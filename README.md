@@ -10,17 +10,20 @@ with granular control over the agent's capabilities.
 - Node.js 22 or newer.
 - Docker installed and available as `docker`.
 - A Telegram bot token.
-- An OpenAI API key usable by the Codex SDK inside the host process and worker container.
+- Either:
+  - a local Codex ChatGPT login on the host machine, or
+  - an OpenAI API key.
 
 ### Configuration
 
 Required environment variables:
 
 - `TELEGRAM_BOT_TOKEN`: Telegram bot token for the channel adapter.
-- `OPENAI_API_KEY`: API key passed to the host controller and sub-agent worker.
 
 Optional environment variables:
 
+- `OPENAI_API_KEY`: API key passed to the host controller and sub-agent worker. If omitted, Sandy uses local Codex ChatGPT auth when available.
+- `SANDY_CODEX_AUTH_FILE`: Override path to the host Codex `auth.json` file that should be mounted into sub-agent containers. Default: `~/.codex/auth.json` when present.
 - `SANDY_WORKER_IMAGE`: Docker image used for sub-agents. Default: `sandy-subagent:latest`.
 - `SANDY_SHARE_ROOT`: Host directory under which per-sub-agent shared volumes are created. Default: `/tmp/sandy-shares`.
 
@@ -28,10 +31,15 @@ Example:
 
 ```bash
 export TELEGRAM_BOT_TOKEN=...
-export OPENAI_API_KEY=...
 export SANDY_WORKER_IMAGE=sandy-subagent:latest
 export SANDY_SHARE_ROOT=/tmp/sandy-shares
 ```
+
+Auth behavior:
+
+- If `OPENAI_API_KEY` is set, the main agent and sub-agent can use it.
+- If the host already has Codex logged in with ChatGPT and `~/.codex/auth.json` exists, Sandy mounts that file into the sub-agent container automatically.
+- If both are present, Codex CLI defaults to the ChatGPT login unless you explicitly log out of that login in the Codex environment.
 
 ### Build and run
 

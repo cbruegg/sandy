@@ -9,7 +9,8 @@ import { parseSubAgentEvent, serializeHostCommand } from "../types.js";
 export type DockerSandboxRunnerOptions = {
   workerImage: string;
   shareRoot: string;
-  openAiApiKey: string;
+  openAiApiKey: string | null;
+  codexAuthFile: string | null;
 };
 
 export class DockerSandboxRunner implements SandboxRunner {
@@ -25,7 +26,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     const containerName = `sandy-${request.taskId}`;
     let finished = false;
 
-    const child = spawn("docker", [
+    const dockerArgs = [
       "run",
       "--rm",
       "--name",
@@ -34,12 +35,26 @@ export class DockerSandboxRunner implements SandboxRunner {
       `SANDY_TASK_ID=${request.taskId}`,
       "-e",
       `SANDY_TASK_BRIEF=${request.taskBrief}`,
-      "-e",
-      `OPENAI_API_KEY=${this.options.openAiApiKey}`,
+    ];
+
+    if (this.options.openAiApiKey) {
+      dockerArgs.push("-e", `OPENAI_API_KEY=${this.options.openAiApiKey}`);
+    }
+
+    if (this.options.codexAuthFile) {
+      dockerArgs.push(
+        "-v",
+        `${this.options.codexAuthFile}:/root/.codex/auth.json:ro`,
+      );
+    }
+
+    dockerArgs.push(
       "-v",
       `${sharePath}:/workspace/share`,
       this.options.workerImage,
-    ], {
+    );
+
+    const child = spawn("docker", dockerArgs, {
       stdio: ["pipe", "pipe", "pipe"],
     });
 

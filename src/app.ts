@@ -13,17 +13,20 @@ export async function startApp(): Promise<void> {
     token: config.telegramBotToken,
   });
 
-  const mainAgent = new CodexMainAgentController(
-    new Codex({
-      apiKey: config.openAiApiKey,
-    }),
-  );
+  const codex = config.openAiApiKey
+    ? new Codex({
+        apiKey: config.openAiApiKey,
+      })
+    : new Codex();
+
+  const mainAgent = new CodexMainAgentController(codex);
 
   const sandboxRunner = new DockerSandboxRunner(
     {
       workerImage: config.workerImage,
       shareRoot: config.shareRoot,
       openAiApiKey: config.openAiApiKey,
+      codexAuthFile: config.codexAuthFile,
     },
   );
 

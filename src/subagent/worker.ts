@@ -16,6 +16,14 @@ function getRequiredEnv(name: string): string {
   return value;
 }
 
+function getOptionalEnv(name: string): string | null {
+  const value = process.env[name];
+  if (!value) {
+    return null;
+  }
+  return value;
+}
+
 function send(event: SubAgentEvent): void {
   process.stdout.write(`${JSON.stringify(event)}\n`);
 }
@@ -98,9 +106,9 @@ async function handleThreadEvent(event: ThreadEvent): Promise<void> {
 
 async function main(): Promise<void> {
   const taskBrief = getRequiredEnv("SANDY_TASK_BRIEF");
-  const apiKey = getRequiredEnv("OPENAI_API_KEY");
+  const apiKey = getOptionalEnv("OPENAI_API_KEY");
 
-  const codex = new Codex({ apiKey });
+  const codex = apiKey ? new Codex({ apiKey }) : new Codex();
   const thread = codex.startThread({
     workingDirectory: "/workspace/share",
     skipGitRepoCheck: true,
