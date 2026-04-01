@@ -13,8 +13,8 @@ Sandy receives messages from the user through a channel abstraction.
 Initially, the only implementation of the channel will be a Telegram bot.
 
 Allowed message types are text messages, file uploads (with images receiving dedicated handling) and voice messages.
-Voice messages are transcribed to text using TTS, and the resulting text is then processed as a normal text message.
-Initially, the TTS provider will be OpenAI's Whisper API, but it should be possible to add support for other providers
+Voice messages are transcribed to text using STT, and the resulting text is then processed as a normal text message.
+Initially, the STT provider will be OpenAI's Whisper API, but it should be possible to add support for other providers
 as well.
 
 Whenever the user sends a message, Sandy lets the wrapped agent tool evaluate the message to determine what to
