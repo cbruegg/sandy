@@ -11,6 +11,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - Single active sub-agent per chat.
   - Per-sub-agent Docker container plus per-sub-agent shared volume.
   - Structured stdio control channel between host and sub-agent worker.
+  - Codex sub-agents run with Docker as the outer sandbox boundary; nested Codex bubblewrap sandboxing is disabled in-container.
   - Quarantining of sub-agent output until the user either reports it as dangerous or continues the conversation.
   - Deterministic cancellation and privilege-request routing.
   - Structured host-side logging for significant lifecycle and failure events.

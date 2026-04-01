@@ -112,7 +112,8 @@ async function main(): Promise<void> {
   const thread = codex.startThread({
     workingDirectory: "/workspace/share",
     skipGitRepoCheck: true,
-    sandboxMode: "workspace-write",
+    // Docker is the actual isolation boundary for sub-agents; avoid nested bwrap sandboxing in-container.
+    sandboxMode: "danger-full-access",
     networkAccessEnabled: true,
     approvalPolicy: "on-request",
   });

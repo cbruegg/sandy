@@ -127,6 +127,9 @@ Sub-agents are launched in isolated containers, initially using Docker.
 Allowed interfaces are internet access, a per-sub-agent shared volume for file exchange and the container control
 channel to the host runtime.
 
+Inside the sub-agent container, Codex itself runs without an additional nested sandbox. Docker is the isolation
+boundary for v1, which avoids bubblewrap/user-namespace failures inside the container.
+
 Inside their sandbox, agents are free to install any dependencies or tools they need to execute the command.
 
 Sub-agents may request access to additional resources from the user, such as:
