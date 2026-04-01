@@ -49,12 +49,13 @@ know to execute the command, and nothing more. This way, if a sub-agent is compr
 full context of the conversation.
 
 Sub-agents are launched in isolated containers, initially using Docker.
-Allowed interfaces are internet access, a shared volume for file exchange and a WebSocket connection to the main agent.
+Allowed interfaces are internet access, a per-sub-agent shared volume for file exchange and a WebSocket connection to
+the main agent.
 
 Inside their sandbox, agents are free to install any dependencies or tools they need to execute the command.
 
 Sub-agents may request access to additional resources from the user, such as:
-- Certain files to be copied into the shared volume.
+- Certain files to be copied in and out of the shared volume.
 - Read-only mount access to a specific directory on the host machine.
 - Read-write mount access to a specific directory on the host machine.
 - MCP servers that the main agent can connect to; note that the main agent tells the sub-agent which MCP servers it can
