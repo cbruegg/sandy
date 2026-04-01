@@ -1,4 +1,4 @@
-import { WebSocket, type ErrorEvent, type MessageEvent } from "ws";
+import { createInterface } from "node:readline";
 import {
   Codex,
   type CommandExecutionItem,
@@ -16,8 +16,8 @@ function getRequiredEnv(name: string): string {
   return value;
 }
 
-function send(socket: WebSocket, event: SubAgentEvent): void {
-  socket.send(JSON.stringify(event));
+function send(event: SubAgentEvent): void {
+  process.stdout.write(`${JSON.stringify(event)}\n`);
 }
 
 function parseHostCommand(raw: string): HostCommand {
@@ -40,26 +40,26 @@ function progressFromCommand(item: CommandExecutionItem): string {
   return `Command ${item.status}: ${item.command}`;
 }
 
-async function streamTurn(socket: WebSocket, thread: Thread, input: string): Promise<void> {
+async function streamTurn(thread: Thread, input: string): Promise<void> {
   const { events } = await thread.runStreamed(input);
 
   for await (const event of events) {
-    await handleThreadEvent(socket, event);
+    await handleThreadEvent(event);
   }
 }
 
-async function handleThreadEvent(socket: WebSocket, event: ThreadEvent): Promise<void> {
+async function handleThreadEvent(event: ThreadEvent): Promise<void> {
   switch (event.type) {
     case "item.completed":
     case "item.updated":
       if (event.item.type === "agent_message" && event.type === "item.completed") {
-        send(socket, {
+        send({
           type: "assistant_output",
           text: event.item.text,
         });
       }
       if (event.item.type === "command_execution") {
-        send(socket, {
+        send({
           type: "progress",
           message: progressFromCommand(event.item),
         });
@@ -67,7 +67,7 @@ async function handleThreadEvent(socket: WebSocket, event: ThreadEvent): Promise
       if (event.item.type === "todo_list") {
         const message = progressFromTodoList(event.item);
         if (message) {
-          send(socket, {
+          send({
             type: "progress",
             message,
           });
@@ -75,16 +75,16 @@ async function handleThreadEvent(socket: WebSocket, event: ThreadEvent): Promise
       }
       break;
     case "turn.completed":
-      send(socket, { type: "task_done" });
+      send({ type: "task_done" });
       break;
     case "turn.failed":
-      send(socket, {
+      send({
         type: "task_error",
         message: event.error.message,
       });
       break;
     case "error":
-      send(socket, {
+      send({
         type: "task_error",
         message: event.message,
       });
@@ -98,10 +98,8 @@ async function handleThreadEvent(socket: WebSocket, event: ThreadEvent): Promise
 
 async function main(): Promise<void> {
   const taskBrief = getRequiredEnv("SANDY_TASK_BRIEF");
-  const wsUrl = getRequiredEnv("SANDY_WS_URL");
   const apiKey = getRequiredEnv("OPENAI_API_KEY");
 
-  const socket = new WebSocket(wsUrl);
   const codex = new Codex({ apiKey });
   const thread = codex.startThread({
     workingDirectory: "/workspace/share",
@@ -118,45 +116,48 @@ async function main(): Promise<void> {
     queue = queue.then(async () => {
       currentAbort = new AbortController();
       try {
-        await streamTurn(socket, thread, input);
+        await streamTurn(thread, input);
       } finally {
         currentAbort = null;
       }
     }).catch((error) => {
-      send(socket, {
+      send({
         type: "task_error",
         message: error instanceof Error ? error.message : "Sub-agent worker turn failed.",
       });
     });
   };
 
-  await new Promise<void>((resolve, reject) => {
-    socket.on("open", () => resolve());
-    socket.on("error", (error: ErrorEvent) => reject(error.error));
-  });
-
   enqueueTurn(taskBrief);
 
-  socket.on("message", (message: MessageEvent) => {
+  const input = createInterface({
+    input: process.stdin,
+    crlfDelay: Infinity,
+  });
+
+  input.on("line", (line) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
+    }
     try {
-      const command = parseHostCommand(String(message.data));
+      const command = parseHostCommand(trimmed);
       switch (command.type) {
         case "user_message":
           enqueueTurn(command.text);
           break;
         case "privilege_decision":
-          send(socket, {
+          send({
             type: "progress",
             message: `Privilege request ${command.requestId} was ${command.decision}.`,
           });
           break;
         case "cancel":
           currentAbort?.abort();
-          socket.close();
           process.exit(0);
       }
     } catch (error) {
-      send(socket, {
+      send({
         type: "task_error",
         message: error instanceof Error ? error.message : "Failed to parse host command.",
       });

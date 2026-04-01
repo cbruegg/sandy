@@ -5,18 +5,9 @@ import { loadConfig } from "./config.js";
 import { SandyOrchestrator } from "./orchestrator.js";
 import { DockerSandboxRunner } from "./sandbox/docker-sandbox-runner.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
-import { SubAgentBridge } from "./websocket/subagent-bridge.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
-
-  const bridge = new SubAgentBridge({
-    listenHost: config.wsListenHost,
-    listenPort: config.wsListenPort,
-    publicHost: config.wsPublicHost,
-    publicPort: config.wsPublicPort,
-  });
-  await bridge.start();
 
   const channel = new TelegramBotApiAdapter({
     token: config.telegramBotToken,
@@ -34,7 +25,6 @@ export async function startApp(): Promise<void> {
       shareRoot: config.shareRoot,
       openAiApiKey: config.openAiApiKey,
     },
-    bridge,
   );
 
   const orchestrator = new SandyOrchestrator({

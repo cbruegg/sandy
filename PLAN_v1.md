@@ -3,14 +3,28 @@
 ## Summary
 Build a safe MVP for Sandy as a Telegram-first orchestration service around Codex sub-agents running in Docker. V1 is text-first, single-process, and allows at most one active sub-agent per chat. The main agent acts only as a narrow controller for deciding whether to launch a task or reply directly; task execution, cancellation, privilege approval, and dangerous-output reporting are handled deterministically by the host runtime.
 
+## Current Implementation Status
+- The current codebase implements a text-first MVP skeleton for Telegram plus Docker-hosted Codex sub-agents.
+- Implemented today:
+  - Telegram message polling and normalization.
+  - A narrow main-agent controller that decides whether to reply directly or launch a sub-agent.
+  - Single active sub-agent per chat.
+  - Per-sub-agent Docker container plus per-sub-agent shared volume.
+  - Structured stdio control channel between host and sub-agent worker.
+  - Quarantining of sub-agent output until the user either reports it as dangerous or continues the conversation.
+  - Deterministic cancellation and privilege-request routing.
+- Not fully implemented yet:
+  - Real STT, file upload handling, and image handling.
+  - Host-side enforcement for approved resource requests such as file copy in/out, mount setup, MCP enablement, and OneCLI enablement.
+- The last point means those operations are currently represented in Sandy's typed protocol and approval flow, but an approval does not yet cause Sandy to perform the actual filesystem or resource mutation on the host.
+
 ## Key Changes
 ### Host runtime and orchestration
 - Replace the current Codex SDK smoke test with a host application that boots:
   - a Telegram channel adapter,
   - an in-memory session store,
   - a main-agent controller,
-  - a Docker-based sub-agent runner,
-  - a WebSocket bridge for host/sub-agent communication.
+  - a Docker-based sub-agent runner using structured stdio for host/sub-agent communication.
 - Track per-chat session state explicitly with statuses such as `idle`, `running`, `awaiting_privilege_decision`, `completed`, `cancelled`, and `failed`.
 - Enforce one active sub-agent per chat. If a user sends a new command while one is running, return a deterministic “cancel the current task first” response.
 
@@ -44,7 +58,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
 - Launch each sub-agent in its own Docker container with:
   - internet access,
   - a per-sub-agent shared volume for file exchange,
-  - a WebSocket connection to the host.
+  - an attached stdio control channel to the host.
 - Run the sub-agent with Codex SDK `runStreamed()` so progress and completion events can be forwarded incrementally.
 - Forward sub-agent user-visible output directly to the user through the host transport layer, but quarantine it from the main-agent context until the user’s next non-report message.
 - If the next user action is a deterministic danger report:
@@ -54,10 +68,10 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
 - Otherwise:
   - release the quarantined output into the orchestration transcript,
   - continue handling the conversation normally.
-- Treat unexpected worker exit, container failure, or WebSocket disconnect as deterministic task failure.
+- Treat unexpected worker exit, container failure, or loss of the stdio control channel as deterministic task failure.
 
 ### Privilege and resource requests
-- Define a typed WebSocket protocol for worker-to-host events such as:
+- Define a typed stdio protocol for worker-to-host events such as:
   - `progress`
   - `assistant_output`
   - `final_result`
@@ -94,7 +108,6 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
 ### Dependencies and configuration
 - Add dependencies for:
   - Telegram bot runtime,
-  - WebSocket transport,
   - runtime schema validation,
   - Docker lifecycle control,
   - testing framework.
@@ -103,7 +116,6 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - `OPENAI_API_KEY`
   - Docker worker image/tag
   - per-sub-agent share root path
-  - WebSocket bind settings
   - allowlisted host mount roots
   - allowlisted MCP identifiers
   - allowlisted OneCLI tool identifiers

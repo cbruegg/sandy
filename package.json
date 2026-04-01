@@ -10,12 +10,10 @@
     "test": "npm run build -- --pretty false && node --test dist/**/*.test.js"
   },
   "dependencies": {
-    "@openai/codex-sdk": "^0.118.0",
-    "ws": "^8.20.0"
+    "@openai/codex-sdk": "^0.118.0"
   },
   "devDependencies": {
     "@types/node": "^25.5.0",
-    "@types/ws": "^8.18.1",
     "typescript": "^5.5.3"
   },
   "private": true

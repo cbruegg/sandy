@@ -3,6 +3,68 @@
 Sandy aims to be a safer alternative to the OpenClaw agent, executing actions in a sandboxed environment
 with granular control over the agent's capabilities.
 
+## Usage
+
+### Prerequisites
+
+- Node.js 22 or newer.
+- Docker installed and available as `docker`.
+- A Telegram bot token.
+- An OpenAI API key usable by the Codex SDK inside the host process and worker container.
+
+### Configuration
+
+Required environment variables:
+
+- `TELEGRAM_BOT_TOKEN`: Telegram bot token for the channel adapter.
+- `OPENAI_API_KEY`: API key passed to the host controller and sub-agent worker.
+
+Optional environment variables:
+
+- `SANDY_WORKER_IMAGE`: Docker image used for sub-agents. Default: `sandy-subagent:latest`.
+- `SANDY_SHARE_ROOT`: Host directory under which per-sub-agent shared volumes are created. Default: `/tmp/sandy-shares`.
+
+Example:
+
+```bash
+export TELEGRAM_BOT_TOKEN=...
+export OPENAI_API_KEY=...
+export SANDY_WORKER_IMAGE=sandy-subagent:latest
+export SANDY_SHARE_ROOT=/tmp/sandy-shares
+```
+
+### Build and run
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Build the worker image:
+
+```bash
+docker build -t sandy-subagent:latest .
+```
+
+Build the TypeScript sources:
+
+```bash
+npm run build
+```
+
+Start Sandy:
+
+```bash
+npm start
+```
+
+Run tests:
+
+```bash
+npm test
+```
+
 ## Architecture
 
 At its core, Sandy wraps an existing agent tool, which for now will be the OpenAI Codex agent using the Codex SDK.
@@ -28,8 +90,8 @@ do with it:
   - Responses from the sub-agent are sent back to the main agent, which then forwards them to the user as updates on
     the command execution.
     - To prevent prompt injection, by default the main agent is not allowed to see the responses from the sub-agent.
-      Instead, the sub-agent sends them directly to the user through a WebSocket connection to the main agent, which then
-      forwards them to the user.
+      Instead, the sub-agent sends them to the host runtime over its container control channel, which then forwards them
+      to the user.
     - When the user sees a dangerous response, they can report it to the main agent. Depending on the channel,
       this can either be through a well-defined emoji reaction or a predefined phrase.
       The main agent then immediately terminates the sub-agent, discards its responses and notifies the user of the
@@ -49,8 +111,8 @@ know to execute the command, and nothing more. This way, if a sub-agent is compr
 full context of the conversation.
 
 Sub-agents are launched in isolated containers, initially using Docker.
-Allowed interfaces are internet access, a per-sub-agent shared volume for file exchange and a WebSocket connection to
-the main agent.
+Allowed interfaces are internet access, a per-sub-agent shared volume for file exchange and the container control
+channel to the host runtime.
 
 Inside their sandbox, agents are free to install any dependencies or tools they need to execute the command.
 
@@ -64,8 +126,8 @@ Sub-agents may request access to additional resources from the user, such as:
   [similar to NanoClaw](https://docs.nanoclaw.dev/concepts/security#6-credential-handling).
 
 Privilege evaluation requests are forwarded to the user verbatim, without the main agent getting to see them.
-As such, these requests from the sub-agent must use a special message type on the WebSocket that is then *not*
-forwarded to the main agent, but instead directly to the user.
+As such, these requests from the sub-agent must use a special message type on the container control channel that is then
+*not* forwarded to the main agent, but instead directly to the user.
 
 The user can then choose to approve or deny the request, and if they approve it using predefined phrases or emoji
 reactions, the main agent deterministically grants the requested access to the sub-agent, without the LLM of the main

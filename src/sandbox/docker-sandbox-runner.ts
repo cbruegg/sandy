@@ -1,9 +1,10 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { createInterface } from "node:readline";
 import type { SandboxHandle, SandboxRunner, LaunchTaskRequest } from "./sandbox-runner.js";
 import type { HostCommand, SubAgentEvent } from "../types.js";
-import { SubAgentBridge } from "../websocket/subagent-bridge.js";
+import { parseSubAgentEvent, serializeHostCommand } from "../types.js";
 
 export type DockerSandboxRunnerOptions = {
   workerImage: string;
@@ -12,10 +13,7 @@ export type DockerSandboxRunnerOptions = {
 };
 
 export class DockerSandboxRunner implements SandboxRunner {
-  constructor(
-    private readonly options: DockerSandboxRunnerOptions,
-    private readonly bridge: SubAgentBridge,
-  ) {}
+  constructor(private readonly options: DockerSandboxRunnerOptions) {}
 
   async launchTask(
     request: LaunchTaskRequest,
@@ -23,8 +21,6 @@ export class DockerSandboxRunner implements SandboxRunner {
   ): Promise<SandboxHandle> {
     const sharePath = join(this.options.shareRoot, request.taskId);
     await mkdir(sharePath, { recursive: true });
-
-    this.bridge.registerTask(request.taskId, onEvent);
 
     const containerName = `sandy-${request.taskId}`;
     let finished = false;
@@ -39,25 +35,16 @@ export class DockerSandboxRunner implements SandboxRunner {
       "-e",
       `SANDY_TASK_BRIEF=${request.taskBrief}`,
       "-e",
-      `SANDY_WS_URL=${this.bridge.workerUrl(request.taskId)}`,
-      "-e",
       `OPENAI_API_KEY=${this.options.openAiApiKey}`,
       "-v",
       `${sharePath}:/workspace/share`,
       this.options.workerImage,
     ], {
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
 
-    child.stdout.on("data", (chunk) => {
-      const message = String(chunk).trim();
-      if (message) {
-        void onEvent({
-          type: "progress",
-          message,
-        });
-      }
-    });
+    this.attachStdoutParser(child, onEvent);
+    void onEvent({ type: "worker_connected" });
 
     child.stderr.on("data", (chunk) => {
       const message = String(chunk).trim();
@@ -74,7 +61,6 @@ export class DockerSandboxRunner implements SandboxRunner {
         return;
       }
       finished = true;
-      this.bridge.unregisterTask(request.taskId);
       void onEvent({
         type: "task_error",
         message: `Failed to launch Docker sub-agent: ${error.message}`,
@@ -86,7 +72,6 @@ export class DockerSandboxRunner implements SandboxRunner {
         return;
       }
       finished = true;
-      this.bridge.unregisterTask(request.taskId);
       if (code === 0 || signal === "SIGTERM") {
         return;
       }
@@ -98,13 +83,13 @@ export class DockerSandboxRunner implements SandboxRunner {
 
     return {
       sendUserMessage: async (text: string) => {
-        await this.sendToWorker(request.taskId, {
+        await this.sendToWorker(child, {
           type: "user_message",
           text,
         });
       },
       resolvePrivilege: async (requestId: string, decision: "approve" | "deny") => {
-        await this.sendToWorker(request.taskId, {
+        await this.sendToWorker(child, {
           type: "privilege_decision",
           requestId,
           decision,
@@ -112,8 +97,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       },
       cancel: async (reason: string) => {
         finished = true;
-        this.bridge.unregisterTask(request.taskId);
-        await this.sendToWorkerSafe(request.taskId, {
+        await this.sendToWorkerSafe(child, {
           type: "cancel",
           reason,
         });
@@ -123,13 +107,55 @@ export class DockerSandboxRunner implements SandboxRunner {
     };
   }
 
-  private async sendToWorker(taskId: string, command: HostCommand): Promise<void> {
-    await this.bridge.sendCommand(taskId, command);
+  private attachStdoutParser(
+    child: ChildProcessWithoutNullStreams,
+    onEvent: (event: SubAgentEvent) => Promise<void>,
+  ): void {
+    const stdout = createInterface({
+      input: child.stdout,
+      crlfDelay: Infinity,
+    });
+
+    stdout.on("line", (line) => {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        return;
+      }
+
+      try {
+        const event = parseSubAgentEvent(trimmed);
+        void onEvent(event);
+      } catch {
+        void onEvent({
+          type: "progress",
+          message: trimmed,
+        });
+      }
+    });
   }
 
-  private async sendToWorkerSafe(taskId: string, command: HostCommand): Promise<void> {
+  private async sendToWorker(
+    child: ChildProcessWithoutNullStreams,
+    command: HostCommand,
+  ): Promise<void> {
+    await new Promise<void>((resolve, reject) => {
+      const payload = `${serializeHostCommand(command)}\n`;
+      child.stdin.write(payload, (error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+
+  private async sendToWorkerSafe(
+    child: ChildProcessWithoutNullStreams,
+    command: HostCommand,
+  ): Promise<void> {
     try {
-      await this.bridge.sendCommand(taskId, command);
+      await this.sendToWorker(child, command);
     } catch {
       // Ignore command delivery failures during cancellation.
     }
