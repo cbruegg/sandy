@@ -1,12 +1,16 @@
 {
-  "name": "${PROJECT_NAME}",
+  "name": "sandy",
   "version": "1.0.0",
   "description": "",
+  "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "start": "node src/index.ts"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@openai/codex-sdk": "^0.118.0"
+  },
   "devDependencies": {
     "typescript": "^5.5.3"
   },
