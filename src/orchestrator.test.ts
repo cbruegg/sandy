@@ -1,0 +1,216 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import type { ChannelAdapter } from "./channel/channel-adapter.js";
+import type { MainAgentController } from "./agent/main-agent-controller.js";
+import type { SandboxHandle, SandboxRunner, LaunchTaskRequest } from "./sandbox/sandbox-runner.js";
+import { SandyOrchestrator } from "./orchestrator.js";
+import { InMemorySessionStore } from "./session/in-memory-session-store.js";
+import type { DecideContext, MainAgentDecision, PrivilegeRequest, SubAgentEvent } from "./types.js";
+
+class RecordingChannel implements ChannelAdapter {
+  public readonly sentTexts: Array<{ chatId: string; text: string }> = [];
+  public readonly taskUpdates: Array<{ chatId: string; text: string }> = [];
+  public readonly privilegeRequests: Array<{ chatId: string; request: PrivilegeRequest }> = [];
+
+  async start(): Promise<void> {}
+  async stop(): Promise<void> {}
+
+  async sendText(chatId: string, text: string): Promise<void> {
+    this.sentTexts.push({ chatId, text });
+  }
+
+  async sendTaskUpdate(chatId: string, text: string): Promise<void> {
+    this.taskUpdates.push({ chatId, text });
+  }
+
+  async sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void> {
+    this.privilegeRequests.push({ chatId, request });
+  }
+}
+
+class StubMainAgent implements MainAgentController {
+  constructor(private readonly decision: MainAgentDecision) {}
+
+  async decide(_context: DecideContext): Promise<MainAgentDecision> {
+    return this.decision;
+  }
+}
+
+class FakeSandboxHandle implements SandboxHandle {
+  public readonly userMessages: string[] = [];
+  public readonly privilegeDecisions: Array<{ requestId: string; decision: "approve" | "deny" }> = [];
+  public readonly cancellations: string[] = [];
+
+  async sendUserMessage(text: string): Promise<void> {
+    this.userMessages.push(text);
+  }
+
+  async resolvePrivilege(requestId: string, decision: "approve" | "deny"): Promise<void> {
+    this.privilegeDecisions.push({ requestId, decision });
+  }
+
+  async cancel(reason: string): Promise<void> {
+    this.cancellations.push(reason);
+  }
+}
+
+class FakeSandboxRunner implements SandboxRunner {
+  public readonly launches: LaunchTaskRequest[] = [];
+  public readonly handle = new FakeSandboxHandle();
+  public onEvent: ((event: SubAgentEvent) => Promise<void>) | null = null;
+
+  async launchTask(request: LaunchTaskRequest, onEvent: (event: SubAgentEvent) => Promise<void>): Promise<SandboxHandle> {
+    this.launches.push(request);
+    this.onEvent = onEvent;
+    return this.handle;
+  }
+
+  async emit(event: SubAgentEvent): Promise<void> {
+    if (!this.onEvent) {
+      throw new Error("No task is active.");
+    }
+    await this.onEvent(event);
+  }
+}
+
+test("orchestrator launches a task and discards quarantined output on danger report", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Inspect the repository.",
+      taskName: "repo-inspect",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-1",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Inspect the repository",
+    rawText: "Inspect the repository",
+  });
+
+  await runner.emit({
+    type: "assistant_output",
+    text: "Potentially dangerous hidden output",
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "danger_report",
+    chatId: "chat-1",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+  });
+
+  assert.equal(runner.handle.cancellations.length, 1);
+  assert.match(channel.sentTexts.at(-1)?.text ?? "", /discarded the pending sub-agent output/);
+
+  const session = store.getOrCreate("chat-1");
+  assert.equal(session.activeTask, null);
+  assert.equal(
+    session.transcript.some((entry) => entry.text === "Potentially dangerous hidden output"),
+    false,
+  );
+});
+
+test("orchestrator releases quarantined output before forwarding the next user message", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Investigate the issue.",
+      taskName: "issue-investigation",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-2",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Investigate the issue",
+    rawText: "Investigate the issue",
+  });
+
+  await runner.emit({
+    type: "assistant_output",
+    text: "Need clarification about the target branch.",
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-2",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    text: "Use the main branch.",
+    rawText: "Use the main branch.",
+  });
+
+  const session = store.getOrCreate("chat-2");
+  const releasedIndex = session.transcript.findIndex((entry) => entry.kind === "released_sub_agent_output");
+  const userIndex = session.transcript.findIndex((entry) => entry.text === "Use the main branch.");
+  assert.notEqual(releasedIndex, -1);
+  assert.notEqual(userIndex, -1);
+  assert.ok(releasedIndex < userIndex);
+  assert.deepEqual(runner.handle.userMessages, ["Use the main branch."]);
+});
+
+test("orchestrator keeps privilege decisions deterministic and out of the main agent path", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Check an MCP resource.",
+      taskName: "mcp-check",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-3",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Check an MCP resource",
+    rawText: "Check an MCP resource",
+  });
+
+  await runner.emit({
+    type: "privilege_request",
+    request: {
+      type: "enable_mcp",
+      requestId: "req-1",
+      identifier: "github-readonly",
+      reason: "Need repository metadata.",
+    },
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-3",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    decision: "approve",
+    requestId: "req-1",
+  });
+
+  assert.equal(channel.privilegeRequests.length, 1);
+  assert.deepEqual(runner.handle.privilegeDecisions, [{ requestId: "req-1", decision: "approve" }]);
+  assert.match(channel.sentTexts.at(-1)?.text ?? "", /Approved privilege request req-1/);
+});

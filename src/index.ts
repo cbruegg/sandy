@@ -1,8 +1,3 @@
-import { Codex } from "@openai/codex-sdk";
+import { startApp } from "./app.js";
 
-const codex = new Codex();
-const thread = codex.startThread();
-const turn = await thread.run("Just reply with hello world");
-
-console.log(turn.finalResponse);
-console.log(turn.items);
+await startApp();
