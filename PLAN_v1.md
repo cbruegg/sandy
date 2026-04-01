@@ -13,6 +13,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - Structured stdio control channel between host and sub-agent worker.
   - Quarantining of sub-agent output until the user either reports it as dangerous or continues the conversation.
   - Deterministic cancellation and privilege-request routing.
+  - Structured host-side logging for significant lifecycle and failure events.
 - Not fully implemented yet:
   - Real STT, file upload handling, and image handling.
   - Host-side enforcement for approved resource requests such as file copy in/out, mount setup, MCP enablement, and OneCLI enablement.
@@ -114,6 +115,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
 - Add config for:
   - `TELEGRAM_BOT_TOKEN`
   - `OPENAI_API_KEY`
+  - `SANDY_LOG_LEVEL`
   - Docker worker image/tag
   - per-sub-agent share root path
   - allowlisted host mount roots

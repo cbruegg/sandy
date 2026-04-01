@@ -1,4 +1,5 @@
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
+import { logger } from "../logger.js";
 import type { ApprovalResponseEvent, DangerReportEvent, NormalizedChatEvent, PrivilegeRequest } from "../types.js";
 
 type TelegramUpdate = {
@@ -156,15 +157,24 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       return;
     }
     this.running = true;
+    logger.info("telegram.polling_started", {
+      apiBaseUrl: this.apiBaseUrl,
+      pollTimeoutSeconds: this.pollTimeoutSeconds,
+    });
     this.pollPromise = this.pollLoop(handler);
   }
 
   async stop(): Promise<void> {
     this.running = false;
     await this.pollPromise;
+    logger.info("telegram.polling_stopped");
   }
 
   async sendText(chatId: string, text: string): Promise<void> {
+    logger.debug("telegram.send_text", {
+      chatId,
+      textPreview: previewText(text),
+    });
     await this.callTelegram("sendMessage", {
       chat_id: chatId,
       text,
@@ -172,6 +182,10 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
   }
 
   async sendTaskUpdate(chatId: string, text: string): Promise<void> {
+    logger.debug("telegram.send_task_update", {
+      chatId,
+      textPreview: previewText(text),
+    });
     await this.callTelegram("sendMessage", {
       chat_id: chatId,
       text,
@@ -186,6 +200,11 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
 
   async sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void> {
     const description = describePrivilegeRequest(request);
+    logger.info("telegram.send_privilege_request", {
+      chatId,
+      requestId: request.requestId,
+      requestType: request.type,
+    });
     await this.callTelegram("sendMessage", {
       chat_id: chatId,
       text: `Privilege request:\n${description}\n\nApprove or deny this request.`,
@@ -205,6 +224,11 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
         this.updateOffset = update.update_id + 1;
         const event = normalizeTelegramUpdate(update);
         if (event) {
+          logger.info("telegram.event_received", {
+            chatId: event.chatId,
+            kind: event.kind,
+            messageId: event.messageId,
+          });
           await handler(event);
         }
       }
@@ -230,6 +254,10 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     });
 
     if (!response.ok) {
+      logger.error("telegram.api_error", {
+        method,
+        status: response.status,
+      });
       throw new Error(`Telegram API ${method} failed with status ${response.status}.`);
     }
 
@@ -239,6 +267,10 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     }
     return payload as T;
   }
+}
+
+function previewText(text: string): string {
+  return text.length <= 120 ? text : `${text.slice(0, 117)}...`;
 }
 
 function describePrivilegeRequest(request: PrivilegeRequest): string {

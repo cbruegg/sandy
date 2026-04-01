@@ -1,4 +1,5 @@
 import { Codex, type Thread } from "@openai/codex-sdk";
+import { logger } from "../logger.js";
 import type { DecideContext, MainAgentDecision } from "../types.js";
 import { parseMainAgentDecision } from "../types.js";
 
@@ -37,11 +38,22 @@ export class CodexMainAgentController implements MainAgentController {
 
   async decide(context: DecideContext): Promise<MainAgentDecision> {
     const thread = this.getThread(context.chatId);
+    logger.info("main_agent.decision_requested", {
+      chatId: context.chatId,
+      transcriptLength: context.transcript.length,
+      hasActiveTask: context.activeTask !== null,
+    });
     const turn = await thread.run(buildMainAgentPrompt(context), {
       outputSchema: decisionSchema,
     });
 
-    return parseMainAgentDecision(turn.finalResponse);
+    const decision = parseMainAgentDecision(turn.finalResponse);
+    logger.info("main_agent.decision_received", {
+      chatId: context.chatId,
+      action: decision.action,
+      taskName: decision.action === "launch_task" ? decision.taskName : null,
+    });
+    return decision;
   }
 
   private getThread(chatId: string): Thread {
@@ -53,6 +65,9 @@ export class CodexMainAgentController implements MainAgentController {
       skipGitRepoCheck: true,
     });
     this.threads.set(chatId, thread);
+    logger.debug("main_agent.thread_started", {
+      chatId,
+    });
     return thread;
   }
 }

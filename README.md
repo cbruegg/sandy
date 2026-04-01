@@ -24,6 +24,7 @@ Optional environment variables:
 
 - `OPENAI_API_KEY`: API key passed to the host controller and sub-agent worker. If omitted, Sandy uses local Codex ChatGPT auth when available.
 - `SANDY_CODEX_AUTH_FILE`: Override path to the host Codex `auth.json` file that should be mounted into sub-agent containers. Default: `~/.codex/auth.json` when present.
+- `SANDY_LOG_LEVEL`: Minimum host log level. Supported values: `debug`, `info`, `warn`, `error`. Default: `info`.
 - `SANDY_WORKER_IMAGE`: Docker image used for sub-agents. Default: `sandy-subagent:latest`.
 - `SANDY_SHARE_ROOT`: Host directory under which per-sub-agent shared volumes are created. Default: `/tmp/sandy-shares`.
 
@@ -31,6 +32,7 @@ Example:
 
 ```bash
 export TELEGRAM_BOT_TOKEN=...
+export SANDY_LOG_LEVEL=info
 export SANDY_WORKER_IMAGE=sandy-subagent:latest
 export SANDY_SHARE_ROOT=/tmp/sandy-shares
 ```
@@ -66,6 +68,9 @@ Start Sandy:
 ```bash
 npm start
 ```
+
+The host emits structured JSON logs to stdout/stderr for significant events such as startup, Telegram message handling,
+main-agent decisions, task lifecycle transitions, privilege requests, and sandbox/container failures.
 
 Run tests:
 

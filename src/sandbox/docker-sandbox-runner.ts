@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
+import { logger } from "../logger.js";
 import type { SandboxHandle, SandboxRunner, LaunchTaskRequest } from "./sandbox-runner.js";
 import type { HostCommand, SubAgentEvent } from "../types.js";
 import { parseSubAgentEvent, serializeHostCommand } from "../types.js";
@@ -25,6 +26,13 @@ export class DockerSandboxRunner implements SandboxRunner {
 
     const containerName = `sandy-${request.taskId}`;
     let finished = false;
+    logger.info("sandbox.launching", {
+      chatId: request.chatId,
+      taskId: request.taskId,
+      taskName: request.taskName,
+      sharePath,
+      workerImage: this.options.workerImage,
+    });
 
     const dockerArgs = [
       "run",
@@ -60,10 +68,18 @@ export class DockerSandboxRunner implements SandboxRunner {
 
     this.attachStdoutParser(child, onEvent);
     void onEvent({ type: "worker_connected" });
+    logger.info("sandbox.started", {
+      taskId: request.taskId,
+      containerName,
+    });
 
     child.stderr.on("data", (chunk) => {
       const message = String(chunk).trim();
       if (message) {
+        logger.warn("sandbox.stderr", {
+          taskId: request.taskId,
+          message,
+        });
         void onEvent({
           type: "progress",
           message,
@@ -76,6 +92,10 @@ export class DockerSandboxRunner implements SandboxRunner {
         return;
       }
       finished = true;
+      logger.error("sandbox.launch_failed", {
+        taskId: request.taskId,
+        message: error.message,
+      });
       void onEvent({
         type: "task_error",
         message: `Failed to launch Docker sub-agent: ${error.message}`,
@@ -88,8 +108,18 @@ export class DockerSandboxRunner implements SandboxRunner {
       }
       finished = true;
       if (code === 0 || signal === "SIGTERM") {
+        logger.info("sandbox.exited", {
+          taskId: request.taskId,
+          code,
+          signal,
+        });
         return;
       }
+      logger.error("sandbox.exited_unexpectedly", {
+        taskId: request.taskId,
+        code,
+        signal,
+      });
       void onEvent({
         type: "task_error",
         message: `Sub-agent container exited unexpectedly (code=${code}, signal=${signal}).`,
@@ -98,12 +128,21 @@ export class DockerSandboxRunner implements SandboxRunner {
 
     return {
       sendUserMessage: async (text: string) => {
+        logger.debug("sandbox.user_message", {
+          taskId: request.taskId,
+          textPreview: text.length <= 120 ? text : `${text.slice(0, 117)}...`,
+        });
         await this.sendToWorker(child, {
           type: "user_message",
           text,
         });
       },
       resolvePrivilege: async (requestId: string, decision: "approve" | "deny") => {
+        logger.info("sandbox.privilege_decision", {
+          taskId: request.taskId,
+          requestId,
+          decision,
+        });
         await this.sendToWorker(child, {
           type: "privilege_decision",
           requestId,
@@ -112,6 +151,10 @@ export class DockerSandboxRunner implements SandboxRunner {
       },
       cancel: async (reason: string) => {
         finished = true;
+        logger.warn("sandbox.cancelling", {
+          taskId: request.taskId,
+          reason,
+        });
         await this.sendToWorkerSafe(child, {
           type: "cancel",
           reason,
@@ -139,8 +182,14 @@ export class DockerSandboxRunner implements SandboxRunner {
 
       try {
         const event = parseSubAgentEvent(trimmed);
+        logger.debug("sandbox.worker_event", {
+          eventType: event.type,
+        });
         void onEvent(event);
       } catch {
+        logger.warn("sandbox.stdout_non_json", {
+          line: trimmed,
+        });
         void onEvent({
           type: "progress",
           message: trimmed,
@@ -178,6 +227,9 @@ export class DockerSandboxRunner implements SandboxRunner {
 
   private async sendDockerKill(containerName: string): Promise<void> {
     await new Promise<void>((resolve) => {
+      logger.debug("sandbox.force_remove", {
+        containerName,
+      });
       const child = spawn("docker", ["rm", "-f", containerName], {
         stdio: "ignore",
       });

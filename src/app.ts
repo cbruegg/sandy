@@ -2,12 +2,20 @@ import { Codex } from "@openai/codex-sdk";
 import { CodexMainAgentController } from "./agent/main-agent-controller.js";
 import { TelegramBotApiAdapter } from "./channel/telegram-adapter.js";
 import { loadConfig } from "./config.js";
+import { logger } from "./logger.js";
 import { SandyOrchestrator } from "./orchestrator.js";
 import { DockerSandboxRunner } from "./sandbox/docker-sandbox-runner.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
+  const authMode = config.openAiApiKey ? "api_key" : config.codexAuthFile ? "codex_auth_file" : "ambient_codex_auth";
+
+  logger.info("app.starting", {
+    workerImage: config.workerImage,
+    shareRoot: config.shareRoot,
+    authMode,
+  });
 
   const channel = new TelegramBotApiAdapter({
     token: config.telegramBotToken,
@@ -38,4 +46,5 @@ export async function startApp(): Promise<void> {
   });
 
   await channel.start(async (event) => orchestrator.handleChatEvent(event));
+  logger.info("app.started");
 }

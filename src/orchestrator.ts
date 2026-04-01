@@ -3,6 +3,7 @@ import type { ChannelAdapter } from "./channel/channel-adapter.js";
 import type { MainAgentController } from "./agent/main-agent-controller.js";
 import type { SandboxHandle, SandboxRunner } from "./sandbox/sandbox-runner.js";
 import type { SessionStore } from "./session/in-memory-session-store.js";
+import { logger } from "./logger.js";
 import type {
   MainAgentDecision,
   NormalizedChatEvent,
@@ -31,8 +32,17 @@ export class SandyOrchestrator {
 
   async handleChatEvent(event: NormalizedChatEvent): Promise<void> {
     const session = this.deps.sessionStore.getOrCreate(event.chatId);
+    logger.info("chat.event_handled", {
+      chatId: event.chatId,
+      kind: event.kind,
+      hasActiveTask: session.activeTask !== null,
+    });
 
     if (event.kind === "unsupported_input") {
+      logger.warn("chat.unsupported_input", {
+        chatId: event.chatId,
+        inputType: event.inputType,
+      });
       await this.deps.channel.sendText(
         event.chatId,
         `This v1 build only supports text messages. Received unsupported ${event.inputType} input.`,
@@ -52,10 +62,20 @@ export class SandyOrchestrator {
   async handleSubAgentEvent(chatId: string, taskId: string, event: SubAgentEvent): Promise<void> {
     const session = this.deps.sessionStore.getOrCreate(chatId);
     if (!session.activeTask || session.activeTask.taskId !== taskId) {
+      logger.warn("task.event_ignored", {
+        chatId,
+        taskId,
+        eventType: event.type,
+      });
       return;
     }
 
     session.activeTask.lastActivityAt = new Date().toISOString();
+    logger.info("task.event_received", {
+      chatId,
+      taskId,
+      eventType: event.type,
+    });
 
     switch (event.type) {
       case "worker_connected":
@@ -79,6 +99,12 @@ export class SandyOrchestrator {
       case "privilege_request":
         session.activeTask.pendingPrivilegeRequest = event.request;
         session.activeTask.status = "awaiting_privilege_decision";
+        logger.info("task.privilege_requested", {
+          chatId,
+          taskId,
+          requestId: event.request.requestId,
+          requestType: event.request.type,
+        });
         await this.deps.channel.sendPrivilegeRequest(chatId, event.request);
         break;
       case "final_result":
@@ -101,6 +127,11 @@ export class SandyOrchestrator {
         break;
       case "task_error":
         session.activeTask.status = "failed";
+        logger.error("task.failed", {
+          chatId,
+          taskId,
+          message: event.message,
+        });
         await this.deps.channel.sendText(chatId, `Task failed: ${event.message}`);
         this.clearTask(session);
         break;
@@ -202,6 +233,9 @@ export class SandyOrchestrator {
     decision: MainAgentDecision,
   ): Promise<void> {
     if (decision.action === "reply") {
+      logger.info("task.reply_direct", {
+        chatId,
+      });
       this.appendTranscript(session, {
         role: "assistant",
         kind: "main_agent_reply",
@@ -214,6 +248,11 @@ export class SandyOrchestrator {
 
     const taskId = randomUUID();
     const now = new Date().toISOString();
+    logger.info("task.launching", {
+      chatId,
+      taskId,
+      taskName: decision.taskName,
+    });
     session.activeTask = {
       taskId,
       taskName: decision.taskName,
@@ -249,6 +288,11 @@ export class SandyOrchestrator {
     );
 
     this.handles.set(taskId, { handle });
+    logger.info("task.started", {
+      chatId,
+      taskId,
+      taskName: decision.taskName,
+    });
 
     await this.deps.channel.sendText(
       chatId,
@@ -261,6 +305,11 @@ export class SandyOrchestrator {
       return;
     }
 
+    logger.info("task.quarantine_released", {
+      chatId: session.chatId,
+      taskId: session.activeTask.taskId,
+      count: session.activeTask.quarantinedOutputs.length,
+    });
     const timestamp = new Date().toISOString();
     for (const text of session.activeTask.quarantinedOutputs) {
       this.appendTranscript(session, {
@@ -289,8 +338,20 @@ export class SandyOrchestrator {
       if (request.type === "enable_mcp" || request.type === "enable_onecli") {
         activeTask.approvedResourceIdentifiers.push(request.identifier);
       }
+      logger.info("task.privilege_resolved", {
+        chatId: session.chatId,
+        taskId: activeTask.taskId,
+        requestId: request.requestId,
+        decision,
+      });
       await this.deps.channel.sendText(session.chatId, `Approved privilege request ${request.requestId}.`);
     } else {
+      logger.info("task.privilege_resolved", {
+        chatId: session.chatId,
+        taskId: activeTask.taskId,
+        requestId: request.requestId,
+        decision,
+      });
       await this.deps.channel.sendText(session.chatId, `Denied privilege request ${request.requestId}.`);
     }
 
@@ -304,6 +365,11 @@ export class SandyOrchestrator {
       return;
     }
 
+    logger.warn("task.cancelling", {
+      chatId: session.chatId,
+      taskId: activeTask.taskId,
+      reason,
+    });
     await this.getHandle(activeTask.taskId).cancel(reason);
     this.appendTranscript(session, {
       role: "system",
@@ -321,6 +387,11 @@ export class SandyOrchestrator {
     if (!session.activeTask) {
       return;
     }
+    logger.info("task.cleared", {
+      chatId: session.chatId,
+      taskId: session.activeTask.taskId,
+      status: session.activeTask.status,
+    });
     this.handles.delete(session.activeTask.taskId);
     session.activeTask = null;
   }
