@@ -13,11 +13,17 @@ const decisionSchema = {
       type: "string",
       enum: ["launch_task", "reply"],
     },
-    taskBrief: { type: "string" },
-    taskName: { type: "string" },
-    replyText: { type: "string" },
+    taskBrief: {
+      type: ["string", "null"],
+    },
+    taskName: {
+      type: ["string", "null"],
+    },
+    replyText: {
+      type: ["string", "null"],
+    },
   },
-  required: ["action"],
+  required: ["action", "taskBrief", "taskName", "replyText"],
   additionalProperties: false,
 } as const;
 
