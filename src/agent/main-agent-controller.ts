@@ -1,4 +1,7 @@
-import { Codex, type Thread } from "@openai/codex-sdk";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Codex, type ThreadOptions } from "@openai/codex-sdk";
 import { logger } from "../logger.js";
 import type { DecideContext, MainAgentDecision } from "../types.js";
 import { parseMainAgentDecision } from "../types.js";
@@ -6,6 +9,17 @@ import { parseMainAgentDecision } from "../types.js";
 export interface MainAgentController {
   decide(context: DecideContext): Promise<MainAgentDecision>;
 }
+
+type MainAgentTurn = {
+  finalResponse: string;
+};
+
+type MainAgentThread = {
+  run(input: string, options?: { outputSchema?: object }): Promise<MainAgentTurn>;
+};
+type CodexClient = {
+  startThread(options?: ThreadOptions): MainAgentThread;
+};
 
 const decisionSchema = {
   type: "object",
@@ -29,10 +43,11 @@ const decisionSchema = {
 } as const;
 
 export class CodexMainAgentController implements MainAgentController {
-  private readonly codex: Codex;
-  private readonly threads = new Map<string, Thread>();
+  private readonly codex: CodexClient;
+  private readonly threads = new Map<string, MainAgentThread>();
+  private readonly threadDirectories = new Map<string, string>();
 
-  constructor(codex?: Codex) {
+  constructor(codex?: CodexClient) {
     this.codex = codex ?? new Codex();
   }
 
@@ -56,20 +71,44 @@ export class CodexMainAgentController implements MainAgentController {
     return decision;
   }
 
-  private getThread(chatId: string): Thread {
+  private getThread(chatId: string): MainAgentThread {
     const existing = this.threads.get(chatId);
     if (existing) {
       return existing;
     }
-    const thread = this.codex.startThread({
-      skipGitRepoCheck: true,
-    });
+    const workingDirectory = this.getOrCreateThreadDirectory(chatId);
+    const thread = this.codex.startThread(buildMainAgentThreadOptions(workingDirectory));
     this.threads.set(chatId, thread);
     logger.debug("main_agent.thread_started", {
       chatId,
+      workingDirectory,
     });
     return thread;
   }
+
+  private getOrCreateThreadDirectory(chatId: string): string {
+    const existing = this.threadDirectories.get(chatId);
+    if (existing) {
+      return existing;
+    }
+
+    const directory = mkdtempSync(join(tmpdir(), "sandy-main-agent-"));
+    this.threadDirectories.set(chatId, directory);
+    logger.debug("main_agent.working_directory_created", {
+      chatId,
+      workingDirectory: directory,
+    });
+    return directory;
+  }
+}
+
+export function buildMainAgentThreadOptions(workingDirectory: string): ThreadOptions {
+  return {
+    approvalPolicy: "never",
+    sandboxMode: "read-only",
+    workingDirectory,
+    skipGitRepoCheck: true,
+  };
 }
 
 export function buildMainAgentPrompt(context: DecideContext): string {

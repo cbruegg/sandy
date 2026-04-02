@@ -126,6 +126,10 @@ Sub-agents do not receive the full message history from the main agent. The main
 know to execute the command, and nothing more. This way, if a sub-agent is compromised, it does not have access to the
 full context of the conversation.
 
+The main agent itself is also restricted. Its Codex thread runs with approval requests disabled, a read-only sandbox,
+and a fresh temporary working directory rather than the Sandy repository root. This keeps the controller focused on
+classification and orchestration instead of local execution.
+
 Sub-agents are launched in isolated containers, initially using Docker.
 Allowed interfaces are internet access, a per-sub-agent shared volume for file exchange and the container control
 channel to the host runtime.

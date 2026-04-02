@@ -9,6 +9,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - `grammY`-based Telegram transport with deterministic normalization into Sandy chat events.
   - Recovery from transient Telegram polling or handler errors without crashing the host process.
   - A narrow main-agent controller that decides whether to reply directly or launch a sub-agent.
+  - Main-agent Codex threads are locked down with `approvalPolicy: "never"`, `sandboxMode: "read-only"`, and a fresh temp working directory per chat thread.
   - Single active sub-agent per chat.
   - Per-sub-agent Docker container plus per-sub-agent shared volume.
   - Structured stdio control channel between host and sub-agent worker, including an explicit worker startup handshake.
