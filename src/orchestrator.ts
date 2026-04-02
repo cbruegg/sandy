@@ -230,69 +230,74 @@ export class SandyOrchestrator {
     chatId: string,
     decision: MainAgentDecision,
   ): Promise<void> {
-    if (decision.action === "reply") {
-      logger.info("task.reply_direct", {
-        chatId,
-      });
-      this.appendTranscript(session, {
-        role: "assistant",
-        kind: "main_agent_reply",
-        timestamp: new Date().toISOString(),
-        text: decision.replyText,
-      });
-      await this.deps.channel.sendText(chatId, decision.replyText);
-      return;
+    switch (decision.action) {
+      case "reply":
+        logger.info("task.reply_direct", {
+          chatId,
+        });
+        this.appendTranscript(session, {
+          role: "assistant",
+          kind: "main_agent_reply",
+          timestamp: new Date().toISOString(),
+          text: decision.replyText,
+        });
+        await this.deps.channel.sendText(chatId, decision.replyText);
+        return;
+      case "launch_task": {
+        const taskId = randomUUID();
+        const now = new Date().toISOString();
+        logger.info("task.launching", {
+          chatId,
+          taskId,
+          taskName: decision.taskName,
+        });
+        session.activeTask = {
+          taskId,
+          taskName: decision.taskName,
+          taskBrief: decision.taskBrief,
+          status: "running",
+          startedAt: now,
+          lastActivityAt: now,
+          pendingPrivilegeRequest: null,
+          quarantinedOutputs: [],
+          approvedResourceIdentifiers: [],
+          workerConnected: false,
+        };
+
+        this.appendTranscript(session, {
+          role: "system",
+          kind: "task_started",
+          timestamp: now,
+          metadata: {
+            taskId,
+            taskName: decision.taskName,
+          },
+        });
+
+        const handle = await this.deps.sandboxRunner.launchTask(
+          {
+            chatId,
+            taskId,
+            taskName: decision.taskName,
+            taskBrief: decision.taskBrief,
+            transcript: session.transcript,
+          },
+          async (event) => this.handleSubAgentEvent(chatId, taskId, event),
+        );
+
+        this.handles.set(taskId, { handle });
+        logger.info("task.started", {
+          chatId,
+          taskId,
+          taskName: decision.taskName,
+        });
+
+        await this.deps.channel.sendText(chatId, messages.taskStarted(decision.taskName));
+        return;
+      }
+      default:
+        assertNever(decision);
     }
-
-    const taskId = randomUUID();
-    const now = new Date().toISOString();
-    logger.info("task.launching", {
-      chatId,
-      taskId,
-      taskName: decision.taskName,
-    });
-    session.activeTask = {
-      taskId,
-      taskName: decision.taskName,
-      taskBrief: decision.taskBrief,
-      status: "running",
-      startedAt: now,
-      lastActivityAt: now,
-      pendingPrivilegeRequest: null,
-      quarantinedOutputs: [],
-      approvedResourceIdentifiers: [],
-      workerConnected: false,
-    };
-
-    this.appendTranscript(session, {
-      role: "system",
-      kind: "task_started",
-      timestamp: now,
-      metadata: {
-        taskId,
-        taskName: decision.taskName,
-      },
-    });
-
-    const handle = await this.deps.sandboxRunner.launchTask(
-      {
-        chatId,
-        taskId,
-        taskName: decision.taskName,
-        taskBrief: decision.taskBrief,
-        transcript: session.transcript,
-      },
-      async (event) => this.handleSubAgentEvent(chatId, taskId, event),
-    );
-
-    this.handles.set(taskId, { handle });
-    logger.info("task.started", {
-      chatId,
-      taskId,
-      taskName: decision.taskName,
-    });
-
-    await this.deps.channel.sendText(chatId, messages.taskStarted(decision.taskName));
   }
 
   private releaseQuarantinedOutputs(session: SessionState): void {
@@ -426,6 +431,10 @@ export class SandyOrchestrator {
   private appendTranscript(session: SessionState, entry: TranscriptEntry): void {
     session.transcript.push(entry);
   }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unhandled main agent decision: ${JSON.stringify(value)}`);
 }
 
 export function describeActiveTaskForMainAgent(session: SessionState) {
