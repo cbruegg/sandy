@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { access, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtempSync } from "node:fs";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
+import { tmpdir } from "node:os";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { DockerSandboxRunner } from "./sandbox/docker-sandbox-runner.js";
 import type { SubAgentEvent } from "./types.js";
@@ -239,4 +243,29 @@ test("DockerSandboxRunner cancellation does not emit a spurious disconnect", asy
   await flushEvents();
 
   assert.deepEqual(events, [{ type: "worker_connected" }]);
+});
+
+test("DockerSandboxRunner inspects and deletes task shares on the host", async () => {
+  const shareRoot = mkdtempSync(join(tmpdir(), "sandy-share-test-"));
+  const runner = new DockerSandboxRunner({
+    workerImage: "sandy-subagent:latest",
+    shareRoot,
+    openAiApiKey: null,
+    codexAuthFile: null,
+  });
+
+  const taskShare = join(shareRoot, "task-1");
+  await mkdir(join(taskShare, "logs"), { recursive: true });
+  await writeFile(join(taskShare, "report.txt"), "ok\n");
+  await writeFile(join(taskShare, "logs", "latest.log"), "done\n");
+
+  const inspection = await runner.inspectTaskShare("task-1");
+  assert.equal(inspection.isEmpty, false);
+  assert.match(inspection.summary ?? "", /report\.txt/);
+  assert.match(inspection.summary ?? "", /logs\//);
+  assert.match(inspection.summary ?? "", /latest\.log/);
+
+  await runner.deleteTaskShare("task-1");
+  await assert.rejects(access(taskShare));
+  await rm(shareRoot, { recursive: true, force: true });
 });

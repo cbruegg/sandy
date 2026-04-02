@@ -201,10 +201,18 @@ export type ActiveTaskState = {
   workerConnected: boolean;
 };
 
+export type PendingShareDeletion = {
+  requestId: string;
+  taskId: string;
+  taskName: string;
+  summary: string;
+};
+
 export type SessionState = {
   chatId: string;
   activeTask: ActiveTaskState | null;
   pendingQuarantinedOutputs: string[];
+  pendingShareDeletion: PendingShareDeletion | null;
 };
 
 export function toTaskMetadata(task: ActiveTaskState): TaskMetadata {

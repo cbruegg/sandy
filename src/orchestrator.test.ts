@@ -12,6 +12,7 @@ class RecordingChannel implements ChannelAdapter {
   public readonly sentTexts: Array<{ chatId: string; text: string }> = [];
   public readonly taskUpdates: Array<{ chatId: string; text: string }> = [];
   public readonly privilegeRequests: Array<{ chatId: string; request: PrivilegeRequest }> = [];
+  public readonly shareDeletionRequests: Array<{ chatId: string; requestId: string; taskName: string; summary: string }> = [];
 
   async start(): Promise<void> {}
   async stop(): Promise<void> {}
@@ -26,6 +27,10 @@ class RecordingChannel implements ChannelAdapter {
 
   async sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void> {
     this.privilegeRequests.push({ chatId, request });
+  }
+
+  async sendShareDeletionRequest(chatId: string, requestId: string, taskName: string, summary: string): Promise<void> {
+    this.shareDeletionRequests.push({ chatId, requestId, taskName, summary });
   }
 }
 
@@ -83,6 +88,8 @@ class FakeSandboxRunner implements SandboxRunner {
   public readonly launches: LaunchTaskRequest[] = [];
   public readonly handle = new FakeSandboxHandle();
   public onEvent: ((event: SubAgentEvent) => Promise<void>) | null = null;
+  public readonly deletedTaskShares: string[] = [];
+  public shareInspections = new Map<string, { isEmpty: boolean; summary: string | null }>();
 
   async launchTask(request: LaunchTaskRequest, onEvent: (event: SubAgentEvent) => Promise<void>): Promise<SandboxHandle> {
     this.launches.push(request);
@@ -95,6 +102,14 @@ class FakeSandboxRunner implements SandboxRunner {
       throw new Error("No task is active.");
     }
     await this.onEvent(event);
+  }
+
+  async inspectTaskShare(taskId: string): Promise<{ isEmpty: boolean; summary: string | null }> {
+    return this.shareInspections.get(taskId) ?? { isEmpty: true, summary: null };
+  }
+
+  async deleteTaskShare(taskId: string): Promise<void> {
+    this.deletedTaskShares.push(taskId);
   }
 }
 
@@ -463,4 +478,192 @@ test("orchestrator marks worker disconnects as task failure and clears the task"
   const session = store.getOrCreate("chat-7");
   assert.equal(session.activeTask, null);
   assert.equal(channel.sentTexts.at(-1)?.text, "Sub-agent control channel disconnected unexpectedly.");
+});
+
+test("orchestrator prompts before deleting a non-empty shared workspace", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Inspect the filesystem.",
+      taskName: "fs-inspect",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-8",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Inspect the filesystem",
+    rawText: "Inspect the filesystem",
+  });
+
+  const taskId = runner.launches[0]?.taskId;
+  assert.ok(taskId);
+  runner.shareInspections.set(taskId, {
+    isEmpty: false,
+    summary: "report.txt\nlogs/\n  latest.log",
+  });
+
+  await runner.emit({
+    type: "task_done",
+  });
+
+  const session = store.getOrCreate("chat-8");
+  assert.equal(session.activeTask, null);
+  assert.equal(channel.shareDeletionRequests.length, 1);
+  assert.equal(channel.shareDeletionRequests[0]?.taskName, "fs-inspect");
+  assert.equal(runner.deletedTaskShares.length, 0);
+});
+
+test("orchestrator deletes or preserves a finished task share based on user confirmation", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new SequenceMainAgent([
+      {
+        action: "launch_task",
+        taskBrief: "Inspect the filesystem.",
+        taskName: "fs-inspect",
+      },
+      {
+        action: "launch_task",
+        taskBrief: "Inspect another filesystem.",
+        taskName: "fs-inspect-2",
+      },
+    ]),
+    sandboxRunner: runner,
+    sessionStore: store,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-9",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Inspect the filesystem",
+    rawText: "Inspect the filesystem",
+  });
+
+  const firstTaskId = runner.launches[0]?.taskId;
+  assert.ok(firstTaskId);
+  runner.shareInspections.set(firstTaskId, {
+    isEmpty: false,
+    summary: "report.txt",
+  });
+
+  await runner.emit({
+    type: "task_done",
+  });
+
+  const deleteRequestId = channel.shareDeletionRequests[0]?.requestId;
+  assert.ok(deleteRequestId);
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-9",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    decision: "approve",
+    requestId: deleteRequestId,
+  });
+
+  assert.deepEqual(runner.deletedTaskShares, [firstTaskId]);
+  assert.equal(channel.sentTexts.at(-1)?.text, messages.shareDeleted("fs-inspect"));
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-9",
+    messageId: "3",
+    timestamp: "2026-04-01T00:00:20.000Z",
+    text: "Inspect another filesystem",
+    rawText: "Inspect another filesystem",
+  });
+
+  const secondTaskId = runner.launches[1]?.taskId;
+  assert.ok(secondTaskId);
+  runner.shareInspections.set(secondTaskId, {
+    isEmpty: false,
+    summary: "archive/\n  result.json",
+  });
+
+  await runner.emit({
+    type: "task_done",
+  });
+
+  const preserveRequestId = channel.shareDeletionRequests[1]?.requestId;
+  assert.ok(preserveRequestId);
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-9",
+    messageId: "4",
+    timestamp: "2026-04-01T00:00:30.000Z",
+    decision: "deny",
+    requestId: preserveRequestId,
+  });
+
+  assert.deepEqual(runner.deletedTaskShares, [firstTaskId]);
+  assert.equal(channel.sentTexts.at(-1)?.text, messages.sharePreserved("fs-inspect-2"));
+});
+
+test("orchestrator blocks new idle input while shared workspace deletion is pending", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const mainAgent = new SequenceMainAgent([
+    {
+      action: "launch_task",
+      taskBrief: "Inspect the filesystem.",
+      taskName: "fs-inspect",
+    },
+    {
+      action: "reply",
+      replyText: "This should not be reached yet.",
+    },
+  ]);
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent,
+    sandboxRunner: runner,
+    sessionStore: store,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-10",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Inspect the filesystem",
+    rawText: "Inspect the filesystem",
+  });
+
+  const taskId = runner.launches[0]?.taskId;
+  assert.ok(taskId);
+  runner.shareInspections.set(taskId, {
+    isEmpty: false,
+    summary: "report.txt",
+  });
+
+  await runner.emit({
+    type: "task_done",
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-10",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    text: "Do something else",
+    rawText: "Do something else",
+  });
+
+  assert.equal(mainAgent.contexts.length, 1);
+  assert.equal(channel.sentTexts.at(-1)?.text, messages.shareDeletionStillPending());
 });

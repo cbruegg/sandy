@@ -21,6 +21,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - Deterministic detection of worker disconnects, handshake timeouts, and control-channel write failures.
   - Structured host-side logging for significant lifecycle and failure events.
   - Centralized user-facing message definitions to prepare for future i18n.
+  - Automatic deletion of empty per-sub-agent shared workspaces, with explicit user confirmation before deleting non-empty workspaces.
 - Not fully implemented yet:
   - Real STT, file upload handling, and image handling.
   - Host-side enforcement for approved resource requests such as file copy in/out, mount setup, MCP enablement, and OneCLI enablement.
@@ -148,7 +149,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
 - `PrivilegeRequest`
   - validated union for `copy_into_share`, `copy_out_of_share`, `mount_ro`, `mount_rw`, `enable_mcp`, `enable_onecli`
 - `SessionState`
-  - in-memory per-chat state including active task metadata and quarantined output pending later release
+  - in-memory per-chat state including active task metadata, quarantined output pending later release, and any pending shared-workspace deletion confirmation
 
 ## Test Plan
 - Unit-test normalization of Telegram inputs into canonical chat events.
@@ -170,6 +171,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - denied privilege request,
   - task cancellation,
   - dangerous-output report termination.
+  - non-empty shared workspace requiring user confirmation before deletion.
 
 ## Assumptions and Defaults
 - V1 is Telegram-only, text-first, single-process, and single-active-task-per-chat.

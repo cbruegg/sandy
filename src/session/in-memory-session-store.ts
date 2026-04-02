@@ -17,6 +17,7 @@ export class InMemorySessionStore implements SessionStore {
       chatId,
       activeTask: null,
       pendingQuarantinedOutputs: [],
+      pendingShareDeletion: null,
     };
     this.sessions.set(chatId, session);
     return session;

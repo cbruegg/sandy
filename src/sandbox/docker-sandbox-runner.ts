@@ -1,9 +1,9 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { logger } from "../logger.js";
-import type { SandboxHandle, SandboxRunner, LaunchTaskRequest } from "./sandbox-runner.js";
+import type { SandboxHandle, SandboxRunner, LaunchTaskRequest, ShareInspection } from "./sandbox-runner.js";
 import type { HostCommand, SubAgentEvent } from "../types.js";
 import { parseSubAgentEvent, serializeHostCommand } from "../types.js";
 
@@ -247,6 +247,44 @@ export class DockerSandboxRunner implements SandboxRunner {
     };
   }
 
+  async inspectTaskShare(taskId: string): Promise<ShareInspection> {
+    const sharePath = join(this.options.shareRoot, taskId);
+    let entries;
+    try {
+      entries = await readdir(sharePath, { withFileTypes: true });
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        return {
+          isEmpty: true,
+          summary: null,
+        };
+      }
+      throw error;
+    }
+
+    if (entries.length === 0) {
+      return {
+        isEmpty: true,
+        summary: null,
+      };
+    }
+
+    const lines = await this.buildShareOverview(sharePath, 0, 2, 12);
+    return {
+      isEmpty: false,
+      summary: lines.join("\n"),
+    };
+  }
+
+  async deleteTaskShare(taskId: string): Promise<void> {
+    const sharePath = join(this.options.shareRoot, taskId);
+    await rm(sharePath, { recursive: true, force: true });
+    logger.info("sandbox.share_deleted", {
+      taskId,
+      sharePath,
+    });
+  }
+
   private attachStdoutParser(
     child: ChildProcessWithoutNullStreams,
     onEvent: (event: SubAgentEvent) => Promise<void>,
@@ -326,4 +364,52 @@ export class DockerSandboxRunner implements SandboxRunner {
     }
     return "Sub-agent control channel write failed.";
   }
+
+  private async buildShareOverview(
+    directoryPath: string,
+    depth: number,
+    maxDepth: number,
+    remainingLines: number,
+  ): Promise<string[]> {
+    if (remainingLines <= 0) {
+      return [];
+    }
+
+    const entries = await readdir(directoryPath, { withFileTypes: true });
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+
+    const lines: string[] = [];
+    let processedEntries = 0;
+    for (const entry of entries) {
+      if (lines.length >= remainingLines) {
+        break;
+      }
+      processedEntries += 1;
+
+      const indent = "  ".repeat(depth);
+      const label = entry.isDirectory() ? `${entry.name}/` : entry.name;
+      lines.push(`${indent}${label}`);
+
+      if (entry.isDirectory() && depth + 1 < maxDepth && lines.length < remainingLines) {
+        const childPath = join(directoryPath, entry.name);
+        const childLines = await this.buildShareOverview(
+          childPath,
+          depth + 1,
+          maxDepth,
+          remainingLines - lines.length,
+        );
+        lines.push(...childLines);
+      }
+    }
+
+    if (processedEntries < entries.length && lines.length >= remainingLines) {
+      lines.push(`${"  ".repeat(depth)}...`);
+    }
+
+    return lines.slice(0, remainingLines);
+  }
+}
+
+function isMissingPathError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error && error.code === "ENOENT";
 }

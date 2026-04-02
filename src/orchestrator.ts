@@ -83,7 +83,7 @@ export class SandyOrchestrator {
         session.activeTask.workerConnected = false;
         session.activeTask.status = "failed";
         await this.deps.channel.sendText(chatId, event.message);
-        this.clearTask(session);
+        await this.clearTask(session);
         break;
       case "progress":
         if (event.message.trim()) {
@@ -109,13 +109,13 @@ export class SandyOrchestrator {
         session.activeTask.quarantinedOutputs.push(event.text);
         await this.deps.channel.sendText(chatId, messages.taskComplete(event.text));
         session.activeTask.status = "completed";
-        this.clearTask(session);
+        await this.clearTask(session);
         break;
       case "task_done":
         if (session.activeTask.status !== "completed") {
           session.activeTask.status = "completed";
           await this.deps.channel.sendText(chatId, messages.taskCompleted(taskId));
-          this.clearTask(session);
+          await this.clearTask(session);
         }
         break;
       case "task_error":
@@ -126,7 +126,7 @@ export class SandyOrchestrator {
           message: event.message,
         });
         await this.deps.channel.sendText(chatId, messages.taskFailed(event.message));
-        this.clearTask(session);
+        await this.clearTask(session);
         break;
     }
 
@@ -139,6 +139,14 @@ export class SandyOrchestrator {
         await this.deps.channel.sendText(event.chatId, messages.noActiveTaskToCancel());
         return;
       case "approval_response":
+        if (session.pendingShareDeletion) {
+          if (event.requestId && event.requestId !== session.pendingShareDeletion.requestId) {
+            await this.deps.channel.sendText(event.chatId, messages.staleShareDeletionRequest());
+            return;
+          }
+          await this.resolveShareDeletion(session, event.decision);
+          return;
+        }
         await this.deps.channel.sendText(event.chatId, messages.noPendingPrivilegeRequest());
         return;
       case "danger_report":
@@ -150,6 +158,10 @@ export class SandyOrchestrator {
         await this.deps.channel.sendText(event.chatId, messages.discardedPendingOutput());
         return;
       case "user_text":
+        if (session.pendingShareDeletion) {
+          await this.deps.channel.sendText(event.chatId, messages.shareDeletionStillPending());
+          return;
+        }
         const newVisibleEntries = [
           ...this.releasePendingOutputs(session),
           {
@@ -356,23 +368,25 @@ export class SandyOrchestrator {
       reason,
     });
     await this.getHandle(activeTask.taskId).cancel(reason);
-    this.clearTask(session, { discardQuarantine: true });
+    await this.clearTask(session, { discardQuarantine: true });
   }
 
-  private clearTask(session: SessionState, options?: { discardQuarantine?: boolean }): void {
-    if (!session.activeTask) {
+  private async clearTask(session: SessionState, options?: { discardQuarantine?: boolean }): Promise<void> {
+    const task = session.activeTask;
+    if (!task) {
       return;
     }
-    if (!options?.discardQuarantine && session.activeTask.quarantinedOutputs.length > 0) {
-      session.pendingQuarantinedOutputs.push(...session.activeTask.quarantinedOutputs);
+    if (!options?.discardQuarantine && task.quarantinedOutputs.length > 0) {
+      session.pendingQuarantinedOutputs.push(...task.quarantinedOutputs);
     }
     logger.info("task.cleared", {
       chatId: session.chatId,
-      taskId: session.activeTask.taskId,
-      status: session.activeTask.status,
+      taskId: task.taskId,
+      status: task.status,
     });
-    this.handles.delete(session.activeTask.taskId);
+    this.handles.delete(task.taskId);
     session.activeTask = null;
+    await this.prepareShareDeletion(session, task.taskId, task.taskName);
   }
 
   private getHandle(taskId: string): SandboxHandle {
@@ -381,6 +395,39 @@ export class SandyOrchestrator {
       throw new Error(`No sandbox handle is registered for task ${taskId}.`);
     }
     return record.handle;
+  }
+
+  private async prepareShareDeletion(session: SessionState, taskId: string, taskName: string): Promise<void> {
+    const inspection = await this.deps.sandboxRunner.inspectTaskShare(taskId);
+    if (inspection.isEmpty) {
+      await this.deps.sandboxRunner.deleteTaskShare(taskId);
+      return;
+    }
+
+    const requestId = randomUUID();
+    session.pendingShareDeletion = {
+      requestId,
+      taskId,
+      taskName,
+      summary: inspection.summary ?? "",
+    };
+    await this.deps.channel.sendShareDeletionRequest(session.chatId, requestId, taskName, inspection.summary ?? "");
+  }
+
+  private async resolveShareDeletion(session: SessionState, decision: "approve" | "deny"): Promise<void> {
+    const pending = session.pendingShareDeletion;
+    if (!pending) {
+      return;
+    }
+
+    if (decision === "approve") {
+      await this.deps.sandboxRunner.deleteTaskShare(pending.taskId);
+      await this.deps.channel.sendText(session.chatId, messages.shareDeleted(pending.taskName));
+    } else {
+      await this.deps.channel.sendText(session.chatId, messages.sharePreserved(pending.taskName));
+    }
+
+    session.pendingShareDeletion = null;
   }
 }
 

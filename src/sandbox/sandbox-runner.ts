@@ -7,6 +7,11 @@ export type LaunchTaskRequest = {
   taskBrief: string;
 };
 
+export type ShareInspection = {
+  isEmpty: boolean;
+  summary: string | null;
+};
+
 export interface SandboxHandle {
   sendUserMessage(text: string): Promise<void>;
   resolvePrivilege(requestId: string, decision: "approve" | "deny"): Promise<void>;
@@ -15,4 +20,6 @@ export interface SandboxHandle {
 
 export interface SandboxRunner {
   launchTask(request: LaunchTaskRequest, onEvent: (event: SubAgentEvent) => Promise<void>): Promise<SandboxHandle>;
+  inspectTaskShare(taskId: string): Promise<ShareInspection>;
+  deleteTaskShare(taskId: string): Promise<void>;
 }

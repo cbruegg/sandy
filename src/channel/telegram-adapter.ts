@@ -254,6 +254,22 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       },
     });
   }
+
+  async sendShareDeletionRequest(chatId: string, requestId: string, taskName: string, summary: string): Promise<void> {
+    logger.info("telegram.send_share_deletion_request", {
+      chatId,
+      requestId,
+      taskName,
+    });
+    await this.bot.api.sendMessage(chatId, messages.shareDeletionRequestPrompt(taskName, summary), {
+      reply_markup: {
+        inline_keyboard: [[
+          { text: buttonLabels.approve, callback_data: `approve:${requestId}` },
+          { text: buttonLabels.deny, callback_data: `deny:${requestId}` },
+        ]],
+      },
+    });
+  }
 }
 
 function previewText(text: string): string {
