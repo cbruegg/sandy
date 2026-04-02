@@ -89,6 +89,7 @@ providing a more flexible API that is not tied to a specific LLM provider.
 
 Sandy receives messages from the user through a channel abstraction.
 Initially, the only implementation of the channel will be a Telegram bot.
+Each channel also defines its own formatting contract for user-visible agent output.
 
 Allowed message types are text messages, file uploads (with images receiving dedicated handling) and voice messages.
 Voice messages are transcribed to text using STT, and the resulting text is then processed as a normal text message.

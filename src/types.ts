@@ -1,5 +1,12 @@
 export type TranscriptRole = "user" | "assistant" | "system";
 
+export type ChannelFormatting = {
+  channel: "telegram";
+  markup: "telegram_html";
+  allowedTags: string[];
+  instructions: string;
+};
+
 export type TranscriptEntry = {
   role: TranscriptRole;
   kind: string;
@@ -115,6 +122,7 @@ export type DecideContext = {
   chatId: string;
   newVisibleEntries: TranscriptEntry[];
   activeTask: TaskMetadata | null;
+  channelFormatting: ChannelFormatting;
 };
 
 // Incremental status text emitted by the worker while a task is running.

@@ -6,7 +6,14 @@ import { messages } from "./messages.js";
 import type { SandboxHandle, SandboxRunner, LaunchTaskRequest } from "./sandbox/sandbox-runner.js";
 import { SandyOrchestrator } from "./orchestrator.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
-import type { DecideContext, MainAgentDecision, PrivilegeRequest, SubAgentEvent } from "./types.js";
+import type { ChannelFormatting, DecideContext, MainAgentDecision, PrivilegeRequest, SubAgentEvent } from "./types.js";
+
+const testFormatting: ChannelFormatting = {
+  channel: "telegram",
+  markup: "telegram_html",
+  allowedTags: ["b", "i", "code", "pre"],
+  instructions: "Use simple Telegram HTML.",
+};
 
 class RecordingChannel implements ChannelAdapter {
   public readonly sentTexts: Array<{ chatId: string; text: string }> = [];
@@ -16,6 +23,9 @@ class RecordingChannel implements ChannelAdapter {
 
   async start(): Promise<void> {}
   async stop(): Promise<void> {}
+  getFormatting(): ChannelFormatting {
+    return testFormatting;
+  }
 
   async sendText(chatId: string, text: string): Promise<void> {
     this.sentTexts.push({ chatId, text });
@@ -152,11 +162,13 @@ test("orchestrator launches a task and discards quarantined output on danger rep
 
   assert.equal(runner.handle.cancellations.length, 1);
   assert.equal(channel.sentTexts.at(-1)?.text, messages.taskTerminatedAndDiscarded("repo-inspect"));
+  assert.deepEqual(runner.launches[0]?.channelFormatting, testFormatting);
 
   const session = store.getOrCreate("chat-1");
   assert.equal(session.activeTask, null);
   assert.deepEqual(session.pendingQuarantinedOutputs, []);
   assert.deepEqual(contextTexts(mainAgent.contexts[0]), ["Inspect the repository"]);
+  assert.deepEqual(mainAgent.contexts[0]?.channelFormatting, testFormatting);
 });
 
 test("orchestrator accepts active-task quarantined output without storing host-side history", async () => {

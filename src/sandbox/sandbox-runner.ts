@@ -1,10 +1,11 @@
-import type { SubAgentEvent } from "../types.js";
+import type { ChannelFormatting, SubAgentEvent } from "../types.js";
 
 export type LaunchTaskRequest = {
   chatId: string;
   taskId: string;
   taskName: string;
   taskBrief: string;
+  channelFormatting: ChannelFormatting;
 };
 
 export type ShareInspection = {

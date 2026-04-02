@@ -61,6 +61,7 @@ export class CodexMainAgentController implements MainAgentController {
     });
     const prompt = buildMainAgentPrompt({
       activeTask: context.activeTask,
+      channelFormatting: context.channelFormatting,
       newVisibleEntries: context.newVisibleEntries,
       isInitialTurn,
     });
@@ -125,6 +126,7 @@ export function buildMainAgentThreadOptions(workingDirectory: string): ThreadOpt
 export function buildMainAgentPrompt(input: {
   newVisibleEntries: DecideContext["newVisibleEntries"];
   activeTask: DecideContext["activeTask"];
+  channelFormatting: DecideContext["channelFormatting"];
   isInitialTurn: boolean;
 }): string {
   const intro = input.isInitialTurn
@@ -151,11 +153,15 @@ export function buildMainAgentPrompt(input: {
     "Current active task metadata:",
     JSON.stringify(input.activeTask, null, 2),
     "",
+    "Channel formatting metadata:",
+    JSON.stringify(input.channelFormatting, null, 2),
+    "",
     "Decision rules:",
     "- Choose between replying directly and launching a task based on the user's likely intent and the current conversation state.",
     "- It is acceptable to launch a task proactively when that is the best way for Sandy to investigate, inspect, or execute something for the user.",
     "- Reply directly for purely conversational requests or when no sub-agent work is useful.",
     "- Task names must be short, stable, and descriptive.",
     "- Task briefs must contain only the minimum instructions needed by the sub-agent.",
+    "- Any replyText you produce is user-visible. Follow the provided channel formatting instructions exactly.",
   ].join("\n");
 }

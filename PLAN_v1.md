@@ -22,6 +22,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - Deterministic detection of worker disconnects, handshake timeouts, and control-channel write failures.
   - Structured host-side logging for significant lifecycle and failure events.
   - Centralized user-facing message definitions to prepare for future i18n.
+  - Channel-owned formatting metadata, with Telegram output sanitized and sent as simple HTML.
   - Automatic deletion of empty per-sub-agent shared workspaces, with explicit user confirmation before deleting non-empty workspaces.
 - Not fully implemented yet:
   - Real STT, file upload handling, and image handling.
@@ -108,11 +109,13 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - `SessionStore`
   - `TranscriptionProvider`
 - Normalize inbound message types as `text`, `image`, `file`, `voice`, but implement only `text` end to end in v1.
+- Expose channel formatting metadata to both the main agent and sub-agents so user-visible output can target the active channel safely.
 - For Telegram v1, support inline buttons and fixed commands/phrases for:
   - cancel
   - approve
   - deny
   - danger report
+- Send Telegram messages using sanitized HTML rather than plain Markdown text.
 - Keep voice/file/image handling scaffolded at the interface level, with explicit “not supported in v1” behavior where needed.
 
 ### Dependencies and configuration

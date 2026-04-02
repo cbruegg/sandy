@@ -6,7 +6,14 @@ import {
   buildMainAgentThreadOptions,
   CodexMainAgentController,
 } from "./agent/main-agent-controller.js";
-import type { DecideContext } from "./types.js";
+import type { ChannelFormatting, DecideContext } from "./types.js";
+
+const testFormatting: ChannelFormatting = {
+  channel: "telegram",
+  markup: "telegram_html",
+  allowedTags: ["b", "i", "code", "pre"],
+  instructions: "Use simple Telegram HTML.",
+};
 
 class RecordingThread {
   public readonly inputs: Array<{ input: string; options?: { outputSchema?: object } }> = [];
@@ -48,6 +55,7 @@ function makeContext(texts: string[], chatId = "chat-1"): DecideContext {
       text,
     })),
     activeTask: null,
+    channelFormatting: testFormatting,
   };
 }
 
@@ -73,17 +81,21 @@ test("buildMainAgentPrompt includes only the new visible entries for incremental
   const initialPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
     activeTask: null,
+    channelFormatting: testFormatting,
     isInitialTurn: true,
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["follow-up"]).newVisibleEntries,
     activeTask: null,
+    channelFormatting: testFormatting,
     isInitialTurn: false,
   });
 
   assert.match(initialPrompt, /Visible chat entries for this first decision:/);
   assert.match(deltaPrompt, /New visible chat entries since your last decision:/);
   assert.doesNotMatch(deltaPrompt, /Visible chat entries for this first decision:/);
+  assert.match(initialPrompt, /telegram_html/);
+  assert.match(initialPrompt, /"allowedTags"/);
 });
 
 test("CodexMainAgentController starts threads in a unique temp directory with no approvals", async () => {

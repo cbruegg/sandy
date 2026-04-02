@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { Update } from "grammy/types";
+import { sanitizeTelegramHtml } from "./channel/telegram-html.js";
 import { TelegramBotApiAdapter, normalizeTelegramUpdate } from "./channel/telegram-adapter.js";
 
 test("normalizeTelegramUpdate maps report callback to a danger report event", () => {
@@ -144,6 +145,31 @@ test("TelegramBotApiAdapter acknowledges callback queries", async () => {
   await adapter.stop();
 
   assert.equal(fakeBot.acknowledgedCallbackQueries, 1);
+});
+
+test("sanitizeTelegramHtml preserves only the supported Telegram tags", () => {
+  assert.equal(
+    sanitizeTelegramHtml("Use <b>bold</b> and <script>alert(1)</script> plus <code>x < y</code>."),
+    "Use <b>bold</b> and &lt;script&gt;alert(1)&lt;/script&gt; plus <code>x &lt; y</code>.",
+  );
+});
+
+test("TelegramBotApiAdapter sends sanitized HTML with parse_mode", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const adapter = new TelegramBotApiAdapter({
+    token: "test-token",
+    botFactory: () => fakeBot,
+  });
+
+  await adapter.sendText("7", "Use <b>bold</b> and <u>underline</u>.");
+
+  assert.deepEqual(fakeBot.sentMessages[0], {
+    chatId: "7",
+    text: "Use <b>bold</b> and &lt;u&gt;underline&lt;/u&gt;.",
+    other: {
+      parse_mode: "HTML",
+    },
+  });
 });
 
 class FakeTelegramBot {

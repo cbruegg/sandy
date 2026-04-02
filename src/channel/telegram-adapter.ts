@@ -3,7 +3,8 @@ import type { Update } from "grammy/types";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { buttonLabels, messages } from "../messages.js";
-import type { ApprovalResponseEvent, DangerReportEvent, NormalizedChatEvent, PrivilegeRequest } from "../types.js";
+import { sanitizeTelegramHtml, telegramHtmlAllowedTags } from "./telegram-html.js";
+import type { ApprovalResponseEvent, ChannelFormatting, DangerReportEvent, NormalizedChatEvent, PrivilegeRequest } from "../types.js";
 
 type TelegramApiLike = {
   sendMessage(
@@ -31,6 +32,13 @@ export type TelegramAdapterOptions = {
   token: string;
   pollTimeoutSeconds?: number;
   botFactory?: TelegramBotFactory;
+};
+
+const telegramFormatting: ChannelFormatting = {
+  channel: "telegram",
+  markup: "telegram_html",
+  allowedTags: telegramHtmlAllowedTags,
+  instructions: "Format user-visible output as simple Telegram HTML using only <b>, <i>, <code>, and <pre>. Do not emit Markdown. Escape raw <, >, and & unless they are part of those exact tags.",
 };
 
 function defaultBotFactory(token: string): TelegramBotLike {
@@ -146,6 +154,10 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     this.pollTimeoutSeconds = options.pollTimeoutSeconds ?? 30;
   }
 
+  getFormatting(): ChannelFormatting {
+    return telegramFormatting;
+  }
+
   async start(handler: MessageHandler): Promise<void> {
     if (this.startPromise) {
       return;
@@ -221,7 +233,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       chatId,
       textPreview: previewText(text),
     });
-    await this.bot.api.sendMessage(chatId, text);
+    await this.sendFormattedMessage(chatId, text);
   }
 
   async sendTaskUpdate(chatId: string, text: string): Promise<void> {
@@ -229,7 +241,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       chatId,
       textPreview: previewText(text),
     });
-    await this.bot.api.sendMessage(chatId, text, {
+    await this.sendFormattedMessage(chatId, text, {
       reply_markup: {
         inline_keyboard: [[
           { text: buttonLabels.reportDangerousOutput, callback_data: "report" },
@@ -245,7 +257,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       requestId: request.requestId,
       requestType: request.type,
     });
-    await this.bot.api.sendMessage(chatId, messages.privilegeRequestPrompt(request), {
+    await this.sendFormattedMessage(chatId, messages.privilegeRequestPrompt(request), {
       reply_markup: {
         inline_keyboard: [[
           { text: buttonLabels.approve, callback_data: `approve:${request.requestId}` },
@@ -261,13 +273,24 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       requestId,
       taskName,
     });
-    await this.bot.api.sendMessage(chatId, messages.shareDeletionRequestPrompt(taskName, summary), {
+    await this.sendFormattedMessage(chatId, messages.shareDeletionRequestPrompt(taskName, summary), {
       reply_markup: {
         inline_keyboard: [[
           { text: buttonLabels.approve, callback_data: `approve:${requestId}` },
           { text: buttonLabels.deny, callback_data: `deny:${requestId}` },
         ]],
       },
+    });
+  }
+
+  private async sendFormattedMessage(
+    chatId: string,
+    text: string,
+    other?: Record<string, unknown>,
+  ): Promise<void> {
+    await this.bot.api.sendMessage(chatId, sanitizeTelegramHtml(text), {
+      parse_mode: "HTML",
+      ...other,
     });
   }
 }

@@ -8,7 +8,14 @@ import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { DockerSandboxRunner } from "./sandbox/docker-sandbox-runner.js";
-import type { SubAgentEvent } from "./types.js";
+import type { ChannelFormatting, SubAgentEvent } from "./types.js";
+
+const testFormatting: ChannelFormatting = {
+  channel: "telegram",
+  markup: "telegram_html",
+  allowedTags: ["b", "i", "code", "pre"],
+  instructions: "Use simple Telegram HTML.",
+};
 
 class FakeStdin {
   public readonly writes: string[] = [];
@@ -110,6 +117,7 @@ async function launchRunnerWithChild(taskChild: FakeChildProcess, onEvent: (even
       taskId: "task-1",
       taskName: "test-task",
       taskBrief: "Inspect the environment.",
+      channelFormatting: testFormatting,
     },
     onEvent,
   );

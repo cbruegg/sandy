@@ -28,8 +28,11 @@ export type SandyOrchestratorDependencies = {
 
 export class SandyOrchestrator {
   private readonly handles = new Map<string, ActiveHandleRecord>();
+  private readonly channelFormatting: ReturnType<ChannelAdapter["getFormatting"]>;
 
-  constructor(private readonly deps: SandyOrchestratorDependencies) {}
+  constructor(private readonly deps: SandyOrchestratorDependencies) {
+    this.channelFormatting = deps.channel.getFormatting();
+  }
 
   async handleChatEvent(event: NormalizedChatEvent): Promise<void> {
     const session = this.deps.sessionStore.getOrCreate(event.chatId);
@@ -176,6 +179,7 @@ export class SandyOrchestrator {
           chatId: event.chatId,
           newVisibleEntries,
           activeTask: null,
+          channelFormatting: this.channelFormatting,
         });
 
         await this.applyMainAgentDecision(session, event.chatId, decision);
@@ -267,6 +271,7 @@ export class SandyOrchestrator {
             taskId,
             taskName: decision.taskName,
             taskBrief: decision.taskBrief,
+            channelFormatting: this.channelFormatting,
           },
           async (event) => this.handleSubAgentEvent(chatId, taskId, event),
         );

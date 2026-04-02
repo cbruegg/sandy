@@ -7,7 +7,7 @@ import {
   type ThreadEvent,
   type TodoListItem,
 } from "@openai/codex-sdk";
-import type { HostCommand, SubAgentEvent } from "../types.js";
+import type { ChannelFormatting, HostCommand, SubAgentEvent } from "../types.js";
 
 function getRequiredEnv(name: string): string {
   const value = process.env[name];
@@ -23,6 +23,27 @@ function getOptionalEnv(name: string): string | null {
     return null;
   }
   return value;
+}
+
+function parseChannelFormatting(raw: string | null): ChannelFormatting | null {
+  if (!raw) {
+    return null;
+  }
+  const parsed = JSON.parse(raw) as Partial<ChannelFormatting>;
+  if (
+    parsed.channel !== "telegram" ||
+    parsed.markup !== "telegram_html" ||
+    !Array.isArray(parsed.allowedTags) ||
+    typeof parsed.instructions !== "string"
+  ) {
+    throw new Error("Invalid channel formatting metadata.");
+  }
+  return {
+    channel: parsed.channel,
+    markup: parsed.markup,
+    allowedTags: parsed.allowedTags.filter((entry): entry is string => typeof entry === "string"),
+    instructions: parsed.instructions,
+  };
 }
 
 function send(event: SubAgentEvent): void {
@@ -105,19 +126,28 @@ async function handleThreadEvent(event: ThreadEvent): Promise<void> {
   }
 }
 
-export function buildInitialTaskInput(taskBrief: string): string {
-  return [
+export function buildInitialTaskInput(taskBrief: string, channelFormatting: ChannelFormatting | null): string {
+  const lines = [
     "You are running inside a Sandy sub-agent container.",
     "Your shared workspace is mounted at /workspace/share.",
     "Use /workspace/share for files that should remain available to the host after your task finishes.",
-    "",
-    taskBrief,
-  ].join("\n");
+  ];
+
+  if (channelFormatting) {
+    lines.push(
+      `User-visible output must follow this channel formatting contract: ${channelFormatting.instructions}`,
+      `Allowed formatting tags: ${channelFormatting.allowedTags.map((tag) => `<${tag}>`).join(", ")}`,
+    );
+  }
+
+  lines.push("", taskBrief);
+  return lines.join("\n");
 }
 
 async function main(): Promise<void> {
   const taskBrief = getRequiredEnv("SANDY_TASK_BRIEF");
   const apiKey = getOptionalEnv("OPENAI_API_KEY");
+  const channelFormatting = parseChannelFormatting(getOptionalEnv("SANDY_CHANNEL_FORMATTING"));
 
   const codex = apiKey ? new Codex({ apiKey }) : new Codex();
   const thread = codex.startThread({
@@ -154,7 +184,7 @@ async function main(): Promise<void> {
   });
 
   send({ type: "worker_connected" });
-  enqueueTurn(buildInitialTaskInput(taskBrief));
+  enqueueTurn(buildInitialTaskInput(taskBrief, channelFormatting));
 
   input.on("line", (line) => {
     const trimmed = line.trim();
