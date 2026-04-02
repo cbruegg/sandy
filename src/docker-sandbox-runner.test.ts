@@ -277,3 +277,51 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
   await assert.rejects(access(taskShare));
   await rm(shareRoot, { recursive: true, force: true });
 });
+
+test("DockerSandboxRunner rejects share inspection outside the configured share root", async () => {
+  const baseRoot = mkdtempSync(join(tmpdir(), "sandy-share-escape-"));
+  const shareRoot = join(baseRoot, "shares");
+  const outsidePath = join(baseRoot, "outside");
+  const runner = new DockerSandboxRunner({
+    workerImage: "sandy-subagent:latest",
+    shareRoot,
+    openAiApiKey: null,
+    codexAuthFile: null,
+  });
+
+  await mkdir(shareRoot, { recursive: true });
+  await mkdir(outsidePath, { recursive: true });
+  await writeFile(join(outsidePath, "keep.txt"), "safe\n");
+
+  await assert.rejects(
+    runner.inspectTaskShare("../outside"),
+    /escapes the configured share root/,
+  );
+
+  await assert.doesNotReject(access(join(outsidePath, "keep.txt")));
+  await rm(baseRoot, { recursive: true, force: true });
+});
+
+test("DockerSandboxRunner rejects share deletion outside the configured share root", async () => {
+  const baseRoot = mkdtempSync(join(tmpdir(), "sandy-share-delete-"));
+  const shareRoot = join(baseRoot, "shares");
+  const outsidePath = join(baseRoot, "outside");
+  const runner = new DockerSandboxRunner({
+    workerImage: "sandy-subagent:latest",
+    shareRoot,
+    openAiApiKey: null,
+    codexAuthFile: null,
+  });
+
+  await mkdir(shareRoot, { recursive: true });
+  await mkdir(outsidePath, { recursive: true });
+  await writeFile(join(outsidePath, "keep.txt"), "safe\n");
+
+  await assert.rejects(
+    runner.deleteTaskShare("../outside"),
+    /escapes the configured share root/,
+  );
+
+  await assert.doesNotReject(access(join(outsidePath, "keep.txt")));
+  await rm(baseRoot, { recursive: true, force: true });
+});

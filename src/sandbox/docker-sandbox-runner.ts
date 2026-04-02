@@ -1,5 +1,5 @@
 import { mkdir, readdir, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { logger } from "../logger.js";
@@ -35,7 +35,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     request: LaunchTaskRequest,
     onEvent: (event: SubAgentEvent) => Promise<void>,
   ): Promise<SandboxHandle> {
-    const sharePath = join(this.options.shareRoot, request.taskId);
+    const sharePath = this.getTaskSharePath(request.taskId);
     await mkdir(sharePath, { recursive: true });
 
     const containerName = `sandy-${request.taskId}`;
@@ -250,7 +250,7 @@ export class DockerSandboxRunner implements SandboxRunner {
   }
 
   async inspectTaskShare(taskId: string): Promise<ShareInspection> {
-    const sharePath = join(this.options.shareRoot, taskId);
+    const sharePath = this.getTaskSharePath(taskId);
     let entries;
     try {
       entries = await readdir(sharePath, { withFileTypes: true });
@@ -279,12 +279,24 @@ export class DockerSandboxRunner implements SandboxRunner {
   }
 
   async deleteTaskShare(taskId: string): Promise<void> {
-    const sharePath = join(this.options.shareRoot, taskId);
+    const sharePath = this.getTaskSharePath(taskId);
     await rm(sharePath, { recursive: true, force: true });
     logger.info("sandbox.share_deleted", {
       taskId,
       sharePath,
     });
+  }
+
+  private getTaskSharePath(taskId: string): string {
+    const shareRoot = resolve(this.options.shareRoot);
+    const sharePath = resolve(shareRoot, taskId);
+    const relativePath = relative(shareRoot, sharePath);
+
+    if (relativePath.startsWith("..") || relativePath === "" || isAbsolutePathEscape(relativePath)) {
+      throw new Error(`Task share path escapes the configured share root: ${taskId}`);
+    }
+
+    return sharePath;
   }
 
   private attachStdoutParser(
@@ -414,4 +426,8 @@ export class DockerSandboxRunner implements SandboxRunner {
 
 function isMissingPathError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+function isAbsolutePathEscape(path: string): boolean {
+  return path.startsWith("/");
 }
