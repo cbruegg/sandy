@@ -36,6 +36,21 @@ class StubMainAgent implements MainAgentController {
   }
 }
 
+class SequenceMainAgent implements MainAgentController {
+  private index = 0;
+
+  constructor(private readonly decisions: MainAgentDecision[]) {}
+
+  async decide(_context: DecideContext): Promise<MainAgentDecision> {
+    const decision = this.decisions[this.index] ?? this.decisions.at(-1);
+    if (!decision) {
+      throw new Error("No main-agent decision configured.");
+    }
+    this.index += 1;
+    return decision;
+  }
+}
+
 class FakeSandboxHandle implements SandboxHandle {
   public readonly userMessages: string[] = [];
   public readonly privilegeDecisions: Array<{ requestId: string; decision: "approve" | "deny" }> = [];
@@ -213,4 +228,187 @@ test("orchestrator keeps privilege decisions deterministic and out of the main a
   assert.equal(channel.privilegeRequests.length, 1);
   assert.deepEqual(runner.handle.privilegeDecisions, [{ requestId: "req-1", decision: "approve" }]);
   assert.match(channel.sentTexts.at(-1)?.text ?? "", /Approved privilege request req-1/);
+});
+
+test("orchestrator keeps completed-task output quarantined until the user sends another message", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Inspect the environment.",
+      taskName: "env-inspection",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-4",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Inspect the environment",
+    rawText: "Inspect the environment",
+  });
+
+  await runner.emit({
+    type: "assistant_output",
+    text: "The environment has 8 CPUs.",
+  });
+
+  await runner.emit({
+    type: "task_done",
+  });
+
+  const session = store.getOrCreate("chat-4");
+  assert.equal(session.activeTask, null);
+  assert.deepEqual(session.pendingQuarantinedOutputs, ["The environment has 8 CPUs."]);
+  assert.equal(
+    session.transcript.some((entry) => entry.kind === "released_sub_agent_output" && entry.text === "The environment has 8 CPUs."),
+    false,
+  );
+});
+
+test("orchestrator releases completed-task output only when the user continues normally", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new SequenceMainAgent([
+      {
+        action: "launch_task",
+        taskBrief: "Inspect the environment.",
+        taskName: "env-inspection",
+      },
+      {
+        action: "reply",
+        replyText: "Continuing with the next step.",
+      },
+    ]),
+    sandboxRunner: runner,
+    sessionStore: store,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-5",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Inspect the environment",
+    rawText: "Inspect the environment",
+  });
+
+  await runner.emit({
+    type: "assistant_output",
+    text: "The environment has 8 CPUs.",
+  });
+
+  await runner.emit({
+    type: "task_done",
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-5",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    text: "thanks",
+    rawText: "thanks",
+  });
+
+  const session = store.getOrCreate("chat-5");
+  const releasedIndex = session.transcript.findIndex((entry) => entry.kind === "released_sub_agent_output");
+  const userIndex = session.transcript.findIndex((entry) => entry.text === "thanks");
+  assert.notEqual(releasedIndex, -1);
+  assert.notEqual(userIndex, -1);
+  assert.ok(releasedIndex < userIndex);
+  assert.deepEqual(session.pendingQuarantinedOutputs, []);
+});
+
+test("orchestrator discards completed-task output when the user sends a danger report next", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Inspect the filesystem.",
+      taskName: "fs-inspect",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-5",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Inspect the filesystem",
+    rawText: "Inspect the filesystem",
+  });
+
+  await runner.emit({
+    type: "assistant_output",
+    text: "Potentially unsafe filesystem output",
+  });
+
+  await runner.emit({
+    type: "task_done",
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "danger_report",
+    chatId: "chat-5",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+  });
+
+  const session = store.getOrCreate("chat-5");
+  assert.equal(session.activeTask, null);
+  assert.deepEqual(session.pendingQuarantinedOutputs, []);
+  assert.equal(
+    session.transcript.some((entry) => entry.text === "Potentially unsafe filesystem output"),
+    false,
+  );
+  assert.match(channel.sentTexts.at(-1)?.text ?? "", /Discarded the pending sub-agent output/);
+});
+
+test("orchestrator marks worker disconnects as task failure and clears the task", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Inspect the filesystem.",
+      taskName: "fs-inspect",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-7",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Inspect the filesystem",
+    rawText: "Inspect the filesystem",
+  });
+
+  await runner.emit({
+    type: "worker_disconnected",
+    message: "Sub-agent control channel disconnected unexpectedly.",
+  });
+
+  const session = store.getOrCreate("chat-7");
+  assert.equal(session.activeTask, null);
+  assert.match(channel.sentTexts.at(-1)?.text ?? "", /control channel disconnected unexpectedly/);
 });

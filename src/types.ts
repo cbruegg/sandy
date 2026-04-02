@@ -198,6 +198,7 @@ export type SessionState = {
   transcript: TranscriptEntry[];
   mainThreadId: string | null;
   activeTask: ActiveTaskState | null;
+  pendingQuarantinedOutputs: string[];
 };
 
 export function toTaskMetadata(task: ActiveTaskState): TaskMetadata {

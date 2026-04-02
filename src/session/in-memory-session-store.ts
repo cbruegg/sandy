@@ -18,6 +18,7 @@ export class InMemorySessionStore implements SessionStore {
       transcript: [],
       mainThreadId: null,
       activeTask: null,
+      pendingQuarantinedOutputs: [],
     };
     this.sessions.set(chatId, session);
     return session;

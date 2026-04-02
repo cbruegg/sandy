@@ -149,9 +149,15 @@ export class SandyOrchestrator {
         await this.deps.channel.sendText(event.chatId, "There is no pending privilege request.");
         return;
       case "danger_report":
-        await this.deps.channel.sendText(event.chatId, "There is no active sub-agent output to report.");
+        if (session.pendingQuarantinedOutputs.length === 0) {
+          await this.deps.channel.sendText(event.chatId, "There is no active sub-agent output to report.");
+          return;
+        }
+        session.pendingQuarantinedOutputs = [];
+        await this.deps.channel.sendText(event.chatId, "Discarded the pending sub-agent output.");
         return;
       case "user_text":
+        this.releasePendingOutputs(session);
         this.appendTranscript(session, {
           role: "user",
           kind: "user_text",
@@ -322,6 +328,27 @@ export class SandyOrchestrator {
     session.activeTask.quarantinedOutputs = [];
   }
 
+  private releasePendingOutputs(session: SessionState): void {
+    if (session.pendingQuarantinedOutputs.length === 0) {
+      return;
+    }
+
+    logger.info("task.pending_quarantine_released", {
+      chatId: session.chatId,
+      count: session.pendingQuarantinedOutputs.length,
+    });
+    const timestamp = new Date().toISOString();
+    for (const text of session.pendingQuarantinedOutputs) {
+      this.appendTranscript(session, {
+        role: "assistant",
+        kind: "released_sub_agent_output",
+        timestamp,
+        text,
+      });
+    }
+    session.pendingQuarantinedOutputs = [];
+  }
+
   private async resolvePrivilegeRequest(
     session: SessionState,
     request: PrivilegeRequest,
@@ -386,6 +413,9 @@ export class SandyOrchestrator {
   private clearTask(session: SessionState): void {
     if (!session.activeTask) {
       return;
+    }
+    if (session.activeTask.quarantinedOutputs.length > 0) {
+      session.pendingQuarantinedOutputs.push(...session.activeTask.quarantinedOutputs);
     }
     logger.info("task.cleared", {
       chatId: session.chatId,

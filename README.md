@@ -42,9 +42,9 @@ export SANDY_SHARE_ROOT=/tmp/sandy-shares
 
 Auth behavior:
 
-- If `OPENAI_API_KEY` is set, the main agent and sub-agent can use it.
 - If the host already has Codex logged in with ChatGPT and `~/.codex/auth.json` exists, Sandy mounts that file into the sub-agent container automatically.
-- If both are present, Codex CLI defaults to the ChatGPT login unless you explicitly log out of that login in the Codex environment.
+- If `OPENAI_API_KEY` is set and no Codex auth file is available, Sandy passes the API key to the main agent and sub-agent worker.
+- If both are present, Sandy prefers the Codex ChatGPT auth file and does not pass `OPENAI_API_KEY`.
 
 ### Build and run
 

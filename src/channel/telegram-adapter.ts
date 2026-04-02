@@ -37,6 +37,8 @@ export type TelegramAdapterOptions = {
   token: string;
   apiBaseUrl?: string;
   pollTimeoutSeconds?: number;
+  pollErrorDelayMs?: number;
+  fetchImpl?: typeof fetch;
 };
 
 function nowFromUnix(seconds: number): string {
@@ -142,6 +144,8 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
   private readonly token: string;
   private readonly apiBaseUrl: string;
   private readonly pollTimeoutSeconds: number;
+  private readonly pollErrorDelayMs: number;
+  private readonly fetchImpl: typeof fetch;
   private running = false;
   private updateOffset = 0;
   private pollPromise: Promise<void> | null = null;
@@ -150,6 +154,8 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     this.token = options.token;
     this.apiBaseUrl = options.apiBaseUrl ?? "https://api.telegram.org";
     this.pollTimeoutSeconds = options.pollTimeoutSeconds ?? 30;
+    this.pollErrorDelayMs = options.pollErrorDelayMs ?? 1000;
+    this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
   async start(handler: MessageHandler): Promise<void> {
@@ -219,18 +225,28 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
 
   private async pollLoop(handler: MessageHandler): Promise<void> {
     while (this.running) {
-      const updates = await this.getUpdates();
-      for (const update of updates) {
-        this.updateOffset = update.update_id + 1;
-        const event = normalizeTelegramUpdate(update);
-        if (event) {
-          logger.info("telegram.event_received", {
-            chatId: event.chatId,
-            kind: event.kind,
-            messageId: event.messageId,
-          });
-          await handler(event);
+      try {
+        const updates = await this.getUpdates();
+        for (const update of updates) {
+          this.updateOffset = update.update_id + 1;
+          const event = normalizeTelegramUpdate(update);
+          if (event) {
+            logger.info("telegram.event_received", {
+              chatId: event.chatId,
+              kind: event.kind,
+              messageId: event.messageId,
+            });
+            await handler(event);
+          }
         }
+      } catch (error) {
+        logger.error("telegram.polling_error", {
+          message: error instanceof Error ? error.message : "Unknown polling error.",
+        });
+        if (!this.running) {
+          break;
+        }
+        await delay(this.pollErrorDelayMs);
       }
     }
   }
@@ -245,7 +261,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
   }
 
   private async callTelegram<T = TelegramSendResponse>(method: string, body: Record<string, unknown>): Promise<T> {
-    const response = await fetch(`${this.apiBaseUrl}/bot${this.token}/${method}`, {
+    const response = await this.fetchImpl(`${this.apiBaseUrl}/bot${this.token}/${method}`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -267,6 +283,12 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     }
     return payload as T;
   }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function previewText(text: string): string {
