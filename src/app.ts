@@ -9,12 +9,11 @@ import { InMemorySessionStore } from "./session/in-memory-session-store.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
-  const authMode = config.openAiApiKey ? "api_key" : config.codexAuthFile ? "codex_auth_file" : "ambient_codex_auth";
 
   logger.info("app.starting", {
     workerImage: config.workerImage,
     shareRoot: config.shareRoot,
-    authMode,
+    authMode: config.authMode,
   });
 
   const channel = new TelegramBotApiAdapter({

@@ -117,39 +117,47 @@ export type DecideContext = {
   activeTask: TaskMetadata | null;
 };
 
+// Incremental status text emitted by the worker while a task is running.
 export type ProgressEvent = {
   type: "progress";
   message: string;
 };
 
+// User-visible sub-agent output that is shown immediately but quarantined from the main agent.
 export type AssistantOutputEvent = {
   type: "assistant_output";
   text: string;
 };
 
+// Final user-visible result for a task that completed with an explicit summary payload.
 export type FinalResultEvent = {
   type: "final_result";
   text: string;
 };
 
+// Deterministic capability request that bypasses the main agent and is shown directly to the user.
 export type PrivilegeRequestEvent = {
   type: "privilege_request";
   request: PrivilegeRequest;
 };
 
+// Clean task completion marker from the worker when no explicit final result payload is sent.
 export type TaskDoneEvent = {
   type: "task_done";
 };
 
+// Terminal task failure reported by the worker itself.
 export type TaskErrorEvent = {
   type: "task_error";
   message: string;
 };
 
+// Handshake event meaning the worker has started successfully and is ready to exchange protocol messages.
 export type WorkerConnectedEvent = {
   type: "worker_connected";
 };
 
+// Transport-level failure meaning the host lost the worker control channel before a terminal task event.
 export type WorkerDisconnectedEvent = {
   type: "worker_disconnected";
   message: string;

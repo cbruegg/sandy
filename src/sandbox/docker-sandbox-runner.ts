@@ -12,10 +12,24 @@ export type DockerSandboxRunnerOptions = {
   shareRoot: string;
   openAiApiKey: string | null;
   codexAuthFile: string | null;
+  handshakeTimeoutMs?: number;
+  spawnImpl?: typeof spawn;
+  setTimeoutImpl?: typeof setTimeout;
+  clearTimeoutImpl?: typeof clearTimeout;
 };
 
 export class DockerSandboxRunner implements SandboxRunner {
-  constructor(private readonly options: DockerSandboxRunnerOptions) {}
+  private readonly handshakeTimeoutMs: number;
+  private readonly spawnImpl: typeof spawn;
+  private readonly setTimeoutImpl: typeof setTimeout;
+  private readonly clearTimeoutImpl: typeof clearTimeout;
+
+  constructor(private readonly options: DockerSandboxRunnerOptions) {
+    this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? 10_000;
+    this.spawnImpl = options.spawnImpl ?? spawn;
+    this.setTimeoutImpl = options.setTimeoutImpl ?? setTimeout;
+    this.clearTimeoutImpl = options.clearTimeoutImpl ?? clearTimeout;
+  }
 
   async launchTask(
     request: LaunchTaskRequest,
@@ -26,6 +40,10 @@ export class DockerSandboxRunner implements SandboxRunner {
 
     const containerName = `sandy-${request.taskId}`;
     let finished = false;
+    let workerConnected = false;
+    let terminalEventSeen = false;
+    let shutdownRequested = false;
+    let disconnectReported = false;
     logger.info("sandbox.launching", {
       chatId: request.chatId,
       taskId: request.taskId,
@@ -62,12 +80,57 @@ export class DockerSandboxRunner implements SandboxRunner {
       this.options.workerImage,
     );
 
-    const child = spawn("docker", dockerArgs, {
+    const child = this.spawnImpl("docker", dockerArgs, {
       stdio: ["pipe", "pipe", "pipe"],
     });
 
-    this.attachStdoutParser(child, onEvent);
-    void onEvent({ type: "worker_connected" });
+    const handshakeTimer = this.setTimeoutImpl(() => {
+      if (workerConnected || terminalEventSeen || shutdownRequested) {
+        return;
+      }
+      logger.error("sandbox.handshake_timeout", {
+        taskId: request.taskId,
+        timeoutMs: this.handshakeTimeoutMs,
+      });
+      void reportDisconnect("Sub-agent worker did not complete startup handshake in time.");
+      shutdownRequested = true;
+      child.kill("SIGTERM");
+      void this.sendDockerKill(containerName);
+    }, this.handshakeTimeoutMs);
+
+    const clearHandshakeTimer = () => {
+      this.clearTimeoutImpl(handshakeTimer);
+    };
+
+    const emitEvent = async (event: SubAgentEvent): Promise<void> => {
+      if (event.type === "worker_connected") {
+        workerConnected = true;
+        clearHandshakeTimer();
+      }
+      if (event.type === "task_done" || event.type === "final_result" || event.type === "task_error") {
+        terminalEventSeen = true;
+        clearHandshakeTimer();
+      }
+      await onEvent(event);
+    };
+
+    const reportDisconnect = async (message: string): Promise<void> => {
+      if (disconnectReported || terminalEventSeen || shutdownRequested) {
+        return;
+      }
+      disconnectReported = true;
+      clearHandshakeTimer();
+      logger.error("sandbox.worker_disconnected", {
+        taskId: request.taskId,
+        message,
+      });
+      await emitEvent({
+        type: "worker_disconnected",
+        message,
+      });
+    };
+
+    this.attachStdoutParser(child, emitEvent);
     logger.info("sandbox.started", {
       taskId: request.taskId,
       containerName,
@@ -80,7 +143,7 @@ export class DockerSandboxRunner implements SandboxRunner {
           taskId: request.taskId,
           message,
         });
-        void onEvent({
+        void emitEvent({
           type: "progress",
           message,
         });
@@ -92,14 +155,22 @@ export class DockerSandboxRunner implements SandboxRunner {
         return;
       }
       finished = true;
+      clearHandshakeTimer();
       logger.error("sandbox.launch_failed", {
         taskId: request.taskId,
         message: error.message,
       });
-      void onEvent({
+      void emitEvent({
         type: "task_error",
         message: `Failed to launch Docker sub-agent: ${error.message}`,
       });
+    });
+
+    child.stdout.on("close", () => {
+      if (finished || shutdownRequested || terminalEventSeen) {
+        return;
+      }
+      void reportDisconnect("Sub-agent control channel disconnected before task completion.");
     });
 
     child.on("exit", (code, signal) => {
@@ -107,7 +178,8 @@ export class DockerSandboxRunner implements SandboxRunner {
         return;
       }
       finished = true;
-      if (code === 0 || signal === "SIGTERM") {
+      clearHandshakeTimer();
+      if (shutdownRequested) {
         logger.info("sandbox.exited", {
           taskId: request.taskId,
           code,
@@ -115,15 +187,15 @@ export class DockerSandboxRunner implements SandboxRunner {
         });
         return;
       }
-      logger.error("sandbox.exited_unexpectedly", {
-        taskId: request.taskId,
-        code,
-        signal,
-      });
-      void onEvent({
-        type: "task_error",
-        message: `Sub-agent container exited unexpectedly (code=${code}, signal=${signal}).`,
-      });
+      if (terminalEventSeen && code === 0) {
+        logger.info("sandbox.exited", {
+          taskId: request.taskId,
+          code,
+          signal,
+        });
+        return;
+      }
+      void reportDisconnect(`Sub-agent container exited before task completion (code=${code}, signal=${signal}).`);
     });
 
     return {
@@ -132,10 +204,14 @@ export class DockerSandboxRunner implements SandboxRunner {
           taskId: request.taskId,
           textPreview: text.length <= 120 ? text : `${text.slice(0, 117)}...`,
         });
-        await this.sendToWorker(child, {
-          type: "user_message",
-          text,
-        });
+        try {
+          await this.sendToWorker(child, {
+            type: "user_message",
+            text,
+          });
+        } catch (error) {
+          await reportDisconnect(this.describeWriteFailure(error));
+        }
       },
       resolvePrivilege: async (requestId: string, decision: "approve" | "deny") => {
         logger.info("sandbox.privilege_decision", {
@@ -143,14 +219,20 @@ export class DockerSandboxRunner implements SandboxRunner {
           requestId,
           decision,
         });
-        await this.sendToWorker(child, {
-          type: "privilege_decision",
-          requestId,
-          decision,
-        });
+        try {
+          await this.sendToWorker(child, {
+            type: "privilege_decision",
+            requestId,
+            decision,
+          });
+        } catch (error) {
+          await reportDisconnect(this.describeWriteFailure(error));
+        }
       },
       cancel: async (reason: string) => {
         finished = true;
+        shutdownRequested = true;
+        clearHandshakeTimer();
         logger.warn("sandbox.cancelling", {
           taskId: request.taskId,
           reason,
@@ -230,11 +312,18 @@ export class DockerSandboxRunner implements SandboxRunner {
       logger.debug("sandbox.force_remove", {
         containerName,
       });
-      const child = spawn("docker", ["rm", "-f", containerName], {
+      const child = this.spawnImpl("docker", ["rm", "-f", containerName], {
         stdio: "ignore",
       });
       child.on("exit", () => resolve());
       child.on("error", () => resolve());
     });
+  }
+
+  private describeWriteFailure(error: unknown): string {
+    if (error instanceof Error) {
+      return `Sub-agent control channel write failed: ${error.message}`;
+    }
+    return "Sub-agent control channel write failed.";
   }
 }

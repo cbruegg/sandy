@@ -11,11 +11,12 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - A narrow main-agent controller that decides whether to reply directly or launch a sub-agent.
   - Single active sub-agent per chat.
   - Per-sub-agent Docker container plus per-sub-agent shared volume.
-  - Structured stdio control channel between host and sub-agent worker.
+  - Structured stdio control channel between host and sub-agent worker, including an explicit worker startup handshake.
   - Codex sub-agents run with Docker as the outer sandbox boundary; nested Codex bubblewrap sandboxing is disabled in-container.
   - Deterministic auth selection that prefers local Codex ChatGPT auth over `OPENAI_API_KEY` when both are available.
   - Quarantining of sub-agent output until the user either reports it as dangerous or continues the conversation.
   - Deterministic cancellation and privilege-request routing.
+  - Deterministic detection of worker disconnects, handshake timeouts, and control-channel write failures.
   - Structured host-side logging for significant lifecycle and failure events.
 - Not fully implemented yet:
   - Real STT, file upload handling, and image handling.
@@ -133,6 +134,14 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - canonical host event type for user text and deterministic control actions
 - `SubAgentEvent`
   - validated union for progress, visible output, privilege requests, completion, and failure
+  - `worker_connected`: worker startup handshake confirming the control channel is ready
+  - `progress`: incremental task status text
+  - `assistant_output`: user-visible sub-agent output that remains quarantined from the main agent
+  - `final_result`: explicit final result payload for a completed task
+  - `privilege_request`: deterministic capability request routed directly to the user
+  - `task_done`: clean completion marker without an explicit final result payload
+  - `task_error`: terminal failure reported by the worker
+  - `worker_disconnected`: transport failure before any terminal task event was received
 - `PrivilegeRequest`
   - validated union for `copy_into_share`, `copy_out_of_share`, `mount_ro`, `mount_rw`, `enable_mcp`, `enable_onecli`
 - `SessionState`

@@ -137,12 +137,13 @@ async function main(): Promise<void> {
     });
   };
 
-  enqueueTurn(taskBrief);
-
   const input = createInterface({
     input: process.stdin,
     crlfDelay: Infinity,
   });
+
+  send({ type: "worker_connected" });
+  enqueueTurn(taskBrief);
 
   input.on("line", (line) => {
     const trimmed = line.trim();
