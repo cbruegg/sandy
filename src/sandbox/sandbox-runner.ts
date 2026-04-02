@@ -1,11 +1,10 @@
-import type { TranscriptEntry, SubAgentEvent } from "../types.js";
+import type { SubAgentEvent } from "../types.js";
 
 export type LaunchTaskRequest = {
   chatId: string;
   taskId: string;
   taskName: string;
   taskBrief: string;
-  transcript: TranscriptEntry[];
 };
 
 export interface SandboxHandle {

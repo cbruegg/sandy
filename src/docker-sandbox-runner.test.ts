@@ -106,7 +106,6 @@ async function launchRunnerWithChild(taskChild: FakeChildProcess, onEvent: (even
       taskId: "task-1",
       taskName: "test-task",
       taskBrief: "Inspect the environment.",
-      transcript: [],
     },
     onEvent,
   );

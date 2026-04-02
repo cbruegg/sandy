@@ -2,46 +2,62 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { ThreadOptions } from "@openai/codex-sdk";
 import {
+  buildMainAgentPrompt,
   buildMainAgentThreadOptions,
   CodexMainAgentController,
 } from "./agent/main-agent-controller.js";
 import type { DecideContext } from "./types.js";
 
-class FakeThread {
-  constructor(private readonly finalResponse: string) {}
+class RecordingThread {
+  public readonly inputs: Array<{ input: string; options?: { outputSchema?: object } }> = [];
 
-  async run(): Promise<{ finalResponse: string }> {
-    return { finalResponse: this.finalResponse };
+  constructor(private readonly finalResponses: string[]) {}
+
+  async run(input: string, options?: { outputSchema?: object }): Promise<{ finalResponse: string }> {
+    this.inputs.push({ input, options });
+    const finalResponse = this.finalResponses.shift();
+    if (!finalResponse) {
+      throw new Error("No final response configured.");
+    }
+    return { finalResponse };
   }
 }
 
 class RecordingCodexClient {
   public readonly startedThreads: ThreadOptions[] = [];
+  public readonly threads: RecordingThread[] = [];
 
-  startThread(options?: ThreadOptions): FakeThread {
+  constructor(private readonly finalResponsesPerThread: string[][]) {}
+
+  startThread(options?: ThreadOptions): RecordingThread {
     this.startedThreads.push(options ?? {});
-    return new FakeThread(JSON.stringify({
-      action: "reply",
-      replyText: "hello",
-      taskBrief: null,
-      taskName: null,
-    }));
+    const finalResponses = this.finalResponsesPerThread.shift() ?? [];
+    const thread = new RecordingThread(finalResponses);
+    this.threads.push(thread);
+    return thread;
   }
 }
 
-function makeContext(): DecideContext {
+function makeContext(texts: string[], chatId = "chat-1"): DecideContext {
   return {
-    chatId: "chat-1",
-    transcript: [
-      {
-        role: "user",
-        kind: "user_text",
-        timestamp: "2026-04-02T10:00:00.000Z",
-        text: "hello",
-      },
-    ],
+    chatId,
+    newVisibleEntries: texts.map((text, index) => ({
+      role: index % 2 === 0 ? "user" : "assistant",
+      kind: index % 2 === 0 ? "user_text" : "main_agent_reply",
+      timestamp: `2026-04-02T10:00:0${index}.000Z`,
+      text,
+    })),
     activeTask: null,
   };
+}
+
+function replyDecision(replyText: string): string {
+  return JSON.stringify({
+    action: "reply",
+    replyText,
+    taskBrief: null,
+    taskName: null,
+  });
 }
 
 test("buildMainAgentThreadOptions locks the main agent down", () => {
@@ -53,11 +69,28 @@ test("buildMainAgentThreadOptions locks the main agent down", () => {
   assert.equal(options.skipGitRepoCheck, true);
 });
 
+test("buildMainAgentPrompt includes only the new visible entries for incremental turns", () => {
+  const initialPrompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
+    activeTask: null,
+    isInitialTurn: true,
+  });
+  const deltaPrompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["follow-up"]).newVisibleEntries,
+    activeTask: null,
+    isInitialTurn: false,
+  });
+
+  assert.match(initialPrompt, /Visible chat entries for this first decision:/);
+  assert.match(deltaPrompt, /New visible chat entries since your last decision:/);
+  assert.doesNotMatch(deltaPrompt, /Visible chat entries for this first decision:/);
+});
+
 test("CodexMainAgentController starts threads in a unique temp directory with no approvals", async () => {
-  const codex = new RecordingCodexClient();
+  const codex = new RecordingCodexClient([[replyDecision("hello")]]);
   const controller = new CodexMainAgentController(codex);
 
-  const decision = await controller.decide(makeContext());
+  const decision = await controller.decide(makeContext(["hello"]));
 
   assert.equal(decision.action, "reply");
   assert.equal(codex.startedThreads.length, 1);
@@ -69,3 +102,19 @@ test("CodexMainAgentController starts threads in a unique temp directory with no
   assert.match(options.workingDirectory ?? "", /^.+sandy-main-agent-/);
 });
 
+test("CodexMainAgentController sends only the entries provided for each decision", async () => {
+  const codex = new RecordingCodexClient([[replyDecision("hello"), replyDecision("world")]]);
+  const controller = new CodexMainAgentController(codex);
+
+  await controller.decide(makeContext(["hello"]));
+  await controller.decide(makeContext(["world"]));
+
+  assert.equal(codex.threads.length, 1);
+  assert.equal(codex.threads[0].inputs.length, 2);
+
+  const [firstInput, secondInput] = codex.threads[0].inputs.map((entry) => entry.input);
+  assert.match(firstInput, /"text": "hello"/);
+  assert.doesNotMatch(firstInput, /"text": "world"/);
+  assert.match(secondInput, /"text": "world"/);
+  assert.doesNotMatch(secondInput, /"text": "hello"/);
+});

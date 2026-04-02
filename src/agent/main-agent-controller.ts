@@ -52,13 +52,19 @@ export class CodexMainAgentController implements MainAgentController {
   }
 
   async decide(context: DecideContext): Promise<MainAgentDecision> {
-    const thread = this.getThread(context.chatId);
+    const isInitialTurn = !this.threads.has(context.chatId);
+    const thread = this.getOrCreateThread(context.chatId);
     logger.info("main_agent.decision_requested", {
       chatId: context.chatId,
-      transcriptLength: context.transcript.length,
+      newVisibleEntryCount: context.newVisibleEntries.length,
       hasActiveTask: context.activeTask !== null,
     });
-    const turn = await thread.run(buildMainAgentPrompt(context), {
+    const prompt = buildMainAgentPrompt({
+      activeTask: context.activeTask,
+      newVisibleEntries: context.newVisibleEntries,
+      isInitialTurn,
+    });
+    const turn = await thread.run(prompt, {
       outputSchema: decisionSchema,
     });
 
@@ -71,14 +77,19 @@ export class CodexMainAgentController implements MainAgentController {
     return decision;
   }
 
-  private getThread(chatId: string): MainAgentThread {
+  private getOrCreateThread(chatId: string): MainAgentThread {
     const existing = this.threads.get(chatId);
     if (existing) {
       return existing;
     }
+    const created = this.createThread(chatId);
+    this.threads.set(chatId, created);
+    return created;
+  }
+
+  private createThread(chatId: string): MainAgentThread {
     const workingDirectory = this.getOrCreateThreadDirectory(chatId);
     const thread = this.codex.startThread(buildMainAgentThreadOptions(workingDirectory));
-    this.threads.set(chatId, thread);
     logger.debug("main_agent.thread_started", {
       chatId,
       workingDirectory,
@@ -111,19 +122,34 @@ export function buildMainAgentThreadOptions(workingDirectory: string): ThreadOpt
   };
 }
 
-export function buildMainAgentPrompt(context: DecideContext): string {
+export function buildMainAgentPrompt(input: {
+  newVisibleEntries: DecideContext["newVisibleEntries"];
+  activeTask: DecideContext["activeTask"];
+  isInitialTurn: boolean;
+}): string {
+  const intro = input.isInitialTurn
+    ? [
+        "You are Sandy's main orchestration controller.",
+        "Decide whether Sandy should launch a new sub-agent task or reply directly.",
+        "This thread persists across decisions for one chat, so retain prior visible context from earlier turns in this thread.",
+        "If some earlier sub-agent output or privilege request details are not present in this thread, treat them as unavailable and do not invent them.",
+        "Return JSON that matches the provided schema.",
+      ]
+    : [
+        "Continue acting as Sandy's main orchestration controller for this chat.",
+        "Use the prior visible context already present in this thread plus only the new visible entries below.",
+        "If some earlier sub-agent output or privilege request details are not present in this thread, treat them as unavailable and do not invent them.",
+        "Return JSON that matches the provided schema.",
+      ];
+
   return [
-    "You are Sandy's main orchestration controller.",
-    "Decide whether Sandy should launch a new sub-agent task or reply directly.",
-    "You only receive the normalized chat transcript plus host-side task metadata.",
-    "If some earlier sub-agent output or privilege request details are not present in this prompt, treat them as unavailable and do not invent them.",
-    "Return JSON that matches the provided schema.",
+    ...intro,
     "",
-    "Normalized chat transcript:",
-    JSON.stringify(context.transcript, null, 2),
+    input.isInitialTurn ? "Visible chat entries for this first decision:" : "New visible chat entries since your last decision:",
+    JSON.stringify(input.newVisibleEntries, null, 2),
     "",
-    "Active task metadata:",
-    JSON.stringify(context.activeTask, null, 2),
+    "Current active task metadata:",
+    JSON.stringify(input.activeTask, null, 2),
     "",
     "Decision rules:",
     "- Choose between replying directly and launching a task based on the user's likely intent and the current conversation state.",

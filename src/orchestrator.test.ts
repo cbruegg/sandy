@@ -30,19 +30,24 @@ class RecordingChannel implements ChannelAdapter {
 }
 
 class StubMainAgent implements MainAgentController {
+  public readonly contexts: DecideContext[] = [];
+
   constructor(private readonly decision: MainAgentDecision) {}
 
-  async decide(_context: DecideContext): Promise<MainAgentDecision> {
+  async decide(context: DecideContext): Promise<MainAgentDecision> {
+    this.contexts.push(context);
     return this.decision;
   }
 }
 
 class SequenceMainAgent implements MainAgentController {
   private index = 0;
+  public readonly contexts: DecideContext[] = [];
 
   constructor(private readonly decisions: MainAgentDecision[]) {}
 
-  async decide(_context: DecideContext): Promise<MainAgentDecision> {
+  async decide(context: DecideContext): Promise<MainAgentDecision> {
+    this.contexts.push(context);
     const decision = this.decisions[this.index] ?? this.decisions.at(-1);
     if (!decision) {
       throw new Error("No main-agent decision configured.");
@@ -50,6 +55,10 @@ class SequenceMainAgent implements MainAgentController {
     this.index += 1;
     return decision;
   }
+}
+
+function contextTexts(context: DecideContext): string[] {
+  return context.newVisibleEntries.map((entry) => entry.text ?? "");
 }
 
 class FakeSandboxHandle implements SandboxHandle {
@@ -93,13 +102,14 @@ test("orchestrator launches a task and discards quarantined output on danger rep
   const channel = new RecordingChannel();
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
+  const mainAgent = new StubMainAgent({
+    action: "launch_task",
+    taskBrief: "Inspect the repository.",
+    taskName: "repo-inspect",
+  });
   const orchestrator = new SandyOrchestrator({
     channel,
-    mainAgent: new StubMainAgent({
-      action: "launch_task",
-      taskBrief: "Inspect the repository.",
-      taskName: "repo-inspect",
-    }),
+    mainAgent,
     sandboxRunner: runner,
     sessionStore: store,
   });
@@ -130,23 +140,22 @@ test("orchestrator launches a task and discards quarantined output on danger rep
 
   const session = store.getOrCreate("chat-1");
   assert.equal(session.activeTask, null);
-  assert.equal(
-    session.transcript.some((entry) => entry.text === "Potentially dangerous hidden output"),
-    false,
-  );
+  assert.deepEqual(session.pendingQuarantinedOutputs, []);
+  assert.deepEqual(contextTexts(mainAgent.contexts[0]), ["Inspect the repository"]);
 });
 
-test("orchestrator releases quarantined output before forwarding the next user message", async () => {
+test("orchestrator accepts active-task quarantined output without storing host-side history", async () => {
   const channel = new RecordingChannel();
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
+  const mainAgent = new StubMainAgent({
+    action: "launch_task",
+    taskBrief: "Investigate the issue.",
+    taskName: "issue-investigation",
+  });
   const orchestrator = new SandyOrchestrator({
     channel,
-    mainAgent: new StubMainAgent({
-      action: "launch_task",
-      taskBrief: "Investigate the issue.",
-      taskName: "issue-investigation",
-    }),
+    mainAgent,
     sandboxRunner: runner,
     sessionStore: store,
   });
@@ -175,12 +184,10 @@ test("orchestrator releases quarantined output before forwarding the next user m
   });
 
   const session = store.getOrCreate("chat-2");
-  const releasedIndex = session.transcript.findIndex((entry) => entry.kind === "released_sub_agent_output");
-  const userIndex = session.transcript.findIndex((entry) => entry.text === "Use the main branch.");
-  assert.notEqual(releasedIndex, -1);
-  assert.notEqual(userIndex, -1);
-  assert.ok(releasedIndex < userIndex);
+  assert.deepEqual(session.pendingQuarantinedOutputs, []);
+  assert.equal(session.activeTask?.quarantinedOutputs.length ?? 0, 0);
   assert.deepEqual(runner.handle.userMessages, ["Use the main branch."]);
+  assert.equal(mainAgent.contexts.length, 1);
 });
 
 test("orchestrator keeps privilege decisions deterministic and out of the main agent path", async () => {
@@ -267,29 +274,26 @@ test("orchestrator keeps completed-task output quarantined until the user sends 
   const session = store.getOrCreate("chat-4");
   assert.equal(session.activeTask, null);
   assert.deepEqual(session.pendingQuarantinedOutputs, ["The environment has 8 CPUs."]);
-  assert.equal(
-    session.transcript.some((entry) => entry.kind === "released_sub_agent_output" && entry.text === "The environment has 8 CPUs."),
-    false,
-  );
 });
 
 test("orchestrator releases completed-task output only when the user continues normally", async () => {
   const channel = new RecordingChannel();
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
+  const mainAgent = new SequenceMainAgent([
+    {
+      action: "launch_task",
+      taskBrief: "Inspect the environment.",
+      taskName: "env-inspection",
+    },
+    {
+      action: "reply",
+      replyText: "Continuing with the next step.",
+    },
+  ]);
   const orchestrator = new SandyOrchestrator({
     channel,
-    mainAgent: new SequenceMainAgent([
-      {
-        action: "launch_task",
-        taskBrief: "Inspect the environment.",
-        taskName: "env-inspection",
-      },
-      {
-        action: "reply",
-        replyText: "Continuing with the next step.",
-      },
-    ]),
+    mainAgent,
     sandboxRunner: runner,
     sessionStore: store,
   });
@@ -322,12 +326,8 @@ test("orchestrator releases completed-task output only when the user continues n
   });
 
   const session = store.getOrCreate("chat-5");
-  const releasedIndex = session.transcript.findIndex((entry) => entry.kind === "released_sub_agent_output");
-  const userIndex = session.transcript.findIndex((entry) => entry.text === "thanks");
-  assert.notEqual(releasedIndex, -1);
-  assert.notEqual(userIndex, -1);
-  assert.ok(releasedIndex < userIndex);
   assert.deepEqual(session.pendingQuarantinedOutputs, []);
+  assert.deepEqual(contextTexts(mainAgent.contexts[1]), ["The environment has 8 CPUs.", "thanks"]);
 });
 
 test("orchestrator discards completed-task output when the user sends a danger report next", async () => {
@@ -373,10 +373,6 @@ test("orchestrator discards completed-task output when the user sends a danger r
   const session = store.getOrCreate("chat-5");
   assert.equal(session.activeTask, null);
   assert.deepEqual(session.pendingQuarantinedOutputs, []);
-  assert.equal(
-    session.transcript.some((entry) => entry.text === "Potentially unsafe filesystem output"),
-    false,
-  );
   assert.equal(channel.sentTexts.at(-1)?.text, messages.discardedPendingOutput());
 });
 
@@ -384,19 +380,20 @@ test("orchestrator keeps final_result output quarantined until the user continue
   const channel = new RecordingChannel();
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
+  const mainAgent = new SequenceMainAgent([
+    {
+      action: "launch_task",
+      taskBrief: "Inspect the environment.",
+      taskName: "env-inspection",
+    },
+    {
+      action: "reply",
+      replyText: "Continuing with the next step.",
+    },
+  ]);
   const orchestrator = new SandyOrchestrator({
     channel,
-    mainAgent: new SequenceMainAgent([
-      {
-        action: "launch_task",
-        taskBrief: "Inspect the environment.",
-        taskName: "env-inspection",
-      },
-      {
-        action: "reply",
-        replyText: "Continuing with the next step.",
-      },
-    ]),
+    mainAgent,
     sandboxRunner: runner,
     sessionStore: store,
   });
@@ -418,10 +415,6 @@ test("orchestrator keeps final_result output quarantined until the user continue
   let session = store.getOrCreate("chat-6");
   assert.equal(session.activeTask, null);
   assert.deepEqual(session.pendingQuarantinedOutputs, ["The environment has 8 CPUs."]);
-  assert.equal(
-    session.transcript.some((entry) => entry.text === "The environment has 8 CPUs."),
-    false,
-  );
   assert.equal(channel.sentTexts.at(-1)?.text, messages.taskComplete("The environment has 8 CPUs."));
 
   await orchestrator.handleChatEvent({
@@ -434,12 +427,8 @@ test("orchestrator keeps final_result output quarantined until the user continue
   });
 
   session = store.getOrCreate("chat-6");
-  const releasedIndex = session.transcript.findIndex((entry) => entry.kind === "released_sub_agent_output");
-  const userIndex = session.transcript.findIndex((entry) => entry.text === "thanks");
-  assert.notEqual(releasedIndex, -1);
-  assert.notEqual(userIndex, -1);
-  assert.ok(releasedIndex < userIndex);
   assert.deepEqual(session.pendingQuarantinedOutputs, []);
+  assert.deepEqual(contextTexts(mainAgent.contexts[1]), ["The environment has 8 CPUs.", "thanks"]);
 });
 
 test("orchestrator marks worker disconnects as task failure and clears the task", async () => {

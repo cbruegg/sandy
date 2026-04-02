@@ -10,6 +10,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - Recovery from transient Telegram polling or handler errors without crashing the host process.
   - A narrow main-agent controller that decides whether to reply directly or launch a sub-agent.
   - Main-agent Codex threads are locked down with `approvalPolicy: "never"`, `sandboxMode: "read-only"`, and a fresh temp working directory per chat thread.
+  - Main-agent Codex threads persist per chat and receive only the newly visible entries for each decision, preserving context caching without maintaining a full host-side transcript.
   - Single active sub-agent per chat.
   - Per-sub-agent Docker container plus per-sub-agent shared volume.
   - Structured stdio control channel between host and sub-agent worker, including an explicit worker startup handshake.
@@ -41,10 +42,10 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - `launch_task`
   - `reply`
 - Build the main-agent prompt from only:
-  - the normalized chat transcript,
+  - the normalized visible chat entries relevant to the current decision turn,
   - host-side task metadata for the active sub-agent if one exists,
   - the allowed action schema.
-- Define “normalized chat transcript” as a deterministic representation of user/channel events, not an LLM summary. It should:
+- Define “normalized visible chat entries” as a deterministic representation of user/channel events, not an LLM summary. It should:
   - convert Telegram-specific inputs into canonical event types such as `user_text`, `cancel_request`, `approval_response`, `danger_report`,
   - keep only semantically relevant text and minimal metadata,
   - exclude raw transport payloads and unsupported binary content.
@@ -73,7 +74,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - discard quarantined output,
   - notify the user.
 - Otherwise:
-  - release the quarantined output into the orchestration transcript,
+  - allow the quarantined output to be included in a later main-agent decision input,
   - continue handling the conversation normally.
 - Treat unexpected worker exit, container failure, or loss of the stdio control channel as deterministic task failure.
 
@@ -147,7 +148,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
 - `PrivilegeRequest`
   - validated union for `copy_into_share`, `copy_out_of_share`, `mount_ro`, `mount_rw`, `enable_mcp`, `enable_onecli`
 - `SessionState`
-  - in-memory per-chat state including active task metadata, pending privilege request, quarantined-output flag, and main/sub-agent thread IDs
+  - in-memory per-chat state including active task metadata and quarantined output pending later release
 
 ## Test Plan
 - Unit-test normalization of Telegram inputs into canonical chat events.
@@ -156,7 +157,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
 - Unit-test quarantine behavior:
   - visible sub-agent output is not exposed to the main agent immediately,
   - danger reports discard quarantined output,
-  - non-report follow-up releases quarantined output into the transcript.
+  - non-report follow-up allows quarantined output to be supplied on a later main-agent decision.
 - Unit-test privilege handling:
   - allowlisted requests can be presented and applied deterministically,
   - non-allowlisted requests are rejected safely,

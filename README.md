@@ -112,13 +112,17 @@ do with it:
       this can either be through a well-defined emoji reaction or a predefined phrase.
       The main agent then immediately terminates the sub-agent, discards its responses and notifies the user of the
       termination.
-    - If the user's message after a response is not a report, the main agent adds the sub-agent's response to its own
-      context and determines the next action to take as usual.
+    - If the user's message after a response is not a report, Sandy may expose that response to the main agent on a
+      later decision turn once it is no longer quarantined.
   - Sub-agents determine their own completion and notify Sandy when they are done, at which point Sandy sends a final
     message to the user with the results.
 - Route the message to the appropriate sub-agent if it is related to an ongoing command execution.
 - Cancel a sub-agent if the user requests it, and notify the user of the cancellation.
 - Respond to the user with a message, without launching a sub-agent.
+
+The main-agent thread for a chat is persistent so Codex can benefit from context caching. Sandy does not keep a full
+host-side conversation transcript for the main agent. Instead, it keeps only the quarantine state and feeds the main
+agent the newly visible entries relevant to each decision turn.
 
 ## Safety
 

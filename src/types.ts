@@ -113,7 +113,7 @@ export type TaskMetadata = {
 
 export type DecideContext = {
   chatId: string;
-  transcript: TranscriptEntry[];
+  newVisibleEntries: TranscriptEntry[];
   activeTask: TaskMetadata | null;
 };
 
@@ -203,8 +203,6 @@ export type ActiveTaskState = {
 
 export type SessionState = {
   chatId: string;
-  transcript: TranscriptEntry[];
-  mainThreadId: string | null;
   activeTask: ActiveTaskState | null;
   pendingQuarantinedOutputs: string[];
 };

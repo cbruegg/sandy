@@ -15,8 +15,6 @@ export class InMemorySessionStore implements SessionStore {
     }
     const session: SessionState = {
       chatId,
-      transcript: [],
-      mainThreadId: null,
       activeTask: null,
       pendingQuarantinedOutputs: [],
     };

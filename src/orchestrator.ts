@@ -150,17 +150,19 @@ export class SandyOrchestrator {
         await this.deps.channel.sendText(event.chatId, messages.discardedPendingOutput());
         return;
       case "user_text":
-        this.releasePendingOutputs(session);
-        this.appendTranscript(session, {
-          role: "user",
-          kind: "user_text",
-          timestamp: event.timestamp,
-          text: event.text,
-        });
+        const newVisibleEntries = [
+          ...this.releasePendingOutputs(session),
+          {
+            role: "user" as const,
+            kind: "user_text",
+            timestamp: event.timestamp,
+            text: event.text,
+          },
+        ];
 
         const decision = await this.deps.mainAgent.decide({
           chatId: event.chatId,
-          transcript: session.transcript,
+          newVisibleEntries,
           activeTask: null,
         });
 
@@ -208,13 +210,7 @@ export class SandyOrchestrator {
           await this.deps.channel.sendText(event.chatId, messages.privilegeRequestStillPending());
           return;
         }
-        this.releaseQuarantinedOutputs(session);
-        this.appendTranscript(session, {
-          role: "user",
-          kind: "user_text",
-          timestamp: event.timestamp,
-          text: event.text,
-        });
+        this.discardAcceptedQuarantinedOutputs(session);
         await this.getHandle(activeTask.taskId).sendUserMessage(event.text);
         return;
     }
@@ -229,12 +225,6 @@ export class SandyOrchestrator {
       case "reply":
         logger.info("task.reply_direct", {
           chatId,
-        });
-        this.appendTranscript(session, {
-          role: "assistant",
-          kind: "main_agent_reply",
-          timestamp: new Date().toISOString(),
-          text: decision.replyText,
         });
         await this.deps.channel.sendText(chatId, decision.replyText);
         return;
@@ -259,23 +249,12 @@ export class SandyOrchestrator {
           workerConnected: false,
         };
 
-        this.appendTranscript(session, {
-          role: "system",
-          kind: "task_started",
-          timestamp: now,
-          metadata: {
-            taskId,
-            taskName: decision.taskName,
-          },
-        });
-
         const handle = await this.deps.sandboxRunner.launchTask(
           {
             chatId,
             taskId,
             taskName: decision.taskName,
             taskBrief: decision.taskBrief,
-            transcript: session.transcript,
           },
           async (event) => this.handleSubAgentEvent(chatId, taskId, event),
         );
@@ -295,7 +274,7 @@ export class SandyOrchestrator {
     }
   }
 
-  private releaseQuarantinedOutputs(session: SessionState): void {
+  private discardAcceptedQuarantinedOutputs(session: SessionState): void {
     if (!session.activeTask || session.activeTask.quarantinedOutputs.length === 0) {
       return;
     }
@@ -305,21 +284,12 @@ export class SandyOrchestrator {
       taskId: session.activeTask.taskId,
       count: session.activeTask.quarantinedOutputs.length,
     });
-    const timestamp = new Date().toISOString();
-    for (const text of session.activeTask.quarantinedOutputs) {
-      this.appendTranscript(session, {
-        role: "assistant",
-        kind: "released_sub_agent_output",
-        timestamp,
-        text,
-      });
-    }
     session.activeTask.quarantinedOutputs = [];
   }
 
-  private releasePendingOutputs(session: SessionState): void {
+  private releasePendingOutputs(session: SessionState): TranscriptEntry[] {
     if (session.pendingQuarantinedOutputs.length === 0) {
-      return;
+      return [];
     }
 
     logger.info("task.pending_quarantine_released", {
@@ -327,15 +297,14 @@ export class SandyOrchestrator {
       count: session.pendingQuarantinedOutputs.length,
     });
     const timestamp = new Date().toISOString();
-    for (const text of session.pendingQuarantinedOutputs) {
-      this.appendTranscript(session, {
-        role: "assistant",
-        kind: "released_sub_agent_output",
-        timestamp,
-        text,
-      });
-    }
+    const releasedEntries = session.pendingQuarantinedOutputs.map((text) => ({
+      role: "assistant" as const,
+      kind: "released_sub_agent_output",
+      timestamp,
+      text,
+    }));
     session.pendingQuarantinedOutputs = [];
+    return releasedEntries;
   }
 
   private async resolvePrivilegeRequest(
@@ -387,23 +356,14 @@ export class SandyOrchestrator {
       reason,
     });
     await this.getHandle(activeTask.taskId).cancel(reason);
-    this.appendTranscript(session, {
-      role: "system",
-      kind: "task_cancelled",
-      timestamp: new Date().toISOString(),
-      metadata: {
-        taskId: activeTask.taskId,
-        reason,
-      },
-    });
-    this.clearTask(session);
+    this.clearTask(session, { discardQuarantine: true });
   }
 
-  private clearTask(session: SessionState): void {
+  private clearTask(session: SessionState, options?: { discardQuarantine?: boolean }): void {
     if (!session.activeTask) {
       return;
     }
-    if (session.activeTask.quarantinedOutputs.length > 0) {
+    if (!options?.discardQuarantine && session.activeTask.quarantinedOutputs.length > 0) {
       session.pendingQuarantinedOutputs.push(...session.activeTask.quarantinedOutputs);
     }
     logger.info("task.cleared", {
@@ -421,10 +381,6 @@ export class SandyOrchestrator {
       throw new Error(`No sandbox handle is registered for task ${taskId}.`);
     }
     return record.handle;
-  }
-
-  private appendTranscript(session: SessionState, entry: TranscriptEntry): void {
-    session.transcript.push(entry);
   }
 }
 
