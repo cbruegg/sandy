@@ -18,6 +18,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - Deterministic cancellation and privilege-request routing.
   - Deterministic detection of worker disconnects, handshake timeouts, and control-channel write failures.
   - Structured host-side logging for significant lifecycle and failure events.
+  - Centralized user-facing message definitions to prepare for future i18n.
 - Not fully implemented yet:
   - Real STT, file upload handling, and image handling.
   - Host-side enforcement for approved resource requests such as file copy in/out, mount setup, MCP enablement, and OneCLI enablement.

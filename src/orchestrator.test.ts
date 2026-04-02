@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { ChannelAdapter } from "./channel/channel-adapter.js";
 import type { MainAgentController } from "./agent/main-agent-controller.js";
+import { messages } from "./messages.js";
 import type { SandboxHandle, SandboxRunner, LaunchTaskRequest } from "./sandbox/sandbox-runner.js";
 import { SandyOrchestrator } from "./orchestrator.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
@@ -125,7 +126,7 @@ test("orchestrator launches a task and discards quarantined output on danger rep
   });
 
   assert.equal(runner.handle.cancellations.length, 1);
-  assert.match(channel.sentTexts.at(-1)?.text ?? "", /discarded the pending sub-agent output/);
+  assert.equal(channel.sentTexts.at(-1)?.text, messages.taskTerminatedAndDiscarded("repo-inspect"));
 
   const session = store.getOrCreate("chat-1");
   assert.equal(session.activeTask, null);
@@ -227,7 +228,7 @@ test("orchestrator keeps privilege decisions deterministic and out of the main a
 
   assert.equal(channel.privilegeRequests.length, 1);
   assert.deepEqual(runner.handle.privilegeDecisions, [{ requestId: "req-1", decision: "approve" }]);
-  assert.match(channel.sentTexts.at(-1)?.text ?? "", /Approved privilege request req-1/);
+  assert.equal(channel.sentTexts.at(-1)?.text, messages.privilegeApproved("req-1"));
 });
 
 test("orchestrator keeps completed-task output quarantined until the user sends another message", async () => {
@@ -376,7 +377,7 @@ test("orchestrator discards completed-task output when the user sends a danger r
     session.transcript.some((entry) => entry.text === "Potentially unsafe filesystem output"),
     false,
   );
-  assert.match(channel.sentTexts.at(-1)?.text ?? "", /Discarded the pending sub-agent output/);
+  assert.equal(channel.sentTexts.at(-1)?.text, messages.discardedPendingOutput());
 });
 
 test("orchestrator marks worker disconnects as task failure and clears the task", async () => {
@@ -410,5 +411,5 @@ test("orchestrator marks worker disconnects as task failure and clears the task"
 
   const session = store.getOrCreate("chat-7");
   assert.equal(session.activeTask, null);
-  assert.match(channel.sentTexts.at(-1)?.text ?? "", /control channel disconnected unexpectedly/);
+  assert.equal(channel.sentTexts.at(-1)?.text, "Sub-agent control channel disconnected unexpectedly.");
 });

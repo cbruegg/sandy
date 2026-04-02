@@ -2,6 +2,7 @@ import { Bot, type Context, type PollingOptions } from "grammy";
 import type { Update } from "grammy/types";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
+import { buttonLabels, messages } from "../messages.js";
 import type { ApprovalResponseEvent, DangerReportEvent, NormalizedChatEvent, PrivilegeRequest } from "../types.js";
 
 type TelegramApiLike = {
@@ -231,25 +232,24 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     await this.bot.api.sendMessage(chatId, text, {
       reply_markup: {
         inline_keyboard: [[
-          { text: "Report dangerous output", callback_data: "report" },
-          { text: "Cancel task", callback_data: "cancel" },
+          { text: buttonLabels.reportDangerousOutput, callback_data: "report" },
+          { text: buttonLabels.cancelTask, callback_data: "cancel" },
         ]],
       },
     });
   }
 
   async sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void> {
-    const description = describePrivilegeRequest(request);
     logger.info("telegram.send_privilege_request", {
       chatId,
       requestId: request.requestId,
       requestType: request.type,
     });
-    await this.bot.api.sendMessage(chatId, `Privilege request:\n${description}\n\nApprove or deny this request.`, {
+    await this.bot.api.sendMessage(chatId, messages.privilegeRequestPrompt(request), {
       reply_markup: {
         inline_keyboard: [[
-          { text: "Approve", callback_data: `approve:${request.requestId}` },
-          { text: "Deny", callback_data: `deny:${request.requestId}` },
+          { text: buttonLabels.approve, callback_data: `approve:${request.requestId}` },
+          { text: buttonLabels.deny, callback_data: `deny:${request.requestId}` },
         ]],
       },
     });
@@ -258,18 +258,4 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
 
 function previewText(text: string): string {
   return text.length <= 120 ? text : `${text.slice(0, 117)}...`;
-}
-
-function describePrivilegeRequest(request: PrivilegeRequest): string {
-  switch (request.type) {
-    case "copy_into_share":
-    case "copy_out_of_share":
-      return `${request.type}: ${request.sourcePath} -> ${request.targetPath}\nReason: ${request.reason}`;
-    case "mount_ro":
-    case "mount_rw":
-      return `${request.type}: ${request.hostPath} -> ${request.targetPath}\nReason: ${request.reason}`;
-    case "enable_mcp":
-    case "enable_onecli":
-      return `${request.type}: ${request.identifier}\nReason: ${request.reason}`;
-  }
 }

@@ -4,6 +4,7 @@ import type { MainAgentController } from "./agent/main-agent-controller.js";
 import type { SandboxHandle, SandboxRunner } from "./sandbox/sandbox-runner.js";
 import type { SessionStore } from "./session/in-memory-session-store.js";
 import { logger } from "./logger.js";
+import { messages } from "./messages.js";
 import type {
   MainAgentDecision,
   NormalizedChatEvent,
@@ -43,10 +44,7 @@ export class SandyOrchestrator {
         chatId: event.chatId,
         inputType: event.inputType,
       });
-      await this.deps.channel.sendText(
-        event.chatId,
-        `This v1 build only supports text messages. Received unsupported ${event.inputType} input.`,
-      );
+      await this.deps.channel.sendText(event.chatId, messages.unsupportedInput(event.inputType));
       return;
     }
 
@@ -114,14 +112,14 @@ export class SandyOrchestrator {
           timestamp: new Date().toISOString(),
           text: event.text,
         });
-        await this.deps.channel.sendText(chatId, `Task complete:\n${event.text}`);
+        await this.deps.channel.sendText(chatId, messages.taskComplete(event.text));
         session.activeTask.status = "completed";
         this.clearTask(session);
         break;
       case "task_done":
         if (session.activeTask.status !== "completed") {
           session.activeTask.status = "completed";
-          await this.deps.channel.sendText(chatId, `Task "${taskId}" completed.`);
+          await this.deps.channel.sendText(chatId, messages.taskCompleted(taskId));
           this.clearTask(session);
         }
         break;
@@ -132,7 +130,7 @@ export class SandyOrchestrator {
           taskId,
           message: event.message,
         });
-        await this.deps.channel.sendText(chatId, `Task failed: ${event.message}`);
+        await this.deps.channel.sendText(chatId, messages.taskFailed(event.message));
         this.clearTask(session);
         break;
     }
@@ -143,18 +141,18 @@ export class SandyOrchestrator {
   private async handleIdleEvent(session: SessionState, event: Exclude<NormalizedChatEvent, { kind: "unsupported_input" }>): Promise<void> {
     switch (event.kind) {
       case "cancel_request":
-        await this.deps.channel.sendText(event.chatId, "There is no active task to cancel.");
+        await this.deps.channel.sendText(event.chatId, messages.noActiveTaskToCancel());
         return;
       case "approval_response":
-        await this.deps.channel.sendText(event.chatId, "There is no pending privilege request.");
+        await this.deps.channel.sendText(event.chatId, messages.noPendingPrivilegeRequest());
         return;
       case "danger_report":
         if (session.pendingQuarantinedOutputs.length === 0) {
-          await this.deps.channel.sendText(event.chatId, "There is no active sub-agent output to report.");
+          await this.deps.channel.sendText(event.chatId, messages.noActiveOutputToReport());
           return;
         }
         session.pendingQuarantinedOutputs = [];
-        await this.deps.channel.sendText(event.chatId, "Discarded the pending sub-agent output.");
+        await this.deps.channel.sendText(event.chatId, messages.discardedPendingOutput());
         return;
       case "user_text":
         this.releasePendingOutputs(session);
@@ -189,36 +187,30 @@ export class SandyOrchestrator {
     switch (event.kind) {
       case "cancel_request":
         await this.cancelActiveTask(session, "Cancelled at the user's request.");
-        await this.deps.channel.sendText(event.chatId, `Cancelled task "${activeTask.taskName}".`);
+        await this.deps.channel.sendText(event.chatId, messages.taskCancelled(activeTask.taskName));
         return;
       case "danger_report":
         if (activeTask.quarantinedOutputs.length === 0) {
-          await this.deps.channel.sendText(event.chatId, "There is no pending sub-agent output to report.");
+          await this.deps.channel.sendText(event.chatId, messages.noPendingOutputToReport());
           return;
         }
         await this.cancelActiveTask(session, "Cancelled after the user reported dangerous output.");
-        await this.deps.channel.sendText(
-          event.chatId,
-          `Terminated task "${activeTask.taskName}" and discarded the pending sub-agent output.`,
-        );
+        await this.deps.channel.sendText(event.chatId, messages.taskTerminatedAndDiscarded(activeTask.taskName));
         return;
       case "approval_response":
         if (!activeTask.pendingPrivilegeRequest) {
-          await this.deps.channel.sendText(event.chatId, "There is no pending privilege request.");
+          await this.deps.channel.sendText(event.chatId, messages.noPendingPrivilegeRequest());
           return;
         }
         if (event.requestId && event.requestId !== activeTask.pendingPrivilegeRequest.requestId) {
-          await this.deps.channel.sendText(event.chatId, "That privilege request is no longer pending.");
+          await this.deps.channel.sendText(event.chatId, messages.stalePrivilegeRequest());
           return;
         }
         await this.resolvePrivilegeRequest(session, activeTask.pendingPrivilegeRequest, event.decision);
         return;
       case "user_text":
         if (activeTask.pendingPrivilegeRequest) {
-          await this.deps.channel.sendText(
-            event.chatId,
-            "A privilege request is pending. Reply with approve or deny before sending more task input.",
-          );
+          await this.deps.channel.sendText(event.chatId, messages.privilegeRequestStillPending());
           return;
         }
         this.releaseQuarantinedOutputs(session);
@@ -300,10 +292,7 @@ export class SandyOrchestrator {
       taskName: decision.taskName,
     });
 
-    await this.deps.channel.sendText(
-      chatId,
-      `Started task "${decision.taskName}". You will receive progress updates here.`,
-    );
+    await this.deps.channel.sendText(chatId, messages.taskStarted(decision.taskName));
   }
 
   private releaseQuarantinedOutputs(session: SessionState): void {
@@ -371,7 +360,7 @@ export class SandyOrchestrator {
         requestId: request.requestId,
         decision,
       });
-      await this.deps.channel.sendText(session.chatId, `Approved privilege request ${request.requestId}.`);
+      await this.deps.channel.sendText(session.chatId, messages.privilegeApproved(request.requestId));
     } else {
       logger.info("task.privilege_resolved", {
         chatId: session.chatId,
@@ -379,7 +368,7 @@ export class SandyOrchestrator {
         requestId: request.requestId,
         decision,
       });
-      await this.deps.channel.sendText(session.chatId, `Denied privilege request ${request.requestId}.`);
+      await this.deps.channel.sendText(session.chatId, messages.privilegeDenied(request.requestId));
     }
 
     activeTask.pendingPrivilegeRequest = null;
