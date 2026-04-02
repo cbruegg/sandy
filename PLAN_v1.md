@@ -183,4 +183,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
 - The main agent is a narrow controller and does not see hidden sub-agent output.
 - Voice, image, and file inputs are part of the interface design but not fully implemented in v1.
 - Each sub-agent gets its own shared volume; copy operations are scoped to that sub-agent’s share.
+- Dynamic host directory mounts are out of scope for v1.
+- MCP and OneCLI capability enablement are out of scope for v1.
+- Privilege handling in v1 is limited to host-mediated file copy operations for the per-sub-agent shared volume.
 - “STT” is the intended term for voice transcription in v1.
