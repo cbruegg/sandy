@@ -380,6 +380,68 @@ test("orchestrator discards completed-task output when the user sends a danger r
   assert.equal(channel.sentTexts.at(-1)?.text, messages.discardedPendingOutput());
 });
 
+test("orchestrator keeps final_result output quarantined until the user continues normally", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new SequenceMainAgent([
+      {
+        action: "launch_task",
+        taskBrief: "Inspect the environment.",
+        taskName: "env-inspection",
+      },
+      {
+        action: "reply",
+        replyText: "Continuing with the next step.",
+      },
+    ]),
+    sandboxRunner: runner,
+    sessionStore: store,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-6",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Inspect the environment",
+    rawText: "Inspect the environment",
+  });
+
+  await runner.emit({
+    type: "final_result",
+    text: "The environment has 8 CPUs.",
+  });
+
+  let session = store.getOrCreate("chat-6");
+  assert.equal(session.activeTask, null);
+  assert.deepEqual(session.pendingQuarantinedOutputs, ["The environment has 8 CPUs."]);
+  assert.equal(
+    session.transcript.some((entry) => entry.text === "The environment has 8 CPUs."),
+    false,
+  );
+  assert.equal(channel.sentTexts.at(-1)?.text, messages.taskComplete("The environment has 8 CPUs."));
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-6",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    text: "thanks",
+    rawText: "thanks",
+  });
+
+  session = store.getOrCreate("chat-6");
+  const releasedIndex = session.transcript.findIndex((entry) => entry.kind === "released_sub_agent_output");
+  const userIndex = session.transcript.findIndex((entry) => entry.text === "thanks");
+  assert.notEqual(releasedIndex, -1);
+  assert.notEqual(userIndex, -1);
+  assert.ok(releasedIndex < userIndex);
+  assert.deepEqual(session.pendingQuarantinedOutputs, []);
+});
+
 test("orchestrator marks worker disconnects as task failure and clears the task", async () => {
   const channel = new RecordingChannel();
   const runner = new FakeSandboxRunner();

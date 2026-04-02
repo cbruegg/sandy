@@ -106,12 +106,7 @@ export class SandyOrchestrator {
         await this.deps.channel.sendPrivilegeRequest(chatId, event.request);
         break;
       case "final_result":
-        this.appendTranscript(session, {
-          role: "assistant",
-          kind: "task_final_result",
-          timestamp: new Date().toISOString(),
-          text: event.text,
-        });
+        session.activeTask.quarantinedOutputs.push(event.text);
         await this.deps.channel.sendText(chatId, messages.taskComplete(event.text));
         session.activeTask.status = "completed";
         this.clearTask(session);
