@@ -1,4 +1,5 @@
 import { createInterface } from "node:readline";
+import { pathToFileURL } from "node:url";
 import {
   Codex,
   type CommandExecutionItem,
@@ -104,6 +105,16 @@ async function handleThreadEvent(event: ThreadEvent): Promise<void> {
   }
 }
 
+export function buildInitialTaskInput(taskBrief: string): string {
+  return [
+    "You are running inside a Sandy sub-agent container.",
+    "Your shared workspace is mounted at /workspace/share.",
+    "Use /workspace/share for files that should remain available to the host after your task finishes.",
+    "",
+    taskBrief,
+  ].join("\n");
+}
+
 async function main(): Promise<void> {
   const taskBrief = getRequiredEnv("SANDY_TASK_BRIEF");
   const apiKey = getOptionalEnv("OPENAI_API_KEY");
@@ -143,7 +154,7 @@ async function main(): Promise<void> {
   });
 
   send({ type: "worker_connected" });
-  enqueueTurn(taskBrief);
+  enqueueTurn(buildInitialTaskInput(taskBrief));
 
   input.on("line", (line) => {
     const trimmed = line.trim();
@@ -175,4 +186,6 @@ async function main(): Promise<void> {
   });
 }
 
-await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}
