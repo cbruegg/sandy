@@ -6,7 +6,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
 ## Current Implementation Status
 - The current codebase implements a text-first MVP skeleton for Telegram plus Docker-hosted Codex sub-agents.
 - Implemented today:
-  - Telegram message polling and normalization.
+  - `grammY`-based Telegram transport with deterministic normalization into Sandy chat events.
   - Recovery from transient Telegram polling or handler errors without crashing the host process.
   - A narrow main-agent controller that decides whether to reply directly or launch a sub-agent.
   - Single active sub-agent per chat.

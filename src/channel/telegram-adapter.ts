@@ -1,52 +1,47 @@
+import { Bot, type Context, type PollingOptions } from "grammy";
+import type { Update } from "grammy/types";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import type { ApprovalResponseEvent, DangerReportEvent, NormalizedChatEvent, PrivilegeRequest } from "../types.js";
 
-type TelegramUpdate = {
-  update_id: number;
-  message?: {
-    message_id: number;
-    date: number;
-    chat: { id: number | string };
-    text?: string;
-    voice?: unknown;
-    photo?: unknown[];
-    document?: unknown;
-  };
-  callback_query?: {
-    id: string;
-    data?: string;
-    message?: {
-      message_id: number;
-      date: number;
-      chat: { id: number | string };
-    };
-  };
+type TelegramApiLike = {
+  sendMessage(
+    chatId: string | number,
+    text: string,
+    other?: Record<string, unknown>,
+  ): Promise<unknown>;
 };
 
-type TelegramGetUpdatesResponse = {
-  ok: boolean;
-  result: TelegramUpdate[];
+type TelegramContextLike = Pick<Context, "update" | "callbackQuery" | "answerCallbackQuery">;
+
+type TelegramMiddleware = (ctx: TelegramContextLike) => Promise<void>;
+
+type TelegramBotLike = {
+  api: TelegramApiLike;
+  on(filter: string | string[], middleware: TelegramMiddleware): unknown;
+  catch(errorHandler: (error: unknown) => void): void;
+  start(options?: PollingOptions): Promise<void>;
+  stop(): Promise<void>;
 };
 
-type TelegramSendResponse = {
-  ok: boolean;
-};
+export type TelegramBotFactory = (token: string) => TelegramBotLike;
 
 export type TelegramAdapterOptions = {
   token: string;
-  apiBaseUrl?: string;
   pollTimeoutSeconds?: number;
-  pollErrorDelayMs?: number;
-  fetchImpl?: typeof fetch;
+  botFactory?: TelegramBotFactory;
 };
+
+function defaultBotFactory(token: string): TelegramBotLike {
+  return new Bot(token);
+}
 
 function nowFromUnix(seconds: number): string {
   return new Date(seconds * 1000).toISOString();
 }
 
-export function normalizeTelegramUpdate(update: TelegramUpdate): NormalizedChatEvent | null {
-  if (update.callback_query?.data && update.callback_query.message) {
+export function normalizeTelegramUpdate(update: Update): NormalizedChatEvent | null {
+  if (update.callback_query?.data && update.callback_query.message && "date" in update.callback_query.message) {
     const { data, message } = update.callback_query;
     const base = {
       chatId: String(message.chat.id),
@@ -100,7 +95,7 @@ export function normalizeTelegramUpdate(update: TelegramUpdate): NormalizedChatE
     timestamp: nowFromUnix(update.message.date),
   };
 
-  if (typeof update.message.text === "string") {
+  if ("text" in update.message && typeof update.message.text === "string") {
     const rawText = update.message.text;
     const normalized = rawText.trim().toLowerCase();
 
@@ -125,15 +120,15 @@ export function normalizeTelegramUpdate(update: TelegramUpdate): NormalizedChatE
     };
   }
 
-  if (update.message.voice) {
+  if ("voice" in update.message && update.message.voice) {
     return { ...base, kind: "unsupported_input", inputType: "voice" };
   }
 
-  if (update.message.photo) {
+  if ("photo" in update.message && update.message.photo) {
     return { ...base, kind: "unsupported_input", inputType: "image" };
   }
 
-  if (update.message.document) {
+  if ("document" in update.message && update.message.document) {
     return { ...base, kind: "unsupported_input", inputType: "file" };
   }
 
@@ -141,38 +136,82 @@ export function normalizeTelegramUpdate(update: TelegramUpdate): NormalizedChatE
 }
 
 export class TelegramBotApiAdapter implements ChannelAdapter {
-  private readonly token: string;
-  private readonly apiBaseUrl: string;
+  private readonly bot: TelegramBotLike;
   private readonly pollTimeoutSeconds: number;
-  private readonly pollErrorDelayMs: number;
-  private readonly fetchImpl: typeof fetch;
-  private running = false;
-  private updateOffset = 0;
-  private pollPromise: Promise<void> | null = null;
+  private startPromise: Promise<void> | null = null;
 
   constructor(options: TelegramAdapterOptions) {
-    this.token = options.token;
-    this.apiBaseUrl = options.apiBaseUrl ?? "https://api.telegram.org";
+    this.bot = (options.botFactory ?? defaultBotFactory)(options.token);
     this.pollTimeoutSeconds = options.pollTimeoutSeconds ?? 30;
-    this.pollErrorDelayMs = options.pollErrorDelayMs ?? 1000;
-    this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
   async start(handler: MessageHandler): Promise<void> {
-    if (this.running) {
+    if (this.startPromise) {
       return;
     }
-    this.running = true;
+
+    const middleware = async (ctx: TelegramContextLike): Promise<void> => {
+      const event = normalizeTelegramUpdate(ctx.update);
+      if (!event) {
+        return;
+      }
+
+      logger.info("telegram.event_received", {
+        chatId: event.chatId,
+        kind: event.kind,
+        messageId: event.messageId,
+      });
+
+      try {
+        await handler(event);
+      } catch (error) {
+        logger.error("telegram.handler_error", {
+          kind: event.kind,
+          chatId: event.chatId,
+          message: error instanceof Error ? error.message : "Unknown handler error.",
+        });
+      }
+
+      if (ctx.callbackQuery) {
+        try {
+          await ctx.answerCallbackQuery();
+        } catch (error) {
+          logger.warn("telegram.callback_ack_failed", {
+            message: error instanceof Error ? error.message : "Unknown callback acknowledgement failure.",
+          });
+        }
+      }
+    };
+
+    this.bot.on("message", middleware);
+    this.bot.on("callback_query:data", middleware);
+    this.bot.catch((error) => {
+      logger.error("telegram.polling_error", {
+        message: error instanceof Error ? error.message : "Unknown Telegram polling error.",
+      });
+    });
+
     logger.info("telegram.polling_started", {
-      apiBaseUrl: this.apiBaseUrl,
       pollTimeoutSeconds: this.pollTimeoutSeconds,
     });
-    this.pollPromise = this.pollLoop(handler);
+
+    this.startPromise = this.bot.start({
+      timeout: this.pollTimeoutSeconds,
+      allowed_updates: ["message", "callback_query"],
+      onStart: () => {
+        logger.info("telegram.bot_started");
+      },
+    });
   }
 
   async stop(): Promise<void> {
-    this.running = false;
-    await this.pollPromise;
+    if (!this.startPromise) {
+      return;
+    }
+
+    await this.bot.stop();
+    await this.startPromise;
+    this.startPromise = null;
     logger.info("telegram.polling_stopped");
   }
 
@@ -181,10 +220,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       chatId,
       textPreview: previewText(text),
     });
-    await this.callTelegram("sendMessage", {
-      chat_id: chatId,
-      text,
-    });
+    await this.bot.api.sendMessage(chatId, text);
   }
 
   async sendTaskUpdate(chatId: string, text: string): Promise<void> {
@@ -192,9 +228,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       chatId,
       textPreview: previewText(text),
     });
-    await this.callTelegram("sendMessage", {
-      chat_id: chatId,
-      text,
+    await this.bot.api.sendMessage(chatId, text, {
       reply_markup: {
         inline_keyboard: [[
           { text: "Report dangerous output", callback_data: "report" },
@@ -211,9 +245,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       requestId: request.requestId,
       requestType: request.type,
     });
-    await this.callTelegram("sendMessage", {
-      chat_id: chatId,
-      text: `Privilege request:\n${description}\n\nApprove or deny this request.`,
+    await this.bot.api.sendMessage(chatId, `Privilege request:\n${description}\n\nApprove or deny this request.`, {
       reply_markup: {
         inline_keyboard: [[
           { text: "Approve", callback_data: `approve:${request.requestId}` },
@@ -222,73 +254,6 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       },
     });
   }
-
-  private async pollLoop(handler: MessageHandler): Promise<void> {
-    while (this.running) {
-      try {
-        const updates = await this.getUpdates();
-        for (const update of updates) {
-          this.updateOffset = update.update_id + 1;
-          const event = normalizeTelegramUpdate(update);
-          if (event) {
-            logger.info("telegram.event_received", {
-              chatId: event.chatId,
-              kind: event.kind,
-              messageId: event.messageId,
-            });
-            await handler(event);
-          }
-        }
-      } catch (error) {
-        logger.error("telegram.polling_error", {
-          message: error instanceof Error ? error.message : "Unknown polling error.",
-        });
-        if (!this.running) {
-          break;
-        }
-        await delay(this.pollErrorDelayMs);
-      }
-    }
-  }
-
-  private async getUpdates(): Promise<TelegramUpdate[]> {
-    const response = await this.callTelegram<TelegramGetUpdatesResponse>("getUpdates", {
-      offset: this.updateOffset,
-      timeout: this.pollTimeoutSeconds,
-      allowed_updates: ["message", "callback_query"],
-    });
-    return response.result;
-  }
-
-  private async callTelegram<T = TelegramSendResponse>(method: string, body: Record<string, unknown>): Promise<T> {
-    const response = await this.fetchImpl(`${this.apiBaseUrl}/bot${this.token}/${method}`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (!response.ok) {
-      logger.error("telegram.api_error", {
-        method,
-        status: response.status,
-      });
-      throw new Error(`Telegram API ${method} failed with status ${response.status}.`);
-    }
-
-    const payload = (await response.json()) as T & { ok?: boolean };
-    if ("ok" in payload && payload.ok === false) {
-      throw new Error(`Telegram API ${method} returned an unsuccessful response.`);
-    }
-    return payload as T;
-  }
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
 }
 
 function previewText(text: string): string {

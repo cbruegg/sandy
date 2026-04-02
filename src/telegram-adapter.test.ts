@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import type { Update } from "grammy/types";
 import { TelegramBotApiAdapter, normalizeTelegramUpdate } from "./channel/telegram-adapter.js";
 
 test("normalizeTelegramUpdate maps report callback to a danger report event", () => {
@@ -8,13 +9,19 @@ test("normalizeTelegramUpdate maps report callback to a danger report event", ()
     callback_query: {
       id: "cb-1",
       data: "report",
+      from: {
+        id: 5,
+        is_bot: false,
+        first_name: "User",
+      },
+      chat_instance: "instance-1",
       message: {
         message_id: 12,
         date: 1_700_000_000,
-        chat: { id: 42 },
+        chat: { id: 42, type: "private" },
       },
     },
-  });
+  } as Update);
 
   assert.deepEqual(event, {
     kind: "danger_report",
@@ -30,10 +37,10 @@ test("normalizeTelegramUpdate maps text commands and unsupported media determini
     message: {
       message_id: 5,
       date: 1_700_000_010,
-      chat: { id: 99 },
+      chat: { id: 99, type: "private" },
       text: "/cancel",
     },
-  });
+  } as Update);
 
   assert.deepEqual(cancelEvent, {
     kind: "cancel_request",
@@ -47,10 +54,14 @@ test("normalizeTelegramUpdate maps text commands and unsupported media determini
     message: {
       message_id: 6,
       date: 1_700_000_020,
-      chat: { id: 99 },
-      voice: {},
+      chat: { id: 99, type: "private" },
+      voice: {
+        file_id: "voice-1",
+        file_unique_id: "voice-u1",
+        duration: 1,
+      },
     },
-  });
+  } as Update);
 
   assert.deepEqual(voiceEvent, {
     kind: "unsupported_input",
@@ -61,76 +72,151 @@ test("normalizeTelegramUpdate maps text commands and unsupported media determini
   });
 });
 
-test("TelegramBotApiAdapter keeps polling after a handler error", async () => {
-  let fetchCount = 0;
-  let handlerCalls = 0;
-
-  const fetchImpl: typeof fetch = async () => {
-    await new Promise((resolve) => {
-      setTimeout(resolve, 0);
-    });
-    fetchCount += 1;
-    const payload = fetchCount === 1
-      ? {
-          ok: true,
-          result: [{
-            update_id: 1,
-            message: {
-              message_id: 1,
-              date: 1_700_000_000,
-              chat: { id: 7 },
-              text: "hello",
-            },
-          }],
-        }
-      : {
-          ok: true,
-          result: [],
-        };
-
-    return new Response(JSON.stringify(payload), {
-      status: 200,
-      headers: {
-        "content-type": "application/json",
-      },
-    });
-  };
-
+test("TelegramBotApiAdapter keeps handling later updates after a handler error", async () => {
+  const fakeBot = new FakeTelegramBot();
   const adapter = new TelegramBotApiAdapter({
     token: "test-token",
-    pollTimeoutSeconds: 0,
-    pollErrorDelayMs: 0,
-    fetchImpl,
+    botFactory: () => fakeBot,
   });
+
+  let handlerCalls = 0;
 
   await adapter.start(async () => {
     handlerCalls += 1;
-    throw new Error("handler failure");
+    if (handlerCalls === 1) {
+      throw new Error("handler failure");
+    }
   });
 
-  await waitFor(() => fetchCount >= 2);
+  await fakeBot.dispatch({
+    update_id: 1,
+    message: {
+      message_id: 1,
+      date: 1_700_000_000,
+      chat: { id: 7, type: "private" },
+      text: "hello",
+    },
+  } as Update);
+
+  await fakeBot.dispatch({
+    update_id: 2,
+    message: {
+      message_id: 2,
+      date: 1_700_000_010,
+      chat: { id: 7, type: "private" },
+      text: "still there?",
+    },
+  } as Update);
+
   await adapter.stop();
 
-  assert.equal(handlerCalls, 1);
-  assert.ok(fetchCount >= 2);
+  assert.equal(handlerCalls, 2);
 });
 
-function waitFor(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
-  const start = Date.now();
-
-  return new Promise((resolve, reject) => {
-    const poll = () => {
-      if (predicate()) {
-        resolve();
-        return;
-      }
-      if (Date.now() - start >= timeoutMs) {
-        reject(new Error("Timed out waiting for condition."));
-        return;
-      }
-      setTimeout(poll, 10);
-    };
-
-    poll();
+test("TelegramBotApiAdapter acknowledges callback queries", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const adapter = new TelegramBotApiAdapter({
+    token: "test-token",
+    botFactory: () => fakeBot,
   });
+
+  await adapter.start(async () => {});
+
+  await fakeBot.dispatch({
+    update_id: 3,
+    callback_query: {
+      id: "cb-2",
+      data: "cancel",
+      from: {
+        id: 5,
+        is_bot: false,
+        first_name: "User",
+      },
+      chat_instance: "instance-2",
+      message: {
+        message_id: 13,
+        date: 1_700_000_030,
+        chat: { id: 42, type: "private" },
+      },
+    },
+  } as Update);
+
+  await adapter.stop();
+
+  assert.equal(fakeBot.acknowledgedCallbackQueries, 1);
+});
+
+class FakeTelegramBot {
+  public readonly sentMessages: Array<{ chatId: string | number; text: string; other?: Record<string, unknown> }> = [];
+  public acknowledgedCallbackQueries = 0;
+  private readonly handlers = new Map<string, Array<(ctx: FakeTelegramContext) => Promise<void>>>();
+  private stopResolve: (() => void) | null = null;
+
+  public readonly api = {
+    sendMessage: async (chatId: string | number, text: string, other?: Record<string, unknown>) => {
+      this.sentMessages.push({ chatId, text, other });
+      return true;
+    },
+  };
+
+  on(filter: string | string[], middleware: (ctx: FakeTelegramContext) => Promise<void>): void {
+    const filters = Array.isArray(filter) ? filter : [filter];
+    for (const entry of filters) {
+      const existing = this.handlers.get(entry) ?? [];
+      existing.push(middleware);
+      this.handlers.set(entry, existing);
+    }
+  }
+
+  catch(_errorHandler: (error: unknown) => void): void {}
+
+  start(): Promise<void> {
+    return new Promise((resolve) => {
+      this.stopResolve = resolve;
+    });
+  }
+
+  async stop(): Promise<void> {
+    this.stopResolve?.();
+    this.stopResolve = null;
+  }
+
+  async dispatch(update: Update): Promise<void> {
+    const filters = getMatchingFilters(update);
+    const context = new FakeTelegramContext(update, () => {
+      this.acknowledgedCallbackQueries += 1;
+    });
+
+    for (const filter of filters) {
+      for (const handler of this.handlers.get(filter) ?? []) {
+        await handler(context);
+      }
+    }
+  }
+}
+
+class FakeTelegramContext {
+  constructor(
+    public readonly update: Update,
+    private readonly onAck: () => void,
+  ) {}
+
+  get callbackQuery(): Update["callback_query"] | undefined {
+    return this.update.callback_query;
+  }
+
+  async answerCallbackQuery(): Promise<true> {
+    this.onAck();
+    return true;
+  }
+}
+
+function getMatchingFilters(update: Update): string[] {
+  if (update.callback_query?.data) {
+    return ["callback_query:data"];
+  }
+  if (update.message) {
+    return ["message"];
+  }
+  return [];
 }

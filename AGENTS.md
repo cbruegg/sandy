@@ -39,10 +39,6 @@ There is no formatter or linter configured yet, so keep style consistent with th
 
 Tests use the built-in Node test runner via `node --test`. Place tests next to the related code as `*.test.ts`. High test coverage is expected for orchestration behavior, normalization, privilege routing, and failure handling. Prefer small fakes over networked or Docker-backed integration in unit tests.
 
-## Commit & Pull Request Guidelines
-
-Follow the existing commit style: short, imperative summaries such as `Implement Sandy orchestration skeleton` or `Use stdio for sub-agent control channel`.
-
 ## Documentation Maintenance
 
-Keep `README.md` aligned with the actual implementation, especially status, supported features, setup steps, and configuration. Also keep the active `PLAN*.md` document up to date with the current implementation status and any meaningful scope or architecture changes made during the work.
+Keep `README.md` aligned with the intended target architecture, setup steps, and configuration. Keep the active `PLAN*.md` document aligned with the current implementation status, completed work, and known gaps relative to that target.
