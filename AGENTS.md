@@ -23,7 +23,7 @@ Sandy is a TypeScript project with the application code under `src/`.
 - `npm test`: rebuild and run the Node test suite from compiled output.
 - `docker build -t sandy-subagent:latest .`: build the worker container image used by sub-agents.
 
-Run `npm test` before committing changes that affect runtime logic.
+Run both `npm run build` and `npm test` before committing changes that affect TypeScript or runtime logic. The explicit build step matters even when tests pass, because it verifies the full TypeScript project still compiles cleanly.
 
 ## Coding Style & Naming Conventions
 
