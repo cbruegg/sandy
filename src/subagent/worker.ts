@@ -19,10 +19,15 @@ import {
 } from "../types.js";
 
 const privilegeRequestPrefix = "SANDY_PRIVILEGE_REQUEST ";
-type ThreadEventDisposition = "none" | "privilege_request" | "terminal_error";
+const channelFilePrefix = "SANDY_CHANNEL_FILE ";
+type ThreadEventDisposition = "none" | "privilege_request" | "channel_file" | "terminal_error";
 type PrivilegeParseResult =
   | { kind: "none" }
   | { kind: "parsed"; request: PrivilegeRequest }
+  | { kind: "invalid"; message: string };
+type ChannelFileParseResult =
+  | { kind: "none" }
+  | { kind: "parsed"; path: string; caption?: string }
   | { kind: "invalid"; message: string };
 
 function getRequiredEnv(name: string): string {
@@ -88,6 +93,7 @@ function progressFromCommand(item: CommandExecutionItem): string {
 
 async function streamTurn(thread: Thread, input: string): Promise<void> {
   let sawPrivilegeRequest = false;
+  let sawChannelFile = false;
   let sawTerminalError = false;
   const { events } = await thread.runStreamed(input);
 
@@ -97,6 +103,10 @@ async function streamTurn(thread: Thread, input: string): Promise<void> {
       throw new Error("Only one privilege request is allowed per turn.");
     }
     sawPrivilegeRequest = disposition === "privilege_request" || sawPrivilegeRequest;
+    if (disposition === "channel_file" && sawChannelFile) {
+      throw new Error("Only one channel file send request is allowed per turn.");
+    }
+    sawChannelFile = disposition === "channel_file" || sawChannelFile;
     sawTerminalError = disposition === "terminal_error" || sawTerminalError;
   }
 
@@ -122,6 +132,22 @@ async function handleThreadEvent(event: ThreadEvent): Promise<ThreadEventDisposi
           send({
             type: "task_error",
             message: privilegeResult.message,
+          });
+          return "terminal_error";
+        }
+        const channelFileResult = tryParseChannelFileMessage(event.item.text);
+        if (channelFileResult.kind === "parsed") {
+          send({
+            type: "channel_file",
+            path: channelFileResult.path,
+            caption: channelFileResult.caption,
+          });
+          return "channel_file";
+        }
+        if (channelFileResult.kind === "invalid") {
+          send({
+            type: "task_error",
+            message: channelFileResult.message,
           });
           return "terminal_error";
         }
@@ -180,13 +206,21 @@ export function buildInitialTaskInputWithCapabilities(
     "You are running inside a Sandy sub-agent container.",
     "Your shared workspace is mounted at /workspace/share.",
     "Use /workspace/share for files that should remain available to the host after your task finishes.",
+    "User-attached files are copied into /workspace/share before you are told about them.",
     "Inside this container you may use the filesystem, network, and installed tools freely.",
     "If you need the host to copy files into or out of /workspace/share, do not ask the user directly.",
-    `Instead, output exactly one line in this format and no surrounding text: ${privilegeRequestPrefix}{...json...}`,
+    "Protocol requirements for host-mediated actions:",
+    `- For privileged host file copy requests, output exactly one line with no surrounding text: ${privilegeRequestPrefix}{...json...}`,
+    `- JSON schema for ${privilegeRequestPrefix}: {"type":"copy_into_share"|"copy_out_of_share","sourcePath":"string","targetPath":"string","reason":"string"}`,
     "Allowed host-mediated request types are copy_into_share and copy_out_of_share.",
     "For any host-mediated request, use absolute paths. Any shared-workspace path must stay under /workspace/share.",
     `Example for copying a result file to Downloads: ${privilegeRequestPrefix}{"type":"copy_out_of_share","sourcePath":"/workspace/share/result.txt","targetPath":"~/Downloads/result.txt","reason":"Need to deliver the generated file to the user."}`,
     `Example for copying a host file in: ${privilegeRequestPrefix}{"type":"copy_into_share","sourcePath":"~/Downloads/input.txt","targetPath":"/workspace/share/input.txt","reason":"Need the user-provided input file inside the task workspace."}`,
+    `- To send a file that already exists under /workspace/share back to the user, output exactly one line with no surrounding text: ${channelFilePrefix}{...json...}`,
+    `- JSON schema for ${channelFilePrefix}: {"path":"string","caption":"string optional"}`,
+    "Sending a file from /workspace/share back to the user through the channel does not require privilege escalation.",
+    "Do not describe the saved path in prose when you want the file delivered. Emit the protocol line instead.",
+    `Example for sending a file to the user: ${channelFilePrefix}{"path":"/workspace/share/result.txt","caption":"Generated result file."}`,
     "After emitting a host-mediated request, stop and wait for the next host message before continuing.",
   ];
 
@@ -238,6 +272,7 @@ export function buildPrivilegeResolutionInput(result: PrivilegeResolutionResult)
   return [
     `Host privilege request ${result.requestId} finished with outcome "${result.outcome}".`,
     result.message,
+    buildProtocolReminder(),
     "Continue the task from here.",
   ].join("\n");
 }
@@ -287,6 +322,59 @@ function tryParsePrivilegeRequestMessage(text: string): PrivilegeParseResult {
       message: `Invalid privilege request payload: ${detail}`,
     };
   }
+}
+
+function parseChannelFileMessage(text: string): { path: string; caption?: string } | null {
+  const trimmed = text.trim();
+  if (trimmed.startsWith(channelFilePrefix)) {
+    const rawPayload = trimmed.slice(channelFilePrefix.length).trim();
+    const parsed = JSON.parse(rawPayload) as unknown;
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error("Channel file payload must be a JSON object.");
+    }
+
+    const path = "path" in parsed ? parsed.path : undefined;
+    const caption = "caption" in parsed ? parsed.caption : undefined;
+    if (typeof path !== "string" || (caption !== undefined && typeof caption !== "string")) {
+      throw new Error("Channel file payload must contain a string path and optional string caption.");
+    }
+
+    return {
+      path,
+      caption,
+    };
+  }
+  return null;
+}
+
+function tryParseChannelFileMessage(text: string): ChannelFileParseResult {
+  try {
+    const parsed = parseChannelFileMessage(text);
+    if (!parsed) {
+      return { kind: "none" };
+    }
+
+    return {
+      kind: "parsed",
+      path: parsed.path,
+      caption: parsed.caption,
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Unknown channel file parse failure.";
+    return {
+      kind: "invalid",
+      message: `Invalid channel file payload: ${detail}`,
+    };
+  }
+}
+
+function buildProtocolReminder(): string {
+  return [
+    "Protocol reminder:",
+    `- Privileged copy request line: ${privilegeRequestPrefix}{"type":"copy_into_share"|"copy_out_of_share","sourcePath":"...","targetPath":"...","reason":"..."}`,
+    `- Non-privileged send-file line: ${channelFilePrefix}{"path":"/workspace/share/...","caption":"optional"}`,
+    "- Emit exactly one protocol line with no surrounding text when you want the host to act.",
+  ].join("\n");
 }
 
 async function main(): Promise<void> {

@@ -7,6 +7,7 @@ import {
   parsePrivilegeRequestMessage,
 } from "./subagent/worker.js";
 import type { ChannelFormatting, PrivilegeResolutionResult } from "./types.js";
+import { parseSubAgentEvent } from "./types.js";
 
 test("buildInitialTaskInput tells the sub-agent where the shared workspace is", () => {
   const formatting: ChannelFormatting = {
@@ -21,6 +22,10 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
   assert.match(input, /shared workspace is mounted/);
   assert.match(input, /SANDY_PRIVILEGE_REQUEST/);
   assert.match(input, /copy_into_share/);
+  assert.match(input, /SANDY_CHANNEL_FILE/);
+  assert.match(input, /JSON schema for SANDY_CHANNEL_FILE/);
+  assert.match(input, /Do not describe the saved path in prose/);
+  assert.match(input, /does not require privilege escalation/);
   assert.match(input, /Telegram HTML/);
   assert.match(input, /<code>/);
   assert.match(input, /leave a summary file\./);
@@ -56,6 +61,8 @@ test("buildPrivilegeResolutionInput explains the host privilege result to the su
   assert.match(input, /req-1/);
   assert.match(input, /approved/);
   assert.match(input, /Copied \/tmp\/input.txt into the shared workspace\./);
+  assert.match(input, /Protocol reminder:/);
+  assert.match(input, /SANDY_CHANNEL_FILE/);
   assert.match(input, /Continue the task from here\./);
 });
 
@@ -77,4 +84,16 @@ test("parsePrivilegeRequestMessage throws a helpful error for invalid payloads",
     ),
     /Invalid privilege request payload|Unsupported privilege request payload|Payload:/,
   );
+});
+
+test("parseSubAgentEvent accepts non-privileged channel file send requests", () => {
+  const event = parseSubAgentEvent(
+    '{"type":"channel_file","path":"/workspace/share/result.txt","caption":"Generated result file."}',
+  );
+
+  assert.deepEqual(event, {
+    type: "channel_file",
+    path: "/workspace/share/result.txt",
+    caption: "Generated result file.",
+  });
 });

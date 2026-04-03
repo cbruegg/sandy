@@ -71,6 +71,38 @@ test("normalizeTelegramUpdate maps text commands and unsupported media determini
     messageId: "6",
     timestamp: "2023-11-14T22:13:40.000Z",
   });
+
+  const documentEvent = normalizeTelegramUpdate({
+    update_id: 4,
+    message: {
+      message_id: 7,
+      date: 1_700_000_030,
+      chat: { id: 99, type: "private" },
+      caption: "Use this input file.",
+      document: {
+        file_id: "doc-1",
+        file_unique_id: "doc-u1",
+        file_name: "input data.csv",
+        mime_type: "text/csv",
+        file_size: 12,
+      },
+    },
+  } as Update);
+
+  assert.deepEqual(documentEvent, {
+    kind: "user_text",
+    chatId: "99",
+    messageId: "7",
+    timestamp: "2023-11-14T22:13:50.000Z",
+    text: "Use this input file.",
+    rawText: "Use this input file.",
+    attachments: [{
+      attachmentId: "doc-1",
+      kind: "file",
+      fileName: "input_data.csv",
+      mimeType: "text/csv",
+    }],
+  });
 });
 
 test("TelegramBotApiAdapter keeps handling later updates after a handler error", async () => {
@@ -172,15 +204,35 @@ test("TelegramBotApiAdapter sends sanitized HTML with parse_mode", async () => {
   });
 });
 
+test("TelegramBotApiAdapter sends local files as Telegram documents", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const adapter = new TelegramBotApiAdapter({
+    token: "test-token",
+    botFactory: () => fakeBot,
+  });
+
+  await adapter.sendFile("7", "/tmp/result.txt", "Generated result");
+
+  assert.equal(fakeBot.sentDocuments.length, 1);
+  assert.equal(fakeBot.sentDocuments[0]?.chatId, "7");
+  assert.equal(fakeBot.sentDocuments[0]?.other?.caption, "Generated result");
+});
+
 class FakeTelegramBot {
   public readonly sentMessages: Array<{ chatId: string | number; text: string; other?: Record<string, unknown> }> = [];
+  public readonly sentDocuments: Array<{ chatId: string | number; document: unknown; other?: Record<string, unknown> }> = [];
   public acknowledgedCallbackQueries = 0;
   private readonly handlers = new Map<string, Array<(ctx: FakeTelegramContext) => Promise<void>>>();
   private stopResolve: (() => void) | null = null;
 
   public readonly api = {
+    getFile: async () => ({ file_path: "documents/test.txt" }),
     sendMessage: async (chatId: string | number, text: string, other?: Record<string, unknown>) => {
       this.sentMessages.push({ chatId, text, other });
+      return true;
+    },
+    sendDocument: async (chatId: string | number, document: unknown, other?: Record<string, unknown>) => {
+      this.sentDocuments.push({ chatId, document, other });
       return true;
     },
   };

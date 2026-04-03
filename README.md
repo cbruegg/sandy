@@ -139,6 +139,14 @@ Sub-agents are launched in isolated containers, initially using Docker.
 Allowed interfaces are internet access, a per-sub-agent shared volume for file exchange and the container control
 channel to the host runtime.
 
+User file uploads are a normal channel capability rather than a privileged host operation. Sandy downloads uploaded
+files directly into the target sub-agent's shared workspace before launch, and can also stage additional uploads into
+the same workspace while a task is running.
+
+Sub-agents may also send files that already exist under `/workspace/share` back to the user through the active channel
+without privilege escalation. This channel-file send path is deterministic and bypasses the main agent in the same way
+as quarantined visible output.
+
 Inside the sub-agent container, Codex itself runs without an additional nested sandbox. Docker is the isolation
 boundary for v1, which avoids bubblewrap/user-namespace failures inside the container.
 
@@ -148,7 +156,7 @@ The default worker image is based on openSUSE Tumbleweed and also includes Homeb
 developer tools during task execution.
 
 Sub-agents may request access to additional resources from the user, such as:
-- Certain files to be copied in and out of the shared volume.
+- Certain host files to be copied in and out of the shared volume.
 - Read-only mount access to a specific directory on the host machine.
 - Read-write mount access to a specific directory on the host machine.
 - MCP servers that the main agent can connect to; note that the main agent tells the sub-agent which MCP servers it can
@@ -159,6 +167,10 @@ Sub-agents may request access to additional resources from the user, such as:
 Privilege evaluation requests are forwarded to the user verbatim, without the main agent getting to see them.
 As such, these requests from the sub-agent must use a special message type on the container control channel that is then
 *not* forwarded to the main agent, but instead directly to the user.
+
+Channel-native file transfer is separate from privilege evaluation. User uploads go straight into the shared workspace,
+and sub-agent requests to send files back to the user through the channel do not require approval as long as the file
+path stays under `/workspace/share`.
 
 The user can then choose to approve or deny the request, and if they approve it using predefined phrases or emoji
 reactions, the host runtime deterministically performs the requested operation without the LLM of the main

@@ -1,15 +1,31 @@
-import { Bot, type Context, type PollingOptions } from "grammy";
+import { mkdir, writeFile } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
+import { Bot, InputFile, type Context, type PollingOptions } from "grammy";
 import type { Update } from "grammy/types";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { buttonLabels, messages } from "../messages.js";
 import { sanitizeTelegramHtml, telegramHtmlAllowedTags } from "./telegram-html.js";
-import type { ApprovalResponseEvent, ChannelFormatting, DangerReportEvent, NormalizedChatEvent, PrivilegeRequest } from "../types.js";
+import type {
+  ApprovalResponseEvent,
+  ChannelFormatting,
+  DangerReportEvent,
+  MessageAttachment,
+  NormalizedChatEvent,
+  PrivilegeRequest,
+  SharedAttachment,
+} from "../types.js";
 
 type TelegramApiLike = {
+  getFile(fileId: string): Promise<{ file_path?: string }>;
   sendMessage(
     chatId: string | number,
     text: string,
+    other?: Record<string, unknown>,
+  ): Promise<unknown>;
+  sendDocument(
+    chatId: string | number,
+    document: InputFile,
     other?: Record<string, unknown>,
   ): Promise<unknown>;
 };
@@ -126,6 +142,7 @@ export function normalizeTelegramUpdate(update: Update): NormalizedChatEvent | n
       kind: "user_text",
       text: rawText,
       rawText,
+      attachments: [],
     };
   }
 
@@ -138,7 +155,20 @@ export function normalizeTelegramUpdate(update: Update): NormalizedChatEvent | n
   }
 
   if ("document" in update.message && update.message.document) {
-    return { ...base, kind: "unsupported_input", inputType: "file" };
+    const fileName = sanitizeTelegramFileName(update.message.document.file_name);
+    const caption = typeof update.message.caption === "string" ? update.message.caption : "";
+    return {
+      ...base,
+      kind: "user_text",
+      text: caption,
+      rawText: caption,
+      attachments: [{
+        attachmentId: update.message.document.file_id,
+        kind: "file",
+        fileName,
+        mimeType: update.message.document.mime_type,
+      }],
+    };
   }
 
   return null;
@@ -147,9 +177,11 @@ export function normalizeTelegramUpdate(update: Update): NormalizedChatEvent | n
 export class TelegramBotApiAdapter implements ChannelAdapter {
   private readonly bot: TelegramBotLike;
   private readonly pollTimeoutSeconds: number;
+  private readonly token: string;
   private startPromise: Promise<void> | null = null;
 
   constructor(options: TelegramAdapterOptions) {
+    this.token = options.token;
     this.bot = (options.botFactory ?? defaultBotFactory)(options.token);
     this.pollTimeoutSeconds = options.pollTimeoutSeconds ?? 30;
   }
@@ -289,6 +321,60 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     });
   }
 
+  async saveAttachments(chatId: string, attachments: MessageAttachment[], targetDirectory: string): Promise<SharedAttachment[]> {
+    if (attachments.length === 0) {
+      return [];
+    }
+
+    await mkdir(targetDirectory, { recursive: true });
+    const saved: SharedAttachment[] = [];
+
+    for (const [index, attachment] of attachments.entries()) {
+      const file = await this.bot.api.getFile(attachment.attachmentId);
+      if (!file.file_path) {
+        throw new Error(`Telegram did not return a download path for attachment ${attachment.attachmentId}.`);
+      }
+
+      const response = await fetch(this.buildFileUrl(file.file_path));
+      if (!response.ok) {
+        throw new Error(`Telegram file download failed with status ${response.status} for attachment ${attachment.attachmentId}.`);
+      }
+
+      const arrayBuffer = await response.arrayBuffer();
+      const fileName = withUniquePrefix(index, attachment.fileName);
+      const hostPath = resolve(targetDirectory, fileName);
+      await writeFile(hostPath, Buffer.from(arrayBuffer));
+
+      logger.info("telegram.attachment_saved", {
+        chatId,
+        attachmentId: attachment.attachmentId,
+        hostPath,
+      });
+
+      saved.push({
+        attachmentId: attachment.attachmentId,
+        kind: attachment.kind,
+        fileName: attachment.fileName,
+        hostPath,
+        sharePath: `/workspace/share/inbox/${basename(targetDirectory)}/${fileName}`,
+        mimeType: attachment.mimeType,
+      });
+    }
+
+    return saved;
+  }
+
+  async sendFile(chatId: string, filePath: string, caption?: string): Promise<void> {
+    logger.info("telegram.send_file", {
+      chatId,
+      filePath,
+      captionPreview: caption ? previewText(caption) : undefined,
+    });
+    await this.bot.api.sendDocument(chatId, new InputFile(filePath, basename(filePath)), {
+      caption,
+    });
+  }
+
   private async sendFormattedMessage(
     chatId: string,
     text: string,
@@ -299,8 +385,23 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       ...other,
     });
   }
+
+  private buildFileUrl(filePath: string): string {
+    return `https://api.telegram.org/file/bot${this.token}/${filePath}`;
+  }
 }
 
 function previewText(text: string): string {
   return text.length <= 120 ? text : `${text.slice(0, 117)}...`;
+}
+
+function sanitizeTelegramFileName(fileName: string | undefined): string {
+  const fallback = "attachment";
+  const trimmed = (fileName ?? fallback).trim();
+  const normalized = trimmed.replaceAll(/[^A-Za-z0-9._-]+/g, "_").replaceAll(/^_+|_+$/g, "");
+  return normalized || fallback;
+}
+
+function withUniquePrefix(index: number, fileName: string): string {
+  return `${index + 1}-${fileName}`;
 }

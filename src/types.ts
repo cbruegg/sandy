@@ -1,5 +1,23 @@
 export type TranscriptRole = "user" | "assistant" | "system";
 
+export type AttachmentKind = "file";
+
+export type MessageAttachment = {
+  attachmentId: string;
+  kind: AttachmentKind;
+  fileName: string;
+  mimeType?: string;
+};
+
+export type SharedAttachment = {
+  attachmentId: string;
+  kind: AttachmentKind;
+  fileName: string;
+  hostPath: string;
+  sharePath: string;
+  mimeType?: string;
+};
+
 export type ChannelFormatting = {
   channel: "telegram";
   markup: "telegram_html";
@@ -25,6 +43,7 @@ export type UserTextEvent = ChatEventBase & {
   kind: "user_text";
   text: string;
   rawText: string;
+  attachments: MessageAttachment[];
 };
 
 export type CancelRequestEvent = ChatEventBase & {
@@ -149,6 +168,12 @@ export type FinalResultEvent = {
   text: string;
 };
 
+export type ChannelFileEvent = {
+  type: "channel_file";
+  path: string;
+  caption?: string;
+};
+
 // Deterministic capability request that bypasses the main agent and is shown directly to the user.
 export type PrivilegeRequestEvent = {
   type: "privilege_request";
@@ -181,6 +206,7 @@ export type SubAgentEvent =
   | ProgressEvent
   | AssistantOutputEvent
   | FinalResultEvent
+  | ChannelFileEvent
   | PrivilegeRequestEvent
   | TaskDoneEvent
   | TaskErrorEvent
@@ -340,6 +366,15 @@ export function parseSubAgentEvent(raw: string): SubAgentEvent {
     case "final_result":
       if (isString(parsed.text)) {
         return { type: "final_result", text: parsed.text };
+      }
+      break;
+    case "channel_file":
+      if (isString(parsed.path) && (parsed.caption === undefined || isString(parsed.caption))) {
+        return {
+          type: "channel_file",
+          path: parsed.path,
+          caption: parsed.caption,
+        };
       }
       break;
     case "privilege_request":

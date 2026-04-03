@@ -9,7 +9,7 @@ export const buttonLabels = {
 
 export const messages = {
   unsupportedInput: (inputType: string): string =>
-    `This v1 build only supports text messages. Received unsupported ${inputType} input.`,
+    `This build supports text messages and file attachments. Received unsupported ${inputType} input.`,
   taskComplete: (text: string): string => `Task complete:\n${text}`,
   taskCompleted: (taskId: string): string => `Task "${taskId}" completed.`,
   taskFailed: (message: string): string => `Task failed: ${message}`,

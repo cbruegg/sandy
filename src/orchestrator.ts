@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import type { ChannelAdapter } from "./channel/channel-adapter.js";
 import type { MainAgentController } from "./agent/main-agent-controller.js";
 import type { PrivilegeBroker } from "./privilege/privilege-broker.js";
@@ -9,10 +10,12 @@ import { logger } from "./logger.js";
 import { messages } from "./messages.js";
 import type {
   MainAgentDecision,
+  MessageAttachment,
   NormalizedChatEvent,
   PrivilegeRequest,
   PrivilegeResolutionResult,
   SessionState,
+  SharedAttachment,
   SubAgentEvent,
   TranscriptEntry,
 } from "./types.js";
@@ -104,6 +107,9 @@ export class SandyOrchestrator {
       case "privilege_request":
         await this.handlePrivilegeRequest(chatId, session, event.request);
         break;
+      case "channel_file":
+        await this.handleChannelFile(chatId, session, event.path, event.caption);
+        break;
       case "final_result":
         session.activeTask.quarantinedOutputs.push(event.text);
         await this.deps.channel.sendText(chatId, messages.taskComplete(event.text));
@@ -167,7 +173,7 @@ export class SandyOrchestrator {
             role: "user" as const,
             kind: "user_text",
             timestamp: event.timestamp,
-            text: event.text,
+            text: describeUserMessageForMainAgent(event.text, event.attachments),
           },
         ];
 
@@ -178,7 +184,7 @@ export class SandyOrchestrator {
           channelFormatting: this.channelFormatting,
         });
 
-        await this.applyMainAgentDecision(session, event.chatId, decision);
+        await this.applyMainAgentDecision(session, event, decision);
         this.deps.sessionStore.save(session);
         return;
     }
@@ -228,35 +234,38 @@ export class SandyOrchestrator {
           return;
         }
         this.discardAcceptedQuarantinedOutputs(session);
-        await this.getHandle(activeTask.taskId).sendUserMessage(event.text);
+        await this.getHandle(activeTask.taskId).sendUserMessage(
+          buildWorkerFollowUpInput(event.text, await this.stageAttachments(event.chatId, event.messageId, event.attachments, activeTask.taskId)),
+        );
         return;
     }
   }
 
   private async applyMainAgentDecision(
     session: SessionState,
-    chatId: string,
+    event: Extract<NormalizedChatEvent, { kind: "user_text" }>,
     decision: MainAgentDecision,
   ): Promise<void> {
     switch (decision.action) {
       case "reply":
         logger.info("task.reply_direct", {
-          chatId,
+          chatId: event.chatId,
         });
-        await this.deps.channel.sendText(chatId, decision.replyText);
+        await this.deps.channel.sendText(event.chatId, decision.replyText);
         return;
       case "launch_task": {
         const taskId = randomUUID();
         const now = new Date().toISOString();
+        const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskId);
         logger.info("task.launching", {
-          chatId,
+          chatId: event.chatId,
           taskId,
           taskName: decision.taskName,
         });
         session.activeTask = {
           taskId,
           taskName: decision.taskName,
-          taskBrief: decision.taskBrief,
+          taskBrief: buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments),
           status: "running",
           startedAt: now,
           lastActivityAt: now,
@@ -268,23 +277,23 @@ export class SandyOrchestrator {
 
         const handle = await this.deps.sandboxRunner.launchTask(
           {
-            chatId,
+            chatId: event.chatId,
             taskId,
             taskName: decision.taskName,
-            taskBrief: decision.taskBrief,
+            taskBrief: buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments),
             channelFormatting: this.channelFormatting,
           },
-          async (event) => this.handleSubAgentEvent(chatId, taskId, event),
+          async (subAgentEvent) => this.handleSubAgentEvent(event.chatId, taskId, subAgentEvent),
         );
 
         this.handles.set(taskId, { handle });
         logger.info("task.started", {
-          chatId,
+          chatId: event.chatId,
           taskId,
           taskName: decision.taskName,
         });
 
-        await this.deps.channel.sendText(chatId, messages.taskStarted(decision.taskName));
+        await this.deps.channel.sendText(event.chatId, messages.taskStarted(decision.taskName));
         return;
       }
       default:
@@ -383,6 +392,24 @@ export class SandyOrchestrator {
     await this.deps.channel.sendPrivilegeRequest(chatId, request);
   }
 
+  private async handleChannelFile(
+    chatId: string,
+    session: SessionState,
+    sharePath: string,
+    caption?: string,
+  ): Promise<void> {
+    const activeTask = session.activeTask;
+    if (!activeTask) {
+      return;
+    }
+
+    await this.deps.channel.sendFile(
+      chatId,
+      resolveTaskSharePath(this.deps.sandboxRunner.getTaskSharePath(activeTask.taskId), sharePath),
+      caption,
+    );
+  }
+
   private buildUnsupportedPrivilegeResult(request: PrivilegeRequest): PrivilegeResolutionResult {
     return {
       requestId: request.requestId,
@@ -466,6 +493,24 @@ export class SandyOrchestrator {
     return record.handle;
   }
 
+  private async stageAttachments(
+    chatId: string,
+    messageId: string,
+    attachments: MessageAttachment[],
+    taskId: string,
+  ): Promise<SharedAttachment[]> {
+    if (attachments.length === 0) {
+      return [];
+    }
+
+    const targetDirectory = join(
+      this.deps.sandboxRunner.getTaskSharePath(taskId),
+      "inbox",
+      sanitizePathSegment(messageId),
+    );
+    return this.deps.channel.saveAttachments(chatId, attachments, targetDirectory);
+  }
+
   private async prepareShareDeletion(session: SessionState, taskId: string, taskName: string): Promise<void> {
     const inspection = await this.deps.sandboxRunner.inspectTaskShare(taskId);
     if (inspection.isEmpty) {
@@ -502,6 +547,70 @@ export class SandyOrchestrator {
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled main agent decision: ${JSON.stringify(value)}`);
+}
+
+function describeUserMessageForMainAgent(text: string, attachments: MessageAttachment[]): string {
+  if (attachments.length === 0) {
+    return text;
+  }
+
+  const attachmentSummary = [
+    "Attached files:",
+    ...attachments.map((attachment) => `- ${attachment.fileName}`),
+  ].join("\n");
+  return text.trim() ? `${text}\n\n${attachmentSummary}` : attachmentSummary;
+}
+
+function buildTaskBriefWithAttachments(taskBrief: string, attachments: SharedAttachment[]): string {
+  const sections = [taskBrief, buildWorkerProtocolReminder()];
+  if (attachments.length > 0) {
+    sections.push([
+      "Files attached by the user are already available in the shared workspace:",
+      ...attachments.map((attachment) => `- ${attachment.fileName}: ${attachment.sharePath}`),
+      "Using these files does not require privilege escalation.",
+    ].join("\n"));
+  }
+
+  return sections.join("\n\n");
+}
+
+function buildWorkerFollowUpInput(text: string, attachments: SharedAttachment[]): string {
+  const sections = [text.trim(), buildWorkerProtocolReminder()].filter((section) => section.length > 0);
+  if (attachments.length > 0) {
+    sections.push([
+      "The user attached additional files to the shared workspace:",
+      ...attachments.map((attachment) => `- ${attachment.fileName}: ${attachment.sharePath}`),
+      "Using these files does not require privilege escalation.",
+    ].join("\n"));
+  }
+  return sections.join("\n\n");
+}
+
+function resolveTaskSharePath(taskSharePath: string, sharePath: string): string {
+  if (!isAbsolute(sharePath)) {
+    throw new Error("channel_file path must be an absolute path under /workspace/share.");
+  }
+
+  const normalizedSharePath = resolve(sharePath);
+  const relativeToShare = relative("/workspace/share", normalizedSharePath);
+  if (relativeToShare.startsWith("..") || isAbsolute(relativeToShare)) {
+    throw new Error("channel_file path must stay within /workspace/share.");
+  }
+
+  return resolve(taskSharePath, relativeToShare);
+}
+
+function sanitizePathSegment(value: string): string {
+  const normalized = value.replaceAll(/[^A-Za-z0-9._-]+/g, "_").replaceAll(/^_+|_+$/g, "");
+  return normalized || "message";
+}
+
+function buildWorkerProtocolReminder(): string {
+  return [
+    "Protocol reminder:",
+    '- To send a file back to the user without privilege escalation, emit exactly one line: SANDY_CHANNEL_FILE {"path":"/workspace/share/...","caption":"optional"}',
+    '- Do not describe a saved path in prose when you want delivery; emit the protocol line instead.',
+  ].join("\n");
 }
 
 export function describeActiveTaskForMainAgent(session: SessionState) {

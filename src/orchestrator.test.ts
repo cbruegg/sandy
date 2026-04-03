@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { basename, resolve } from "node:path";
 import type { ChannelAdapter } from "./channel/channel-adapter.js";
 import type { MainAgentController } from "./agent/main-agent-controller.js";
 import { messages } from "./messages.js";
@@ -11,8 +12,10 @@ import type {
   ChannelFormatting,
   DecideContext,
   MainAgentDecision,
+  MessageAttachment,
   PrivilegeRequest,
   PrivilegeResolutionResult,
+  SharedAttachment,
   SubAgentEvent,
 } from "./types.js";
 import type { SupportedPrivilegeRequest } from "./privilege/privilege-broker.js";
@@ -27,13 +30,31 @@ const testFormatting: ChannelFormatting = {
 class RecordingChannel implements ChannelAdapter {
   public readonly sentTexts: Array<{ chatId: string; text: string }> = [];
   public readonly taskUpdates: Array<{ chatId: string; text: string }> = [];
+  public readonly sentFiles: Array<{ chatId: string; filePath: string; caption?: string }> = [];
   public readonly privilegeRequests: Array<{ chatId: string; request: PrivilegeRequest }> = [];
   public readonly shareDeletionRequests: Array<{ chatId: string; requestId: string; taskName: string; summary: string }> = [];
+  public readonly savedAttachments: Array<{ chatId: string; attachments: MessageAttachment[]; targetDirectory: string }> = [];
 
   async start(): Promise<void> {}
   async stop(): Promise<void> {}
   getFormatting(): ChannelFormatting {
     return testFormatting;
+  }
+
+  async saveAttachments(chatId: string, attachments: MessageAttachment[], targetDirectory: string): Promise<SharedAttachment[]> {
+    this.savedAttachments.push({ chatId, attachments, targetDirectory });
+    return attachments.map((attachment, index) => ({
+      attachmentId: attachment.attachmentId,
+      kind: attachment.kind,
+      fileName: attachment.fileName,
+      mimeType: attachment.mimeType,
+      hostPath: resolve(targetDirectory, `${index + 1}-${attachment.fileName}`),
+      sharePath: `/workspace/share/inbox/${basename(targetDirectory)}/${index + 1}-${attachment.fileName}`,
+    }));
+  }
+
+  async sendFile(chatId: string, filePath: string, caption?: string): Promise<void> {
+    this.sentFiles.push({ chatId, filePath, caption });
   }
 
   async sendText(chatId: string, text: string): Promise<void> {
@@ -178,6 +199,7 @@ test("orchestrator launches a task and discards quarantined output on danger rep
     timestamp: "2026-04-01T00:00:00.000Z",
     text: "Inspect the repository",
     rawText: "Inspect the repository",
+    attachments: [],
   });
 
   await runner.emit({
@@ -227,6 +249,7 @@ test("orchestrator accepts active-task quarantined output without storing host-s
     timestamp: "2026-04-01T00:00:00.000Z",
     text: "Investigate the issue",
     rawText: "Investigate the issue",
+    attachments: [],
   });
 
   await runner.emit({
@@ -241,13 +264,100 @@ test("orchestrator accepts active-task quarantined output without storing host-s
     timestamp: "2026-04-01T00:00:10.000Z",
     text: "Use the main branch.",
     rawText: "Use the main branch.",
+    attachments: [],
   });
 
   const session = store.getOrCreate("chat-2");
   assert.deepEqual(session.pendingQuarantinedOutputs, []);
   assert.equal(session.activeTask?.quarantinedOutputs.length ?? 0, 0);
-  assert.deepEqual(runner.handle.userMessages, ["Use the main branch."]);
+  assert.match(runner.handle.userMessages[0] ?? "", /Use the main branch\./);
+  assert.match(runner.handle.userMessages[0] ?? "", /Protocol reminder:/);
+  assert.match(runner.handle.userMessages[0] ?? "", /SANDY_CHANNEL_FILE/);
   assert.equal(mainAgent.contexts.length, 1);
+});
+
+test("orchestrator stages attached files into the task share before launching the worker", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const mainAgent = new StubMainAgent({
+    action: "launch_task",
+    taskBrief: "Analyze the uploaded file.",
+    taskName: "file-analysis",
+  });
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent,
+    sandboxRunner: runner,
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-file-launch",
+    messageId: "message/1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Analyze this",
+    rawText: "Analyze this",
+    attachments: [{
+      attachmentId: "doc-1",
+      kind: "file",
+      fileName: "input.csv",
+      mimeType: "text/csv",
+    }],
+  });
+
+  assert.equal(channel.savedAttachments.length, 1);
+  assert.match(channel.savedAttachments[0]!.targetDirectory, /inbox\/message_1$/);
+  assert.match(runner.launches[0]!.taskBrief, /Files attached by the user are already available/);
+  assert.match(runner.launches[0]!.taskBrief, /\/workspace\/share\/inbox\/message_1\/1-input\.csv/);
+  assert.deepEqual(contextTexts(mainAgent.contexts[0]), ["Analyze this\n\nAttached files:\n- input.csv"]);
+});
+
+test("orchestrator stages attached files into the active task share and notifies the worker", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Wait for files.",
+      taskName: "file-wait",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-file-active",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Start waiting",
+    rawText: "Start waiting",
+    attachments: [],
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-file-active",
+    messageId: "message/2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    text: "",
+    rawText: "",
+    attachments: [{
+      attachmentId: "doc-2",
+      kind: "file",
+      fileName: "followup.txt",
+    }],
+  });
+
+  assert.equal(channel.savedAttachments.length, 1);
+  assert.match(runner.handle.userMessages[0] ?? "", /The user attached additional files to the shared workspace/);
+  assert.match(runner.handle.userMessages[0] ?? "", /\/workspace\/share\/inbox\/message_2\/1-followup\.txt/);
 });
 
 test("orchestrator applies supported privilege requests deterministically and outside the main agent path", async () => {
@@ -274,6 +384,7 @@ test("orchestrator applies supported privilege requests deterministically and ou
     timestamp: "2026-04-01T00:00:00.000Z",
     text: "Copy a host file into the shared workspace",
     rawText: "Copy a host file into the shared workspace",
+    attachments: [],
   });
 
   await runner.emit({
@@ -339,6 +450,7 @@ test("orchestrator rejects unsupported privilege requests without prompting the 
     timestamp: "2026-04-01T00:00:00.000Z",
     text: "Check an MCP resource",
     rawText: "Check an MCP resource",
+    attachments: [],
   });
 
   await runner.emit({
@@ -386,6 +498,7 @@ test("orchestrator terminates the task when the user reports a pending privilege
     timestamp: "2026-04-01T00:00:00.000Z",
     text: "Copy a host file into the shared workspace",
     rawText: "Copy a host file into the shared workspace",
+    attachments: [],
   });
 
   await runner.emit({
@@ -436,6 +549,7 @@ test("orchestrator keeps completed-task output quarantined until the user sends 
     timestamp: "2026-04-01T00:00:00.000Z",
     text: "Inspect the environment",
     rawText: "Inspect the environment",
+    attachments: [],
   });
 
   await runner.emit({
@@ -450,6 +564,45 @@ test("orchestrator keeps completed-task output quarantined until the user sends 
   const session = store.getOrCreate("chat-4");
   assert.equal(session.activeTask, null);
   assert.deepEqual(session.pendingQuarantinedOutputs, ["The environment has 8 CPUs."]);
+});
+
+test("orchestrator sends worker-requested shared files back through the channel", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Generate a file.",
+      taskName: "file-out",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-file-out",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Generate a file",
+    rawText: "Generate a file",
+    attachments: [],
+  });
+
+  await runner.emit({
+    type: "channel_file",
+    path: "/workspace/share/results/output.txt",
+    caption: "Generated output",
+  });
+
+  assert.deepEqual(channel.sentFiles, [{
+    chatId: "chat-file-out",
+    filePath: `/tmp/${runner.launches[0]!.taskId}/results/output.txt`,
+    caption: "Generated output",
+  }]);
 });
 
 test("orchestrator closes the sandbox handle on normal task completion", async () => {
@@ -476,6 +629,7 @@ test("orchestrator closes the sandbox handle on normal task completion", async (
     timestamp: "2026-04-01T00:00:00.000Z",
     text: "Inspect the environment",
     rawText: "Inspect the environment",
+    attachments: [],
   });
 
   await runner.emit({
@@ -515,6 +669,7 @@ test("orchestrator releases completed-task output only when the user continues n
     timestamp: "2026-04-01T00:00:00.000Z",
     text: "Inspect the environment",
     rawText: "Inspect the environment",
+    attachments: [],
   });
 
   await runner.emit({
@@ -533,6 +688,7 @@ test("orchestrator releases completed-task output only when the user continues n
     timestamp: "2026-04-01T00:00:10.000Z",
     text: "thanks",
     rawText: "thanks",
+    attachments: [],
   });
 
   const session = store.getOrCreate("chat-5");
@@ -563,6 +719,7 @@ test("orchestrator discards completed-task output when the user sends a danger r
     timestamp: "2026-04-01T00:00:00.000Z",
     text: "Inspect the filesystem",
     rawText: "Inspect the filesystem",
+    attachments: [],
   });
 
   await runner.emit({
@@ -617,6 +774,7 @@ test("orchestrator keeps final_result output quarantined until the user continue
     timestamp: "2026-04-01T00:00:00.000Z",
     text: "Inspect the environment",
     rawText: "Inspect the environment",
+    attachments: [],
   });
 
   await runner.emit({
@@ -636,6 +794,7 @@ test("orchestrator keeps final_result output quarantined until the user continue
     timestamp: "2026-04-01T00:00:10.000Z",
     text: "thanks",
     rawText: "thanks",
+    attachments: [],
   });
 
   session = store.getOrCreate("chat-6");
@@ -666,6 +825,7 @@ test("orchestrator marks worker disconnects as task failure and clears the task"
     timestamp: "2026-04-01T00:00:00.000Z",
     text: "Inspect the filesystem",
     rawText: "Inspect the filesystem",
+    attachments: [],
   });
 
   await runner.emit({
@@ -701,6 +861,7 @@ test("orchestrator prompts before deleting a non-empty shared workspace", async 
     timestamp: "2026-04-01T00:00:00.000Z",
     text: "Inspect the filesystem",
     rawText: "Inspect the filesystem",
+    attachments: [],
   });
 
   const taskId = runner.launches[0]?.taskId;
@@ -751,6 +912,7 @@ test("orchestrator deletes or preserves a finished task share based on user conf
     timestamp: "2026-04-01T00:00:00.000Z",
     text: "Inspect the filesystem",
     rawText: "Inspect the filesystem",
+    attachments: [],
   });
 
   const firstTaskId = runner.launches[0]?.taskId;
@@ -785,6 +947,7 @@ test("orchestrator deletes or preserves a finished task share based on user conf
     timestamp: "2026-04-01T00:00:20.000Z",
     text: "Inspect another filesystem",
     rawText: "Inspect another filesystem",
+    attachments: [],
   });
 
   const secondTaskId = runner.launches[1]?.taskId;
@@ -843,6 +1006,7 @@ test("orchestrator blocks new idle input while shared workspace deletion is pend
     timestamp: "2026-04-01T00:00:00.000Z",
     text: "Inspect the filesystem",
     rawText: "Inspect the filesystem",
+    attachments: [],
   });
 
   const taskId = runner.launches[0]?.taskId;
@@ -863,6 +1027,7 @@ test("orchestrator blocks new idle input while shared workspace deletion is pend
     timestamp: "2026-04-01T00:00:10.000Z",
     text: "Do something else",
     rawText: "Do something else",
+    attachments: [],
   });
 
   assert.equal(mainAgent.contexts.length, 1);

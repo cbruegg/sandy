@@ -1,4 +1,10 @@
-import type { ChannelFormatting, NormalizedChatEvent, PrivilegeRequest } from "../types.js";
+import type {
+  ChannelFormatting,
+  MessageAttachment,
+  NormalizedChatEvent,
+  PrivilegeRequest,
+  SharedAttachment,
+} from "../types.js";
 
 export type MessageHandler = (event: NormalizedChatEvent) => Promise<void>;
 
@@ -6,6 +12,8 @@ export interface ChannelAdapter {
   getFormatting(): ChannelFormatting;
   start(handler: MessageHandler): Promise<void>;
   stop(): Promise<void>;
+  saveAttachments(chatId: string, attachments: MessageAttachment[], targetDirectory: string): Promise<SharedAttachment[]>;
+  sendFile(chatId: string, filePath: string, caption?: string): Promise<void>;
   sendText(chatId: string, text: string): Promise<void>;
   sendTaskUpdate(chatId: string, text: string): Promise<void>;
   sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void>;

@@ -19,6 +19,8 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - Deterministic auth selection that prefers local Codex ChatGPT auth over `OPENAI_API_KEY` when both are available.
   - Quarantining of sub-agent output until the user either reports it as dangerous or continues the conversation.
   - Deterministic cancellation and privilege-request routing.
+  - Telegram file uploads staged directly into the per-task shared workspace on task launch and during active tasks.
+  - Deterministic sub-agent requests to send files from `/workspace/share` back to the user through the channel without privilege escalation.
   - Host-mediated one-off file copy operations into and out of the per-sub-agent shared workspace.
   - Deterministic detection of worker disconnects, handshake timeouts, and control-channel write failures.
   - Structured host-side logging for significant lifecycle and failure events.
@@ -26,7 +28,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - Channel-owned formatting metadata, with Telegram output sanitized and sent as simple HTML.
   - Automatic deletion of empty per-sub-agent shared workspaces, with explicit user confirmation before deleting non-empty workspaces.
 - Not fully implemented yet:
-  - Real STT, file upload handling, and image handling.
+  - Real STT and image handling.
   - Host-side enforcement for approved resource requests beyond shared-workspace file copy, such as mount setup, MCP enablement, and OneCLI enablement.
 - Mount, MCP, and OneCLI requests remain represented in Sandy's typed protocol for future expansion, but they are currently rejected as unsupported by the host runtime.
 
@@ -109,7 +111,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - `PrivilegeBroker`
   - `SessionStore`
   - `TranscriptionProvider`
-- Normalize inbound message types as `text`, `image`, `file`, `voice`, but implement only `text` end to end in v1.
+- Normalize inbound message types as `text`, `image`, `file`, `voice`, with `text` and file attachments implemented end to end in v1.
 - Expose channel formatting metadata to both the main agent and sub-agents so user-visible output can target the active channel safely.
 - For Telegram v1, support inline buttons and fixed commands/phrases for:
   - cancel
@@ -117,7 +119,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - deny
   - danger report
 - Send Telegram messages using sanitized HTML rather than plain Markdown text.
-- Keep voice/file/image handling scaffolded at the interface level, with explicit “not supported in v1” behavior where needed.
+- Keep voice/image handling scaffolded at the interface level, with explicit “not supported in v1” behavior where needed.
 
 ### Dependencies and configuration
 - Add dependencies for:
@@ -168,7 +170,8 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - allowlisted requests can be presented and applied deterministically,
   - non-allowlisted requests are rejected safely,
   - copy-in and copy-out operations target only the requesting sub-agent’s share.
-- Unit-test unsupported voice/image/file inputs produce explicit deterministic responses.
+- Unit-test unsupported voice/image inputs produce explicit deterministic responses.
+- Unit-test file upload staging into the task share and deterministic file send-back through the channel.
 - Integration-test happy-path task launch, progress relay, privilege approval, and completion using mocked Codex, mocked Docker, mocked Telegram, and mocked worker transport.
 - Integration-test failure cases:
   - container launch failure,
@@ -182,8 +185,10 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
 - V1 is Telegram-only, text-first, single-process, and single-active-task-per-chat.
 - Runtime state is in memory only; restart recovery is out of scope.
 - The main agent is a narrow controller and does not see hidden sub-agent output.
-- Voice, image, and file inputs are part of the interface design but not fully implemented in v1.
+- Voice and image inputs are part of the interface design but not fully implemented in v1.
 - Each sub-agent gets its own shared volume; copy operations are scoped to that sub-agent’s share.
+- User-uploaded files are copied into the task share by the channel adapter and do not require privilege escalation.
+- Sending a file from `/workspace/share` back to the user through the channel does not require privilege escalation.
 - Dynamic host directory mounts are out of scope for v1.
 - MCP and OneCLI capability enablement are out of scope for v1.
 - Privilege handling in v1 is limited to host-mediated file copy operations for the per-sub-agent shared volume.
