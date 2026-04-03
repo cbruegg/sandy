@@ -28,7 +28,7 @@ Optional environment variables:
 - `OPENAI_API_KEY`: API key passed to the host controller and sub-agent worker. If omitted, Sandy uses local Codex ChatGPT auth when available.
 - `SANDY_CODEX_AUTH_FILE`: Override path to the host Codex `auth.json` file that should be mounted into sub-agent containers. Default: `~/.codex/auth.json` when present.
 - `SANDY_LOG_LEVEL`: Minimum host log level. Supported values: `debug`, `info`, `warn`, `error`. Default: `info`.
-- `SANDY_WORKER_IMAGE`: Docker image used for sub-agents. Default: `sandy-subagent:latest`.
+- `SANDY_WORKER_IMAGE`: Docker image used for sub-agents. Default: `sandy-subagent:latest` built from this repository's openSUSE Tumbleweed + Homebrew `Dockerfile`.
 - `SANDY_SHARE_ROOT`: Host directory under which per-sub-agent shared volumes are created. Default: `/tmp/sandy-shares`.
 
 Example:
@@ -143,6 +143,9 @@ Inside the sub-agent container, Codex itself runs without an additional nested s
 boundary for v1, which avoids bubblewrap/user-namespace failures inside the container.
 
 Inside their sandbox, agents are free to install any dependencies or tools they need to execute the command.
+The default worker image is based on openSUSE Tumbleweed and also includes Homebrew. The worker tells Codex when
+`zypper` and `brew` are available so it can use `zypper` for system packages and `brew` for fast-moving CLI or
+developer tools during task execution.
 
 Sub-agents may request access to additional resources from the user, such as:
 - Certain files to be copied in and out of the shared volume.

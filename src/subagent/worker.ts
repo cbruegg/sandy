@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import {
@@ -167,6 +168,14 @@ async function handleThreadEvent(event: ThreadEvent): Promise<ThreadEventDisposi
 }
 
 export function buildInitialTaskInput(taskBrief: string, channelFormatting: ChannelFormatting | null): string {
+  return buildInitialTaskInputWithCapabilities(taskBrief, channelFormatting, detectRuntimeCapabilities());
+}
+
+export function buildInitialTaskInputWithCapabilities(
+  taskBrief: string,
+  channelFormatting: ChannelFormatting | null,
+  runtimeCapabilities: string[],
+): string {
   const lines = [
     "You are running inside a Sandy sub-agent container.",
     "Your shared workspace is mounted at /workspace/share.",
@@ -181,6 +190,10 @@ export function buildInitialTaskInput(taskBrief: string, channelFormatting: Chan
     "After emitting a host-mediated request, stop and wait for the next host message before continuing.",
   ];
 
+  if (runtimeCapabilities.length > 0) {
+    lines.push(...runtimeCapabilities);
+  }
+
   if (channelFormatting) {
     lines.push(
       `User-visible output must follow this channel formatting contract: ${channelFormatting.instructions}`,
@@ -190,6 +203,35 @@ export function buildInitialTaskInput(taskBrief: string, channelFormatting: Chan
 
   lines.push("", taskBrief);
   return lines.join("\n");
+}
+
+function detectRuntimeCapabilities(): string[] {
+  const capabilities: string[] = [];
+  const zypperVersion = spawnSync("zypper", ["--version"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+
+  if (zypperVersion.status === 0) {
+    capabilities.push(
+      "Detected package manager: zypper.",
+      "You can install or update openSUSE Tumbleweed packages in this container with zypper when needed.",
+    );
+  }
+
+  const brewVersion = spawnSync("brew", ["--version"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+
+  if (brewVersion.status === 0) {
+    capabilities.push(
+      "Detected package manager: Homebrew.",
+      "Use brew for fast-moving CLI and developer tools; the container's brew command runs under the dedicated linuxbrew user automatically.",
+    );
+  }
+
+  return capabilities;
 }
 
 export function buildPrivilegeResolutionInput(result: PrivilegeResolutionResult): string {
@@ -294,7 +336,7 @@ async function main(): Promise<void> {
   process.stdin.resume();
 
   send({ type: "worker_connected" });
-  enqueueTurn(buildInitialTaskInput(taskBrief, channelFormatting));
+  enqueueTurn(buildInitialTaskInputWithCapabilities(taskBrief, channelFormatting, detectRuntimeCapabilities()));
 
   input.on("line", (line) => {
     const trimmed = line.trim();

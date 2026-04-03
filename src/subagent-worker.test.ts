@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildInitialTaskInput,
+  buildInitialTaskInputWithCapabilities,
   buildPrivilegeResolutionInput,
   parsePrivilegeRequestMessage,
 } from "./subagent/worker.js";
@@ -23,6 +24,24 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
   assert.match(input, /Telegram HTML/);
   assert.match(input, /<code>/);
   assert.match(input, /leave a summary file\./);
+});
+
+test("buildInitialTaskInputWithCapabilities includes package-manager guidance when detected during init", () => {
+  const input = buildInitialTaskInputWithCapabilities(
+    "Install dependencies if needed.",
+    null,
+    [
+      "Detected package manager: zypper.",
+      "You can install or update openSUSE Tumbleweed packages in this container with zypper when needed.",
+      "Detected package manager: Homebrew.",
+      "Use brew for fast-moving CLI and developer tools; the container's brew command runs under the dedicated linuxbrew user automatically.",
+    ],
+  );
+
+  assert.match(input, /Detected package manager: zypper\./);
+  assert.match(input, /openSUSE Tumbleweed packages/);
+  assert.match(input, /Detected package manager: Homebrew\./);
+  assert.match(input, /brew command runs under the dedicated linuxbrew user/);
 });
 
 test("buildPrivilegeResolutionInput explains the host privilege result to the sub-agent", () => {
