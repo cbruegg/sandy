@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
 import type { ChannelAdapter } from "./channel/channel-adapter.js";
 import type { MainAgentController } from "./agent/main-agent-controller.js";
 import type { PrivilegeBroker } from "./privilege/privilege-broker.js";
@@ -10,18 +9,21 @@ import { logger } from "./logger.js";
 import { messages } from "./messages.js";
 import type {
   MainAgentDecision,
-  MessageAttachment,
   NormalizedChatEvent,
   PrivilegeRequest,
   PrivilegeResolutionResult,
-  SavedAttachment,
   SessionState,
-  SharedAttachment,
   SubAgentEvent,
   TranscriptEntry,
 } from "./types.js";
 import { toTaskMetadata } from "./types.js";
-import { resolveTaskShareHostPath, toSharedWorkspacePath } from "./shared-workspace.js";
+import { resolveTaskShareHostPath } from "./shared-workspace.js";
+import {
+  buildTaskBriefWithAttachments,
+  buildWorkerFollowUpInput,
+  describeUserMessageForMainAgent,
+} from "./orchestrator-worker-input.js";
+import { stageSharedAttachments } from "./orchestrator-task-share.js";
 
 type ActiveHandleRecord = {
   handle: SandboxHandle;
@@ -527,28 +529,17 @@ export class SandyOrchestrator {
   private async stageAttachments(
     chatId: string,
     messageId: string,
-    attachments: MessageAttachment[],
+    attachments: Extract<NormalizedChatEvent, { kind: "user_text" }>["attachments"],
     taskId: string,
-  ): Promise<SharedAttachment[]> {
-    if (attachments.length === 0) {
-      return [];
-    }
-
-    const taskSharePath = this.deps.sandboxRunner.getTaskSharePath(taskId);
-    const targetDirectory = join(
-      taskSharePath,
-      "inbox",
-      sanitizePathSegment(messageId),
-    );
-    const savedAttachments = await this.deps.channel.saveAttachments(chatId, attachments, targetDirectory);
-    return this.buildSharedAttachments(taskSharePath, savedAttachments);
-  }
-
-  private buildSharedAttachments(taskSharePath: string, attachments: SavedAttachment[]): SharedAttachment[] {
-    return attachments.map((attachment) => ({
-      ...attachment,
-      sharePath: toSharedWorkspacePath(taskSharePath, attachment.hostPath, `${attachment.fileName} hostPath`),
-    }));
+  ) {
+    return stageSharedAttachments({
+      channel: this.deps.channel,
+      sandboxRunner: this.deps.sandboxRunner,
+      chatId,
+      messageId,
+      attachments,
+      taskId,
+    });
   }
 
   private async prepareShareDeletion(session: SessionState, taskId: string, taskName: string): Promise<void> {
@@ -587,50 +578,4 @@ export class SandyOrchestrator {
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled main agent decision: ${JSON.stringify(value)}`);
-}
-
-function describeUserMessageForMainAgent(text: string, attachments: MessageAttachment[]): string {
-  if (attachments.length === 0) {
-    return text;
-  }
-
-  const attachmentSummary = [
-    "Attached files:",
-    ...attachments.map((attachment) => `- ${attachment.fileName}`),
-  ].join("\n");
-  return text.trim() ? `${text}\n\n${attachmentSummary}` : attachmentSummary;
-}
-
-function buildTaskBriefWithAttachments(taskBrief: string, attachments: SharedAttachment[]): string {
-  const sections = [taskBrief];
-  if (attachments.length > 0) {
-    sections.push([
-      "Files attached by the user are already available in the shared workspace:",
-      ...attachments.map((attachment) => `- ${attachment.fileName}: ${attachment.sharePath}`),
-      "Using these files does not require privilege escalation.",
-    ].join("\n"));
-  }
-
-  return sections.join("\n\n");
-}
-
-function buildWorkerFollowUpInput(text: string, attachments: SharedAttachment[]): string {
-  const sections = [text.trim()].filter((section) => section.length > 0);
-  if (attachments.length > 0) {
-    sections.push([
-      "The user attached additional files to the shared workspace:",
-      ...attachments.map((attachment) => `- ${attachment.fileName}: ${attachment.sharePath}`),
-      "Using these files does not require privilege escalation.",
-    ].join("\n"));
-  }
-  return sections.join("\n\n");
-}
-
-function sanitizePathSegment(value: string): string {
-  const normalized = value.replaceAll(/[^A-Za-z0-9._-]+/g, "_").replaceAll(/^_+|_+$/g, "");
-  return normalized || "message";
-}
-
-export function describeActiveTaskForMainAgent(session: SessionState) {
-  return session.activeTask ? toTaskMetadata(session.activeTask) : null;
 }

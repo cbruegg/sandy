@@ -1,17 +1,15 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { basename } from "node:path";
 import { Bot, InputFile, type Context, type PollingOptions } from "grammy";
 import type { Update } from "grammy/types";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { buttonLabels, messages } from "../messages.js";
 import { sanitizeTelegramHtml, telegramHtmlAllowedTags } from "./telegram-html.js";
+import { normalizeTelegramUpdate } from "./telegram-normalization.js";
+import { saveTelegramAttachments } from "./telegram-files.js";
 import type {
-  ApprovalResponseEvent,
   ChannelFormatting,
-  DangerReportEvent,
   MessageAttachment,
-  NormalizedChatEvent,
   PrivilegeRequest,
   SavedAttachment,
 } from "../types.js";
@@ -59,119 +57,6 @@ const telegramFormatting: ChannelFormatting = {
 
 function defaultBotFactory(token: string): TelegramBotLike {
   return new Bot(token);
-}
-
-function nowFromUnix(seconds: number): string {
-  return new Date(seconds * 1000).toISOString();
-}
-
-export function normalizeTelegramUpdate(update: Update): NormalizedChatEvent | null {
-  if (update.callback_query?.data && update.callback_query.message && "date" in update.callback_query.message) {
-    const { data, message } = update.callback_query;
-    const base = {
-      chatId: String(message.chat.id),
-      messageId: `callback:${update.callback_query.id}`,
-      timestamp: nowFromUnix(message.date),
-    };
-
-    if (data.startsWith("approve:")) {
-      const event: ApprovalResponseEvent = {
-        ...base,
-        kind: "approval_response",
-        decision: "approve",
-        requestId: data.slice("approve:".length) || undefined,
-      };
-      return event;
-    }
-
-    if (data.startsWith("deny:")) {
-      const event: ApprovalResponseEvent = {
-        ...base,
-        kind: "approval_response",
-        decision: "deny",
-        requestId: data.slice("deny:".length) || undefined,
-      };
-      return event;
-    }
-
-    if (data === "report") {
-      const event: DangerReportEvent = {
-        ...base,
-        kind: "danger_report",
-      };
-      return event;
-    }
-
-    if (data === "cancel") {
-      return {
-        ...base,
-        kind: "cancel_request",
-      };
-    }
-  }
-
-  if (!update.message) {
-    return null;
-  }
-
-  const base = {
-    chatId: String(update.message.chat.id),
-    messageId: String(update.message.message_id),
-    timestamp: nowFromUnix(update.message.date),
-  };
-
-  if ("text" in update.message && typeof update.message.text === "string") {
-    const rawText = update.message.text;
-    const normalized = rawText.trim().toLowerCase();
-
-    if (normalized === "/cancel" || normalized === "cancel") {
-      return { ...base, kind: "cancel_request" };
-    }
-    if (normalized === "/report" || normalized === "report") {
-      return { ...base, kind: "danger_report" };
-    }
-    if (normalized === "/approve" || normalized === "approve") {
-      return { ...base, kind: "approval_response", decision: "approve" };
-    }
-    if (normalized === "/deny" || normalized === "deny") {
-      return { ...base, kind: "approval_response", decision: "deny" };
-    }
-
-    return {
-      ...base,
-      kind: "user_text",
-      text: rawText,
-      rawText,
-      attachments: [],
-    };
-  }
-
-  if ("voice" in update.message && update.message.voice) {
-    return { ...base, kind: "unsupported_input", inputType: "voice" };
-  }
-
-  if ("photo" in update.message && update.message.photo) {
-    return { ...base, kind: "unsupported_input", inputType: "image" };
-  }
-
-  if ("document" in update.message && update.message.document) {
-    const fileName = sanitizeTelegramFileName(update.message.document.file_name);
-    const caption = typeof update.message.caption === "string" ? update.message.caption : "";
-    return {
-      ...base,
-      kind: "user_text",
-      text: caption,
-      rawText: caption,
-      attachments: [{
-        attachmentId: update.message.document.file_id,
-        kind: "file",
-        fileName,
-        mimeType: update.message.document.mime_type,
-      }],
-    };
-  }
-
-  return null;
 }
 
 export class TelegramBotApiAdapter implements ChannelAdapter {
@@ -322,45 +207,16 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
   }
 
   async saveAttachments(chatId: string, attachments: MessageAttachment[], targetDirectory: string): Promise<SavedAttachment[]> {
-    if (attachments.length === 0) {
-      return [];
-    }
-
-    await mkdir(targetDirectory, { recursive: true });
-    const saved: SavedAttachment[] = [];
-
-    for (const [index, attachment] of attachments.entries()) {
-      const file = await this.bot.api.getFile(attachment.attachmentId);
-      if (!file.file_path) {
-        throw new Error(`Telegram did not return a download path for attachment ${attachment.attachmentId}.`);
-      }
-
-      const response = await fetch(this.buildFileUrl(file.file_path));
-      if (!response.ok) {
-        throw new Error(`Telegram file download failed with status ${response.status} for attachment ${attachment.attachmentId}.`);
-      }
-
-      const arrayBuffer = await response.arrayBuffer();
-      const fileName = withUniquePrefix(index, attachment.fileName);
-      const hostPath = resolve(targetDirectory, fileName);
-      await writeFile(hostPath, Buffer.from(arrayBuffer));
-
-      logger.info("telegram.attachment_saved", {
-        chatId,
-        attachmentId: attachment.attachmentId,
-        hostPath,
-      });
-
-      saved.push({
-        attachmentId: attachment.attachmentId,
-        kind: attachment.kind,
-        fileName: attachment.fileName,
-        hostPath,
-        mimeType: attachment.mimeType,
-      });
-    }
-
-    return saved;
+    return saveTelegramAttachments({
+      api: this.bot.api,
+      token: this.token,
+      chatId,
+      attachments,
+      targetDirectory,
+      logSavedAttachment: (entry) => {
+        logger.info("telegram.attachment_saved", entry);
+      },
+    });
   }
 
   async sendFile(chatId: string, filePath: string, caption?: string): Promise<void> {
@@ -384,23 +240,10 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       ...other,
     });
   }
-
-  private buildFileUrl(filePath: string): string {
-    return `https://api.telegram.org/file/bot${this.token}/${filePath}`;
-  }
 }
 
 function previewText(text: string): string {
   return text.length <= 120 ? text : `${text.slice(0, 117)}...`;
 }
 
-function sanitizeTelegramFileName(fileName: string | undefined): string {
-  const fallback = "attachment";
-  const trimmed = (fileName ?? fallback).trim();
-  const normalized = trimmed.replaceAll(/[^A-Za-z0-9._-]+/g, "_").replaceAll(/^_+|_+$/g, "");
-  return normalized || fallback;
-}
-
-function withUniquePrefix(index: number, fileName: string): string {
-  return `${index + 1}-${fileName}`;
-}
+export { normalizeTelegramUpdate } from "./telegram-normalization.js";

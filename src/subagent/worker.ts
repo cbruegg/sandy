@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import {
@@ -12,17 +11,20 @@ import {
   type ChannelFormatting,
   type HostCommand,
   type PrivilegeRequest,
-  type PrivilegeResolutionResult,
   type SubAgentEvent,
 } from "../types.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 import {
-  buildWorkerProtocolInstructions,
   channelFilePrefix,
   parseChannelFileMessage,
   privilegeRequestPrefix,
   parsePrivilegeRequestMessage,
 } from "./worker-protocol.js";
+import {
+  buildInitialTaskInput,
+  buildInitialTaskInputWithCapabilities,
+  buildPrivilegeResolutionInput,
+} from "./worker-prompt.js";
 type ThreadEventDisposition = "none" | "privilege_request" | "channel_file" | "terminal_error";
 type PrivilegeParseResult =
   | { kind: "none" }
@@ -65,7 +67,7 @@ function parseChannelFormatting(raw: string | null): ChannelFormatting | null {
   return {
     channel: parsed.channel,
     markup: parsed.markup,
-    allowedTags: parsed.allowedTags.filter((entry): entry is string => typeof entry === "string"),
+    allowedTags: parsed.allowedTags.filter((entry: unknown): entry is string => typeof entry === "string"),
     instructions: parsed.instructions,
   };
 }
@@ -196,77 +198,6 @@ async function handleThreadEvent(event: ThreadEvent): Promise<ThreadEventDisposi
   }
 }
 
-export function buildInitialTaskInput(taskBrief: string, channelFormatting: ChannelFormatting | null): string {
-  return buildInitialTaskInputWithCapabilities(taskBrief, channelFormatting, detectRuntimeCapabilities());
-}
-
-export function buildInitialTaskInputWithCapabilities(
-  taskBrief: string,
-  channelFormatting: ChannelFormatting | null,
-  runtimeCapabilities: string[],
-): string {
-  const lines = [
-    "You are running inside a Sandy sub-agent container.",
-    `Your shared workspace is mounted at ${sharedWorkspaceMountPath}.`,
-    `Use ${sharedWorkspaceMountPath} for files that should remain available to the host after your task finishes.`,
-    `User-attached files are copied into ${sharedWorkspaceMountPath} before you are told about them.`,
-    "Inside this container you may use the filesystem, network, and installed tools freely.",
-    `If you need the host to copy files into or out of ${sharedWorkspaceMountPath}, do not ask the user directly.`,
-    ...buildWorkerProtocolInstructions(),
-  ];
-
-  if (runtimeCapabilities.length > 0) {
-    lines.push(...runtimeCapabilities);
-  }
-
-  if (channelFormatting) {
-    lines.push(
-      `User-visible output must follow this channel formatting contract: ${channelFormatting.instructions}`,
-      `Allowed formatting tags: ${channelFormatting.allowedTags.map((tag) => `<${tag}>`).join(", ")}`,
-    );
-  }
-
-  lines.push("", taskBrief);
-  return lines.join("\n");
-}
-
-function detectRuntimeCapabilities(): string[] {
-  const capabilities: string[] = [];
-  const zypperVersion = spawnSync("zypper", ["--version"], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  });
-
-  if (zypperVersion.status === 0) {
-    capabilities.push(
-      "Detected package manager: zypper.",
-      "You can install or update openSUSE Tumbleweed packages in this container with zypper when needed.",
-    );
-  }
-
-  const brewVersion = spawnSync("brew", ["--version"], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  });
-
-  if (brewVersion.status === 0) {
-    capabilities.push(
-      "Detected package manager: Homebrew.",
-      "Use brew for fast-moving CLI and developer tools; the container's brew command runs under the dedicated linuxbrew user automatically.",
-    );
-  }
-
-  return capabilities;
-}
-
-export function buildPrivilegeResolutionInput(result: PrivilegeResolutionResult): string {
-  return [
-    `Host privilege request ${result.requestId} finished with outcome "${result.outcome}".`,
-    result.message,
-    "Continue the task from here.",
-  ].join("\n");
-}
-
 function tryParsePrivilegeRequestMessage(text: string): PrivilegeParseResult {
   try {
     const request = parsePrivilegeRequestMessage(text);
@@ -348,7 +279,7 @@ async function main(): Promise<void> {
   process.stdin.resume();
 
   send({ type: "worker_connected" });
-  enqueueTurn(buildInitialTaskInputWithCapabilities(taskBrief, channelFormatting, detectRuntimeCapabilities()));
+  enqueueTurn(buildInitialTaskInput(taskBrief, channelFormatting));
 
   input.on("line", (line) => {
     const trimmed = line.trim();
@@ -388,3 +319,8 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   await main();
 }
 export { parsePrivilegeRequestMessage } from "./worker-protocol.js";
+export {
+  buildInitialTaskInput,
+  buildInitialTaskInputWithCapabilities,
+  buildPrivilegeResolutionInput,
+} from "./worker-prompt.js";
