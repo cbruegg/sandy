@@ -13,7 +13,7 @@ import type {
   MessageAttachment,
   NormalizedChatEvent,
   PrivilegeRequest,
-  SharedAttachment,
+  SavedAttachment,
 } from "../types.js";
 
 type TelegramApiLike = {
@@ -321,13 +321,13 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     });
   }
 
-  async saveAttachments(chatId: string, attachments: MessageAttachment[], targetDirectory: string): Promise<SharedAttachment[]> {
+  async saveAttachments(chatId: string, attachments: MessageAttachment[], targetDirectory: string): Promise<SavedAttachment[]> {
     if (attachments.length === 0) {
       return [];
     }
 
     await mkdir(targetDirectory, { recursive: true });
-    const saved: SharedAttachment[] = [];
+    const saved: SavedAttachment[] = [];
 
     for (const [index, attachment] of attachments.entries()) {
       const file = await this.bot.api.getFile(attachment.attachmentId);
@@ -356,7 +356,6 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
         kind: attachment.kind,
         fileName: attachment.fileName,
         hostPath,
-        sharePath: `/workspace/share/inbox/${basename(targetDirectory)}/${fileName}`,
         mimeType: attachment.mimeType,
       });
     }

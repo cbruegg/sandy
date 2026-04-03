@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
@@ -10,16 +9,20 @@ import {
   type TodoListItem,
 } from "@openai/codex-sdk";
 import {
-  parsePrivilegeRequest,
   type ChannelFormatting,
   type HostCommand,
   type PrivilegeRequest,
   type PrivilegeResolutionResult,
   type SubAgentEvent,
 } from "../types.js";
-
-const privilegeRequestPrefix = "SANDY_PRIVILEGE_REQUEST ";
-const channelFilePrefix = "SANDY_CHANNEL_FILE ";
+import { sharedWorkspaceMountPath } from "../shared-workspace.js";
+import {
+  buildWorkerProtocolInstructions,
+  channelFilePrefix,
+  parseChannelFileMessage,
+  privilegeRequestPrefix,
+  parsePrivilegeRequestMessage,
+} from "./worker-protocol.js";
 type ThreadEventDisposition = "none" | "privilege_request" | "channel_file" | "terminal_error";
 type PrivilegeParseResult =
   | { kind: "none" }
@@ -204,24 +207,12 @@ export function buildInitialTaskInputWithCapabilities(
 ): string {
   const lines = [
     "You are running inside a Sandy sub-agent container.",
-    "Your shared workspace is mounted at /workspace/share.",
-    "Use /workspace/share for files that should remain available to the host after your task finishes.",
-    "User-attached files are copied into /workspace/share before you are told about them.",
+    `Your shared workspace is mounted at ${sharedWorkspaceMountPath}.`,
+    `Use ${sharedWorkspaceMountPath} for files that should remain available to the host after your task finishes.`,
+    `User-attached files are copied into ${sharedWorkspaceMountPath} before you are told about them.`,
     "Inside this container you may use the filesystem, network, and installed tools freely.",
-    "If you need the host to copy files into or out of /workspace/share, do not ask the user directly.",
-    "Protocol requirements for host-mediated actions:",
-    `- For privileged host file copy requests, output exactly one line with no surrounding text: ${privilegeRequestPrefix}{...json...}`,
-    `- JSON schema for ${privilegeRequestPrefix}: {"type":"copy_into_share"|"copy_out_of_share","sourcePath":"string","targetPath":"string","reason":"string"}`,
-    "Allowed host-mediated request types are copy_into_share and copy_out_of_share.",
-    "For any host-mediated request, use absolute paths. Any shared-workspace path must stay under /workspace/share.",
-    `Example for copying a result file to Downloads: ${privilegeRequestPrefix}{"type":"copy_out_of_share","sourcePath":"/workspace/share/result.txt","targetPath":"~/Downloads/result.txt","reason":"Need to deliver the generated file to the user."}`,
-    `Example for copying a host file in: ${privilegeRequestPrefix}{"type":"copy_into_share","sourcePath":"~/Downloads/input.txt","targetPath":"/workspace/share/input.txt","reason":"Need the user-provided input file inside the task workspace."}`,
-    `- To send a file that already exists under /workspace/share back to the user, output exactly one line with no surrounding text: ${channelFilePrefix}{...json...}`,
-    `- JSON schema for ${channelFilePrefix}: {"path":"string","caption":"string optional"}`,
-    "Sending a file from /workspace/share back to the user through the channel does not require privilege escalation.",
-    "Do not describe the saved path in prose when you want the file delivered. Emit the protocol line instead.",
-    `Example for sending a file to the user: ${channelFilePrefix}{"path":"/workspace/share/result.txt","caption":"Generated result file."}`,
-    "After emitting a host-mediated request, stop and wait for the next host message before continuing.",
+    `If you need the host to copy files into or out of ${sharedWorkspaceMountPath}, do not ask the user directly.`,
+    ...buildWorkerProtocolInstructions(),
   ];
 
   if (runtimeCapabilities.length > 0) {
@@ -272,46 +263,11 @@ export function buildPrivilegeResolutionInput(result: PrivilegeResolutionResult)
   return [
     `Host privilege request ${result.requestId} finished with outcome "${result.outcome}".`,
     result.message,
-    buildProtocolReminder(),
     "Continue the task from here.",
   ].join("\n");
 }
 
-export function parsePrivilegeRequestMessage(text: string): PrivilegeRequest | null {
-  const rawPayload = extractPrivilegeRequestPayload(text);
-  if (!rawPayload) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(rawPayload) as unknown;
-    if (!parsed || typeof parsed !== "object") {
-      throw new Error("Privilege request payload must be a JSON object.");
-    }
-    return parsePrivilegeRequest({
-      ...(parsed as Record<string, unknown>),
-      requestId: randomUUID(),
-    });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "Unknown privilege request parse failure.";
-    throw new Error(`${detail} Payload: ${rawPayload}`);
-  }
-}
-
-function extractPrivilegeRequestPayload(text: string): string | null {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith(privilegeRequestPrefix)) {
-    return null;
-  }
-  return trimmed.slice(privilegeRequestPrefix.length).trim();
-}
-
 function tryParsePrivilegeRequestMessage(text: string): PrivilegeParseResult {
-  const rawPayload = extractPrivilegeRequestPayload(text);
-  if (!rawPayload) {
-    return { kind: "none" };
-  }
-
   try {
     const request = parsePrivilegeRequestMessage(text);
     return request ? { kind: "parsed", request } : { kind: "none" };
@@ -322,29 +278,6 @@ function tryParsePrivilegeRequestMessage(text: string): PrivilegeParseResult {
       message: `Invalid privilege request payload: ${detail}`,
     };
   }
-}
-
-function parseChannelFileMessage(text: string): { path: string; caption?: string } | null {
-  const trimmed = text.trim();
-  if (trimmed.startsWith(channelFilePrefix)) {
-    const rawPayload = trimmed.slice(channelFilePrefix.length).trim();
-    const parsed = JSON.parse(rawPayload) as unknown;
-    if (!parsed || typeof parsed !== "object") {
-      throw new Error("Channel file payload must be a JSON object.");
-    }
-
-    const path = "path" in parsed ? parsed.path : undefined;
-    const caption = "caption" in parsed ? parsed.caption : undefined;
-    if (typeof path !== "string" || (caption !== undefined && typeof caption !== "string")) {
-      throw new Error("Channel file payload must contain a string path and optional string caption.");
-    }
-
-    return {
-      path,
-      caption,
-    };
-  }
-  return null;
 }
 
 function tryParseChannelFileMessage(text: string): ChannelFileParseResult {
@@ -368,15 +301,6 @@ function tryParseChannelFileMessage(text: string): ChannelFileParseResult {
   }
 }
 
-function buildProtocolReminder(): string {
-  return [
-    "Protocol reminder:",
-    `- Privileged copy request line: ${privilegeRequestPrefix}{"type":"copy_into_share"|"copy_out_of_share","sourcePath":"...","targetPath":"...","reason":"..."}`,
-    `- Non-privileged send-file line: ${channelFilePrefix}{"path":"/workspace/share/...","caption":"optional"}`,
-    "- Emit exactly one protocol line with no surrounding text when you want the host to act.",
-  ].join("\n");
-}
-
 async function main(): Promise<void> {
   const taskBrief = getRequiredEnv("SANDY_TASK_BRIEF");
   const apiKey = getOptionalEnv("OPENAI_API_KEY");
@@ -384,7 +308,7 @@ async function main(): Promise<void> {
 
   const codex = apiKey ? new Codex({ apiKey }) : new Codex();
   const thread = codex.startThread({
-    workingDirectory: "/workspace/share",
+    workingDirectory: sharedWorkspaceMountPath,
     skipGitRepoCheck: true,
     // Docker is the actual isolation boundary for sub-agents; avoid nested bwrap sandboxing in-container.
     sandboxMode: "danger-full-access",
@@ -463,3 +387,4 @@ async function main(): Promise<void> {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await main();
 }
+export { parsePrivilegeRequestMessage } from "./worker-protocol.js";

@@ -242,6 +242,30 @@ test("DockerSandboxRunner reports a disconnect when writing to the worker stdin 
   ]);
 });
 
+test("DockerSandboxRunner terminates the container if event delivery rejects", async () => {
+  const taskChild = new FakeChildProcess();
+  const events: SubAgentEvent[] = [];
+  const { invocations } = await launchRunnerWithChild(taskChild, async (event) => {
+    events.push(event);
+    if (event.type === "progress") {
+      throw new Error("event handler failed");
+    }
+  });
+
+  taskChild.stdout.write('{"type":"worker_connected"}\n');
+  await flushEvents();
+
+  taskChild.stderr.write("background warning\n");
+  await flushEvents();
+
+  assert.deepEqual(events, [
+    { type: "worker_connected" },
+    { type: "progress", message: "background warning" },
+  ]);
+  assert.deepEqual(taskChild.killSignals, ["SIGTERM"]);
+  assert.ok(invocations.some((invocation) => invocation.args[0] === "rm"));
+});
+
 test("DockerSandboxRunner cancellation does not emit a spurious disconnect", async () => {
   const taskChild = new FakeChildProcess();
   const events: SubAgentEvent[] = [];

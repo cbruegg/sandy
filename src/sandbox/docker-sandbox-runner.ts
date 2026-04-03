@@ -6,6 +6,7 @@ import { logger } from "../logger.js";
 import type { SandboxHandle, SandboxRunner, LaunchTaskRequest, ShareInspection } from "./sandbox-runner.js";
 import type { HostCommand, PrivilegeResolutionResult, SubAgentEvent } from "../types.js";
 import { parseSubAgentEvent, serializeHostCommand } from "../types.js";
+import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 
 export type DockerSandboxRunnerOptions = {
   workerImage: string;
@@ -79,7 +80,7 @@ export class DockerSandboxRunner implements SandboxRunner {
 
     dockerArgs.push(
       "-v",
-      `${sharePath}:/workspace/share`,
+      `${sharePath}:${sharedWorkspaceMountPath}`,
       this.options.workerImage,
     );
 
@@ -117,6 +118,28 @@ export class DockerSandboxRunner implements SandboxRunner {
       await onEvent(event);
     };
 
+    const handleEventDeliveryFailure = async (event: SubAgentEvent, error: unknown): Promise<void> => {
+      logger.error("sandbox.event_handler_failed", {
+        taskId: request.taskId,
+        eventType: event.type,
+        message: error instanceof Error ? error.message : "Unknown event delivery failure.",
+      });
+      if (finished || shutdownRequested) {
+        return;
+      }
+      finished = true;
+      shutdownRequested = true;
+      clearHandshakeTimer();
+      child.kill("SIGTERM");
+      await this.sendDockerKill(containerName);
+    };
+
+    const emitEventSafely = (event: SubAgentEvent): void => {
+      void emitEvent(event).catch(async (error) => {
+        await handleEventDeliveryFailure(event, error);
+      });
+    };
+
     const reportDisconnect = async (message: string): Promise<void> => {
       if (disconnectReported || terminalEventSeen || shutdownRequested) {
         return;
@@ -133,7 +156,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       });
     };
 
-    this.attachStdoutParser(child, emitEvent);
+    this.attachStdoutParser(child, emitEventSafely);
     logger.info("sandbox.started", {
       taskId: request.taskId,
       containerName,
@@ -146,7 +169,7 @@ export class DockerSandboxRunner implements SandboxRunner {
           taskId: request.taskId,
           message,
         });
-        void emitEvent({
+        emitEventSafely({
           type: "progress",
           message,
         });
@@ -163,7 +186,7 @@ export class DockerSandboxRunner implements SandboxRunner {
         taskId: request.taskId,
         message: error.message,
       });
-      void emitEvent({
+      emitEventSafely({
         type: "task_error",
         message: `Failed to launch Docker sub-agent: ${error.message}`,
       });
@@ -311,10 +334,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     return sharePath;
   }
 
-  private attachStdoutParser(
-    child: ChildProcessWithoutNullStreams,
-    onEvent: (event: SubAgentEvent) => Promise<void>,
-  ): void {
+  private attachStdoutParser(child: ChildProcessWithoutNullStreams, onEvent: (event: SubAgentEvent) => void): void {
     const stdout = createInterface({
       input: child.stdout,
       crlfDelay: Infinity,
@@ -331,12 +351,12 @@ export class DockerSandboxRunner implements SandboxRunner {
         logger.debug("sandbox.worker_event", {
           eventType: event.type,
         });
-        void onEvent(event);
+        onEvent(event);
       } catch {
         logger.warn("sandbox.stdout_non_json", {
           line: trimmed,
         });
-        void onEvent({
+        onEvent({
           type: "progress",
           message: trimmed,
         });

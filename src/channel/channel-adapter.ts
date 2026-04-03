@@ -3,7 +3,7 @@ import type {
   MessageAttachment,
   NormalizedChatEvent,
   PrivilegeRequest,
-  SharedAttachment,
+  SavedAttachment,
 } from "../types.js";
 
 export type MessageHandler = (event: NormalizedChatEvent) => Promise<void>;
@@ -12,7 +12,7 @@ export interface ChannelAdapter {
   getFormatting(): ChannelFormatting;
   start(handler: MessageHandler): Promise<void>;
   stop(): Promise<void>;
-  saveAttachments(chatId: string, attachments: MessageAttachment[], targetDirectory: string): Promise<SharedAttachment[]>;
+  saveAttachments(chatId: string, attachments: MessageAttachment[], targetDirectory: string): Promise<SavedAttachment[]>;
   sendFile(chatId: string, filePath: string, caption?: string): Promise<void>;
   sendText(chatId: string, text: string): Promise<void>;
   sendTaskUpdate(chatId: string, text: string): Promise<void>;

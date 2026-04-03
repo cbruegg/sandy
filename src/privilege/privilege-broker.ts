@@ -1,9 +1,8 @@
 import { cp, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import type { PrivilegeRequest, PrivilegeResolutionResult } from "../types.js";
-
-const shareMountPath = "/workspace/share";
+import { resolveTaskShareHostPath } from "../shared-workspace.js";
 
 export type PrivilegeContext = {
   taskId: string;
@@ -42,7 +41,7 @@ export class PrivilegeBrokerImpl implements PrivilegeBroker {
     context: PrivilegeContext,
   ): Promise<PrivilegeResolutionResult> {
     const sourcePath = resolveAbsoluteHostPath(request.sourcePath, "copy_into_share sourcePath");
-    const targetPath = resolveSharePath(context.taskSharePath, request.targetPath, "copy_into_share targetPath");
+    const targetPath = resolveTaskShareHostPath(context.taskSharePath, request.targetPath, "copy_into_share targetPath");
 
     await mkdir(dirname(targetPath), { recursive: true });
     await cp(sourcePath, targetPath, { recursive: true });
@@ -58,7 +57,7 @@ export class PrivilegeBrokerImpl implements PrivilegeBroker {
     request: Extract<SupportedPrivilegeRequest, { type: "copy_out_of_share" }>,
     context: PrivilegeContext,
   ): Promise<PrivilegeResolutionResult> {
-    const sourcePath = resolveSharePath(context.taskSharePath, request.sourcePath, "copy_out_of_share sourcePath");
+    const sourcePath = resolveTaskShareHostPath(context.taskSharePath, request.sourcePath, "copy_out_of_share sourcePath");
     const targetPath = resolveAbsoluteHostPath(request.targetPath, "copy_out_of_share targetPath");
 
     await mkdir(dirname(targetPath), { recursive: true });
@@ -82,20 +81,6 @@ function resolveAbsoluteHostPath(inputPath: string, fieldName: string): string {
     throw new Error(`${fieldName} must be an absolute path.`);
   }
   return resolve(expandedPath);
-}
-
-function resolveSharePath(taskSharePath: string, requestPath: string, fieldName: string): string {
-  if (!isAbsolute(requestPath)) {
-    throw new Error(`${fieldName} must be an absolute path under ${shareMountPath}.`);
-  }
-
-  const normalizedRequestPath = resolve(requestPath);
-  const relativeToShare = relative(shareMountPath, normalizedRequestPath);
-  if (relativeToShare.startsWith("..") || isAbsolute(relativeToShare)) {
-    throw new Error(`${fieldName} must stay within ${shareMountPath}.`);
-  }
-
-  return resolve(taskSharePath, relativeToShare);
 }
 
 function expandHomePath(inputPath: string): string {

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
 import type { ChannelAdapter } from "./channel/channel-adapter.js";
 import type { MainAgentController } from "./agent/main-agent-controller.js";
 import { messages } from "./messages.js";
@@ -15,7 +15,7 @@ import type {
   MessageAttachment,
   PrivilegeRequest,
   PrivilegeResolutionResult,
-  SharedAttachment,
+  SavedAttachment,
   SubAgentEvent,
 } from "./types.js";
 import type { SupportedPrivilegeRequest } from "./privilege/privilege-broker.js";
@@ -34,6 +34,7 @@ class RecordingChannel implements ChannelAdapter {
   public readonly privilegeRequests: Array<{ chatId: string; request: PrivilegeRequest }> = [];
   public readonly shareDeletionRequests: Array<{ chatId: string; requestId: string; taskName: string; summary: string }> = [];
   public readonly savedAttachments: Array<{ chatId: string; attachments: MessageAttachment[]; targetDirectory: string }> = [];
+  public sendFileError: Error | null = null;
 
   async start(): Promise<void> {}
   async stop(): Promise<void> {}
@@ -41,7 +42,7 @@ class RecordingChannel implements ChannelAdapter {
     return testFormatting;
   }
 
-  async saveAttachments(chatId: string, attachments: MessageAttachment[], targetDirectory: string): Promise<SharedAttachment[]> {
+  async saveAttachments(chatId: string, attachments: MessageAttachment[], targetDirectory: string): Promise<SavedAttachment[]> {
     this.savedAttachments.push({ chatId, attachments, targetDirectory });
     return attachments.map((attachment, index) => ({
       attachmentId: attachment.attachmentId,
@@ -49,11 +50,13 @@ class RecordingChannel implements ChannelAdapter {
       fileName: attachment.fileName,
       mimeType: attachment.mimeType,
       hostPath: resolve(targetDirectory, `${index + 1}-${attachment.fileName}`),
-      sharePath: `/workspace/share/inbox/${basename(targetDirectory)}/${index + 1}-${attachment.fileName}`,
     }));
   }
 
   async sendFile(chatId: string, filePath: string, caption?: string): Promise<void> {
+    if (this.sendFileError) {
+      throw this.sendFileError;
+    }
     this.sentFiles.push({ chatId, filePath, caption });
   }
 
@@ -271,8 +274,6 @@ test("orchestrator accepts active-task quarantined output without storing host-s
   assert.deepEqual(session.pendingQuarantinedOutputs, []);
   assert.equal(session.activeTask?.quarantinedOutputs.length ?? 0, 0);
   assert.match(runner.handle.userMessages[0] ?? "", /Use the main branch\./);
-  assert.match(runner.handle.userMessages[0] ?? "", /Protocol reminder:/);
-  assert.match(runner.handle.userMessages[0] ?? "", /SANDY_CHANNEL_FILE/);
   assert.equal(mainAgent.contexts.length, 1);
 });
 
@@ -836,6 +837,45 @@ test("orchestrator marks worker disconnects as task failure and clears the task"
   const session = store.getOrCreate("chat-7");
   assert.equal(session.activeTask, null);
   assert.equal(channel.sentTexts.at(-1)?.text, "Sub-agent control channel disconnected unexpectedly.");
+});
+
+test("orchestrator fails the active task if channel file delivery fails", async () => {
+  const channel = new RecordingChannel();
+  channel.sendFileError = new Error("Telegram upload failed.");
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Prepare a file.",
+      taskName: "file-task",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-file-failure",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Prepare a file",
+    rawText: "Prepare a file",
+    attachments: [],
+  });
+
+  await runner.emit({
+    type: "channel_file",
+    path: "/workspace/share/result.txt",
+    caption: "Result",
+  });
+
+  const session = store.getOrCreate("chat-file-failure");
+  assert.equal(session.activeTask, null);
+  assert.equal(channel.sentTexts.at(-1)?.text, messages.taskFailed("Telegram upload failed."));
+  assert.equal(runner.handle.closeCalls, 1);
 });
 
 test("orchestrator prompts before deleting a non-empty shared workspace", async () => {

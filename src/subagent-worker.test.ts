@@ -61,8 +61,6 @@ test("buildPrivilegeResolutionInput explains the host privilege result to the su
   assert.match(input, /req-1/);
   assert.match(input, /approved/);
   assert.match(input, /Copied \/tmp\/input.txt into the shared workspace\./);
-  assert.match(input, /Protocol reminder:/);
-  assert.match(input, /SANDY_CHANNEL_FILE/);
   assert.match(input, /Continue the task from here\./);
 });
 

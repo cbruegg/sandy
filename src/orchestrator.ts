@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { join } from "node:path";
 import type { ChannelAdapter } from "./channel/channel-adapter.js";
 import type { MainAgentController } from "./agent/main-agent-controller.js";
 import type { PrivilegeBroker } from "./privilege/privilege-broker.js";
@@ -14,12 +14,14 @@ import type {
   NormalizedChatEvent,
   PrivilegeRequest,
   PrivilegeResolutionResult,
+  SavedAttachment,
   SessionState,
   SharedAttachment,
   SubAgentEvent,
   TranscriptEntry,
 } from "./types.js";
 import { toTaskMetadata } from "./types.js";
+import { resolveTaskShareHostPath, toSharedWorkspacePath } from "./shared-workspace.js";
 
 type ActiveHandleRecord = {
   handle: SandboxHandle;
@@ -85,54 +87,65 @@ export class SandyOrchestrator {
       eventType: event.type,
     });
 
-    switch (event.type) {
-      case "worker_connected":
-        session.activeTask.workerConnected = true;
-        break;
-      case "worker_disconnected":
-        session.activeTask.workerConnected = false;
-        session.activeTask.status = "failed";
-        await this.deps.channel.sendText(chatId, event.message);
-        await this.clearTask(session);
-        break;
-      case "progress":
-        if (event.message.trim()) {
-          await this.deps.channel.sendTaskUpdate(chatId, event.message);
-        }
-        break;
-      case "assistant_output":
-        session.activeTask.quarantinedOutputs.push(event.text);
-        await this.deps.channel.sendTaskUpdate(chatId, event.text);
-        break;
-      case "privilege_request":
-        await this.handlePrivilegeRequest(chatId, session, event.request);
-        break;
-      case "channel_file":
-        await this.handleChannelFile(chatId, session, event.path, event.caption);
-        break;
-      case "final_result":
-        session.activeTask.quarantinedOutputs.push(event.text);
-        await this.deps.channel.sendText(chatId, messages.taskComplete(event.text));
-        session.activeTask.status = "completed";
-        await this.clearTask(session);
-        break;
-      case "task_done":
-        if (session.activeTask.status !== "completed") {
-          session.activeTask.status = "completed";
-          await this.deps.channel.sendText(chatId, messages.taskCompleted(taskId));
+    try {
+      switch (event.type) {
+        case "worker_connected":
+          session.activeTask.workerConnected = true;
+          break;
+        case "worker_disconnected":
+          session.activeTask.workerConnected = false;
+          session.activeTask.status = "failed";
+          await this.deps.channel.sendText(chatId, event.message);
           await this.clearTask(session);
-        }
-        break;
-      case "task_error":
-        session.activeTask.status = "failed";
-        logger.error("task.failed", {
-          chatId,
-          taskId,
-          message: event.message,
-        });
-        await this.deps.channel.sendText(chatId, messages.taskFailed(event.message));
-        await this.clearTask(session);
-        break;
+          break;
+        case "progress":
+          if (event.message.trim()) {
+            await this.deps.channel.sendTaskUpdate(chatId, event.message);
+          }
+          break;
+        case "assistant_output":
+          session.activeTask.quarantinedOutputs.push(event.text);
+          await this.deps.channel.sendTaskUpdate(chatId, event.text);
+          break;
+        case "privilege_request":
+          await this.handlePrivilegeRequest(chatId, session, event.request);
+          break;
+        case "channel_file":
+          await this.handleChannelFile(chatId, session, event.path, event.caption);
+          break;
+        case "final_result":
+          session.activeTask.quarantinedOutputs.push(event.text);
+          await this.deps.channel.sendText(chatId, messages.taskComplete(event.text));
+          session.activeTask.status = "completed";
+          await this.clearTask(session);
+          break;
+        case "task_done":
+          if (session.activeTask.status !== "completed") {
+            session.activeTask.status = "completed";
+            await this.deps.channel.sendText(chatId, messages.taskCompleted(taskId));
+            await this.clearTask(session);
+          }
+          break;
+        case "task_error":
+          session.activeTask.status = "failed";
+          logger.error("task.failed", {
+            chatId,
+            taskId,
+            message: event.message,
+          });
+          await this.deps.channel.sendText(chatId, messages.taskFailed(event.message));
+          await this.clearTask(session);
+          break;
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown sub-agent event handling failure.";
+      logger.error("task.event_handler_failed", {
+        chatId,
+        taskId,
+        eventType: event.type,
+        message,
+      });
+      await this.failActiveTaskFromEventHandling(session, taskId, message);
     }
 
     this.deps.sessionStore.save(session);
@@ -405,7 +418,7 @@ export class SandyOrchestrator {
 
     await this.deps.channel.sendFile(
       chatId,
-      resolveTaskSharePath(this.deps.sandboxRunner.getTaskSharePath(activeTask.taskId), sharePath),
+      resolveTaskShareHostPath(this.deps.sandboxRunner.getTaskSharePath(activeTask.taskId), sharePath, "channel_file path"),
       caption,
     );
   }
@@ -485,6 +498,24 @@ export class SandyOrchestrator {
     await this.prepareShareDeletion(session, task.taskId, task.taskName);
   }
 
+  private async failActiveTaskFromEventHandling(session: SessionState, taskId: string, message: string): Promise<void> {
+    if (!session.activeTask || session.activeTask.taskId !== taskId) {
+      return;
+    }
+
+    session.activeTask.status = "failed";
+    try {
+      await this.deps.channel.sendText(session.chatId, messages.taskFailed(message));
+    } catch (notifyError) {
+      logger.error("task.event_failure_notification_failed", {
+        chatId: session.chatId,
+        taskId,
+        message: notifyError instanceof Error ? notifyError.message : "Unknown notification failure.",
+      });
+    }
+    await this.clearTask(session, { discardQuarantine: true });
+  }
+
   private getHandle(taskId: string): SandboxHandle {
     const record = this.handles.get(taskId);
     if (!record) {
@@ -503,12 +534,21 @@ export class SandyOrchestrator {
       return [];
     }
 
+    const taskSharePath = this.deps.sandboxRunner.getTaskSharePath(taskId);
     const targetDirectory = join(
-      this.deps.sandboxRunner.getTaskSharePath(taskId),
+      taskSharePath,
       "inbox",
       sanitizePathSegment(messageId),
     );
-    return this.deps.channel.saveAttachments(chatId, attachments, targetDirectory);
+    const savedAttachments = await this.deps.channel.saveAttachments(chatId, attachments, targetDirectory);
+    return this.buildSharedAttachments(taskSharePath, savedAttachments);
+  }
+
+  private buildSharedAttachments(taskSharePath: string, attachments: SavedAttachment[]): SharedAttachment[] {
+    return attachments.map((attachment) => ({
+      ...attachment,
+      sharePath: toSharedWorkspacePath(taskSharePath, attachment.hostPath, `${attachment.fileName} hostPath`),
+    }));
   }
 
   private async prepareShareDeletion(session: SessionState, taskId: string, taskName: string): Promise<void> {
@@ -562,7 +602,7 @@ function describeUserMessageForMainAgent(text: string, attachments: MessageAttac
 }
 
 function buildTaskBriefWithAttachments(taskBrief: string, attachments: SharedAttachment[]): string {
-  const sections = [taskBrief, buildWorkerProtocolReminder()];
+  const sections = [taskBrief];
   if (attachments.length > 0) {
     sections.push([
       "Files attached by the user are already available in the shared workspace:",
@@ -575,7 +615,7 @@ function buildTaskBriefWithAttachments(taskBrief: string, attachments: SharedAtt
 }
 
 function buildWorkerFollowUpInput(text: string, attachments: SharedAttachment[]): string {
-  const sections = [text.trim(), buildWorkerProtocolReminder()].filter((section) => section.length > 0);
+  const sections = [text.trim()].filter((section) => section.length > 0);
   if (attachments.length > 0) {
     sections.push([
       "The user attached additional files to the shared workspace:",
@@ -586,31 +626,9 @@ function buildWorkerFollowUpInput(text: string, attachments: SharedAttachment[])
   return sections.join("\n\n");
 }
 
-function resolveTaskSharePath(taskSharePath: string, sharePath: string): string {
-  if (!isAbsolute(sharePath)) {
-    throw new Error("channel_file path must be an absolute path under /workspace/share.");
-  }
-
-  const normalizedSharePath = resolve(sharePath);
-  const relativeToShare = relative("/workspace/share", normalizedSharePath);
-  if (relativeToShare.startsWith("..") || isAbsolute(relativeToShare)) {
-    throw new Error("channel_file path must stay within /workspace/share.");
-  }
-
-  return resolve(taskSharePath, relativeToShare);
-}
-
 function sanitizePathSegment(value: string): string {
   const normalized = value.replaceAll(/[^A-Za-z0-9._-]+/g, "_").replaceAll(/^_+|_+$/g, "");
   return normalized || "message";
-}
-
-function buildWorkerProtocolReminder(): string {
-  return [
-    "Protocol reminder:",
-    '- To send a file back to the user without privilege escalation, emit exactly one line: SANDY_CHANNEL_FILE {"path":"/workspace/share/...","caption":"optional"}',
-    '- Do not describe a saved path in prose when you want delivery; emit the protocol line instead.',
-  ].join("\n");
 }
 
 export function describeActiveTaskForMainAgent(session: SessionState) {
