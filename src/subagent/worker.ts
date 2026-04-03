@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import {
@@ -7,7 +8,21 @@ import {
   type ThreadEvent,
   type TodoListItem,
 } from "@openai/codex-sdk";
-import type { ChannelFormatting, HostCommand, SubAgentEvent } from "../types.js";
+import {
+  parsePrivilegeRequest,
+  type ChannelFormatting,
+  type HostCommand,
+  type PrivilegeRequest,
+  type PrivilegeResolutionResult,
+  type SubAgentEvent,
+} from "../types.js";
+
+const privilegeRequestPrefix = "SANDY_PRIVILEGE_REQUEST ";
+type ThreadEventDisposition = "none" | "privilege_request" | "terminal_error";
+type PrivilegeParseResult =
+  | { kind: "none" }
+  | { kind: "parsed"; request: PrivilegeRequest }
+  | { kind: "invalid"; message: string };
 
 function getRequiredEnv(name: string): string {
   const value = process.env[name];
@@ -71,18 +86,44 @@ function progressFromCommand(item: CommandExecutionItem): string {
 }
 
 async function streamTurn(thread: Thread, input: string): Promise<void> {
+  let sawPrivilegeRequest = false;
+  let sawTerminalError = false;
   const { events } = await thread.runStreamed(input);
 
   for await (const event of events) {
-    await handleThreadEvent(event);
+    const disposition = await handleThreadEvent(event);
+    if (disposition === "privilege_request" && sawPrivilegeRequest) {
+      throw new Error("Only one privilege request is allowed per turn.");
+    }
+    sawPrivilegeRequest = disposition === "privilege_request" || sawPrivilegeRequest;
+    sawTerminalError = disposition === "terminal_error" || sawTerminalError;
+  }
+
+  if (!sawPrivilegeRequest && !sawTerminalError) {
+    send({ type: "task_done" });
   }
 }
 
-async function handleThreadEvent(event: ThreadEvent): Promise<void> {
+async function handleThreadEvent(event: ThreadEvent): Promise<ThreadEventDisposition> {
   switch (event.type) {
     case "item.completed":
     case "item.updated":
       if (event.item.type === "agent_message" && event.type === "item.completed") {
+        const privilegeResult = tryParsePrivilegeRequestMessage(event.item.text);
+        if (privilegeResult.kind === "parsed") {
+          send({
+            type: "privilege_request",
+            request: privilegeResult.request,
+          });
+          return "privilege_request";
+        }
+        if (privilegeResult.kind === "invalid") {
+          send({
+            type: "task_error",
+            message: privilegeResult.message,
+          });
+          return "terminal_error";
+        }
         send({
           type: "assistant_output",
           text: event.item.text,
@@ -103,26 +144,25 @@ async function handleThreadEvent(event: ThreadEvent): Promise<void> {
           });
         }
       }
-      break;
+      return "none";
     case "turn.completed":
-      send({ type: "task_done" });
-      break;
+      return "none";
     case "turn.failed":
       send({
         type: "task_error",
         message: event.error.message,
       });
-      break;
+      return "terminal_error";
     case "error":
       send({
         type: "task_error",
         message: event.message,
       });
-      break;
+      return "terminal_error";
     case "thread.started":
     case "turn.started":
     case "item.started":
-      break;
+      return "none";
   }
 }
 
@@ -131,6 +171,14 @@ export function buildInitialTaskInput(taskBrief: string, channelFormatting: Chan
     "You are running inside a Sandy sub-agent container.",
     "Your shared workspace is mounted at /workspace/share.",
     "Use /workspace/share for files that should remain available to the host after your task finishes.",
+    "Inside this container you may use the filesystem, network, and installed tools freely.",
+    "If you need the host to copy files into or out of /workspace/share, do not ask the user directly.",
+    `Instead, output exactly one line in this format and no surrounding text: ${privilegeRequestPrefix}{...json...}`,
+    "Allowed host-mediated request types are copy_into_share and copy_out_of_share.",
+    "For any host-mediated request, use absolute paths. Any shared-workspace path must stay under /workspace/share.",
+    `Example for copying a result file to Downloads: ${privilegeRequestPrefix}{"type":"copy_out_of_share","sourcePath":"/workspace/share/result.txt","targetPath":"~/Downloads/result.txt","reason":"Need to deliver the generated file to the user."}`,
+    `Example for copying a host file in: ${privilegeRequestPrefix}{"type":"copy_into_share","sourcePath":"~/Downloads/input.txt","targetPath":"/workspace/share/input.txt","reason":"Need the user-provided input file inside the task workspace."}`,
+    "After emitting a host-mediated request, stop and wait for the next host message before continuing.",
   ];
 
   if (channelFormatting) {
@@ -142,6 +190,61 @@ export function buildInitialTaskInput(taskBrief: string, channelFormatting: Chan
 
   lines.push("", taskBrief);
   return lines.join("\n");
+}
+
+export function buildPrivilegeResolutionInput(result: PrivilegeResolutionResult): string {
+  return [
+    `Host privilege request ${result.requestId} finished with outcome "${result.outcome}".`,
+    result.message,
+    "Continue the task from here.",
+  ].join("\n");
+}
+
+export function parsePrivilegeRequestMessage(text: string): PrivilegeRequest | null {
+  const rawPayload = extractPrivilegeRequestPayload(text);
+  if (!rawPayload) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(rawPayload) as unknown;
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error("Privilege request payload must be a JSON object.");
+    }
+    return parsePrivilegeRequest({
+      ...(parsed as Record<string, unknown>),
+      requestId: randomUUID(),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Unknown privilege request parse failure.";
+    throw new Error(`${detail} Payload: ${rawPayload}`);
+  }
+}
+
+function extractPrivilegeRequestPayload(text: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith(privilegeRequestPrefix)) {
+    return null;
+  }
+  return trimmed.slice(privilegeRequestPrefix.length).trim();
+}
+
+function tryParsePrivilegeRequestMessage(text: string): PrivilegeParseResult {
+  const rawPayload = extractPrivilegeRequestPayload(text);
+  if (!rawPayload) {
+    return { kind: "none" };
+  }
+
+  try {
+    const request = parsePrivilegeRequestMessage(text);
+    return request ? { kind: "parsed", request } : { kind: "none" };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Unknown privilege request parse failure.";
+    return {
+      kind: "invalid",
+      message: `Invalid privilege request payload: ${detail}`,
+    };
+  }
 }
 
 async function main(): Promise<void> {
@@ -156,7 +259,6 @@ async function main(): Promise<void> {
     // Docker is the actual isolation boundary for sub-agents; avoid nested bwrap sandboxing in-container.
     sandboxMode: "danger-full-access",
     networkAccessEnabled: true,
-    approvalPolicy: "on-request",
   });
 
   let currentAbort: AbortController | null = null;
@@ -182,6 +284,14 @@ async function main(): Promise<void> {
     input: process.stdin,
     crlfDelay: Infinity,
   });
+  let shutdownResolver: (() => void) | null = null;
+  const waitForShutdown = new Promise<void>((resolve) => {
+    shutdownResolver = resolve;
+  });
+
+  // Keep the worker process alive after a turn finishes so the host can reply
+  // to privilege requests and send follow-up task input over stdin.
+  process.stdin.resume();
 
   send({ type: "worker_connected" });
   enqueueTurn(buildInitialTaskInput(taskBrief, channelFormatting));
@@ -197,14 +307,12 @@ async function main(): Promise<void> {
         case "user_message":
           enqueueTurn(command.text);
           break;
-        case "privilege_decision":
-          send({
-            type: "progress",
-            message: `Privilege request ${command.requestId} was ${command.decision}.`,
-          });
+        case "privilege_result":
+          enqueueTurn(buildPrivilegeResolutionInput(command.result));
           break;
         case "cancel":
           currentAbort?.abort();
+          shutdownResolver?.();
           process.exit(0);
       }
     } catch (error) {
@@ -214,6 +322,12 @@ async function main(): Promise<void> {
       });
     }
   });
+
+  input.on("close", () => {
+    shutdownResolver?.();
+  });
+
+  await waitForShutdown;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

@@ -19,6 +19,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - Deterministic auth selection that prefers local Codex ChatGPT auth over `OPENAI_API_KEY` when both are available.
   - Quarantining of sub-agent output until the user either reports it as dangerous or continues the conversation.
   - Deterministic cancellation and privilege-request routing.
+  - Host-mediated one-off file copy operations into and out of the per-sub-agent shared workspace.
   - Deterministic detection of worker disconnects, handshake timeouts, and control-channel write failures.
   - Structured host-side logging for significant lifecycle and failure events.
   - Centralized user-facing message definitions to prepare for future i18n.
@@ -26,8 +27,8 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - Automatic deletion of empty per-sub-agent shared workspaces, with explicit user confirmation before deleting non-empty workspaces.
 - Not fully implemented yet:
   - Real STT, file upload handling, and image handling.
-  - Host-side enforcement for approved resource requests such as file copy in/out, mount setup, MCP enablement, and OneCLI enablement.
-- The last point means those operations are currently represented in Sandy's typed protocol and approval flow, but an approval does not yet cause Sandy to perform the actual filesystem or resource mutation on the host.
+  - Host-side enforcement for approved resource requests beyond shared-workspace file copy, such as mount setup, MCP enablement, and OneCLI enablement.
+- Mount, MCP, and OneCLI requests remain represented in Sandy's typed protocol for future expansion, but they are currently rejected as unsupported by the host runtime.
 
 ## Key Changes
 ### Host runtime and orchestration

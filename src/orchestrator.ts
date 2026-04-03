@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { ChannelAdapter } from "./channel/channel-adapter.js";
 import type { MainAgentController } from "./agent/main-agent-controller.js";
+import type { PrivilegeBroker } from "./privilege/privilege-broker.js";
+import { isSupportedPrivilegeRequest } from "./privilege/privilege-broker.js";
 import type { SandboxHandle, SandboxRunner } from "./sandbox/sandbox-runner.js";
 import type { SessionStore } from "./session/in-memory-session-store.js";
 import { logger } from "./logger.js";
@@ -9,6 +11,7 @@ import type {
   MainAgentDecision,
   NormalizedChatEvent,
   PrivilegeRequest,
+  PrivilegeResolutionResult,
   SessionState,
   SubAgentEvent,
   TranscriptEntry,
@@ -24,6 +27,7 @@ export type SandyOrchestratorDependencies = {
   mainAgent: MainAgentController;
   sandboxRunner: SandboxRunner;
   sessionStore: SessionStore;
+  privilegeBroker: PrivilegeBroker;
 };
 
 export class SandyOrchestrator {
@@ -98,15 +102,7 @@ export class SandyOrchestrator {
         await this.deps.channel.sendTaskUpdate(chatId, event.text);
         break;
       case "privilege_request":
-        session.activeTask.pendingPrivilegeRequest = event.request;
-        session.activeTask.status = "awaiting_privilege_decision";
-        logger.info("task.privilege_requested", {
-          chatId,
-          taskId,
-          requestId: event.request.requestId,
-          requestType: event.request.type,
-        });
-        await this.deps.channel.sendPrivilegeRequest(chatId, event.request);
+        await this.handlePrivilegeRequest(chatId, session, event.request);
         break;
       case "final_result":
         session.activeTask.quarantinedOutputs.push(event.text);
@@ -203,6 +199,11 @@ export class SandyOrchestrator {
         await this.deps.channel.sendText(event.chatId, messages.taskCancelled(activeTask.taskName));
         return;
       case "danger_report":
+        if (activeTask.pendingPrivilegeRequest) {
+          await this.cancelActiveTask(session, "Cancelled after the user reported a dangerous privilege request.");
+          await this.deps.channel.sendText(event.chatId, messages.taskTerminatedAfterDangerousPrivilegeRequest(activeTask.taskName));
+          return;
+        }
         if (activeTask.quarantinedOutputs.length === 0) {
           await this.deps.channel.sendText(event.chatId, messages.noPendingOutputToReport());
           return;
@@ -334,31 +335,90 @@ export class SandyOrchestrator {
       return;
     }
 
-    await this.getHandle(activeTask.taskId).resolvePrivilege(request.requestId, decision);
-
-    if (decision === "approve") {
-      if (request.type === "enable_mcp" || request.type === "enable_onecli") {
-        activeTask.approvedResourceIdentifiers.push(request.identifier);
-      }
-      logger.info("task.privilege_resolved", {
-        chatId: session.chatId,
-        taskId: activeTask.taskId,
+    let result: PrivilegeResolutionResult;
+    if (decision === "deny") {
+      result = {
         requestId: request.requestId,
-        decision,
-      });
-      await this.deps.channel.sendText(session.chatId, messages.privilegeApproved(request.requestId));
+        outcome: "denied",
+        message: `The user denied privilege request ${request.requestId}.`,
+      };
+    } else if (!isSupportedPrivilegeRequest(request)) {
+      result = this.buildUnsupportedPrivilegeResult(request);
     } else {
-      logger.info("task.privilege_resolved", {
-        chatId: session.chatId,
+      result = await this.deps.privilegeBroker.apply(request, {
         taskId: activeTask.taskId,
-        requestId: request.requestId,
-        decision,
+        taskSharePath: this.deps.sandboxRunner.getTaskSharePath(activeTask.taskId),
       });
-      await this.deps.channel.sendText(session.chatId, messages.privilegeDenied(request.requestId));
     }
+
+    await this.getHandle(activeTask.taskId).resolvePrivilege(result);
+    await this.sendPrivilegeResolutionMessage(session.chatId, activeTask.taskId, result);
 
     activeTask.pendingPrivilegeRequest = null;
     activeTask.status = "running";
+  }
+
+  private async handlePrivilegeRequest(chatId: string, session: SessionState, request: PrivilegeRequest): Promise<void> {
+    const activeTask = session.activeTask;
+    if (!activeTask) {
+      return;
+    }
+
+    logger.info("task.privilege_requested", {
+      chatId,
+      taskId: activeTask.taskId,
+      requestId: request.requestId,
+      requestType: request.type,
+    });
+
+    if (!isSupportedPrivilegeRequest(request)) {
+      const result = this.buildUnsupportedPrivilegeResult(request);
+      await this.getHandle(activeTask.taskId).resolvePrivilege(result);
+      await this.sendPrivilegeResolutionMessage(chatId, activeTask.taskId, result);
+      return;
+    }
+
+    activeTask.pendingPrivilegeRequest = request;
+    activeTask.status = "awaiting_privilege_decision";
+    await this.deps.channel.sendPrivilegeRequest(chatId, request);
+  }
+
+  private buildUnsupportedPrivilegeResult(request: PrivilegeRequest): PrivilegeResolutionResult {
+    return {
+      requestId: request.requestId,
+      outcome: "rejected",
+      message: `Privilege request type "${request.type}" is not supported by this runtime.`,
+    };
+  }
+
+  private async sendPrivilegeResolutionMessage(
+    chatId: string,
+    taskId: string,
+    result: PrivilegeResolutionResult,
+  ): Promise<void> {
+    logger.info("task.privilege_resolved", {
+      chatId,
+      taskId,
+      requestId: result.requestId,
+      outcome: result.outcome,
+    });
+
+    switch (result.outcome) {
+      case "approved":
+        await this.deps.channel.sendText(chatId, messages.privilegeApproved(result.requestId, result.message));
+        return;
+      case "denied":
+        await this.deps.channel.sendText(chatId, messages.privilegeDenied(result.requestId));
+        return;
+      case "rejected":
+        await this.deps.channel.sendText(chatId, messages.privilegeRejected(result.requestId, result.message));
+        return;
+      case "failed":
+        await this.deps.channel.sendText(chatId, messages.privilegeFailed(result.requestId, result.message));
+        return;
+      default:
+        assertNever(result.outcome);
+    }
   }
 
   private async cancelActiveTask(session: SessionState, reason: string): Promise<void> {
@@ -380,6 +440,10 @@ export class SandyOrchestrator {
     const task = session.activeTask;
     if (!task) {
       return;
+    }
+    const handle = this.handles.get(task.taskId)?.handle;
+    if (handle) {
+      await handle.close();
     }
     if (!options?.discardQuarantine && task.quarantinedOutputs.length > 0) {
       session.pendingQuarantinedOutputs.push(...task.quarantinedOutputs);

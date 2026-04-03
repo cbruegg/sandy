@@ -20,6 +20,7 @@ const testFormatting: ChannelFormatting = {
 class FakeStdin {
   public readonly writes: string[] = [];
   public failNextWrite = false;
+  public endCalls = 0;
 
   write(chunk: Buffer | string, callback: (error?: Error | null) => void): boolean {
     this.writes.push(String(chunk));
@@ -30,6 +31,10 @@ class FakeStdin {
     }
     callback(null);
     return true;
+  }
+
+  end(): void {
+    this.endCalls += 1;
   }
 }
 
@@ -139,11 +144,12 @@ test("DockerSandboxRunner waits for an explicit worker_connected handshake", asy
   const taskChild = new FakeChildProcess();
   const events: SubAgentEvent[] = [];
 
-  await launchRunnerWithChild(taskChild, async (event) => {
+  const { invocations } = await launchRunnerWithChild(taskChild, async (event) => {
     events.push(event);
   });
 
   assert.deepEqual(events, []);
+  assert.ok(invocations.some((invocation) => invocation.args[0] === "run" && invocation.args.includes("-i")));
 
   taskChild.stdout.write('{"type":"worker_connected"}\n');
   await flushEvents();
@@ -250,6 +256,24 @@ test("DockerSandboxRunner cancellation does not emit a spurious disconnect", asy
   taskChild.emit("exit", null, "SIGTERM");
   await flushEvents();
 
+  assert.deepEqual(events, [{ type: "worker_connected" }]);
+});
+
+test("DockerSandboxRunner close shuts down the worker stdin without reporting a disconnect", async () => {
+  const taskChild = new FakeChildProcess();
+  const events: SubAgentEvent[] = [];
+  const { handle } = await launchRunnerWithChild(taskChild, async (event) => {
+    events.push(event);
+  });
+
+  taskChild.stdout.write('{"type":"worker_connected"}\n');
+  await flushEvents();
+
+  await handle.close();
+  taskChild.emit("exit", 0, null);
+  await flushEvents();
+
+  assert.equal(taskChild.stdin.endCalls, 1);
   assert.deepEqual(events, [{ type: "worker_connected" }]);
 });
 

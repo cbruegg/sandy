@@ -95,6 +95,12 @@ export type PrivilegeRequest =
   | MountRequest
   | ResourceEnableRequest;
 
+export type PrivilegeResolutionResult = {
+  requestId: string;
+  outcome: "approved" | "denied" | "rejected" | "failed";
+  message: string;
+};
+
 export type MainAgentDecision =
   | {
       action: "reply";
@@ -187,9 +193,8 @@ export type HostCommand =
       text: string;
     }
   | {
-      type: "privilege_decision";
-      requestId: string;
-      decision: "approve" | "deny";
+      type: "privilege_result";
+      result: PrivilegeResolutionResult;
     }
   | {
       type: "cancel";
@@ -267,7 +272,7 @@ export function parseMainAgentDecision(raw: string): MainAgentDecision {
   throw new Error("Main agent returned an unsupported decision.");
 }
 
-function parsePrivilegeRequest(payload: unknown): PrivilegeRequest {
+export function parsePrivilegeRequest(payload: unknown): PrivilegeRequest {
   if (!isRecord(payload) || !isString(payload.type) || !isString(payload.requestId) || !isString(payload.reason)) {
     throw new Error("Invalid privilege request payload.");
   }

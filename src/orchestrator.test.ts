@@ -3,10 +3,19 @@ import assert from "node:assert/strict";
 import type { ChannelAdapter } from "./channel/channel-adapter.js";
 import type { MainAgentController } from "./agent/main-agent-controller.js";
 import { messages } from "./messages.js";
+import type { PrivilegeBroker } from "./privilege/privilege-broker.js";
 import type { SandboxHandle, SandboxRunner, LaunchTaskRequest } from "./sandbox/sandbox-runner.js";
 import { SandyOrchestrator } from "./orchestrator.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
-import type { ChannelFormatting, DecideContext, MainAgentDecision, PrivilegeRequest, SubAgentEvent } from "./types.js";
+import type {
+  ChannelFormatting,
+  DecideContext,
+  MainAgentDecision,
+  PrivilegeRequest,
+  PrivilegeResolutionResult,
+  SubAgentEvent,
+} from "./types.js";
+import type { SupportedPrivilegeRequest } from "./privilege/privilege-broker.js";
 
 const testFormatting: ChannelFormatting = {
   channel: "telegram",
@@ -78,15 +87,20 @@ function contextTexts(context: DecideContext): string[] {
 
 class FakeSandboxHandle implements SandboxHandle {
   public readonly userMessages: string[] = [];
-  public readonly privilegeDecisions: Array<{ requestId: string; decision: "approve" | "deny" }> = [];
+  public readonly privilegeResults: PrivilegeResolutionResult[] = [];
+  public closeCalls = 0;
   public readonly cancellations: string[] = [];
 
   async sendUserMessage(text: string): Promise<void> {
     this.userMessages.push(text);
   }
 
-  async resolvePrivilege(requestId: string, decision: "approve" | "deny"): Promise<void> {
-    this.privilegeDecisions.push({ requestId, decision });
+  async resolvePrivilege(result: PrivilegeResolutionResult): Promise<void> {
+    this.privilegeResults.push(result);
+  }
+
+  async close(): Promise<void> {
+    this.closeCalls += 1;
   }
 
   async cancel(reason: string): Promise<void> {
@@ -121,6 +135,23 @@ class FakeSandboxRunner implements SandboxRunner {
   async deleteTaskShare(taskId: string): Promise<void> {
     this.deletedTaskShares.push(taskId);
   }
+
+  getTaskSharePath(taskId: string): string {
+    return `/tmp/${taskId}`;
+  }
+}
+
+class FakePrivilegeBroker implements PrivilegeBroker {
+  public readonly appliedRequests: Array<{ request: SupportedPrivilegeRequest; taskId: string; taskSharePath: string }> = [];
+
+  async apply(request: SupportedPrivilegeRequest, context: { taskId: string; taskSharePath: string }): Promise<PrivilegeResolutionResult> {
+    this.appliedRequests.push({ request, taskId: context.taskId, taskSharePath: context.taskSharePath });
+    return {
+      requestId: request.requestId,
+      outcome: "approved",
+      message: `Applied ${request.type}.`,
+    };
+  }
 }
 
 test("orchestrator launches a task and discards quarantined output on danger report", async () => {
@@ -137,6 +168,7 @@ test("orchestrator launches a task and discards quarantined output on danger rep
     mainAgent,
     sandboxRunner: runner,
     sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
   });
 
   await orchestrator.handleChatEvent({
@@ -185,6 +217,7 @@ test("orchestrator accepts active-task quarantined output without storing host-s
     mainAgent,
     sandboxRunner: runner,
     sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
   });
 
   await orchestrator.handleChatEvent({
@@ -217,19 +250,21 @@ test("orchestrator accepts active-task quarantined output without storing host-s
   assert.equal(mainAgent.contexts.length, 1);
 });
 
-test("orchestrator keeps privilege decisions deterministic and out of the main agent path", async () => {
+test("orchestrator applies supported privilege requests deterministically and outside the main agent path", async () => {
   const channel = new RecordingChannel();
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
+  const privilegeBroker = new FakePrivilegeBroker();
   const orchestrator = new SandyOrchestrator({
     channel,
     mainAgent: new StubMainAgent({
       action: "launch_task",
-      taskBrief: "Check an MCP resource.",
-      taskName: "mcp-check",
+      taskBrief: "Need a host file copied into the share.",
+      taskName: "copy-in",
     }),
     sandboxRunner: runner,
     sessionStore: store,
+    privilegeBroker,
   });
 
   await orchestrator.handleChatEvent({
@@ -237,17 +272,18 @@ test("orchestrator keeps privilege decisions deterministic and out of the main a
     chatId: "chat-3",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
-    text: "Check an MCP resource",
-    rawText: "Check an MCP resource",
+    text: "Copy a host file into the shared workspace",
+    rawText: "Copy a host file into the shared workspace",
   });
 
   await runner.emit({
     type: "privilege_request",
     request: {
-      type: "enable_mcp",
+      type: "copy_into_share",
       requestId: "req-1",
-      identifier: "github-readonly",
-      reason: "Need repository metadata.",
+      sourcePath: "/Users/test/input.txt",
+      targetPath: "/workspace/share/input.txt",
+      reason: "Need a local fixture file.",
     },
   });
 
@@ -261,8 +297,120 @@ test("orchestrator keeps privilege decisions deterministic and out of the main a
   });
 
   assert.equal(channel.privilegeRequests.length, 1);
-  assert.deepEqual(runner.handle.privilegeDecisions, [{ requestId: "req-1", decision: "approve" }]);
-  assert.equal(channel.sentTexts.at(-1)?.text, messages.privilegeApproved("req-1"));
+  assert.deepEqual(privilegeBroker.appliedRequests, [{
+    request: {
+      type: "copy_into_share",
+      requestId: "req-1",
+      sourcePath: "/Users/test/input.txt",
+      targetPath: "/workspace/share/input.txt",
+      reason: "Need a local fixture file.",
+    },
+    taskId: runner.launches[0]!.taskId,
+    taskSharePath: `/tmp/${runner.launches[0]!.taskId}`,
+  }]);
+  assert.deepEqual(runner.handle.privilegeResults, [{
+    requestId: "req-1",
+    outcome: "approved",
+    message: "Applied copy_into_share.",
+  }]);
+  assert.equal(channel.sentTexts.at(-1)?.text, messages.privilegeApproved("req-1", "Applied copy_into_share."));
+});
+
+test("orchestrator rejects unsupported privilege requests without prompting the user", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Check an MCP resource.",
+      taskName: "mcp-check",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-unsupported",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Check an MCP resource",
+    rawText: "Check an MCP resource",
+  });
+
+  await runner.emit({
+    type: "privilege_request",
+    request: {
+      type: "enable_mcp",
+      requestId: "req-unsupported",
+      identifier: "github-readonly",
+      reason: "Need repository metadata.",
+    },
+  });
+
+  assert.equal(channel.privilegeRequests.length, 0);
+  assert.deepEqual(runner.handle.privilegeResults.at(-1), {
+    requestId: "req-unsupported",
+    outcome: "rejected",
+    message: 'Privilege request type "enable_mcp" is not supported by this runtime.',
+  });
+  assert.equal(
+    channel.sentTexts.at(-1)?.text,
+    messages.privilegeRejected("req-unsupported", 'Privilege request type "enable_mcp" is not supported by this runtime.'),
+  );
+});
+
+test("orchestrator terminates the task when the user reports a pending privilege request as dangerous", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Need a host file copied into the share.",
+      taskName: "copy-in",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-danger-privilege",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Copy a host file into the shared workspace",
+    rawText: "Copy a host file into the shared workspace",
+  });
+
+  await runner.emit({
+    type: "privilege_request",
+    request: {
+      type: "copy_into_share",
+      requestId: "req-danger",
+      sourcePath: "/Users/test/input.txt",
+      targetPath: "/workspace/share/input.txt",
+      reason: "Need a local fixture file.",
+    },
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "danger_report",
+    chatId: "chat-danger-privilege",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+  });
+
+  assert.equal(runner.handle.cancellations.length, 1);
+  assert.equal(
+    channel.sentTexts.at(-1)?.text,
+    messages.taskTerminatedAfterDangerousPrivilegeRequest("copy-in"),
+  );
 });
 
 test("orchestrator keeps completed-task output quarantined until the user sends another message", async () => {
@@ -278,6 +426,7 @@ test("orchestrator keeps completed-task output quarantined until the user sends 
     }),
     sandboxRunner: runner,
     sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
   });
 
   await orchestrator.handleChatEvent({
@@ -303,6 +452,39 @@ test("orchestrator keeps completed-task output quarantined until the user sends 
   assert.deepEqual(session.pendingQuarantinedOutputs, ["The environment has 8 CPUs."]);
 });
 
+test("orchestrator closes the sandbox handle on normal task completion", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const mainAgent = new StubMainAgent({
+    action: "launch_task",
+    taskBrief: "Inspect the environment.",
+    taskName: "env-inspection",
+  });
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent,
+    sandboxRunner: runner,
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-close",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Inspect the environment",
+    rawText: "Inspect the environment",
+  });
+
+  await runner.emit({
+    type: "task_done",
+  });
+
+  assert.equal(runner.handle.closeCalls, 1);
+});
+
 test("orchestrator releases completed-task output only when the user continues normally", async () => {
   const channel = new RecordingChannel();
   const runner = new FakeSandboxRunner();
@@ -323,6 +505,7 @@ test("orchestrator releases completed-task output only when the user continues n
     mainAgent,
     sandboxRunner: runner,
     sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
   });
 
   await orchestrator.handleChatEvent({
@@ -370,6 +553,7 @@ test("orchestrator discards completed-task output when the user sends a danger r
     }),
     sandboxRunner: runner,
     sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
   });
 
   await orchestrator.handleChatEvent({
@@ -423,6 +607,7 @@ test("orchestrator keeps final_result output quarantined until the user continue
     mainAgent,
     sandboxRunner: runner,
     sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
   });
 
   await orchestrator.handleChatEvent({
@@ -471,6 +656,7 @@ test("orchestrator marks worker disconnects as task failure and clears the task"
     }),
     sandboxRunner: runner,
     sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
   });
 
   await orchestrator.handleChatEvent({
@@ -505,6 +691,7 @@ test("orchestrator prompts before deleting a non-empty shared workspace", async 
     }),
     sandboxRunner: runner,
     sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
   });
 
   await orchestrator.handleChatEvent({
@@ -554,6 +741,7 @@ test("orchestrator deletes or preserves a finished task share based on user conf
     ]),
     sandboxRunner: runner,
     sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
   });
 
   await orchestrator.handleChatEvent({
@@ -645,6 +833,7 @@ test("orchestrator blocks new idle input while shared workspace deletion is pend
     mainAgent,
     sandboxRunner: runner,
     sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
   });
 
   await orchestrator.handleChatEvent({

@@ -4,6 +4,7 @@ import { TelegramBotApiAdapter } from "./channel/telegram-adapter.js";
 import { loadConfig } from "./config.js";
 import { logger } from "./logger.js";
 import { SandyOrchestrator } from "./orchestrator.js";
+import { PrivilegeBrokerImpl } from "./privilege/privilege-broker.js";
 import { DockerSandboxRunner } from "./sandbox/docker-sandbox-runner.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
 
@@ -42,6 +43,7 @@ export async function startApp(): Promise<void> {
     mainAgent,
     sandboxRunner,
     sessionStore: new InMemorySessionStore(),
+    privilegeBroker: new PrivilegeBrokerImpl(),
   });
 
   await channel.start(async (event) => orchestrator.handleChatEvent(event));

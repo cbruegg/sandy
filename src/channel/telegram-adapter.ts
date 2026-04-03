@@ -259,10 +259,16 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     });
     await this.sendFormattedMessage(chatId, messages.privilegeRequestPrompt(request), {
       reply_markup: {
-        inline_keyboard: [[
-          { text: buttonLabels.approve, callback_data: `approve:${request.requestId}` },
-          { text: buttonLabels.deny, callback_data: `deny:${request.requestId}` },
-        ]],
+        inline_keyboard: [
+          [
+            { text: buttonLabels.approve, callback_data: `approve:${request.requestId}` },
+            { text: buttonLabels.deny, callback_data: `deny:${request.requestId}` },
+          ],
+          [
+            { text: buttonLabels.reportDangerousOutput, callback_data: "report" },
+            { text: buttonLabels.cancelTask, callback_data: "cancel" },
+          ],
+        ],
       },
     });
   }

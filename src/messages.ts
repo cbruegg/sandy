@@ -21,15 +21,19 @@ export const messages = {
   noPendingOutputToReport: (): string => "There is no pending sub-agent output to report.",
   taskTerminatedAndDiscarded: (taskName: string): string =>
     `Terminated task "${taskName}" and discarded the pending sub-agent output.`,
+  taskTerminatedAfterDangerousPrivilegeRequest: (taskName: string): string =>
+    `Terminated task "${taskName}" after a dangerous privilege request report.`,
   stalePrivilegeRequest: (): string => "That privilege request is no longer pending.",
   privilegeRequestStillPending: (): string =>
     "A privilege request is pending. Reply with approve or deny before sending more task input.",
   shareDeletionStillPending: (): string =>
     "A shared workspace deletion decision is pending. Reply with approve or deny before sending more input.",
   taskStarted: (taskName: string): string =>
-    `Started task "${taskName}". You will receive progress updates here.`,
-  privilegeApproved: (requestId: string): string => `Approved privilege request ${requestId}.`,
+      `Started task "${taskName}". You will receive progress updates here.`,
+  privilegeApproved: (requestId: string, detail: string): string => `Approved privilege request ${requestId}.\n${detail}`,
   privilegeDenied: (requestId: string): string => `Denied privilege request ${requestId}.`,
+  privilegeRejected: (requestId: string, detail: string): string => `Rejected privilege request ${requestId}.\n${detail}`,
+  privilegeFailed: (requestId: string, detail: string): string => `Privilege request ${requestId} failed.\n${detail}`,
   staleShareDeletionRequest: (): string => "That shared workspace deletion request is no longer pending.",
   shareDeletionRequestPrompt: (taskName: string, summary: string): string =>
     `Task "${taskName}" left files in its shared workspace.\n\n${summary}\n\nApprove to delete this workspace, or deny to keep it.`,

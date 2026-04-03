@@ -158,8 +158,8 @@ As such, these requests from the sub-agent must use a special message type on th
 *not* forwarded to the main agent, but instead directly to the user.
 
 The user can then choose to approve or deny the request, and if they approve it using predefined phrases or emoji
-reactions, the main agent deterministically grants the requested access to the sub-agent, without the LLM of the main
-agent involved. It then notifies it of the approval so it can proceed with its execution.
+reactions, the host runtime deterministically performs the requested operation without the LLM of the main
+agent involved. It then notifies the sub-agent of the result so it can proceed with its execution.
 
 ## Testing
 

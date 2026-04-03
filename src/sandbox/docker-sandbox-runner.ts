@@ -4,7 +4,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { logger } from "../logger.js";
 import type { SandboxHandle, SandboxRunner, LaunchTaskRequest, ShareInspection } from "./sandbox-runner.js";
-import type { HostCommand, SubAgentEvent } from "../types.js";
+import type { HostCommand, PrivilegeResolutionResult, SubAgentEvent } from "../types.js";
 import { parseSubAgentEvent, serializeHostCommand } from "../types.js";
 
 export type DockerSandboxRunnerOptions = {
@@ -55,6 +55,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     const dockerArgs = [
       "run",
       "--rm",
+      "-i",
       "--name",
       containerName,
       "-e",
@@ -215,21 +216,32 @@ export class DockerSandboxRunner implements SandboxRunner {
           await reportDisconnect(this.describeWriteFailure(error));
         }
       },
-      resolvePrivilege: async (requestId: string, decision: "approve" | "deny") => {
+      resolvePrivilege: async (result: PrivilegeResolutionResult) => {
         logger.info("sandbox.privilege_decision", {
           taskId: request.taskId,
-          requestId,
-          decision,
+          requestId: result.requestId,
+          outcome: result.outcome,
         });
         try {
           await this.sendToWorker(child, {
-            type: "privilege_decision",
-            requestId,
-            decision,
+            type: "privilege_result",
+            result,
           });
         } catch (error) {
           await reportDisconnect(this.describeWriteFailure(error));
         }
+      },
+      close: async () => {
+        if (finished || shutdownRequested) {
+          return;
+        }
+        finished = true;
+        shutdownRequested = true;
+        clearHandshakeTimer();
+        logger.info("sandbox.closing", {
+          taskId: request.taskId,
+        });
+        child.stdin.end();
       },
       cancel: async (reason: string) => {
         finished = true;
@@ -287,7 +299,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     });
   }
 
-  private getTaskSharePath(taskId: string): string {
+  getTaskSharePath(taskId: string): string {
     const shareRoot = resolve(this.options.shareRoot);
     const sharePath = resolve(shareRoot, taskId);
     const relativePath = relative(shareRoot, sharePath);
