@@ -169,9 +169,7 @@ export class SandyOrchestrator {
         return;
     }
 
-    // TODO: Typescript says this is unreachable; we should remove the below, but only
-    //       if we can ensure that TypeScript will fail compilation if the switch above is not exhaustive
-    assertNever(call);
+    assertNever(call); // would fail at compile-time
   }
 
   private async routeIdleChatEvent(session: SessionState, event: SupportedChatEvent): Promise<void> {
