@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { SubAgentEvent } from "../types.js";
 import type { WorkerToolDefinitions, WorkerToolName, WorkerToolPayload } from "./worker-tool-registry.js";
-import { getWorkerToolEntries, getWorkerToolPrefix } from "./worker-tool-registry.js";
+import { getWorkerToolPrefix, workerToolEntries } from "./worker-tool-registry.js";
 
 export type WorkerToolDefinition<TSchema extends z.ZodObject<z.core.$ZodLooseShape> = z.ZodObject<z.core.$ZodLooseShape>> = {
   description: string;
@@ -31,7 +31,7 @@ export function buildWorkerProtocolInstructions(): string[] {
 export function parseWorkerToolCall(text: string): WorkerToolCall | null {
   const trimmed = text.trim();
 
-  for (const entry of getWorkerToolEntries()) {
+  for (const entry of workerToolEntries) {
     const prefix = getWorkerToolPrefix(entry.name);
     if (!trimmed.startsWith(prefix)) {
       continue;
@@ -74,11 +74,11 @@ export function workerToolCallToSubAgentEvent(
 }
 
 function buildWorkerToolInstructionSections(): string[] {
-  return getWorkerToolEntries().flatMap((entry) => buildWorkerToolInstructionSection(entry));
+  return workerToolEntries.flatMap((entry) => buildWorkerToolInstructionSection(entry));
 }
 
 function buildWorkerToolInstructionSection(
-  entry: ReturnType<typeof getWorkerToolEntries>[number],
+  entry: typeof workerToolEntries[number],
 ): string[] {
   const prefix = getWorkerToolPrefix(entry.name);
   return [

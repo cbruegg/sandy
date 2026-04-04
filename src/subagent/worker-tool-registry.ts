@@ -14,24 +14,16 @@ type WorkerToolEntry<TName extends WorkerToolName = WorkerToolName> = {
 type WorkerToolSchema = WorkerToolDefinitions[WorkerToolName]["schema"];
 type WorkerToolSchemaTuple = [WorkerToolSchema, ...WorkerToolSchema[]];
 
-function isWorkerToolName(value: string): value is WorkerToolName {
-  return value in workerToolDefinitions;
-}
-
-// TODO: Can't we just iterate over Object.entries wherever this would be used?
-export function getWorkerToolEntries(): WorkerToolEntry[] {
-  return Object.keys(workerToolDefinitions)
-    .filter(isWorkerToolName)
-    .map((name) => ({
-      name,
-      definition: workerToolDefinitions[name],
-    }));
-}
+export const workerToolEntries = Object.entries(workerToolDefinitions)
+  .map(([name, definition]) => ({
+    name,
+    definition,
+  })) as WorkerToolEntry[];
 
 export function createWorkerToolPayloadSchema(
   include: (entry: WorkerToolEntry) => boolean = () => true,
 ): z.ZodDiscriminatedUnion<WorkerToolSchemaTuple, "type"> {
-  const schemas = getWorkerToolEntries()
+  const schemas = workerToolEntries
     .filter(include)
     .map((entry) => entry.definition.schema);
   const [firstSchema, ...restSchemas] = schemas;
