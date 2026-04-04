@@ -69,4 +69,4 @@ export const workerToolDefinitions = {
       caption: z.string().optional(),
     }).strict(),
   },
-} satisfies Record<string, WorkerToolDefinition>;
+} as const satisfies Record<string, WorkerToolDefinition>;

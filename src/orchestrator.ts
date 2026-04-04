@@ -7,7 +7,6 @@ import type { SandboxHandle, SandboxRunner } from "./sandbox/sandbox-runner.js";
 import type { SessionStore } from "./session/in-memory-session-store.js";
 import { logger } from "./logger.js";
 import { messages } from "./messages.js";
-import { workerToolDefinitions } from "./subagent/worker-tools.js";
 import type {
   MainAgentDecision,
   NormalizedChatEvent,
@@ -153,21 +152,26 @@ export class SandyOrchestrator {
     session: SessionState,
     call: Extract<SubAgentEvent, { type: "tool_call" }>["call"],
   ): Promise<void> {
-    if (call.type === "send_file_to_channel") {
-      await this.sendSharedFileToUser(chatId, session, call.path, call.caption);
-      return;
+    switch (call.type) {
+      case "send_file_to_channel":
+        await this.sendSharedFileToUser(chatId, session, call.path, call.caption);
+        return;
+      case "copy_into_share":
+      case "copy_out_of_share":
+      case "mount_ro":
+      case "mount_rw":
+      case "enable_mcp":
+      case "enable_onecli":
+        await this.presentPrivilegeRequestToUser(chatId, session, {
+          requestId: randomUUID(),
+          payload: call,
+        });
+        return;
     }
 
-    if (workerToolDefinitions[call.type].requiresPrivilegeEscalation) {
-      await this.presentPrivilegeRequestToUser(chatId, session, {
-        requestId: randomUUID(),
-        payload: call,
-      });
-      return;
-    }
-
-    // TODO: Can we make the above handling exhaustive to let the TypeScript type checker detect unhandled tool calls at compile-time? I'd find it ok to comment out the currently unsupported tools in workerToolDefinitions for now.
-    throw new Error(`Unhandled worker tool call type "${call.type}".`);
+    // TODO: Typescript says this is unreachable; we should remove the below, but only
+    //       if we can ensure that TypeScript will fail compilation if the switch above is not exhaustive
+    assertNever(call);
   }
 
   private async routeIdleChatEvent(session: SessionState, event: SupportedChatEvent): Promise<void> {

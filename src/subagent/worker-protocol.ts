@@ -1,43 +1,23 @@
 import { z } from "zod";
 import type { SubAgentEvent } from "../types.js";
-import { subAgentEventSchema } from "../types.js";
-import { workerToolDefinitions } from "./worker-tools.js";
+import type { WorkerToolDefinitions, WorkerToolName, WorkerToolPayload } from "./worker-tool-registry.js";
+import { getWorkerToolEntries, getWorkerToolPrefix } from "./worker-tool-registry.js";
 
-// TODO Check if we can make this generic like WorkerToolDefinition<Schema>
-export type WorkerToolDefinition = {
+export type WorkerToolDefinition<TSchema extends z.ZodObject<z.core.$ZodLooseShape> = z.ZodObject<z.core.$ZodLooseShape>> = {
   description: string;
   requiresPrivilegeEscalation: boolean;
-  schema: z.ZodObject<z.core.$ZodLooseShape>;
+  schema: TSchema;
 };
 
-type WorkerToolConfigs = typeof workerToolDefinitions;
-type WorkerToolName = keyof WorkerToolConfigs;
-// TODO: This looks quite complicated, why?
-type WorkerToolRegistry = {
-  [TName in WorkerToolName]: WorkerToolConfigs[TName] & {
-    name: TName;
-    prefix: string;
-  };
+type WorkerToolCallFor<TName extends WorkerToolName> = {
+  tool: TName;
+  definition: WorkerToolDefinitions[TName];
+  payload: WorkerToolPayload<TName>;
 };
 
-export type WorkerToolCall = {
-  [TName in WorkerToolName]: {
-    tool: TName;
-    definition: WorkerToolRegistry[TName];
-    payload: z.infer<WorkerToolRegistry[TName]["schema"]>; // Maybe we can make WorkerToolCall generic too?
-  };
-}[WorkerToolName];
-
-const workerToolRegistry = Object.fromEntries(
-  Object.entries(workerToolDefinitions).map(([name, definition]) => [
-    name,
-    {
-      ...definition,
-      name,
-      prefix: `SANDY_${name.toUpperCase()} `,
-    },
-  ]),
-) as WorkerToolRegistry; // TODO: I don't like such casts, because this is not actually true: Due to the prefix addition, this does not actually satisfy the type. Maybe we can move prefix addition and stripping to the helper functions below and avoid "rewriting" the workerToolRegistry with a prefix? Its only use is detecting that a worker response *is* a tool call
+export type WorkerToolCall<TName extends WorkerToolName = WorkerToolName> = TName extends WorkerToolName
+  ? WorkerToolCallFor<TName>
+  : never;
 
 export function buildWorkerProtocolInstructions(): string[] {
   return [
@@ -51,32 +31,33 @@ export function buildWorkerProtocolInstructions(): string[] {
 export function parseWorkerToolCall(text: string): WorkerToolCall | null {
   const trimmed = text.trim();
 
-  for (const tool of Object.values(workerToolRegistry)) {
-    if (!trimmed.startsWith(tool.prefix)) {
+  for (const entry of getWorkerToolEntries()) {
+    const prefix = getWorkerToolPrefix(entry.name);
+    if (!trimmed.startsWith(prefix)) {
       continue;
     }
 
-    const rawPayload = trimmed.slice(tool.prefix.length).trim();
+    const rawPayload = trimmed.slice(prefix.length).trim();
 
     try {
       const payload = JSON.parse(rawPayload) as Record<string, unknown>;
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
         throw new Error("Tool payload must be a JSON object.");
       }
-      if (payload.type !== undefined && payload.type !== tool.name) {
-        throw new Error(`Tool payload type must be "${tool.name}" when provided.`);
+      if (payload.type !== undefined && payload.type !== entry.name) {
+        throw new Error(`Tool payload type must be "${entry.name}" when provided.`);
       }
       return {
-        tool: tool.name,
-        definition: tool,
-        payload: tool.schema.parse({
+        tool: entry.name,
+        definition: entry.definition,
+        payload: entry.definition.schema.parse({
           ...payload,
-          type: tool.name,
+          type: entry.name,
         }),
       } as WorkerToolCall;
     } catch (error) {
       const detail = error instanceof Error ? error.message : "Unknown tool parse failure.";
-      throw new Error(`Invalid ${tool.name} tool payload: ${detail} Payload: ${rawPayload}`, { cause: error });
+      throw new Error(`Invalid ${entry.name} tool payload: ${detail} Payload: ${rawPayload}`, { cause: error });
     }
   }
 
@@ -86,20 +67,25 @@ export function parseWorkerToolCall(text: string): WorkerToolCall | null {
 export function workerToolCallToSubAgentEvent(
   call: WorkerToolCall,
 ): Extract<SubAgentEvent, { type: "tool_call" }> {
-  return subAgentEventSchema.parse({
+  return {
     type: "tool_call",
     call: call.payload,
-  }) as Extract<SubAgentEvent, { type: "tool_call" }>;
+  };
 }
 
 function buildWorkerToolInstructionSections(): string[] {
-  return Object.values(workerToolRegistry).flatMap((tool) => buildWorkerToolInstructionSection(tool));
+  return getWorkerToolEntries().flatMap((entry) => buildWorkerToolInstructionSection(entry));
 }
 
-function buildWorkerToolInstructionSection(tool: WorkerToolRegistry[WorkerToolName]): string[] {
+function buildWorkerToolInstructionSection(
+  entry: ReturnType<typeof getWorkerToolEntries>[number],
+): string[] {
+  const prefix = getWorkerToolPrefix(entry.name);
   return [
-    `Tool "${tool.prefix.trim()}": ${tool.description}`,
-    `Format: ${tool.prefix}{...json...}`,
-    `Schema: ${JSON.stringify(z.toJSONSchema(tool.schema))}`,
+    `Tool "${prefix.trim()}": ${entry.definition.description}`,
+    `Format: ${prefix}{...json...}`,
+    `Schema: ${JSON.stringify(z.toJSONSchema(entry.definition.schema))}`,
+     // deliberately do not include whether this tool requires privilege escalation;
+     // agent probably does not need to know
   ];
 }
