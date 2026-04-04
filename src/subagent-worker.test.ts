@@ -4,7 +4,8 @@ import {
   buildInitialTaskInput,
   buildInitialTaskInputWithCapabilities,
   buildPrivilegeResolutionInput,
-  parsePrivilegeRequestMessage,
+  parseWorkerToolCall,
+  workerToolCallToSubAgentEvent,
 } from "./subagent/worker.js";
 import type { ChannelFormatting, PrivilegeResolutionResult } from "./types.js";
 import { parseSubAgentEvent } from "./types.js";
@@ -20,11 +21,10 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
 
   assert.match(input, /\/workspace\/share/);
   assert.match(input, /shared workspace is mounted/);
-  assert.match(input, /SANDY_PRIVILEGE_REQUEST/);
-  assert.match(input, /copy_into_share/);
-  assert.match(input, /SANDY_CHANNEL_FILE/);
-  assert.match(input, /JSON schema for SANDY_CHANNEL_FILE/);
-  assert.match(input, /Do not describe the saved path in prose/);
+  assert.match(input, /SANDY_COPY_INTO_SHARE/);
+  assert.match(input, /SANDY_SEND_FILE_TO_CHANNEL/);
+  assert.match(input, /Schema:/);
+  assert.match(input, /Use a tool by emitting exactly one line with no surrounding text/);
   assert.match(input, /does not require privilege escalation/);
   assert.match(input, /Telegram HTML/);
   assert.match(input, /<code>/);
@@ -64,34 +64,76 @@ test("buildPrivilegeResolutionInput explains the host privilege result to the su
   assert.match(input, /Continue the task from here\./);
 });
 
-test("parsePrivilegeRequestMessage accepts only the exact supported JSON payload shape", () => {
-  const request = parsePrivilegeRequestMessage(
-    'SANDY_PRIVILEGE_REQUEST {"type":"copy_out_of_share","sourcePath":"/workspace/share/random_numbers.txt","targetPath":"~/Downloads/random_numbers.txt","reason":"Deliver the generated file."}',
+test("parseWorkerToolCall parses privilege-escalated worker tools", () => {
+  const call = parseWorkerToolCall(
+    'SANDY_COPY_OUT_OF_SHARE {"sourcePath":"/workspace/share/random_numbers.txt","targetPath":"~/Downloads/random_numbers.txt","reason":"Deliver the generated file."}',
   );
 
-  assert.equal(request?.type, "copy_out_of_share");
-  assert.equal(request?.sourcePath, "/workspace/share/random_numbers.txt");
-  assert.equal(request?.targetPath, "~/Downloads/random_numbers.txt");
-  assert.equal(request?.reason, "Deliver the generated file.");
+  assert.equal(call?.tool, "copy_out_of_share");
+  assert.equal(call?.definition.requiresPrivilegeEscalation, true);
+  assert.deepEqual(call?.payload, {
+    type: "copy_out_of_share",
+    sourcePath: "/workspace/share/random_numbers.txt",
+    targetPath: "~/Downloads/random_numbers.txt",
+    reason: "Deliver the generated file.",
+  });
 });
 
-test("parsePrivilegeRequestMessage throws a helpful error for invalid payloads", () => {
+test("parseWorkerToolCall throws a helpful error for invalid payloads", () => {
   assert.throws(
-    () => parsePrivilegeRequestMessage(
-      'SANDY_PRIVILEGE_REQUEST {"type":"copy_out_of_share","source":"random_numbers.txt","destinationPath":"~/Downloads/random_numbers.txt"}',
+    () => parseWorkerToolCall(
+      'SANDY_COPY_OUT_OF_SHARE {"source":"random_numbers.txt","destinationPath":"~/Downloads/random_numbers.txt"}',
     ),
-    /Invalid privilege request payload|Unsupported privilege request payload|Payload:/,
+    /Invalid copy_out_of_share tool payload|Payload:/,
   );
 });
 
-test("parseSubAgentEvent accepts non-privileged channel file send requests", () => {
+test("workerToolCallToSubAgentEvent converts non-privileged tools generically", () => {
+  const call = parseWorkerToolCall(
+    'SANDY_SEND_FILE_TO_CHANNEL {"path":"/workspace/share/result.txt","caption":"Generated result file."}',
+  );
+
+  const event = workerToolCallToSubAgentEvent(call!);
+
+  assert.deepEqual(event, {
+    type: "tool_call",
+    call: {
+      type: "send_file_to_channel",
+      path: "/workspace/share/result.txt",
+      caption: "Generated result file.",
+    },
+  });
+});
+
+test("workerToolCallToSubAgentEvent converts privileged tools into tool-call events", () => {
+  const call = parseWorkerToolCall(
+    'SANDY_COPY_OUT_OF_SHARE {"sourcePath":"/workspace/share/result.txt","targetPath":"~/Downloads/result.txt","reason":"Deliver the generated file."}',
+  );
+
+  const event = workerToolCallToSubAgentEvent(call!);
+
+  assert.deepEqual(event, {
+    type: "tool_call",
+    call: {
+      type: "copy_out_of_share",
+      sourcePath: "/workspace/share/result.txt",
+      targetPath: "~/Downloads/result.txt",
+      reason: "Deliver the generated file.",
+    },
+  });
+});
+
+test("parseSubAgentEvent accepts tool-call events", () => {
   const event = parseSubAgentEvent(
-    '{"type":"channel_file","path":"/workspace/share/result.txt","caption":"Generated result file."}',
+    '{"type":"tool_call","call":{"type":"send_file_to_channel","path":"/workspace/share/result.txt","caption":"Generated result file."}}',
   );
 
   assert.deepEqual(event, {
-    type: "channel_file",
-    path: "/workspace/share/result.txt",
-    caption: "Generated result file.",
+    type: "tool_call",
+    call: {
+      type: "send_file_to_channel",
+      path: "/workspace/share/result.txt",
+      caption: "Generated result file.",
+    },
   });
 });

@@ -1,4 +1,4 @@
-import type { PrivilegeRequest } from "./types.js";
+import type { PrivilegeRequest, PrivilegeRequestPayload } from "./types.js";
 
 export const buttonLabels = {
   reportDangerousOutput: "Report dangerous output",
@@ -40,10 +40,10 @@ export const messages = {
   shareDeleted: (taskName: string): string => `Deleted the shared workspace for task "${taskName}".`,
   sharePreserved: (taskName: string): string => `Kept the shared workspace for task "${taskName}".`,
   privilegeRequestPrompt: (request: PrivilegeRequest): string =>
-    `Privilege request:\n${describePrivilegeRequest(request)}\n\nApprove or deny this request.`,
+    `Privilege request:\n${describePrivilegeRequest(request.payload)}\n\nApprove or deny this request.`,
 } as const;
 
-function describePrivilegeRequest(request: PrivilegeRequest): string {
+function describePrivilegeRequest(request: PrivilegeRequestPayload): string {
   switch (request.type) {
     case "copy_into_share":
     case "copy_out_of_share":

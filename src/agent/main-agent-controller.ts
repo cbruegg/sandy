@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Codex, type ThreadOptions } from "@openai/codex-sdk";
 import { logger } from "../logger.js";
 import type { DecideContext, MainAgentDecision } from "../types.js";
-import { parseMainAgentDecision } from "../types.js";
+import { mainAgentDecisionOutputSchema, parseMainAgentDecision } from "./main-agent-decision.js";
 
 export interface MainAgentController {
   decide(context: DecideContext): Promise<MainAgentDecision>;
@@ -20,27 +20,6 @@ type MainAgentThread = {
 type CodexClient = {
   startThread(options?: ThreadOptions): MainAgentThread;
 };
-
-const decisionSchema = {
-  type: "object",
-  properties: {
-    action: {
-      type: "string",
-      enum: ["launch_task", "reply"],
-    },
-    taskBrief: {
-      type: ["string", "null"],
-    },
-    taskName: {
-      type: ["string", "null"],
-    },
-    replyText: {
-      type: ["string", "null"],
-    },
-  },
-  required: ["action", "taskBrief", "taskName", "replyText"],
-  additionalProperties: false,
-} as const;
 
 export class CodexMainAgentController implements MainAgentController {
   private readonly codex: CodexClient;
@@ -66,7 +45,7 @@ export class CodexMainAgentController implements MainAgentController {
       isInitialTurn,
     });
     const turn = await thread.run(prompt, {
-      outputSchema: decisionSchema,
+      outputSchema: mainAgentDecisionOutputSchema,
     });
 
     const decision = parseMainAgentDecision(turn.finalResponse);

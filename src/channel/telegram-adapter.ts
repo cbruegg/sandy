@@ -172,7 +172,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     logger.info("telegram.send_privilege_request", {
       chatId,
       requestId: request.requestId,
-      requestType: request.type,
+      requestType: request.payload.type,
     });
     await this.sendFormattedMessage(chatId, messages.privilegeRequestPrompt(request), {
       reply_markup: {

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { ThreadOptions } from "@openai/codex-sdk";
+import { mainAgentDecisionOutputSchema } from "./agent/main-agent-decision.js";
 import {
   buildMainAgentPrompt,
   buildMainAgentThreadOptions,
@@ -63,8 +64,6 @@ function replyDecision(replyText: string): string {
   return JSON.stringify({
     action: "reply",
     replyText,
-    taskBrief: null,
-    taskName: null,
   });
 }
 
@@ -112,6 +111,7 @@ test("CodexMainAgentController starts threads in a unique temp directory with no
   assert.equal(options.sandboxMode, "read-only");
   assert.equal(options.skipGitRepoCheck, true);
   assert.match(options.workingDirectory ?? "", /^.+sandy-main-agent-/);
+  assert.deepEqual(codex.threads[0].inputs[0].options?.outputSchema, mainAgentDecisionOutputSchema);
 });
 
 test("CodexMainAgentController sends only the entries provided for each decision", async () => {

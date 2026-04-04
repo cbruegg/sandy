@@ -1,79 +1,105 @@
-import { randomUUID } from "node:crypto";
-import { parsePrivilegeRequest, type PrivilegeRequest } from "../types.js";
-import { sharedWorkspaceMountPath } from "../shared-workspace.js";
+import { z } from "zod";
+import type { SubAgentEvent } from "../types.js";
+import { subAgentEventSchema } from "../types.js";
+import { workerToolDefinitions } from "./worker-tools.js";
 
-export const privilegeRequestPrefix = "SANDY_PRIVILEGE_REQUEST ";
-export const channelFilePrefix = "SANDY_CHANNEL_FILE ";
+// TODO Check if we can make this generic like WorkerToolDefinition<Schema>
+export type WorkerToolDefinition = {
+  description: string;
+  requiresPrivilegeEscalation: boolean;
+  schema: z.ZodObject<z.core.$ZodLooseShape>;
+};
 
-const privilegeRequestSchemaText = '{"type":"copy_into_share"|"copy_out_of_share","sourcePath":"string","targetPath":"string","reason":"string"}';
-const channelFileSchemaText = '{"path":"string","caption":"string optional"}';
+type WorkerToolConfigs = typeof workerToolDefinitions;
+type WorkerToolName = keyof WorkerToolConfigs;
+// TODO: This looks quite complicated, why?
+type WorkerToolRegistry = {
+  [TName in WorkerToolName]: WorkerToolConfigs[TName] & {
+    name: TName;
+    prefix: string;
+  };
+};
+
+export type WorkerToolCall = {
+  [TName in WorkerToolName]: {
+    tool: TName;
+    definition: WorkerToolRegistry[TName];
+    payload: z.infer<WorkerToolRegistry[TName]["schema"]>; // Maybe we can make WorkerToolCall generic too?
+  };
+}[WorkerToolName];
+
+const workerToolRegistry = Object.fromEntries(
+  Object.entries(workerToolDefinitions).map(([name, definition]) => [
+    name,
+    {
+      ...definition,
+      name,
+      prefix: `SANDY_${name.toUpperCase()} `,
+    },
+  ]),
+) as WorkerToolRegistry; // TODO: I don't like such casts, because this is not actually true: Due to the prefix addition, this does not actually satisfy the type. Maybe we can move prefix addition and stripping to the helper functions below and avoid "rewriting" the workerToolRegistry with a prefix? Its only use is detecting that a worker response *is* a tool call
 
 export function buildWorkerProtocolInstructions(): string[] {
   return [
     "Protocol requirements for host-mediated actions:",
-    `- For privileged host file copy requests, output exactly one line with no surrounding text: ${privilegeRequestPrefix}{...json...}`,
-    `- JSON schema for ${privilegeRequestPrefix}: ${privilegeRequestSchemaText}`,
-    "Allowed host-mediated request types are copy_into_share and copy_out_of_share.",
-    `For any host-mediated request, use absolute paths. Any shared-workspace path must stay under ${sharedWorkspaceMountPath}.`,
-    `Example for copying a result file to Downloads: ${privilegeRequestPrefix}{"type":"copy_out_of_share","sourcePath":"${sharedWorkspaceMountPath}/result.txt","targetPath":"~/Downloads/result.txt","reason":"Need to deliver the generated file to the user."}`,
-    `Example for copying a host file in: ${privilegeRequestPrefix}{"type":"copy_into_share","sourcePath":"~/Downloads/input.txt","targetPath":"${sharedWorkspaceMountPath}/input.txt","reason":"Need the user-provided input file inside the task workspace."}`,
-    `- To send a file that already exists under ${sharedWorkspaceMountPath} back to the user, output exactly one line with no surrounding text: ${channelFilePrefix}{...json...}`,
-    `- JSON schema for ${channelFilePrefix}: ${channelFileSchemaText}`,
-    `Sending a file from ${sharedWorkspaceMountPath} back to the user through the channel does not require privilege escalation.`,
-    "Do not describe the saved path in prose when you want the file delivered. Emit the protocol line instead.",
-    `Example for sending a file to the user: ${channelFilePrefix}{"path":"${sharedWorkspaceMountPath}/result.txt","caption":"Generated result file."}`,
-    "After emitting a host-mediated request, stop and wait for the next host message before continuing.",
+    "Use a tool by emitting exactly one line with no surrounding text.",
+    ...buildWorkerToolInstructionSections(),
+    "After emitting a tool call, stop and wait for the next host message before continuing.",
   ];
 }
 
-export function parsePrivilegeRequestMessage(text: string): PrivilegeRequest | null {
-  const rawPayload = extractPayload(text, privilegeRequestPrefix);
-  if (!rawPayload) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(rawPayload) as unknown;
-    if (!parsed || typeof parsed !== "object") {
-      throw new Error("Privilege request payload must be a JSON object.");
-    }
-    return parsePrivilegeRequest({
-      ...(parsed as Record<string, unknown>),
-      requestId: randomUUID(),
-    });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "Unknown privilege request parse failure.";
-    throw new Error(`${detail} Payload: ${rawPayload}`, { cause: error });
-  }
-}
-
-export function parseChannelFileMessage(text: string): { path: string; caption?: string } | null {
-  const rawPayload = extractPayload(text, channelFilePrefix);
-  if (!rawPayload) {
-    return null;
-  }
-
-  const parsed = JSON.parse(rawPayload) as unknown;
-  if (!parsed || typeof parsed !== "object") {
-    throw new Error("Channel file payload must be a JSON object.");
-  }
-
-  const path = "path" in parsed ? parsed.path : undefined;
-  const caption = "caption" in parsed ? parsed.caption : undefined;
-  if (typeof path !== "string" || (caption !== undefined && typeof caption !== "string")) {
-    throw new Error("Channel file payload must contain a string path and optional string caption.");
-  }
-
-  return {
-    path,
-    caption,
-  };
-}
-
-function extractPayload(text: string, prefix: string): string | null {
+export function parseWorkerToolCall(text: string): WorkerToolCall | null {
   const trimmed = text.trim();
-  if (!trimmed.startsWith(prefix)) {
-    return null;
+
+  for (const tool of Object.values(workerToolRegistry)) {
+    if (!trimmed.startsWith(tool.prefix)) {
+      continue;
+    }
+
+    const rawPayload = trimmed.slice(tool.prefix.length).trim();
+
+    try {
+      const payload = JSON.parse(rawPayload) as Record<string, unknown>;
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw new Error("Tool payload must be a JSON object.");
+      }
+      if (payload.type !== undefined && payload.type !== tool.name) {
+        throw new Error(`Tool payload type must be "${tool.name}" when provided.`);
+      }
+      return {
+        tool: tool.name,
+        definition: tool,
+        payload: tool.schema.parse({
+          ...payload,
+          type: tool.name,
+        }),
+      } as WorkerToolCall;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Unknown tool parse failure.";
+      throw new Error(`Invalid ${tool.name} tool payload: ${detail} Payload: ${rawPayload}`, { cause: error });
+    }
   }
-  return trimmed.slice(prefix.length).trim();
+
+  return null;
+}
+
+export function workerToolCallToSubAgentEvent(
+  call: WorkerToolCall,
+): Extract<SubAgentEvent, { type: "tool_call" }> {
+  return subAgentEventSchema.parse({
+    type: "tool_call",
+    call: call.payload,
+  }) as Extract<SubAgentEvent, { type: "tool_call" }>;
+}
+
+function buildWorkerToolInstructionSections(): string[] {
+  return Object.values(workerToolRegistry).flatMap((tool) => buildWorkerToolInstructionSection(tool));
+}
+
+function buildWorkerToolInstructionSection(tool: WorkerToolRegistry[WorkerToolName]): string[] {
+  return [
+    `Tool "${tool.prefix.trim()}": ${tool.description}`,
+    `Format: ${tool.prefix}{...json...}`,
+    `Schema: ${JSON.stringify(z.toJSONSchema(tool.schema))}`,
+  ];
 }

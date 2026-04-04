@@ -24,6 +24,7 @@ export function resolveTaskShareHostPath(taskShareHostPath: string, requestedSha
   return resolve(taskShareHostPath, resolveSharedWorkspaceRelativePath(requestedSharedPath, fieldName));
 }
 
+// TODO: Do we really need the fieldName here? Seems to be just to compose the error message, which is not so needed IMO
 export function toSharedWorkspacePath(taskSharePath: string, hostPath: string, fieldName: string): string {
   const normalizedTaskSharePath = resolve(taskSharePath);
   const normalizedHostPath = resolve(hostPath);
