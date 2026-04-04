@@ -1,7 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { ThreadOptions } from "@openai/codex-sdk";
-import { mainAgentDecisionOutputSchema } from "./agent/main-agent-decision.js";
 import {
   buildMainAgentPrompt,
   buildMainAgentThreadOptions,
@@ -17,12 +16,12 @@ const testFormatting: ChannelFormatting = {
 };
 
 class RecordingThread {
-  public readonly inputs: Array<{ input: string; options?: { outputSchema?: object } }> = [];
+  public readonly inputs: string[] = [];
 
   constructor(private readonly finalResponses: string[]) {}
 
-  async run(input: string, options?: { outputSchema?: object }): Promise<{ finalResponse: string }> {
-    this.inputs.push({ input, options });
+  async run(input: string): Promise<{ finalResponse: string }> {
+    this.inputs.push(input);
     const finalResponse = this.finalResponses.shift();
     if (!finalResponse) {
       throw new Error("No final response configured.");
@@ -111,7 +110,21 @@ test("CodexMainAgentController starts threads in a unique temp directory with no
   assert.equal(options.sandboxMode, "read-only");
   assert.equal(options.skipGitRepoCheck, true);
   assert.match(options.workingDirectory ?? "", /^.+sandy-main-agent-/);
-  assert.deepEqual(codex.threads[0].inputs[0].options?.outputSchema, mainAgentDecisionOutputSchema);
+  assert.match(codex.threads[0].inputs[0], /Required JSON schema:/);
+});
+
+test("buildMainAgentPrompt includes the precise decision schema", () => {
+  const prompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    isInitialTurn: true,
+  });
+
+  assert.match(prompt, /Required JSON schema:/);
+  assert.match(prompt, /"oneOf"/);
+  assert.match(prompt, /"reply"/);
+  assert.match(prompt, /"launch_task"/);
 });
 
 test("CodexMainAgentController sends only the entries provided for each decision", async () => {
@@ -124,9 +137,31 @@ test("CodexMainAgentController sends only the entries provided for each decision
   assert.equal(codex.threads.length, 1);
   assert.equal(codex.threads[0].inputs.length, 2);
 
-  const [firstInput, secondInput] = codex.threads[0].inputs.map((entry) => entry.input);
+  const [firstInput, secondInput] = codex.threads[0].inputs;
   assert.match(firstInput, /"text": "hello"/);
   assert.doesNotMatch(firstInput, /"text": "world"/);
   assert.match(secondInput, /"text": "world"/);
   assert.doesNotMatch(secondInput, /"text": "hello"/);
+});
+
+test("CodexMainAgentController retries when the model returns invalid JSON", async () => {
+  const codex = new RecordingCodexClient([["not json", replyDecision("hello")]]);
+  const controller = new CodexMainAgentController(codex);
+
+  const decision = await controller.decide(makeContext(["hello"]));
+
+  assert.equal(decision.action, "reply");
+  assert.equal(codex.threads[0].inputs.length, 2);
+  assert.match(codex.threads[0].inputs[1], /Your last response was not valid JSON/);
+});
+
+test("CodexMainAgentController gives up after repeated validation failures", async () => {
+  const codex = new RecordingCodexClient([["{}", "[]", "{\"action\":\"reply\"}"]]);
+  const controller = new CodexMainAgentController(codex);
+
+  await assert.rejects(
+    controller.decide(makeContext(["hello"])),
+    /Main agent failed to return a valid decision after 3 attempts/,
+  );
+  assert.equal(codex.threads[0].inputs.length, 3);
 });

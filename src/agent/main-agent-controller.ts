@@ -2,9 +2,14 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Codex, type ThreadOptions } from "@openai/codex-sdk";
+import { ZodError } from "zod";
 import { logger } from "../logger.js";
 import type { DecideContext, MainAgentDecision } from "../types.js";
-import { mainAgentDecisionOutputSchema, parseMainAgentDecision } from "./main-agent-decision.js";
+import {
+  formatMainAgentDecisionValidationError,
+  mainAgentDecisionPromptSchema,
+  parseMainAgentDecision,
+} from "./main-agent-decision.js";
 
 export interface MainAgentController {
   decide(context: DecideContext): Promise<MainAgentDecision>;
@@ -15,11 +20,13 @@ type MainAgentTurn = {
 };
 
 type MainAgentThread = {
-  run(input: string, options?: { outputSchema?: object }): Promise<MainAgentTurn>;
+  run(input: string): Promise<MainAgentTurn>;
 };
 type CodexClient = {
   startThread(options?: ThreadOptions): MainAgentThread;
 };
+
+const MAX_DECISION_VALIDATION_ATTEMPTS = 3;
 
 export class CodexMainAgentController implements MainAgentController {
   private readonly codex: CodexClient;
@@ -44,17 +51,46 @@ export class CodexMainAgentController implements MainAgentController {
       newVisibleEntries: context.newVisibleEntries,
       isInitialTurn,
     });
-    const turn = await thread.run(prompt, {
-      outputSchema: mainAgentDecisionOutputSchema,
-    });
-
-    const decision = parseMainAgentDecision(turn.finalResponse);
+    const decision = await this.runValidatedDecision(thread, prompt, context.chatId);
     logger.info("main_agent.decision_received", {
       chatId: context.chatId,
       action: decision.action,
       taskName: decision.action === "launch_task" ? decision.taskName : null,
     });
     return decision;
+  }
+
+  private async runValidatedDecision(thread: MainAgentThread, prompt: string, chatId: string): Promise<MainAgentDecision> {
+    let nextInput = prompt;
+
+    for (let attempt = 1; attempt <= MAX_DECISION_VALIDATION_ATTEMPTS; attempt += 1) {
+      const turn = await thread.run(nextInput);
+      try {
+        return parseMainAgentDecision(turn.finalResponse);
+      } catch (error) {
+        if (!(error instanceof SyntaxError) && !(error instanceof ZodError)) {
+          throw error;
+        }
+
+        logger.warn("main_agent.decision_validation_failed", {
+          chatId,
+          attempt,
+          maxAttempts: MAX_DECISION_VALIDATION_ATTEMPTS,
+          message: error.message,
+        });
+
+        if (attempt === MAX_DECISION_VALIDATION_ATTEMPTS) {
+          throw new Error(
+            `Main agent failed to return a valid decision after ${MAX_DECISION_VALIDATION_ATTEMPTS} attempts: ${error.message}`,
+            { cause: error },
+          );
+        }
+
+        nextInput = formatMainAgentDecisionValidationError(turn.finalResponse, error);
+      }
+    }
+
+    throw new Error("Unreachable.");
   }
 
   private getOrCreateThread(chatId: string): MainAgentThread {
@@ -114,17 +150,20 @@ export function buildMainAgentPrompt(input: {
         "Decide whether Sandy should launch a new sub-agent task or reply directly.",
         "This thread persists across decisions for one chat, so retain prior visible context from earlier turns in this thread.",
         "If some earlier sub-agent output or privilege request details are not present in this thread, treat them as unavailable and do not invent them.",
-        "Return JSON that matches the provided schema.",
+        "Return exactly one JSON object that matches the provided schema.",
       ]
     : [
         "Continue acting as Sandy's main orchestration controller for this chat.",
         "Use the prior visible context already present in this thread plus only the new visible entries below.",
         "If some earlier sub-agent output or privilege request details are not present in this thread, treat them as unavailable and do not invent them.",
-        "Return JSON that matches the provided schema.",
+        "Return exactly one JSON object that matches the provided schema.",
       ];
 
   return [
     ...intro,
+    "",
+    "Required JSON schema:",
+    JSON.stringify(mainAgentDecisionPromptSchema, null, 2),
     "",
     input.isInitialTurn ? "Visible chat entries for this first decision:" : "New visible chat entries since your last decision:",
     JSON.stringify(input.newVisibleEntries, null, 2),
