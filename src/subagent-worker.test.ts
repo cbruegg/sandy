@@ -25,7 +25,7 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
   assert.match(input, /SANDY_SEND_FILE_TO_CHANNEL/);
   assert.match(input, /Schema:/);
   assert.match(input, /Use a tool by emitting exactly one line with no surrounding text/);
-  assert.match(input, /does not require privilege escalation/);
+  assert.match(input, /Send a file that already exists in the shared workspace back to the user through the channel adapter/);
   assert.match(input, /Telegram HTML/);
   assert.match(input, /<code>/);
   assert.match(input, /leave a summary file\./);
