@@ -15,8 +15,13 @@ function resolveLogLevel(): LogLevel {
   return "info";
 }
 
+function isDebugContentLoggingEnabled(): boolean {
+  return process.env.SANDY_DEBUG === "true";
+}
+
 class SandyLogger {
   private readonly minLevel = resolveLogLevel();
+  private readonly debugContentEnabled = isDebugContentLoggingEnabled();
 
   debug(event: string, data?: Record<string, unknown>): void {
     this.write("debug", event, data);
@@ -32,6 +37,13 @@ class SandyLogger {
 
   error(event: string, data?: Record<string, unknown>): void {
     this.write("error", event, data);
+  }
+
+  debugContent(event: string, data?: Record<string, unknown>): void {
+    if (!this.debugContentEnabled) {
+      return;
+    }
+    this.write("info", event, data);
   }
 
   private write(level: LogLevel, event: string, data?: Record<string, unknown>): void {

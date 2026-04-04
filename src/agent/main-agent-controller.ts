@@ -65,6 +65,11 @@ export class CodexMainAgentController implements MainAgentController {
 
     for (let attempt = 1; attempt <= MAX_DECISION_VALIDATION_ATTEMPTS; attempt += 1) {
       const turn = await thread.run(nextInput);
+      logger.debugContent("main_agent.model_response", {
+        chatId,
+        attempt,
+        response: turn.finalResponse,
+      });
       try {
         return parseMainAgentDecision(turn.finalResponse);
       } catch (error) {

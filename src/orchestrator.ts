@@ -55,6 +55,19 @@ export class SandyOrchestrator {
       kind: event.kind,
       hasActiveTask: session.activeTask !== null,
     });
+    if (event.kind === "user_text") {
+      logger.debugContent("chat.user_message", {
+        chatId: event.chatId,
+        messageId: event.messageId,
+        text: event.text,
+        attachments: event.attachments.map((attachment) => ({
+          attachmentId: attachment.attachmentId,
+          kind: attachment.kind,
+          fileName: attachment.fileName ?? null,
+          mimeType: attachment.mimeType ?? null,
+        })),
+      });
+    }
 
     if (event.kind === "unsupported_input") {
       logger.warn("chat.unsupported_input", {

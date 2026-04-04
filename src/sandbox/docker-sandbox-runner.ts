@@ -226,9 +226,9 @@ export class DockerSandboxRunner implements SandboxRunner {
 
     return {
       sendUserMessage: async (text: string) => {
-        logger.debug("sandbox.user_message", {
+        logger.debugContent("sandbox.user_message", {
           taskId: request.taskId,
-          textPreview: text.length <= 120 ? text : `${text.slice(0, 117)}...`,
+          text,
         });
         try {
           await this.sendToWorker(child, {
@@ -352,6 +352,12 @@ export class DockerSandboxRunner implements SandboxRunner {
         logger.debug("sandbox.worker_event", {
           eventType: event.type,
         });
+        if (event.type === "assistant_output" || event.type === "final_result") {
+          logger.debugContent("sandbox.model_response", {
+            eventType: event.type,
+            text: event.text,
+          });
+        }
         onEvent(event);
       } catch {
         logger.warn("sandbox.stdout_non_json", {
