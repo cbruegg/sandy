@@ -1,8 +1,8 @@
-import { cp, mkdir } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, isAbsolute, resolve } from "node:path";
-import type { PrivilegeRequestPayload } from "../types.js";
-import { resolveTaskShareHostPath } from "../shared-workspace.js";
+import {cp, mkdir} from "node:fs/promises";
+import {homedir} from "node:os";
+import {dirname, isAbsolute, resolve} from "node:path";
+import {resolveTaskShareHostPath} from "../shared-workspace.js";
+import type {PrivilegedWorkerToolPayload} from "../subagent/worker-tool-registry.js";
 
 export type PrivilegeContext = {
   taskId: string;
@@ -10,7 +10,7 @@ export type PrivilegeContext = {
 };
 
 export type SupportedPrivilegeRequest = Extract<
-  PrivilegeRequestPayload,
+  PrivilegedWorkerToolPayload,
   { type: "copy_into_share" | "copy_out_of_share" }
 >;
 
@@ -73,7 +73,7 @@ export class PrivilegeBrokerImpl implements PrivilegeBroker {
   }
 }
 
-export function isSupportedPrivilegeRequest(request: PrivilegeRequestPayload): request is SupportedPrivilegeRequest {
+export function isSupportedPrivilegeRequest(request: PrivilegedWorkerToolPayload): request is SupportedPrivilegeRequest {
   return request.type === "copy_into_share" || request.type === "copy_out_of_share";
 }
 

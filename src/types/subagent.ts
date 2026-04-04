@@ -1,12 +1,9 @@
-import { z } from "zod";
-import { createWorkerToolPayloadSchema } from "../subagent/worker-tool-registry.js";
-import type { WorkerToolPayload } from "../subagent/worker-tool-registry.js";
-import type { PrivilegeResolutionResult } from "./privilege.js";
+import {z} from "zod";
+import type {WorkerToolPayload} from "../subagent/worker-tool-registry.js";
+import {createWorkerToolPayloadSchema} from "../subagent/worker-tool-registry.js";
+import type {PrivilegeResolutionResult} from "./privilege.js";
 
 const workerToolCallSchema = createWorkerToolPayloadSchema();
-
-// TODO: Can't we inline this type?
-export type WorkerToolCallPayload = WorkerToolPayload;
 
 export type ProgressEvent = {
   type: "progress";
@@ -25,7 +22,7 @@ export type FinalResultEvent = {
 
 export type ToolCallEvent = {
   type: "tool_call";
-  call: WorkerToolCallPayload;
+  call: WorkerToolPayload;
 };
 
 export type TaskDoneEvent = {

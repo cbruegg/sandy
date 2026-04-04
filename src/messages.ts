@@ -1,4 +1,5 @@
-import type { PrivilegeRequest, PrivilegeRequestPayload } from "./types.js";
+import type {PrivilegeRequest} from "./types.js";
+import type {PrivilegedWorkerToolPayload} from "./subagent/worker-tool-registry.js";
 
 export const buttonLabels = {
   reportDangerousOutput: "Report dangerous output",
@@ -43,7 +44,7 @@ export const messages = {
     `Privilege request:\n${describePrivilegeRequest(request.payload)}\n\nApprove or deny this request.`,
 } as const;
 
-function describePrivilegeRequest(request: PrivilegeRequestPayload): string {
+function describePrivilegeRequest(request: PrivilegedWorkerToolPayload): string {
   switch (request.type) {
     case "copy_into_share":
     case "copy_out_of_share":

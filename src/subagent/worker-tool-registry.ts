@@ -3,10 +3,12 @@ import { workerToolDefinitions } from "./worker-tools.js";
 
 export type WorkerToolDefinitions = typeof workerToolDefinitions;
 export type WorkerToolName = keyof WorkerToolDefinitions;
-// TODO: This is still a lot of types; also i don't like the hardcoded value
-export type PrivilegedWorkerToolName = Exclude<WorkerToolName, "send_file_to_channel">;
 export type WorkerToolPayload<TName extends WorkerToolName = WorkerToolName> = z.infer<WorkerToolDefinitions[TName]["schema"]>;
-export type PrivilegedWorkerToolPayload = WorkerToolPayload<PrivilegedWorkerToolName>;
+type WorkerToolNameByPrivilege<TRequiresPrivilegeEscalation extends boolean> = {
+  [TName in WorkerToolName]:
+    WorkerToolDefinitions[TName]["requiresPrivilegeEscalation"] extends TRequiresPrivilegeEscalation ? TName : never;
+}[WorkerToolName];
+export type PrivilegedWorkerToolPayload = WorkerToolPayload<WorkerToolNameByPrivilege<true>>;
 type WorkerToolEntry<TName extends WorkerToolName = WorkerToolName> = {
   name: TName;
   definition: WorkerToolDefinitions[TName];
