@@ -15,7 +15,7 @@ type WorkerToolCallFor<TName extends WorkerToolName> = {
   payload: WorkerToolPayload<TName>;
 };
 
-export type WorkerToolCall<TName extends WorkerToolName = WorkerToolName> = TName extends WorkerToolName
+type WorkerToolCall<TName extends WorkerToolName = WorkerToolName> = TName extends WorkerToolName
   ? WorkerToolCallFor<TName>
   : never;
 

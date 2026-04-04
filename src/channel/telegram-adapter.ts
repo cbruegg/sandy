@@ -39,9 +39,9 @@ type TelegramBotLike = {
   stop(): Promise<void>;
 };
 
-export type TelegramBotFactory = (token: string) => TelegramBotLike;
+type TelegramBotFactory = (token: string) => TelegramBotLike;
 
-export type TelegramAdapterOptions = {
+type TelegramAdapterOptions = {
   token: string;
   pollTimeoutSeconds?: number;
   botFactory?: TelegramBotFactory;

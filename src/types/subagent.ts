@@ -3,7 +3,7 @@ import { createWorkerToolPayloadSchema } from "../subagent/worker-tool-registry.
 import type { WorkerToolPayload } from "../subagent/worker-tool-registry.js";
 import type { PrivilegeResolutionResult } from "./privilege.js";
 
-export const workerToolCallSchema = createWorkerToolPayloadSchema();
+const workerToolCallSchema = createWorkerToolPayloadSchema();
 
 // TODO: Can't we inline this type?
 export type WorkerToolCallPayload = WorkerToolPayload;
@@ -70,7 +70,7 @@ export type HostCommand =
       reason: string;
     };
 
-export const subAgentEventSchema = z.discriminatedUnion("type", [
+const subAgentEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("progress"),
     message: z.string(),

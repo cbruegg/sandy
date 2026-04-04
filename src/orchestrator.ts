@@ -32,7 +32,7 @@ type SupportedChatEvent = Exclude<NormalizedChatEvent, { kind: "unsupported_inpu
 type UserTextEvent = Extract<NormalizedChatEvent, { kind: "user_text" }>;
 type ActiveTaskStatus = NonNullable<SessionState["activeTask"]>["status"];
 
-export type SandyOrchestratorDependencies = {
+type SandyOrchestratorDependencies = {
   channel: ChannelAdapter;
   mainAgent: MainAgentController;
   sandboxRunner: SandboxRunner;

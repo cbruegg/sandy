@@ -15,7 +15,7 @@ function resolveLogLevel(): LogLevel {
   return "info";
 }
 
-export class SandyLogger {
+class SandyLogger {
   private readonly minLevel = resolveLogLevel();
 
   debug(event: string, data?: Record<string, unknown>): void {

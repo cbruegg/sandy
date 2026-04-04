@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export type SandyConfig = {
+type SandyConfig = {
   telegramBotToken: string;
   openAiApiKey: string | null;
   codexAuthFile: string | null;

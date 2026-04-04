@@ -46,17 +46,3 @@ export type SessionState = {
   pendingQuarantinedOutputs: string[];
   pendingShareDeletion: PendingShareDeletion | null;
 };
-
-export function toTaskMetadata(task: ActiveTaskState): TaskMetadata {
-  return {
-    taskId: task.taskId,
-    taskName: task.taskName,
-    status: task.status,
-    startedAt: task.startedAt,
-    lastActivityAt: task.lastActivityAt,
-    hasPendingQuarantinedOutput: task.quarantinedOutputs.length > 0,
-    hasPendingPrivilegeRequest: task.pendingPrivilegeRequest !== null,
-    approvedResourceIdentifiers: [...task.approvedResourceIdentifiers],
-    workerConnected: task.workerConnected,
-  };
-}

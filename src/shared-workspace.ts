@@ -2,7 +2,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 
 export const sharedWorkspaceMountPath = "/workspace/share";
 
-export function resolveSharedWorkspaceRelativePath(sharedPath: string, fieldName: string): string {
+function resolveSharedWorkspaceRelativePath(sharedPath: string, fieldName: string): string {
   if (!isAbsolute(sharedPath)) {
     throw new Error(`${fieldName} must be an absolute path under ${sharedWorkspaceMountPath}.`);
   }

@@ -7,7 +7,7 @@ export type WorkerToolName = keyof WorkerToolDefinitions;
 export type PrivilegedWorkerToolName = Exclude<WorkerToolName, "send_file_to_channel">;
 export type WorkerToolPayload<TName extends WorkerToolName = WorkerToolName> = z.infer<WorkerToolDefinitions[TName]["schema"]>;
 export type PrivilegedWorkerToolPayload = WorkerToolPayload<PrivilegedWorkerToolName>;
-export type WorkerToolEntry<TName extends WorkerToolName = WorkerToolName> = {
+type WorkerToolEntry<TName extends WorkerToolName = WorkerToolName> = {
   name: TName;
   definition: WorkerToolDefinitions[TName];
 };
