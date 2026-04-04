@@ -1,8 +1,8 @@
-import { cp, mkdir } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, isAbsolute, resolve } from "node:path";
-import type { PrivilegeRequest, PrivilegeResolutionResult } from "../types.js";
-import { resolveTaskShareHostPath } from "../shared-workspace.js";
+import {cp, mkdir} from "node:fs/promises";
+import {homedir} from "node:os";
+import {dirname, isAbsolute, resolve} from "node:path";
+import {resolveTaskShareHostPath} from "../shared-workspace.js";
+import type {PrivilegedWorkerToolPayload} from "../subagent/worker-tool-registry.js";
 
 export type PrivilegeContext = {
   taskId: string;
@@ -10,16 +10,21 @@ export type PrivilegeContext = {
 };
 
 export type SupportedPrivilegeRequest = Extract<
-  PrivilegeRequest,
+  PrivilegedWorkerToolPayload,
   { type: "copy_into_share" | "copy_out_of_share" }
 >;
 
+export type PrivilegeOperationResult = {
+  outcome: "approved" | "failed";
+  message: string;
+};
+
 export interface PrivilegeBroker {
-  apply(request: SupportedPrivilegeRequest, context: PrivilegeContext): Promise<PrivilegeResolutionResult>;
+  apply(request: SupportedPrivilegeRequest, context: PrivilegeContext): Promise<PrivilegeOperationResult>;
 }
 
 export class PrivilegeBrokerImpl implements PrivilegeBroker {
-  async apply(request: SupportedPrivilegeRequest, context: PrivilegeContext): Promise<PrivilegeResolutionResult> {
+  async apply(request: SupportedPrivilegeRequest, context: PrivilegeContext): Promise<PrivilegeOperationResult> {
     try {
       switch (request.type) {
         case "copy_into_share":
@@ -29,7 +34,6 @@ export class PrivilegeBrokerImpl implements PrivilegeBroker {
       }
     } catch (error) {
       return {
-        requestId: request.requestId,
         outcome: "failed",
         message: error instanceof Error ? error.message : "Privilege operation failed.",
       };
@@ -39,7 +43,7 @@ export class PrivilegeBrokerImpl implements PrivilegeBroker {
   private async copyIntoShare(
     request: Extract<SupportedPrivilegeRequest, { type: "copy_into_share" }>,
     context: PrivilegeContext,
-  ): Promise<PrivilegeResolutionResult> {
+  ): Promise<PrivilegeOperationResult> {
     const sourcePath = resolveAbsoluteHostPath(request.sourcePath, "copy_into_share sourcePath");
     const targetPath = resolveTaskShareHostPath(context.taskSharePath, request.targetPath, "copy_into_share targetPath");
 
@@ -47,7 +51,6 @@ export class PrivilegeBrokerImpl implements PrivilegeBroker {
     await cp(sourcePath, targetPath, { recursive: true });
 
     return {
-      requestId: request.requestId,
       outcome: "approved",
       message: `Copied ${sourcePath} into the shared workspace at ${request.targetPath}.`,
     };
@@ -56,7 +59,7 @@ export class PrivilegeBrokerImpl implements PrivilegeBroker {
   private async copyOutOfShare(
     request: Extract<SupportedPrivilegeRequest, { type: "copy_out_of_share" }>,
     context: PrivilegeContext,
-  ): Promise<PrivilegeResolutionResult> {
+  ): Promise<PrivilegeOperationResult> {
     const sourcePath = resolveTaskShareHostPath(context.taskSharePath, request.sourcePath, "copy_out_of_share sourcePath");
     const targetPath = resolveAbsoluteHostPath(request.targetPath, "copy_out_of_share targetPath");
 
@@ -64,14 +67,13 @@ export class PrivilegeBrokerImpl implements PrivilegeBroker {
     await cp(sourcePath, targetPath, { recursive: true });
 
     return {
-      requestId: request.requestId,
       outcome: "approved",
       message: `Copied ${request.sourcePath} out of the shared workspace to ${targetPath}.`,
     };
   }
 }
 
-export function isSupportedPrivilegeRequest(request: PrivilegeRequest): request is SupportedPrivilegeRequest {
+export function isSupportedPrivilegeRequest(request: PrivilegedWorkerToolPayload): request is SupportedPrivilegeRequest {
   return request.type === "copy_into_share" || request.type === "copy_out_of_share";
 }
 

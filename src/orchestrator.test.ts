@@ -168,10 +168,9 @@ class FakeSandboxRunner implements SandboxRunner {
 class FakePrivilegeBroker implements PrivilegeBroker {
   public readonly appliedRequests: Array<{ request: SupportedPrivilegeRequest; taskId: string; taskSharePath: string }> = [];
 
-  async apply(request: SupportedPrivilegeRequest, context: { taskId: string; taskSharePath: string }): Promise<PrivilegeResolutionResult> {
+  async apply(request: SupportedPrivilegeRequest, context: { taskId: string; taskSharePath: string }): Promise<{ outcome: "approved"; message: string }> {
     this.appliedRequests.push({ request, taskId: context.taskId, taskSharePath: context.taskSharePath });
     return {
-      requestId: request.requestId,
       outcome: "approved",
       message: `Applied ${request.type}.`,
     };
@@ -389,15 +388,16 @@ test("orchestrator applies supported privilege requests deterministically and ou
   });
 
   await runner.emit({
-    type: "privilege_request",
-    request: {
+    type: "tool_call",
+    call: {
       type: "copy_into_share",
-      requestId: "req-1",
       sourcePath: "/Users/test/input.txt",
       targetPath: "/workspace/share/input.txt",
       reason: "Need a local fixture file.",
     },
   });
+
+  const requestId = channel.privilegeRequests[0]?.request.requestId;
 
   await orchestrator.handleChatEvent({
     kind: "approval_response",
@@ -405,14 +405,13 @@ test("orchestrator applies supported privilege requests deterministically and ou
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
     decision: "approve",
-    requestId: "req-1",
+    requestId,
   });
 
   assert.equal(channel.privilegeRequests.length, 1);
   assert.deepEqual(privilegeBroker.appliedRequests, [{
     request: {
       type: "copy_into_share",
-      requestId: "req-1",
       sourcePath: "/Users/test/input.txt",
       targetPath: "/workspace/share/input.txt",
       reason: "Need a local fixture file.",
@@ -421,11 +420,11 @@ test("orchestrator applies supported privilege requests deterministically and ou
     taskSharePath: `/tmp/${runner.launches[0].taskId}`,
   }]);
   assert.deepEqual(runner.handle.privilegeResults, [{
-    requestId: "req-1",
+    requestId,
     outcome: "approved",
     message: "Applied copy_into_share.",
   }]);
-  assert.equal(channel.sentTexts.at(-1)?.text, messages.privilegeApproved("req-1", "Applied copy_into_share."));
+  assert.equal(channel.sentTexts.at(-1)?.text, messages.privilegeApproved(requestId, "Applied copy_into_share."));
 });
 
 test("orchestrator rejects unsupported privilege requests without prompting the user", async () => {
@@ -455,10 +454,9 @@ test("orchestrator rejects unsupported privilege requests without prompting the 
   });
 
   await runner.emit({
-    type: "privilege_request",
-    request: {
+    type: "tool_call",
+    call: {
       type: "enable_mcp",
-      requestId: "req-unsupported",
       identifier: "github-readonly",
       reason: "Need repository metadata.",
     },
@@ -466,13 +464,16 @@ test("orchestrator rejects unsupported privilege requests without prompting the 
 
   assert.equal(channel.privilegeRequests.length, 0);
   assert.deepEqual(runner.handle.privilegeResults.at(-1), {
-    requestId: "req-unsupported",
+    requestId: runner.handle.privilegeResults.at(-1)?.requestId,
     outcome: "rejected",
     message: 'Privilege request type "enable_mcp" is not supported by this runtime.',
   });
   assert.equal(
     channel.sentTexts.at(-1)?.text,
-    messages.privilegeRejected("req-unsupported", 'Privilege request type "enable_mcp" is not supported by this runtime.'),
+    messages.privilegeRejected(
+      runner.handle.privilegeResults.at(-1)!.requestId,
+      'Privilege request type "enable_mcp" is not supported by this runtime.',
+    ),
   );
 });
 
@@ -503,10 +504,9 @@ test("orchestrator terminates the task when the user reports a pending privilege
   });
 
   await runner.emit({
-    type: "privilege_request",
-    request: {
+    type: "tool_call",
+    call: {
       type: "copy_into_share",
-      requestId: "req-danger",
       sourcePath: "/Users/test/input.txt",
       targetPath: "/workspace/share/input.txt",
       reason: "Need a local fixture file.",
@@ -594,9 +594,12 @@ test("orchestrator sends worker-requested shared files back through the channel"
   });
 
   await runner.emit({
-    type: "channel_file",
-    path: "/workspace/share/results/output.txt",
-    caption: "Generated output",
+    type: "tool_call",
+    call: {
+      type: "send_file_to_channel",
+      path: "/workspace/share/results/output.txt",
+      caption: "Generated output",
+    },
   });
 
   assert.deepEqual(channel.sentFiles, [{
@@ -867,9 +870,12 @@ test("orchestrator fails the active task if channel file delivery fails", async 
   });
 
   await runner.emit({
-    type: "channel_file",
-    path: "/workspace/share/result.txt",
-    caption: "Result",
+    type: "tool_call",
+    call: {
+      type: "send_file_to_channel",
+      path: "/workspace/share/result.txt",
+      caption: "Result",
+    },
   });
 
   const session = store.getOrCreate("chat-file-failure");

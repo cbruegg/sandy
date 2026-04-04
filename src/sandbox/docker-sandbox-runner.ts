@@ -8,7 +8,7 @@ import type { HostCommand, PrivilegeResolutionResult, SubAgentEvent } from "../t
 import { parseSubAgentEvent, serializeHostCommand } from "../types.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 
-export type DockerSandboxRunnerOptions = {
+type DockerSandboxRunnerOptions = {
   workerImage: string;
   shareRoot: string;
   openAiApiKey: string | null;

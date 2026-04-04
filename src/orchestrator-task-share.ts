@@ -29,7 +29,7 @@ export async function stageSharedAttachments(input: {
 function buildSharedAttachments(taskSharePath: string, attachments: SavedAttachment[]): SharedAttachment[] {
   return attachments.map((attachment) => ({
     ...attachment,
-    sharePath: toSharedWorkspacePath(taskSharePath, attachment.hostPath, `${attachment.fileName} hostPath`),
+    sharePath: toSharedWorkspacePath(taskSharePath, attachment.hostPath),
   }));
 }
 

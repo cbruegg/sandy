@@ -10,26 +10,22 @@ import {
 import {
   type ChannelFormatting,
   type HostCommand,
-  type PrivilegeRequest,
   type SubAgentEvent,
 } from "../types.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
+import { workerToolDefinitions } from "./worker-tools.js";
 import {
-  parseChannelFileMessage,
-  parsePrivilegeRequestMessage,
+  parseWorkerToolCall,
+  workerToolCallToSubAgentEvent,
 } from "./worker-protocol.js";
 import {
   buildInitialTaskInput,
   buildPrivilegeResolutionInput,
 } from "./worker-prompt.js";
-type ThreadEventDisposition = "none" | "privilege_request" | "channel_file" | "terminal_error";
-type PrivilegeParseResult =
+type ThreadEventDisposition = "none" | "privileged_tool_call" | "send_file_to_channel" | "terminal_error";
+type WorkerToolEventParseResult =
   | { kind: "none" }
-  | { kind: "parsed"; request: PrivilegeRequest }
-  | { kind: "invalid"; message: string };
-type ChannelFileParseResult =
-  | { kind: "none" }
-  | { kind: "parsed"; path: string; caption?: string }
+  | { kind: "parsed"; event: Extract<SubAgentEvent, { type: "tool_call" }> }
   | { kind: "invalid"; message: string };
 
 function getRequiredEnv(name: string): string {
@@ -94,25 +90,25 @@ function progressFromCommand(item: CommandExecutionItem): string {
 }
 
 async function streamTurn(thread: Thread, input: string): Promise<void> {
-  let sawPrivilegeRequest = false;
-  let sawChannelFile = false;
+  let sawPrivilegedToolCall = false;
+  let sawSendFileToChannel = false;
   let sawTerminalError = false;
   const { events } = await thread.runStreamed(input);
 
   for await (const event of events) {
     const disposition = handleThreadEvent(event);
-    if (disposition === "privilege_request" && sawPrivilegeRequest) {
-      throw new Error("Only one privilege request is allowed per turn.");
+    if (disposition === "privileged_tool_call" && sawPrivilegedToolCall) {
+      throw new Error("Only one privileged tool call is allowed per turn.");
     }
-    sawPrivilegeRequest = disposition === "privilege_request" || sawPrivilegeRequest;
-    if (disposition === "channel_file" && sawChannelFile) {
+    sawPrivilegedToolCall = disposition === "privileged_tool_call" || sawPrivilegedToolCall;
+    if (disposition === "send_file_to_channel" && sawSendFileToChannel) {
       throw new Error("Only one channel file send request is allowed per turn.");
     }
-    sawChannelFile = disposition === "channel_file" || sawChannelFile;
+    sawSendFileToChannel = disposition === "send_file_to_channel" || sawSendFileToChannel;
     sawTerminalError = disposition === "terminal_error" || sawTerminalError;
   }
 
-  if (!sawPrivilegeRequest && !sawTerminalError) {
+  if (!sawPrivilegedToolCall && !sawTerminalError) {
     send({ type: "task_done" });
   }
 }
@@ -122,34 +118,15 @@ function handleThreadEvent(event: ThreadEvent): ThreadEventDisposition {
     case "item.completed":
     case "item.updated":
       if (event.item.type === "agent_message" && event.type === "item.completed") {
-        const privilegeResult = tryParsePrivilegeRequestMessage(event.item.text);
-        if (privilegeResult.kind === "parsed") {
-          send({
-            type: "privilege_request",
-            request: privilegeResult.request,
-          });
-          return "privilege_request";
+        const toolEventResult = tryParseWorkerToolEvent(event.item.text);
+        if (toolEventResult.kind === "parsed") {
+          send(toolEventResult.event);
+          return classifyToolCallDisposition(toolEventResult.event.call.type);
         }
-        if (privilegeResult.kind === "invalid") {
+        if (toolEventResult.kind === "invalid") {
           send({
             type: "task_error",
-            message: privilegeResult.message,
-          });
-          return "terminal_error";
-        }
-        const channelFileResult = tryParseChannelFileMessage(event.item.text);
-        if (channelFileResult.kind === "parsed") {
-          send({
-            type: "channel_file",
-            path: channelFileResult.path,
-            caption: channelFileResult.caption,
-          });
-          return "channel_file";
-        }
-        if (channelFileResult.kind === "invalid") {
-          send({
-            type: "task_error",
-            message: channelFileResult.message,
+            message: toolEventResult.message,
           });
           return "terminal_error";
         }
@@ -195,38 +172,30 @@ function handleThreadEvent(event: ThreadEvent): ThreadEventDisposition {
   }
 }
 
-function tryParsePrivilegeRequestMessage(text: string): PrivilegeParseResult {
+function tryParseWorkerToolEvent(text: string): WorkerToolEventParseResult {
   try {
-    const request = parsePrivilegeRequestMessage(text);
-    return request ? { kind: "parsed", request } : { kind: "none" };
+    const call = parseWorkerToolCall(text);
+    if (!call) {
+      return { kind: "none" };
+    }
+    return {
+      kind: "parsed",
+      event: workerToolCallToSubAgentEvent(call),
+    };
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "Unknown privilege request parse failure.";
+    const detail = error instanceof Error ? error.message : "Unknown worker tool parse failure.";
     return {
       kind: "invalid",
-      message: `Invalid privilege request payload: ${detail}`,
+      message: `Invalid worker tool payload: ${detail}`,
     };
   }
 }
 
-function tryParseChannelFileMessage(text: string): ChannelFileParseResult {
-  try {
-    const parsed = parseChannelFileMessage(text);
-    if (!parsed) {
-      return { kind: "none" };
-    }
-
-    return {
-      kind: "parsed",
-      path: parsed.path,
-      caption: parsed.caption,
-    };
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "Unknown channel file parse failure.";
-    return {
-      kind: "invalid",
-      message: `Invalid channel file payload: ${detail}`,
-    };
+function classifyToolCallDisposition(toolType: Extract<SubAgentEvent, { type: "tool_call" }>["call"]["type"]): ThreadEventDisposition {
+  if (toolType === "send_file_to_channel") {
+    return "send_file_to_channel";
   }
+  return workerToolDefinitions[toolType].requiresPrivilegeEscalation ? "privileged_tool_call" : "none";
 }
 
 async function main(): Promise<void> {
@@ -315,7 +284,10 @@ async function main(): Promise<void> {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await main();
 }
-export { parsePrivilegeRequestMessage } from "./worker-protocol.js";
+export {
+  parseWorkerToolCall,
+  workerToolCallToSubAgentEvent,
+} from "./worker-protocol.js";
 export {
   buildInitialTaskInput,
   buildInitialTaskInputWithCapabilities,

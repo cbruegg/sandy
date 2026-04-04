@@ -9,7 +9,7 @@ test("shared workspace helpers map between host and worker paths", () => {
   );
 
   assert.equal(
-    toSharedWorkspacePath("/tmp/task-1", "/tmp/task-1/inbox/msg-1/1-input.txt", "hostPath"),
+    toSharedWorkspacePath("/tmp/task-1", "/tmp/task-1/inbox/msg-1/1-input.txt"),
     "/workspace/share/inbox/msg-1/1-input.txt",
   );
 });
@@ -21,7 +21,7 @@ test("shared workspace helpers reject path escapes", () => {
   );
 
   assert.throws(
-    () => toSharedWorkspacePath("/tmp/task-1", "/tmp/other-task/file.txt", "hostPath"),
-    /must stay within the task share/,
+    () => toSharedWorkspacePath("/tmp/task-1", "/tmp/other-task/file.txt"),
+    /Path must stay within the task share/,
   );
 });

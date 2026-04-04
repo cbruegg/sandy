@@ -16,7 +16,6 @@ test("PrivilegeBrokerImpl copies a host file into the task share", async () => {
   const result = await broker.apply(
     {
       type: "copy_into_share",
-      requestId: "req-1",
       reason: "Need fixture input.",
       sourcePath,
       targetPath: "/workspace/share/copied/input.txt",
@@ -28,7 +27,6 @@ test("PrivilegeBrokerImpl copies a host file into the task share", async () => {
   );
 
   assert.deepEqual(result, {
-    requestId: "req-1",
     outcome: "approved",
     message: `Copied ${sourcePath} into the shared workspace at /workspace/share/copied/input.txt.`,
   });
@@ -49,7 +47,6 @@ test("PrivilegeBrokerImpl copies a shared file out to the host", async () => {
   const result = await broker.apply(
     {
       type: "copy_out_of_share",
-      requestId: "req-2",
       reason: "Export result.",
       sourcePath: "/workspace/share/nested/result.txt",
       targetPath,
@@ -61,7 +58,6 @@ test("PrivilegeBrokerImpl copies a shared file out to the host", async () => {
   );
 
   assert.deepEqual(result, {
-    requestId: "req-2",
     outcome: "approved",
     message: `Copied /workspace/share/nested/result.txt out of the shared workspace to ${targetPath}.`,
   });
@@ -79,7 +75,6 @@ test("PrivilegeBrokerImpl rejects share path traversal", async () => {
   const result = await broker.apply(
     {
       type: "copy_into_share",
-      requestId: "req-4",
       reason: "Try to escape the share.",
       sourcePath,
       targetPath: "/workspace/other/input.txt",
@@ -91,7 +86,6 @@ test("PrivilegeBrokerImpl rejects share path traversal", async () => {
   );
 
   assert.deepEqual(result, {
-    requestId: "req-4",
     outcome: "failed",
     message: "copy_into_share targetPath must stay within /workspace/share.",
   });
@@ -109,7 +103,6 @@ test("PrivilegeBrokerImpl expands ~/ for host paths", async () => {
   const result = await broker.apply(
     {
       type: "copy_out_of_share",
-      requestId: "req-5",
       reason: "Export result.",
       sourcePath: "/workspace/share/result.txt",
       targetPath: `~/${targetPath.slice(homedir().length + 1)}`,
@@ -121,7 +114,6 @@ test("PrivilegeBrokerImpl expands ~/ for host paths", async () => {
   );
 
   assert.deepEqual(result, {
-    requestId: "req-5",
     outcome: "approved",
     message: `Copied /workspace/share/result.txt out of the shared workspace to ${targetPath}.`,
   });

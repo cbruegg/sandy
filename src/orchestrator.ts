@@ -32,7 +32,7 @@ type SupportedChatEvent = Exclude<NormalizedChatEvent, { kind: "unsupported_inpu
 type UserTextEvent = Extract<NormalizedChatEvent, { kind: "user_text" }>;
 type ActiveTaskStatus = NonNullable<SessionState["activeTask"]>["status"];
 
-export type SandyOrchestratorDependencies = {
+type SandyOrchestratorDependencies = {
   channel: ChannelAdapter;
   mainAgent: MainAgentController;
   sandboxRunner: SandboxRunner;
@@ -109,11 +109,8 @@ export class SandyOrchestrator {
           session.activeTask.quarantinedOutputs.push(event.text);
           await this.deps.channel.sendTaskUpdate(chatId, event.text);
           break;
-        case "privilege_request":
-          await this.presentPrivilegeRequestToUser(chatId, session, event.request);
-          break;
-        case "channel_file":
-          await this.sendSharedFileToUser(chatId, session, event.path, event.caption);
+        case "tool_call":
+          await this.routeWorkerToolCall(chatId, session, event.call);
           break;
         case "final_result":
           session.activeTask.quarantinedOutputs.push(event.text);
@@ -148,6 +145,31 @@ export class SandyOrchestrator {
     }
 
     this.deps.sessionStore.save(session);
+  }
+
+  private async routeWorkerToolCall(
+    chatId: string,
+    session: SessionState,
+    call: Extract<SubAgentEvent, { type: "tool_call" }>["call"],
+  ): Promise<void> {
+    switch (call.type) {
+      case "send_file_to_channel":
+        await this.sendSharedFileToUser(chatId, session, call.path, call.caption);
+        return;
+      case "copy_into_share":
+      case "copy_out_of_share":
+      case "mount_ro":
+      case "mount_rw":
+      case "enable_mcp":
+      case "enable_onecli":
+        await this.presentPrivilegeRequestToUser(chatId, session, {
+          requestId: randomUUID(),
+          payload: call,
+        });
+        return;
+    }
+
+    assertNever(call); // would fail at compile-time
   }
 
   private async routeIdleChatEvent(session: SessionState, event: SupportedChatEvent): Promise<void> {
@@ -365,13 +387,17 @@ export class SandyOrchestrator {
         outcome: "denied",
         message: `The user denied privilege request ${request.requestId}.`,
       };
-    } else if (!isSupportedPrivilegeRequest(request)) {
+    } else if (!isSupportedPrivilegeRequest(request.payload)) {
       result = this.buildUnsupportedPrivilegeResult(request);
     } else {
-      result = await this.deps.privilegeBroker.apply(request, {
+      const operation = await this.deps.privilegeBroker.apply(request.payload, {
         taskId: activeTask.taskId,
         taskSharePath: this.deps.sandboxRunner.getTaskSharePath(activeTask.taskId),
       });
+      result = {
+        requestId: request.requestId,
+        ...operation,
+      };
     }
 
     await this.requireHandle(activeTask.taskId).resolvePrivilege(result);
@@ -391,10 +417,10 @@ export class SandyOrchestrator {
       chatId,
       taskId: activeTask.taskId,
       requestId: request.requestId,
-      requestType: request.type,
+      requestType: request.payload.type,
     });
 
-    if (!isSupportedPrivilegeRequest(request)) {
+    if (!isSupportedPrivilegeRequest(request.payload)) {
       const result = this.buildUnsupportedPrivilegeResult(request);
       await this.requireHandle(activeTask.taskId).resolvePrivilege(result);
       await this.sendPrivilegeResolutionMessage(chatId, activeTask.taskId, result);
@@ -419,7 +445,7 @@ export class SandyOrchestrator {
 
     await this.deps.channel.sendFile(
       chatId,
-      resolveTaskShareHostPath(this.deps.sandboxRunner.getTaskSharePath(activeTask.taskId), sharePath, "channel_file path"),
+      resolveTaskShareHostPath(this.deps.sandboxRunner.getTaskSharePath(activeTask.taskId), sharePath, "send_file_to_channel path"),
       caption,
     );
   }
@@ -428,7 +454,7 @@ export class SandyOrchestrator {
     return {
       requestId: request.requestId,
       outcome: "rejected",
-      message: `Privilege request type "${request.type}" is not supported by this runtime.`,
+      message: `Privilege request type "${request.payload.type}" is not supported by this runtime.`,
     };
   }
 

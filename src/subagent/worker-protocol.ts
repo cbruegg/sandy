@@ -1,79 +1,91 @@
-import { randomUUID } from "node:crypto";
-import { parsePrivilegeRequest, type PrivilegeRequest } from "../types.js";
-import { sharedWorkspaceMountPath } from "../shared-workspace.js";
+import { z } from "zod";
+import type { SubAgentEvent } from "../types.js";
+import type { WorkerToolDefinitions, WorkerToolName, WorkerToolPayload } from "./worker-tool-registry.js";
+import { getWorkerToolPrefix, workerToolEntries } from "./worker-tool-registry.js";
 
-export const privilegeRequestPrefix = "SANDY_PRIVILEGE_REQUEST ";
-export const channelFilePrefix = "SANDY_CHANNEL_FILE ";
+export type WorkerToolDefinition<TSchema extends z.ZodObject<z.core.$ZodLooseShape> = z.ZodObject<z.core.$ZodLooseShape>> = {
+  description: string;
+  requiresPrivilegeEscalation: boolean;
+  schema: TSchema;
+};
 
-const privilegeRequestSchemaText = '{"type":"copy_into_share"|"copy_out_of_share","sourcePath":"string","targetPath":"string","reason":"string"}';
-const channelFileSchemaText = '{"path":"string","caption":"string optional"}';
+type WorkerToolCallFor<TName extends WorkerToolName> = {
+  tool: TName;
+  definition: WorkerToolDefinitions[TName];
+  payload: WorkerToolPayload<TName>;
+};
+
+type WorkerToolCall<TName extends WorkerToolName = WorkerToolName> = TName extends WorkerToolName
+  ? WorkerToolCallFor<TName>
+  : never;
 
 export function buildWorkerProtocolInstructions(): string[] {
   return [
     "Protocol requirements for host-mediated actions:",
-    `- For privileged host file copy requests, output exactly one line with no surrounding text: ${privilegeRequestPrefix}{...json...}`,
-    `- JSON schema for ${privilegeRequestPrefix}: ${privilegeRequestSchemaText}`,
-    "Allowed host-mediated request types are copy_into_share and copy_out_of_share.",
-    `For any host-mediated request, use absolute paths. Any shared-workspace path must stay under ${sharedWorkspaceMountPath}.`,
-    `Example for copying a result file to Downloads: ${privilegeRequestPrefix}{"type":"copy_out_of_share","sourcePath":"${sharedWorkspaceMountPath}/result.txt","targetPath":"~/Downloads/result.txt","reason":"Need to deliver the generated file to the user."}`,
-    `Example for copying a host file in: ${privilegeRequestPrefix}{"type":"copy_into_share","sourcePath":"~/Downloads/input.txt","targetPath":"${sharedWorkspaceMountPath}/input.txt","reason":"Need the user-provided input file inside the task workspace."}`,
-    `- To send a file that already exists under ${sharedWorkspaceMountPath} back to the user, output exactly one line with no surrounding text: ${channelFilePrefix}{...json...}`,
-    `- JSON schema for ${channelFilePrefix}: ${channelFileSchemaText}`,
-    `Sending a file from ${sharedWorkspaceMountPath} back to the user through the channel does not require privilege escalation.`,
-    "Do not describe the saved path in prose when you want the file delivered. Emit the protocol line instead.",
-    `Example for sending a file to the user: ${channelFilePrefix}{"path":"${sharedWorkspaceMountPath}/result.txt","caption":"Generated result file."}`,
-    "After emitting a host-mediated request, stop and wait for the next host message before continuing.",
+    "Use a tool by emitting exactly one line with no surrounding text.",
+    ...buildWorkerToolInstructionSections(),
+    "After emitting a tool call, stop and wait for the next host message before continuing.",
   ];
 }
 
-export function parsePrivilegeRequestMessage(text: string): PrivilegeRequest | null {
-  const rawPayload = extractPayload(text, privilegeRequestPrefix);
-  if (!rawPayload) {
-    return null;
+export function parseWorkerToolCall(text: string): WorkerToolCall | null {
+  const trimmed = text.trim();
+
+  for (const entry of workerToolEntries) {
+    const prefix = getWorkerToolPrefix(entry.name);
+    if (!trimmed.startsWith(prefix)) {
+      continue;
+    }
+
+    const rawPayload = trimmed.slice(prefix.length).trim();
+
+    try {
+      const payload = JSON.parse(rawPayload) as Record<string, unknown>;
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+        throw new Error("Tool payload must be a JSON object.");
+      }
+      if (payload.type !== undefined && payload.type !== entry.name) {
+        throw new Error(`Tool payload type must be "${entry.name}" when provided.`);
+      }
+      return {
+        tool: entry.name,
+        definition: entry.definition,
+        payload: entry.definition.schema.parse({
+          ...payload,
+          type: entry.name,
+        }),
+      } as WorkerToolCall;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Unknown tool parse failure.";
+      throw new Error(`Invalid ${entry.name} tool payload: ${detail} Payload: ${rawPayload}`, { cause: error });
+    }
   }
 
-  try {
-    const parsed = JSON.parse(rawPayload) as unknown;
-    if (!parsed || typeof parsed !== "object") {
-      throw new Error("Privilege request payload must be a JSON object.");
-    }
-    return parsePrivilegeRequest({
-      ...(parsed as Record<string, unknown>),
-      requestId: randomUUID(),
-    });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "Unknown privilege request parse failure.";
-    throw new Error(`${detail} Payload: ${rawPayload}`, { cause: error });
-  }
+  return null;
 }
 
-export function parseChannelFileMessage(text: string): { path: string; caption?: string } | null {
-  const rawPayload = extractPayload(text, channelFilePrefix);
-  if (!rawPayload) {
-    return null;
-  }
-
-  const parsed = JSON.parse(rawPayload) as unknown;
-  if (!parsed || typeof parsed !== "object") {
-    throw new Error("Channel file payload must be a JSON object.");
-  }
-
-  const path = "path" in parsed ? parsed.path : undefined;
-  const caption = "caption" in parsed ? parsed.caption : undefined;
-  if (typeof path !== "string" || (caption !== undefined && typeof caption !== "string")) {
-    throw new Error("Channel file payload must contain a string path and optional string caption.");
-  }
-
+export function workerToolCallToSubAgentEvent(
+  call: WorkerToolCall,
+): Extract<SubAgentEvent, { type: "tool_call" }> {
   return {
-    path,
-    caption,
+    type: "tool_call",
+    call: call.payload,
   };
 }
 
-function extractPayload(text: string, prefix: string): string | null {
-  const trimmed = text.trim();
-  if (!trimmed.startsWith(prefix)) {
-    return null;
-  }
-  return trimmed.slice(prefix.length).trim();
+function buildWorkerToolInstructionSections(): string[] {
+  return workerToolEntries.flatMap((entry) => buildWorkerToolInstructionSection(entry));
+}
+
+function buildWorkerToolInstructionSection(
+  entry: typeof workerToolEntries[number],
+): string[] {
+  const prefix = getWorkerToolPrefix(entry.name);
+  return [
+    `Tool "${prefix.trim()}": ${entry.definition.description}`,
+    `Format: ${prefix}{...json...}`,
+    `Schema: ${JSON.stringify(z.toJSONSchema(entry.definition.schema))}`,
+     // deliberately do not include whether this tool requires privilege escalation;
+     // agent probably does not need to know
+  ];
 }

@@ -2,7 +2,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 
 export const sharedWorkspaceMountPath = "/workspace/share";
 
-export function resolveSharedWorkspaceRelativePath(sharedPath: string, fieldName: string): string {
+function resolveSharedWorkspaceRelativePath(sharedPath: string, fieldName: string): string {
   if (!isAbsolute(sharedPath)) {
     throw new Error(`${fieldName} must be an absolute path under ${sharedWorkspaceMountPath}.`);
   }
@@ -24,12 +24,12 @@ export function resolveTaskShareHostPath(taskShareHostPath: string, requestedSha
   return resolve(taskShareHostPath, resolveSharedWorkspaceRelativePath(requestedSharedPath, fieldName));
 }
 
-export function toSharedWorkspacePath(taskSharePath: string, hostPath: string, fieldName: string): string {
+export function toSharedWorkspacePath(taskSharePath: string, hostPath: string): string {
   const normalizedTaskSharePath = resolve(taskSharePath);
   const normalizedHostPath = resolve(hostPath);
   const relativeToTaskShare = relative(normalizedTaskSharePath, normalizedHostPath);
   if (relativeToTaskShare.startsWith("..") || isAbsolute(relativeToTaskShare)) {
-    throw new Error(`${fieldName} must stay within the task share.`);
+    throw new Error("Path must stay within the task share.");
   }
 
   return resolve(sharedWorkspaceMountPath, relativeToTaskShare);
