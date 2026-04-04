@@ -254,9 +254,9 @@ export class DockerSandboxRunner implements SandboxRunner {
           await reportDisconnect(this.describeWriteFailure(error));
         }
       },
-      close: async () => {
+      close: () => {
         if (finished || shutdownRequested) {
-          return;
+          return Promise.resolve();
         }
         finished = true;
         shutdownRequested = true;
@@ -265,6 +265,7 @@ export class DockerSandboxRunner implements SandboxRunner {
           taskId: request.taskId,
         });
         child.stdin.end();
+        return Promise.resolve();
       },
       cancel: async (reason: string) => {
         finished = true;

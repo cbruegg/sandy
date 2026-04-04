@@ -43,7 +43,7 @@ export function parsePrivilegeRequestMessage(text: string): PrivilegeRequest | n
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Unknown privilege request parse failure.";
-    throw new Error(`${detail} Payload: ${rawPayload}`);
+    throw new Error(`${detail} Payload: ${rawPayload}`, { cause: error });
   }
 }
 

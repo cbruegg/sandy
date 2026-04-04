@@ -310,9 +310,9 @@ test("orchestrator stages attached files into the task share before launching th
   });
 
   assert.equal(channel.savedAttachments.length, 1);
-  assert.match(channel.savedAttachments[0]!.targetDirectory, /inbox\/message_1$/);
-  assert.match(runner.launches[0]!.taskBrief, /Files attached by the user are already available/);
-  assert.match(runner.launches[0]!.taskBrief, /\/workspace\/share\/inbox\/message_1\/1-input\.csv/);
+  assert.match(channel.savedAttachments[0].targetDirectory, /inbox\/message_1$/);
+  assert.match(runner.launches[0].taskBrief, /Files attached by the user are already available/);
+  assert.match(runner.launches[0].taskBrief, /\/workspace\/share\/inbox\/message_1\/1-input\.csv/);
   assert.deepEqual(contextTexts(mainAgent.contexts[0]), ["Analyze this\n\nAttached files:\n- input.csv"]);
 });
 
@@ -417,8 +417,8 @@ test("orchestrator applies supported privilege requests deterministically and ou
       targetPath: "/workspace/share/input.txt",
       reason: "Need a local fixture file.",
     },
-    taskId: runner.launches[0]!.taskId,
-    taskSharePath: `/tmp/${runner.launches[0]!.taskId}`,
+    taskId: runner.launches[0].taskId,
+    taskSharePath: `/tmp/${runner.launches[0].taskId}`,
   }]);
   assert.deepEqual(runner.handle.privilegeResults, [{
     requestId: "req-1",
@@ -601,7 +601,7 @@ test("orchestrator sends worker-requested shared files back through the channel"
 
   assert.deepEqual(channel.sentFiles, [{
     chatId: "chat-file-out",
-    filePath: `/tmp/${runner.launches[0]!.taskId}/results/output.txt`,
+    filePath: `/tmp/${runner.launches[0].taskId}/results/output.txt`,
     caption: "Generated output",
   }]);
 });

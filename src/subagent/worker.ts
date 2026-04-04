@@ -15,14 +15,11 @@ import {
 } from "../types.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 import {
-  channelFilePrefix,
   parseChannelFileMessage,
-  privilegeRequestPrefix,
   parsePrivilegeRequestMessage,
 } from "./worker-protocol.js";
 import {
   buildInitialTaskInput,
-  buildInitialTaskInputWithCapabilities,
   buildPrivilegeResolutionInput,
 } from "./worker-prompt.js";
 type ThreadEventDisposition = "none" | "privilege_request" | "channel_file" | "terminal_error";
@@ -103,7 +100,7 @@ async function streamTurn(thread: Thread, input: string): Promise<void> {
   const { events } = await thread.runStreamed(input);
 
   for await (const event of events) {
-    const disposition = await handleThreadEvent(event);
+    const disposition = handleThreadEvent(event);
     if (disposition === "privilege_request" && sawPrivilegeRequest) {
       throw new Error("Only one privilege request is allowed per turn.");
     }
@@ -120,7 +117,7 @@ async function streamTurn(thread: Thread, input: string): Promise<void> {
   }
 }
 
-async function handleThreadEvent(event: ThreadEvent): Promise<ThreadEventDisposition> {
+function handleThreadEvent(event: ThreadEvent): ThreadEventDisposition {
   switch (event.type) {
     case "item.completed":
     case "item.updated":

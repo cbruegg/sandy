@@ -1,6 +1,5 @@
 import { basename } from "node:path";
 import { Bot, InputFile, type Context, type PollingOptions } from "grammy";
-import type { Update } from "grammy/types";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { buttonLabels, messages } from "../messages.js";
@@ -75,9 +74,9 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     return telegramFormatting;
   }
 
-  async start(handler: MessageHandler): Promise<void> {
+  start(handler: MessageHandler): Promise<void> {
     if (this.startPromise) {
-      return;
+      return Promise.resolve();
     }
 
     const middleware = async (ctx: TelegramContextLike): Promise<void> => {
@@ -132,6 +131,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
         logger.info("telegram.bot_started");
       },
     });
+    return Promise.resolve();
   }
 
   async stop(): Promise<void> {

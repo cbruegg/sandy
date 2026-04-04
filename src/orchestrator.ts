@@ -16,7 +16,6 @@ import type {
   SubAgentEvent,
   TranscriptEntry,
 } from "./types.js";
-import { toTaskMetadata } from "./types.js";
 import { resolveTaskShareHostPath } from "./shared-workspace.js";
 import {
   buildTaskBriefWithAttachments,
@@ -180,26 +179,28 @@ export class SandyOrchestrator {
           await this.deps.channel.sendText(event.chatId, messages.shareDeletionStillPending());
           return;
         }
-        const newVisibleEntries = [
-          ...this.releasePendingOutputs(session),
-          {
-            role: "user" as const,
-            kind: "user_text",
-            timestamp: event.timestamp,
-            text: describeUserMessageForMainAgent(event.text, event.attachments),
-          },
-        ];
+        {
+          const newVisibleEntries = [
+            ...this.releasePendingOutputs(session),
+            {
+              role: "user" as const,
+              kind: "user_text",
+              timestamp: event.timestamp,
+              text: describeUserMessageForMainAgent(event.text, event.attachments),
+            },
+          ];
 
-        const decision = await this.deps.mainAgent.decide({
-          chatId: event.chatId,
-          newVisibleEntries,
-          activeTask: null,
-          channelFormatting: this.channelFormatting,
-        });
+          const decision = await this.deps.mainAgent.decide({
+            chatId: event.chatId,
+            newVisibleEntries,
+            activeTask: null,
+            channelFormatting: this.channelFormatting,
+          });
 
-        await this.executeMainAgentDecision(session, event, decision);
-        this.deps.sessionStore.save(session);
-        return;
+          await this.executeMainAgentDecision(session, event, decision);
+          this.deps.sessionStore.save(session);
+          return;
+        }
     }
   }
 

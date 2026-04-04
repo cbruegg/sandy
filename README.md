@@ -66,6 +66,12 @@ Build the TypeScript sources:
 npm run build
 ```
 
+Run lint checks:
+
+```bash
+npm run lint
+```
+
 Start Sandy:
 
 ```bash
@@ -80,6 +86,8 @@ Run tests:
 ```bash
 npm test
 ```
+
+`npm run build` now runs ESLint first, so any lint violation fails the build before TypeScript compilation.
 
 ## Architecture
 
