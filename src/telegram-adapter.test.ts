@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import type { Update } from "grammy/types";
 import { sanitizeTelegramHtml } from "./channel/telegram-html.js";
 import { TelegramBotApiAdapter, normalizeTelegramUpdate } from "./channel/telegram-adapter.js";
+import type { TranscriptionProvider } from "./transcription/transcription-provider.js";
 
-test("normalizeTelegramUpdate maps report callback to a danger report event", () => {
-  const event = normalizeTelegramUpdate({
+test("normalizeTelegramUpdate maps report callback to a danger report event", async () => {
+  const event = await normalizeTelegramUpdate({
     update_id: 1,
     callback_query: {
       id: "cb-1",
@@ -32,8 +33,8 @@ test("normalizeTelegramUpdate maps report callback to a danger report event", ()
   });
 });
 
-test("normalizeTelegramUpdate maps text commands and unsupported media deterministically", () => {
-  const cancelEvent = normalizeTelegramUpdate({
+test("normalizeTelegramUpdate maps text commands and unsupported media deterministically", async () => {
+  const cancelEvent = await normalizeTelegramUpdate({
     update_id: 2,
     message: {
       message_id: 5,
@@ -50,7 +51,7 @@ test("normalizeTelegramUpdate maps text commands and unsupported media determini
     timestamp: "2023-11-14T22:13:30.000Z",
   });
 
-  const voiceEvent = normalizeTelegramUpdate({
+  const voiceEvent = await normalizeTelegramUpdate({
     update_id: 3,
     message: {
       message_id: 6,
@@ -72,7 +73,7 @@ test("normalizeTelegramUpdate maps text commands and unsupported media determini
     timestamp: "2023-11-14T22:13:40.000Z",
   });
 
-  const documentEvent = normalizeTelegramUpdate({
+  const documentEvent = await normalizeTelegramUpdate({
     update_id: 4,
     message: {
       message_id: 7,
@@ -177,6 +178,126 @@ test("TelegramBotApiAdapter acknowledges callback queries", async () => {
   await adapter.stop();
 
   assert.equal(fakeBot.acknowledgedCallbackQueries, 1);
+});
+
+test("TelegramBotApiAdapter transcribes voice messages into normal text events", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const handlerEvents: unknown[] = [];
+  const adapter = new TelegramBotApiAdapter({
+    token: "test-token",
+    botFactory: () => fakeBot,
+    fileDownloader: async () => new Uint8Array([1, 2, 3]).buffer,
+    transcriptionProvider: {
+      async transcribe() {
+        return "inspect the system";
+      },
+    } satisfies TranscriptionProvider,
+  });
+
+  await adapter.start(async (event) => {
+    handlerEvents.push(event);
+  });
+
+  await fakeBot.dispatch({
+    update_id: 4,
+    message: {
+      message_id: 8,
+      date: 1_700_000_040,
+      chat: { id: 99, type: "private" },
+      voice: {
+        file_id: "voice-2",
+        file_unique_id: "voice-u2",
+        duration: 2,
+        mime_type: "audio/ogg",
+      },
+    },
+  } as Update);
+
+  await adapter.stop();
+
+  assert.deepEqual(handlerEvents, [{
+    kind: "user_text",
+    chatId: "99",
+    messageId: "8",
+    timestamp: "2023-11-14T22:14:00.000Z",
+    text: "inspect the system",
+    rawText: "inspect the system",
+    attachments: [],
+  }]);
+});
+
+test("TelegramBotApiAdapter routes transcribed voice commands like normal text commands", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const handlerEvents: unknown[] = [];
+  const adapter = new TelegramBotApiAdapter({
+    token: "test-token",
+    botFactory: () => fakeBot,
+    fileDownloader: async () => new Uint8Array([1, 2, 3]).buffer,
+    transcriptionProvider: {
+      async transcribe() {
+        return "/cancel";
+      },
+    } satisfies TranscriptionProvider,
+  });
+
+  await adapter.start(async (event) => {
+    handlerEvents.push(event);
+  });
+
+  await fakeBot.dispatch({
+    update_id: 5,
+    message: {
+      message_id: 9,
+      date: 1_700_000_050,
+      chat: { id: 99, type: "private" },
+      voice: {
+        file_id: "voice-3",
+        file_unique_id: "voice-u3",
+        duration: 2,
+      },
+    },
+  } as Update);
+
+  await adapter.stop();
+
+  assert.deepEqual(handlerEvents, [{
+    kind: "cancel_request",
+    chatId: "99",
+    messageId: "9",
+    timestamp: "2023-11-14T22:14:10.000Z",
+  }]);
+});
+
+test("TelegramBotApiAdapter reports voice messages as disabled without STT configuration", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const adapter = new TelegramBotApiAdapter({
+    token: "test-token",
+    botFactory: () => fakeBot,
+  });
+
+  let handlerCalls = 0;
+  await adapter.start(async () => {
+    handlerCalls += 1;
+  });
+
+  await fakeBot.dispatch({
+    update_id: 6,
+    message: {
+      message_id: 10,
+      date: 1_700_000_060,
+      chat: { id: 99, type: "private" },
+      voice: {
+        file_id: "voice-4",
+        file_unique_id: "voice-u4",
+        duration: 2,
+      },
+    },
+  } as Update);
+
+  await adapter.stop();
+
+  assert.equal(handlerCalls, 0);
+  assert.equal(fakeBot.sentMessages[0]?.text, "Voice messages are disabled. Configure SANDY_STT_API_KEY to enable transcription.");
 });
 
 test("sanitizeTelegramHtml preserves only the supported Telegram tags", () => {

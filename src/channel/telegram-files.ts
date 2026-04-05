@@ -22,17 +22,7 @@ export async function saveTelegramAttachments(input: {
   const saved: SavedAttachment[] = [];
 
   for (const [index, attachment] of input.attachments.entries()) {
-    const file = await input.api.getFile(attachment.attachmentId);
-    if (!file.file_path) {
-      throw new Error(`Telegram did not return a download path for attachment ${attachment.attachmentId}.`);
-    }
-
-    const response = await fetch(buildTelegramFileUrl(input.token, file.file_path));
-    if (!response.ok) {
-      throw new Error(`Telegram file download failed with status ${response.status} for attachment ${attachment.attachmentId}.`);
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
+    const arrayBuffer = await downloadTelegramFile(input.api, input.token, attachment.attachmentId);
     const fileName = withUniquePrefix(index, attachment.fileName);
     const hostPath = resolve(input.targetDirectory, fileName);
     await writeFile(hostPath, Buffer.from(arrayBuffer));
@@ -53,6 +43,24 @@ export async function saveTelegramAttachments(input: {
   }
 
   return saved;
+}
+
+export async function downloadTelegramFile(
+  api: TelegramFileApi,
+  token: string,
+  fileId: string,
+): Promise<ArrayBuffer> {
+  const file = await api.getFile(fileId);
+  if (!file.file_path) {
+    throw new Error(`Telegram did not return a download path for attachment ${fileId}.`);
+  }
+
+  const response = await fetch(buildTelegramFileUrl(token, file.file_path));
+  if (!response.ok) {
+    throw new Error(`Telegram file download failed with status ${response.status} for attachment ${fileId}.`);
+  }
+
+  return response.arrayBuffer();
 }
 
 function buildTelegramFileUrl(token: string, filePath: string): string {

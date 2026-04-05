@@ -10,7 +10,11 @@ export const buttonLabels = {
 
 export const messages = {
   unsupportedInput: (inputType: string): string =>
-    `This build supports text messages and file attachments. Received unsupported ${inputType} input.`,
+    `This build supports text messages, file attachments, and optionally voice messages when STT is configured. Received unsupported ${inputType} input.`,
+  voiceMessagesNotEnabled: (): string =>
+    "Voice messages are disabled. Configure SANDY_STT_API_KEY to enable transcription.",
+  voiceTranscriptionFailed: (): string =>
+    "Voice transcription failed. Please try again or send the request as text.",
   taskComplete: (text: string): string => `Task complete:\n${text}`,
   taskCompleted: (taskId: string): string => `Task "${taskId}" completed.`,
   taskFailed: (message: string): string => `Task failed: ${message}`,

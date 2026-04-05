@@ -7,6 +7,7 @@ import { SandyOrchestrator } from "./orchestrator.js";
 import { PrivilegeBrokerImpl } from "./privilege/privilege-broker.js";
 import { DockerSandboxRunner } from "./sandbox/docker-sandbox-runner.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
+import { OpenAiTranscriptionProvider } from "./transcription/openai-transcription-provider.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -15,10 +16,20 @@ export async function startApp(): Promise<void> {
     workerImage: config.workerImage,
     shareRoot: config.shareRoot,
     authMode: config.authMode,
+    sttEnabled: config.sttApiKey !== null,
   });
+
+  const transcriptionProvider = config.sttApiKey
+    ? new OpenAiTranscriptionProvider({
+        apiKey: config.sttApiKey,
+        baseUrl: config.sttBaseUrl,
+        model: config.sttModel,
+      })
+    : null;
 
   const channel = new TelegramBotApiAdapter({
     token: config.telegramBotToken,
+    transcriptionProvider: transcriptionProvider ?? undefined,
   });
 
   const codex = config.openAiApiKey

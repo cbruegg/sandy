@@ -8,6 +8,9 @@ type SandyConfig = {
   codexAuthFile: string | null;
   workerImage: string;
   shareRoot: string;
+  sttApiKey: string | null;
+  sttBaseUrl: string;
+  sttModel: string;
   authMode: "api_key" | "codex_auth_file" | "ambient_codex_auth";
 };
 
@@ -51,6 +54,9 @@ export function loadConfig(env: EnvSource = process.env): SandyConfig {
     codexAuthFile,
     workerImage: env.SANDY_WORKER_IMAGE ?? "sandy-subagent:latest",
     shareRoot: env.SANDY_SHARE_ROOT ?? "/tmp/sandy-shares",
+    sttApiKey: getOptionalEnv(env, "SANDY_STT_API_KEY"),
+    sttBaseUrl: env.SANDY_STT_BASE_URL ?? "https://api.openai.com/v1",
+    sttModel: env.SANDY_STT_MODEL ?? "gpt-4o-mini-transcribe",
     authMode,
   };
 }

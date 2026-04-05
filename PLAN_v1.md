@@ -22,13 +22,14 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - Telegram file uploads staged directly into the per-task shared workspace on task launch and during active tasks.
   - Deterministic sub-agent requests to send files from `/workspace/share` back to the user through the channel without privilege escalation.
   - Host-mediated one-off file copy operations into and out of the per-sub-agent shared workspace.
+  - Telegram voice messages transcribed through a configurable OpenAI-compatible STT endpoint and then processed through the normal text-message path.
   - Deterministic detection of worker disconnects, handshake timeouts, and control-channel write failures.
   - Structured host-side logging for significant lifecycle and failure events.
   - Centralized user-facing message definitions to prepare for future i18n.
   - Channel-owned formatting metadata, with Telegram output sanitized and sent as simple HTML.
   - Automatic deletion of empty per-sub-agent shared workspaces, with explicit user confirmation before deleting non-empty workspaces.
 - Not fully implemented yet:
-  - Real STT and image handling.
+  - Image handling.
   - Host-side enforcement for approved resource requests beyond shared-workspace file copy, such as mount setup, MCP enablement, and OneCLI enablement.
 - Mount, MCP, and OneCLI requests remain represented in Sandy's typed protocol for future expansion, but they are currently rejected as unsupported by the host runtime.
 

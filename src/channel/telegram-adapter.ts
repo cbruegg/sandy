@@ -5,13 +5,14 @@ import { logger } from "../logger.js";
 import { buttonLabels, messages } from "../messages.js";
 import { sanitizeTelegramHtml, telegramHtmlAllowedTags } from "./telegram-html.js";
 import { normalizeTelegramUpdate } from "./telegram-normalization.js";
-import { saveTelegramAttachments } from "./telegram-files.js";
+import { downloadTelegramFile, saveTelegramAttachments } from "./telegram-files.js";
 import type {
   ChannelFormatting,
   MessageAttachment,
   PrivilegeRequest,
   SavedAttachment,
 } from "../types.js";
+import type { TranscriptionProvider } from "../transcription/transcription-provider.js";
 
 type TelegramApiLike = {
   getFile(fileId: string): Promise<{ file_path?: string }>;
@@ -26,6 +27,8 @@ type TelegramApiLike = {
     other?: Record<string, unknown>,
   ): Promise<unknown>;
 };
+
+type TelegramFileApiLike = Pick<TelegramApiLike, "getFile">;
 
 type TelegramContextLike = Pick<Context, "update" | "callbackQuery" | "answerCallbackQuery">;
 
@@ -45,6 +48,8 @@ type TelegramAdapterOptions = {
   token: string;
   pollTimeoutSeconds?: number;
   botFactory?: TelegramBotFactory;
+  transcriptionProvider?: TranscriptionProvider;
+  fileDownloader?: (api: TelegramFileApiLike, token: string, fileId: string) => Promise<ArrayBuffer>;
 };
 
 const telegramFormatting: ChannelFormatting = {
@@ -62,12 +67,16 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
   private readonly bot: TelegramBotLike;
   private readonly pollTimeoutSeconds: number;
   private readonly token: string;
+  private readonly transcriptionProvider: TranscriptionProvider | null;
+  private readonly fileDownloader: (api: TelegramFileApiLike, token: string, fileId: string) => Promise<ArrayBuffer>;
   private startPromise: Promise<void> | null = null;
 
   constructor(options: TelegramAdapterOptions) {
     this.token = options.token;
     this.bot = (options.botFactory ?? defaultBotFactory)(options.token);
     this.pollTimeoutSeconds = options.pollTimeoutSeconds ?? 30;
+    this.transcriptionProvider = options.transcriptionProvider ?? null;
+    this.fileDownloader = options.fileDownloader ?? downloadTelegramFile;
   }
 
   getFormatting(): ChannelFormatting {
@@ -80,7 +89,11 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     }
 
     const middleware = async (ctx: TelegramContextLike): Promise<void> => {
-      const event = normalizeTelegramUpdate(ctx.update);
+      const event = await normalizeTelegramUpdate(ctx.update, {
+        transcriptionProvider: this.transcriptionProvider,
+        fileDownloader: async (fileId) => this.fileDownloader(this.bot.api, this.token, fileId),
+        sendText: async (chatId, text) => this.sendText(chatId, text),
+      });
       if (!event) {
         return;
       }

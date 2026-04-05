@@ -26,6 +26,9 @@ Required environment variables:
 Optional environment variables:
 
 - `OPENAI_API_KEY`: API key passed to the host controller and sub-agent worker. If omitted, Sandy uses local Codex ChatGPT auth when available.
+- `SANDY_STT_API_KEY`: API key used for voice-message transcription. If unset, Telegram voice messages remain disabled.
+- `SANDY_STT_BASE_URL`: OpenAI-compatible base URL for STT requests. Default: `https://api.openai.com/v1`.
+- `SANDY_STT_MODEL`: Transcription model name sent to the STT endpoint. Default: `gpt-4o-mini-transcribe`.
 - `SANDY_CODEX_AUTH_FILE`: Override path to the host Codex `auth.json` file that should be mounted into sub-agent containers. Default: `~/.codex/auth.json` when present.
 - `SANDY_LOG_LEVEL`: Minimum host log level. Supported values: `debug`, `info`, `warn`, `error`. Default: `info`.
 - `SANDY_DEBUG`: When set to exactly `true`, Sandy also logs full inbound user messages and LLM model responses from the main agent and sub-agent paths. Default: unset.
@@ -36,6 +39,7 @@ Example:
 
 ```bash
 export TELEGRAM_BOT_TOKEN=...
+export SANDY_STT_API_KEY=...
 export SANDY_LOG_LEVEL=info
 export SANDY_DEBUG=true
 export SANDY_WORKER_IMAGE=sandy-subagent:latest
@@ -105,8 +109,9 @@ Each channel also defines its own formatting contract for user-visible agent out
 
 Allowed message types are text messages, file uploads (with images receiving dedicated handling) and voice messages.
 Voice messages are transcribed to text using STT, and the resulting text is then processed as a normal text message.
-Initially, the STT provider will be OpenAI's Whisper API, but it should be possible to add support for other providers
-as well.
+In the current implementation, voice support is enabled only when `SANDY_STT_API_KEY` is configured. By default,
+Sandy sends STT requests to the OpenAI API with `gpt-4o-mini-transcribe`, and the endpoint can be overridden with an
+OpenAI-compatible base URL.
 
 Whenever the user sends a message, Sandy lets the wrapped agent tool evaluate the message to determine what to
 do with it:
