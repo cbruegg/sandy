@@ -297,7 +297,7 @@ test("TelegramBotApiAdapter reports voice messages as disabled without STT confi
   await adapter.stop();
 
   assert.equal(handlerCalls, 0);
-  assert.equal(fakeBot.sentMessages[0]?.text, "Voice messages are disabled. Configure SANDY_STT_API_KEY to enable transcription.");
+  assert.equal(fakeBot.sentMessages[0]?.text, "Voice messages are disabled. Configure STT in Sandy's config file to enable transcription.");
 });
 
 test("sanitizeTelegramHtml preserves only the supported Telegram tags", () => {

@@ -1,10 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { configureLogger, logger } from "./logger.js";
 
-test("logger.debugContent writes info logs only when SANDY_DEBUG is true", async () => {
-  type LoggerModule = typeof import("./logger.js");
-  const originalDebug = process.env.SANDY_DEBUG;
-  const originalLevel = process.env.SANDY_LOG_LEVEL;
+test("logger.debugContent writes info logs only when debug content logging is enabled", () => {
   const originalConsoleLog = console.log;
   const lines: string[] = [];
   console.log = (line?: unknown) => {
@@ -12,32 +10,27 @@ test("logger.debugContent writes info logs only when SANDY_DEBUG is true", async
   };
 
   try {
-    process.env.SANDY_LOG_LEVEL = "info";
-    process.env.SANDY_DEBUG = "true";
-    const enabledModule = await import(`./logger.js?enabled=${Date.now()}`) as LoggerModule;
-    const { logger } = enabledModule;
+    configureLogger({
+      minLevel: "info",
+      debugContentEnabled: true,
+    });
     logger.debugContent("test.enabled", {
       text: "hello",
     });
 
-    process.env.SANDY_DEBUG = "false";
-    const disabledModule = await import(`./logger.js?disabled=${Date.now()}`) as LoggerModule;
-    const { logger: disabledLogger } = disabledModule;
-    disabledLogger.debugContent("test.disabled", {
+    configureLogger({
+      minLevel: "info",
+      debugContentEnabled: false,
+    });
+    logger.debugContent("test.disabled", {
       text: "goodbye",
     });
   } finally {
     console.log = originalConsoleLog;
-    if (originalDebug === undefined) {
-      delete process.env.SANDY_DEBUG;
-    } else {
-      process.env.SANDY_DEBUG = originalDebug;
-    }
-    if (originalLevel === undefined) {
-      delete process.env.SANDY_LOG_LEVEL;
-    } else {
-      process.env.SANDY_LOG_LEVEL = originalLevel;
-    }
+    configureLogger({
+      minLevel: "info",
+      debugContentEnabled: false,
+    });
   }
 
   assert.equal(lines.length, 1);

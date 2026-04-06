@@ -1,10 +1,11 @@
 import type {PrivilegeRequest} from "./types.js";
-import type {PrivilegedWorkerToolPayload} from "./subagent/worker-tool-registry.js";
 
 export const buttonLabels = {
   reportDangerousOutput: "Report dangerous output",
   cancelTask: "Cancel task",
-  approve: "Approve",
+  approve: "Approve once",
+  approveWorkerSession: "Allow in task",
+  approveAlways: "Always allow",
   deny: "Deny",
 } as const;
 
@@ -12,7 +13,7 @@ export const messages = {
   unsupportedInput: (inputType: string): string =>
     `This build supports text messages, file attachments, and optionally voice messages when STT is configured. Received unsupported ${inputType} input.`,
   voiceMessagesNotEnabled: (): string =>
-    "Voice messages are disabled. Configure SANDY_STT_API_KEY to enable transcription.",
+    "Voice messages are disabled. Configure STT in Sandy's config file to enable transcription.",
   voiceTranscriptionFailed: (): string =>
     "Voice transcription failed. Please try again or send the request as text.",
   taskComplete: (text: string): string => `Task complete:\n${text}`,
@@ -30,7 +31,7 @@ export const messages = {
     `Terminated task "${taskName}" after a dangerous privilege request report.`,
   stalePrivilegeRequest: (): string => "That privilege request is no longer pending.",
   privilegeRequestStillPending: (): string =>
-    "A privilege request is pending. Reply with approve or deny before sending more task input.",
+    "A privilege request is pending. Resolve it before sending more task input.",
   shareDeletionStillPending: (): string =>
     "A shared workspace deletion decision is pending. Reply with approve or deny before sending more input.",
   taskStarted: (taskName: string): string =>
@@ -45,19 +46,33 @@ export const messages = {
   shareDeleted: (taskName: string): string => `Deleted the shared workspace for task "${taskName}".`,
   sharePreserved: (taskName: string): string => `Kept the shared workspace for task "${taskName}".`,
   privilegeRequestPrompt: (request: PrivilegeRequest): string =>
-    `Privilege request:\n${describePrivilegeRequest(request.payload)}\n\nApprove or deny this request.`,
+    `Privilege request:\n${describePrivilegeRequest(request)}\n\n${describePrivilegeActions(request)}`,
 } as const;
 
-function describePrivilegeRequest(request: PrivilegedWorkerToolPayload): string {
-  switch (request.type) {
+function describePrivilegeRequest(request: PrivilegeRequest): string {
+  if (request.kind === "mcp_tool_call") {
+    return [
+      `mcp_tool_call: ${request.serverId}.${request.toolName}`,
+      `Arguments: ${JSON.stringify(request.arguments)}`,
+    ].join("\n");
+  }
+
+  switch (request.payload.type) {
     case "copy_into_share":
     case "copy_out_of_share":
-      return `${request.type}: ${request.sourcePath} -> ${request.targetPath}\nReason: ${request.reason}`;
+      return `${request.payload.type}: ${request.payload.sourcePath} -> ${request.payload.targetPath}\nReason: ${request.payload.reason}`;
     case "mount_ro":
     case "mount_rw":
-      return `${request.type}: ${request.hostPath} -> ${request.targetPath}\nReason: ${request.reason}`;
+      return `${request.payload.type}: ${request.payload.hostPath} -> ${request.payload.targetPath}\nReason: ${request.payload.reason}`;
     case "enable_mcp":
     case "enable_onecli":
-      return `${request.type}: ${request.identifier}\nReason: ${request.reason}`;
+      return `${request.payload.type}: ${request.payload.identifier}\nReason: ${request.payload.reason}`;
   }
+}
+
+function describePrivilegeActions(request: PrivilegeRequest): string {
+  if (request.kind === "mcp_tool_call") {
+    return "Choose approve once, allow in this task, always allow, or deny.";
+  }
+  return "Approve or deny this request.";
 }

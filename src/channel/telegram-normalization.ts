@@ -79,7 +79,13 @@ function normalizeTelegramTextInput(
     return { ...base, kind: "danger_report" };
   }
   if (normalized === "/approve" || normalized === "approve") {
-    return { ...base, kind: "approval_response", decision: "approve" };
+    return { ...base, kind: "approval_response", decision: "approve_once" };
+  }
+  if (normalized === "/approve_session" || normalized === "approve session" || normalized === "allow for task") {
+    return { ...base, kind: "approval_response", decision: "approve_worker_session" };
+  }
+  if (normalized === "/approve_always" || normalized === "approve always" || normalized === "always allow") {
+    return { ...base, kind: "approval_response", decision: "approve_always" };
   }
   if (normalized === "/deny" || normalized === "deny") {
     return { ...base, kind: "approval_response", decision: "deny" };
@@ -114,8 +120,28 @@ function normalizeCallbackQuery(update: Update): NormalizedChatEvent | null {
     const event: ApprovalResponseEvent = {
       ...base,
       kind: "approval_response",
-      decision: "approve",
+      decision: "approve_once",
       requestId: data.slice("approve:".length) || undefined,
+    };
+    return event;
+  }
+
+  if (data.startsWith("approve_session:")) {
+    const event: ApprovalResponseEvent = {
+      ...base,
+      kind: "approval_response",
+      decision: "approve_worker_session",
+      requestId: data.slice("approve_session:".length) || undefined,
+    };
+    return event;
+  }
+
+  if (data.startsWith("approve_always:")) {
+    const event: ApprovalResponseEvent = {
+      ...base,
+      kind: "approval_response",
+      decision: "approve_always",
+      requestId: data.slice("approve_always:".length) || undefined,
     };
     return event;
   }

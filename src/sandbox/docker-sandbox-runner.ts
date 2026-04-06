@@ -1,4 +1,4 @@
-import { mkdir, readdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
@@ -13,6 +13,10 @@ type DockerSandboxRunnerOptions = {
   shareRoot: string;
   openAiApiKey: string | null;
   codexAuthFile: string | null;
+  workerCodexConfigBuilder?: (taskId: string) => {
+    codexConfigToml: string | null;
+    environment: Record<string, string>;
+  };
   handshakeTimeoutMs?: number;
   spawnImpl?: typeof spawn;
   setTimeoutImpl?: typeof setTimeout;
@@ -38,6 +42,17 @@ export class DockerSandboxRunner implements SandboxRunner {
   ): Promise<SandboxHandle> {
     const sharePath = this.getTaskSharePath(request.taskId);
     await mkdir(sharePath, { recursive: true });
+    const builtWorkerConfig = this.options.workerCodexConfigBuilder?.(request.taskId) ?? null;
+    const workerCodexConfig = request.workerCodexConfigToml ?? builtWorkerConfig?.codexConfigToml ?? null;
+    const workerEnvironment = {
+      ...(builtWorkerConfig?.environment ?? {}),
+      ...(request.workerEnvironment ?? {}),
+    };
+    let workerCodexConfigHostPath: string | null = null;
+    if (workerCodexConfig) {
+      workerCodexConfigHostPath = join(sharePath, ".sandy-worker-codex-config.toml");
+      await writeFile(workerCodexConfigHostPath, workerCodexConfig, "utf8");
+    }
 
     const containerName = `sandy-${request.taskId}`;
     let finished = false;
@@ -71,6 +86,10 @@ export class DockerSandboxRunner implements SandboxRunner {
       dockerArgs.push("-e", `OPENAI_API_KEY=${this.options.openAiApiKey}`);
     }
 
+    for (const [name, value] of Object.entries(workerEnvironment)) {
+      dockerArgs.push("-e", `${name}=${value}`);
+    }
+
     if (this.options.codexAuthFile) {
       dockerArgs.push(
         "-v",
@@ -78,7 +97,16 @@ export class DockerSandboxRunner implements SandboxRunner {
       );
     }
 
+    if (workerCodexConfigHostPath) {
+      dockerArgs.push(
+        "-v",
+        `${workerCodexConfigHostPath}:/root/.codex/config.toml:ro`,
+      );
+    }
+
     dockerArgs.push(
+      "--add-host",
+      "host.docker.internal:host-gateway",
       "-v",
       `${sharePath}:${sharedWorkspaceMountPath}`,
       this.options.workerImage,

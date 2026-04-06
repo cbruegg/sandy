@@ -22,16 +22,21 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - Telegram file uploads staged directly into the per-task shared workspace on task launch and during active tasks.
   - Deterministic sub-agent requests to send files from `/workspace/share` back to the user through the channel without privilege escalation.
   - Host-mediated one-off file copy operations into and out of the per-sub-agent shared workspace.
+  - File-backed Sandy runtime configuration in `~/.config/sandy/config.toml`, with `SANDY_CONFIG_FILE` as a path override.
   - Telegram voice messages transcribed through a configurable OpenAI-compatible STT endpoint and then processed through the normal text-message path.
   - Deterministic detection of worker disconnects, handshake timeouts, and control-channel write failures.
   - Structured host-side logging for significant lifecycle and failure events.
   - Centralized user-facing message definitions to prepare for future i18n.
   - Channel-owned formatting metadata, with Telegram output sanitized and sent as simple HTML.
   - Automatic deletion of empty per-sub-agent shared workspaces, with explicit user confirmation before deleting non-empty workspaces.
+  - Host-side MCP proxying for configured upstream MCP servers, with per-task JWT authentication for workers.
+  - Host-admin MCP OAuth login flow through `sandy mcp <list|status|login|logout>`.
+  - MCP privilege approval scopes `once`, `worker_session`, and `always allow`, with `always allow` persisted automatically to the Sandy TOML config.
 - Not fully implemented yet:
   - Image handling.
-  - Host-side enforcement for approved resource requests beyond shared-workspace file copy, such as mount setup, MCP enablement, and OneCLI enablement.
-- Mount, MCP, and OneCLI requests remain represented in Sandy's typed protocol for future expansion, but they are currently rejected as unsupported by the host runtime.
+  - Host-side enforcement for approved resource requests beyond shared-workspace file copy and MCP tool access, such as mount setup and OneCLI enablement.
+- Mount and OneCLI requests remain represented in Sandy's typed protocol for future expansion, but they are currently rejected as unsupported by the host runtime.
+- Sandy's own worker-tool flow is intentionally not rewritten to MCP in v1; that remains follow-up work after external MCP support.
 
 ## Key Changes
 ### Host runtime and orchestration
@@ -100,7 +105,11 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - read-write host directory mount,
   - enabling access to a preconfigured MCP server identifier,
   - enabling access to a preconfigured OneCLI-backed tool identifier.
-- Do not route privilege requests through the main agent. The host forwards them directly to the user and resolves approve/deny deterministically.
+- Do not route privilege requests through the main agent. The host forwards them directly to the user and resolves them deterministically.
+- For MCP tool calls, support three positive approval scopes:
+  - once
+  - always in this worker session
+  - always allow, persisted to Sandy's TOML config on disk
 - Restrict approvable resources to configured allowlists. Unknown host paths or unknown MCP/OneCLI identifiers are denied before user prompting.
 - On approval, the host applies the change deterministically and informs the sub-agent. On denial, the host sends a deterministic rejection event.
 
@@ -128,14 +137,16 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - runtime schema validation,
   - Docker lifecycle control,
   - testing framework.
-- Add config for:
-  - `TELEGRAM_BOT_TOKEN`
-  - `OPENAI_API_KEY`
-  - `SANDY_LOG_LEVEL`
+- Add Sandy TOML config for:
+  - Telegram bot token
+  - OpenAI/Codex auth selection
+  - host log level and debug-content logging
   - Docker worker image/tag
   - per-sub-agent share root path
+  - STT endpoint/model credentials
+  - configured MCP server definitions
+  - persisted `always allow` MCP tool grants
   - allowlisted host mount roots
-  - allowlisted MCP identifiers
   - allowlisted OneCLI tool identifiers
 
 ## Public Interfaces and Types
@@ -191,6 +202,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
 - User-uploaded files are copied into the task share by the channel adapter and do not require privilege escalation.
 - Sending a file from `/workspace/share` back to the user through the channel does not require privilege escalation.
 - Dynamic host directory mounts are out of scope for v1.
-- MCP and OneCLI capability enablement are out of scope for v1.
-- Privilege handling in v1 is limited to host-mediated file copy operations for the per-sub-agent shared volume.
+- OneCLI capability enablement is out of scope for v1.
+- External MCP server access is in scope for v1 through Sandy's host-side proxy.
+- Sandy's own worker-tool flow is not rewritten to MCP in v1.
 - “STT” is the intended term for voice transcription in v1.

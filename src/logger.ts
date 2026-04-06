@@ -7,21 +7,23 @@ const levelPriority: Record<LogLevel, number> = {
   error: 40,
 };
 
-function resolveLogLevel(): LogLevel {
-  const configured = process.env.SANDY_LOG_LEVEL?.toLowerCase();
-  if (configured === "debug" || configured === "info" || configured === "warn" || configured === "error") {
-    return configured;
-  }
-  return "info";
-}
-
-function isDebugContentLoggingEnabled(): boolean {
-  return process.env.SANDY_DEBUG === "true";
-}
+type LoggerConfig = {
+  minLevel: LogLevel;
+  debugContentEnabled: boolean;
+};
 
 class SandyLogger {
-  private readonly minLevel = resolveLogLevel();
-  private readonly debugContentEnabled = isDebugContentLoggingEnabled();
+  private config: LoggerConfig = {
+    minLevel: "info",
+    debugContentEnabled: false,
+  };
+
+  configure(config: Partial<LoggerConfig>): void {
+    this.config = {
+      ...this.config,
+      ...config,
+    };
+  }
 
   debug(event: string, data?: Record<string, unknown>): void {
     this.write("debug", event, data);
@@ -40,14 +42,14 @@ class SandyLogger {
   }
 
   debugContent(event: string, data?: Record<string, unknown>): void {
-    if (!this.debugContentEnabled) {
+    if (!this.config.debugContentEnabled) {
       return;
     }
     this.write("info", event, data);
   }
 
   private write(level: LogLevel, event: string, data?: Record<string, unknown>): void {
-    if (levelPriority[level] < levelPriority[this.minLevel]) {
+    if (levelPriority[level] < levelPriority[this.config.minLevel]) {
       return;
     }
 
@@ -68,3 +70,7 @@ class SandyLogger {
 }
 
 export const logger = new SandyLogger();
+
+export function configureLogger(config: Partial<LoggerConfig>): void {
+  logger.configure(config);
+}

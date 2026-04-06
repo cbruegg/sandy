@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import {
   Codex,
   type CommandExecutionItem,
+  type McpToolCallItem,
   type Thread,
   type ThreadEvent,
   type TodoListItem,
@@ -89,6 +90,10 @@ function progressFromCommand(item: CommandExecutionItem): string {
   return `Command ${item.status}: ${item.command}`;
 }
 
+function progressFromMcpToolCall(item: McpToolCallItem): string {
+  return `MCP ${item.status}: ${item.server}.${item.tool}`;
+}
+
 async function streamTurn(thread: Thread, input: string): Promise<void> {
   let sawPrivilegedToolCall = false;
   let sawSendFileToChannel = false;
@@ -149,6 +154,12 @@ function handleThreadEvent(event: ThreadEvent): ThreadEventDisposition {
             message,
           });
         }
+      }
+      if (event.item.type === "mcp_tool_call") {
+        send({
+          type: "progress",
+          message: progressFromMcpToolCall(event.item),
+        });
       }
       return "none";
     case "turn.completed":

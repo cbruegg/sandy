@@ -1,25 +1,21 @@
 # MCP (Model Context Protocol) Integration
 
-- It should be possible to configure access to MCP servers in the host
-  tool.
-- The host tool should handle OAuth login to the configured MCP servers.
-- MCP server metadata should be passed to the workers.
-- Workers should be able to make requests to the MCP servers, but pass
-  through the host tool for privilege management.
-- By default, each tool call should be considered a privilege request.
-- Users may grant access to a tool call once, "always in this worker session"
-  or "always allow" (for safe operations).
-- "Always allow" choices have to be persisted in a human-readable config file on disk.
+Implemented in the current codebase:
 
-→ We need to introduce some config file, maybe also suitable for other config parameters
-  we already have right now.
+- Sandy reads MCP server definitions from the Sandy TOML config file.
+- Sandy exposes configured upstream MCP servers to workers through a host-side MCP proxy.
+- Workers authenticate to the Sandy MCP proxy with a Sandy-issued JWT bearer token that expires after one day.
+- MCP tool calls are mediated by the Sandy host runtime rather than going directly from worker to upstream server.
+- Every MCP tool call is treated as a privilege request unless already covered by a worker-session or persisted grant.
+- Users can approve an MCP tool call once, for the current worker session, or with `always allow`.
+- `Always allow` decisions are written back automatically to Sandy's human-readable TOML config file on disk.
+- Upstream MCP OAuth login is handled on the host through `sandy mcp list|status|login|logout`.
 
-→ The host needs to expose an MCP server to the workers, so that they can make requests to the configured MCP servers.
-  The MCP server should listen only on localhost, workers connect through an internal Docker network,
-  and workers should receive a JWT token with an expiry of 1 day to authenticate with the host's MCP server.
+Explicitly deferred:
 
-The MCP server integration should be tested with the Todoist MCP server
-and the Home Assistant MCP server.
+- Rewriting Sandy's own host-mediated worker-tool flow to MCP. V1 keeps the native worker protocol for file copy and channel-file send operations.
 
-- As the host already exposes MCP servers to the client, we could also
-  refactor Sandy's own tool call flow to MCP.
+Current limitations:
+
+- The current upstream OAuth flow is intended for streamable HTTP MCP servers.
+- Dynamic host mounts and OneCLI remain out of scope for v1 and are still rejected by the runtime.

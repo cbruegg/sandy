@@ -19,7 +19,7 @@ export type CancelRequestEvent = ChatEventBase & {
 
 export type ApprovalResponseEvent = ChatEventBase & {
   kind: "approval_response";
-  decision: "approve" | "deny";
+  decision: "approve" | "approve_once" | "approve_worker_session" | "approve_always" | "deny";
   requestId?: string;
 };
 

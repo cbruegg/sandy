@@ -1,5 +1,10 @@
 import type { PrivilegeRequest } from "./privilege.js";
 
+export type McpToolGrant = {
+  serverId: string;
+  toolName: string;
+};
+
 export type TaskStatus =
   | "idle"
   | "running"
@@ -16,7 +21,7 @@ export type TaskMetadata = {
   lastActivityAt: string;
   hasPendingQuarantinedOutput: boolean;
   hasPendingPrivilegeRequest: boolean;
-  approvedResourceIdentifiers: string[];
+  approvedMcpTools: McpToolGrant[];
   workerConnected: boolean;
 };
 
@@ -29,7 +34,7 @@ export type ActiveTaskState = {
   lastActivityAt: string;
   pendingPrivilegeRequest: PrivilegeRequest | null;
   quarantinedOutputs: string[];
-  approvedResourceIdentifiers: string[];
+  approvedMcpTools: McpToolGrant[];
   workerConnected: boolean;
 };
 

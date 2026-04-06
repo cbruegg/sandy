@@ -6,6 +6,8 @@ export type LaunchTaskRequest = {
   taskName: string;
   taskBrief: string;
   channelFormatting: ChannelFormatting;
+  workerCodexConfigToml?: string | null;
+  workerEnvironment?: Record<string, string>;
 };
 
 export type ShareInspection = {
