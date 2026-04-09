@@ -49,6 +49,27 @@ export const messages = {
     `Privilege request:\n${describePrivilegeRequest(request)}\n\n${describePrivilegeActions(request)}`,
 } as const;
 
+export const mcpAdminMessages = {
+  oauthLoginUnsupported: (serverId: string): string =>
+    `MCP server ${serverId} does not support OAuth login because it is not streamable_http.`,
+  oauthAuthorizationUrlMissing: (serverId: string): string =>
+    `OAuth login for ${serverId} did not provide an authorization URL.`,
+  unknownServer: (serverId: string): string =>
+    `Unknown MCP server "${serverId}".`,
+  oauthCallbackReturnedError: (error: string): string =>
+    `OAuth callback returned error: ${error}`,
+  oauthLoginFailedResponse: (): string =>
+    "OAuth login failed. You can close this tab.",
+  oauthAuthorizationCodeMissing: (): string =>
+    "Missing OAuth authorization code.",
+  oauthLoginCompletedResponse: (): string =>
+    "OAuth login completed. You can close this tab.",
+  oauthCallbackServerStartFailed: (): string =>
+    "Failed to start OAuth callback server.",
+  oauthLoginOpenUrl: (serverId: string): string =>
+    `Open this URL to authorize ${serverId}:`,
+} as const;
+
 function describePrivilegeRequest(request: PrivilegeRequest): string {
   if (request.kind === "mcp_tool_call") {
     return [

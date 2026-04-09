@@ -3,6 +3,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { McpServerConfig } from "../config.js";
+import { mcpAdminMessages } from "../messages.js";
 import { SandyOAuthClientProvider } from "./oauth-provider.js";
 
 type McpServerStatus = {
@@ -47,7 +48,7 @@ export class SandyMcpAdminService {
   async login(serverId: string): Promise<void> {
     const config = this.requireServer(serverId);
     if (config.transport !== "streamable_http" || !config.url) {
-      throw new Error(`MCP server ${serverId} does not support OAuth login because it is not streamable_http.`);
+      throw new Error(mcpAdminMessages.oauthLoginUnsupported(serverId));
     }
 
     const callback = await startLoopbackCallbackServer();
@@ -68,10 +69,10 @@ export class SandyMcpAdminService {
 
     if (!authorizationUrl) {
       await callback.close();
-      throw new Error(`OAuth login for ${serverId} did not provide an authorization URL.`);
+      throw new Error(mcpAdminMessages.oauthAuthorizationUrlMissing(serverId));
     }
 
-    console.log(`Open this URL to authorize ${serverId}:`);
+    console.log(mcpAdminMessages.oauthLoginOpenUrl(serverId));
     console.log(String(authorizationUrl));
     const authorizationCode = await callback.waitForCode();
     await callback.close();
@@ -90,7 +91,7 @@ export class SandyMcpAdminService {
   private requireServer(serverId: string): McpServerConfig {
     const config = this.mcpServers[serverId];
     if (!config) {
-      throw new Error(`Unknown MCP server "${serverId}".`);
+      throw new Error(mcpAdminMessages.unknownServer(serverId));
     }
     return config;
   }
@@ -129,21 +130,21 @@ async function startLoopbackCallbackServer(): Promise<{
     const error = url.searchParams.get("error");
 
     if (error) {
-      rejectCode?.(new Error(`OAuth callback returned error: ${error}`));
+      rejectCode?.(new Error(mcpAdminMessages.oauthCallbackReturnedError(error)));
       res.statusCode = 400;
-      res.end("OAuth login failed. You can close this tab.");
+      res.end(mcpAdminMessages.oauthLoginFailedResponse());
       return;
     }
 
     if (!code) {
       res.statusCode = 400;
-      res.end("Missing OAuth authorization code.");
+      res.end(mcpAdminMessages.oauthAuthorizationCodeMissing());
       return;
     }
 
     resolveCode?.(code);
     res.statusCode = 200;
-    res.end("OAuth login completed. You can close this tab.");
+    res.end(mcpAdminMessages.oauthLoginCompletedResponse());
   });
 
   await new Promise<void>((resolve, reject) => {
@@ -156,7 +157,7 @@ async function startLoopbackCallbackServer(): Promise<{
 
   const address = server.address();
   if (!address || typeof address === "string") {
-    throw new Error("Failed to start OAuth callback server.");
+    throw new Error(mcpAdminMessages.oauthCallbackServerStartFailed());
   }
 
   return {
