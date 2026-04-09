@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import * as toml from "@iarna/toml";
 import jwt from "jsonwebtoken";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -14,7 +14,6 @@ import {
   ReadResourceRequestSchema,
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
-import type { RequestHandlerExtra } from "@modelcontextprotocol/sdk/shared/protocol.js";
 import type { McpServerConfig } from "../config.js";
 import type { McpServerRegistry } from "./server-registry.js";
 import type { PrivilegeResolutionResult } from "../types.js";
@@ -51,13 +50,11 @@ type SandyMcpProxyOptions = {
 
 export class SandyMcpProxy {
   private readonly secret = randomBytes(32).toString("hex");
-  private readonly server = new Server({
-    name: "Sandy MCP Proxy",
-    version: "1.0.0",
-  });
-  private readonly transport = new StreamableHTTPServerTransport({
-    sessionIdGenerator: undefined,
-  });
+  private readonly sessions = new Map<string, {
+    route: ProxyRouteContext;
+    server: Server;
+    transport: StreamableHTTPServerTransport;
+  }>();
   private httpServer = createServer((req, res) => {
     void this.handleHttpRequest(req, res);
   });
@@ -68,50 +65,9 @@ export class SandyMcpProxy {
   constructor(private readonly options: SandyMcpProxyOptions) {
     this.host = options.host ?? "0.0.0.0";
     this.workerBaseUrlHost = options.workerBaseUrlHost ?? "host.docker.internal";
-
-    this.server.registerCapabilities({
-      tools: {},
-      resources: {},
-      prompts: {},
-    });
-
-    this.server.setRequestHandler(ListToolsRequestSchema, async (request, extra) => {
-      return this.options.registry.listTools(this.resolveRoute(extra).serverId, request.params);
-    });
-    this.server.setRequestHandler(ListResourcesRequestSchema, async (request, extra) => {
-      return this.options.registry.listResources(this.resolveRoute(extra).serverId, request.params);
-    });
-    this.server.setRequestHandler(ListResourceTemplatesRequestSchema, async (request, extra) => {
-      return this.options.registry.listResourceTemplates(this.resolveRoute(extra).serverId, request.params);
-    });
-    this.server.setRequestHandler(ReadResourceRequestSchema, async (request, extra) => {
-      return this.options.registry.readResource(this.resolveRoute(extra).serverId, request.params);
-    });
-    this.server.setRequestHandler(ListPromptsRequestSchema, async (request, extra) => {
-      return this.options.registry.listPrompts(this.resolveRoute(extra).serverId, request.params);
-    });
-    this.server.setRequestHandler(GetPromptRequestSchema, async (request, extra) => {
-      return this.options.registry.getPrompt(this.resolveRoute(extra).serverId, request.params);
-    });
-    this.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-      const route = this.resolveRoute(extra);
-      const approval = await this.options.authorizeToolCall({
-        taskId: route.taskId,
-        serverId: route.serverId,
-        toolName: request.params.name,
-        arguments: request.params.arguments ?? {},
-      });
-
-      if (approval.outcome !== "approved") {
-        return buildToolErrorResult(approval.message);
-      }
-
-      return this.options.registry.callTool(route.serverId, request.params);
-    });
   }
 
   async start(): Promise<void> {
-    await this.server.connect(this.transport);
     await new Promise<void>((resolve, reject) => {
       this.httpServer.once("error", reject);
       this.httpServer.listen(0, this.host, () => {
@@ -128,8 +84,11 @@ export class SandyMcpProxy {
   }
 
   async stop(): Promise<void> {
+    for (const session of this.sessions.values()) {
+      await session.transport.close();
+    }
+    this.sessions.clear();
     await this.options.registry.close();
-    await this.transport.close();
     await new Promise<void>((resolve, reject) => {
       this.httpServer.close((error) => {
         if (error) {
@@ -212,23 +171,111 @@ export class SandyMcpProxy {
       return;
     }
 
-    await this.transport.handleRequest(req, res);
-  }
+    const sessionIdHeader = req.headers["mcp-session-id"];
+    const sessionId = Array.isArray(sessionIdHeader) ? sessionIdHeader[0] : sessionIdHeader;
 
-  private resolveRoute(
-    extra: RequestHandlerExtra<never, never>,
-  ): ProxyRouteContext {
-    const url = extra.requestInfo?.url;
-    if (!url) {
-      throw new Error("Missing request URL for MCP proxy request.");
+    let session = sessionId ? this.sessions.get(sessionId) ?? null : null;
+    if (session && !sameRoute(session.route, route)) {
+      res.statusCode = 404;
+      res.end("Unknown MCP session for this task or server.");
+      return;
     }
 
-    const route = matchProxyRoute(url.pathname);
-    if (!route) {
-      throw new Error(`Unsupported MCP proxy route: ${url.pathname}`);
+    if (!session) {
+      session = await this.createSession(route);
     }
-    return route;
+
+    try {
+      await session.transport.handleRequest(req, res);
+    } catch (error) {
+      if (!res.headersSent) {
+        res.statusCode = 500;
+        res.end(error instanceof Error ? error.message : "Internal MCP proxy error.");
+        return;
+      }
+      throw error;
+    }
   }
+
+  private createServer(route: ProxyRouteContext): Server {
+    const server = new Server({
+      name: "Sandy MCP Proxy",
+      version: "1.0.0",
+    });
+
+    server.registerCapabilities({
+      tools: {},
+      resources: {},
+      prompts: {},
+    });
+
+    server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+      return this.options.registry.listTools(route.serverId, request.params);
+    });
+    server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
+      return this.options.registry.listResources(route.serverId, request.params);
+    });
+    server.setRequestHandler(ListResourceTemplatesRequestSchema, async (request) => {
+      return this.options.registry.listResourceTemplates(route.serverId, request.params);
+    });
+    server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+      return this.options.registry.readResource(route.serverId, request.params);
+    });
+    server.setRequestHandler(ListPromptsRequestSchema, async (request) => {
+      return this.options.registry.listPrompts(route.serverId, request.params);
+    });
+    server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+      return this.options.registry.getPrompt(route.serverId, request.params);
+    });
+    server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      const approval = await this.options.authorizeToolCall({
+        taskId: route.taskId,
+        serverId: route.serverId,
+        toolName: request.params.name,
+        arguments: request.params.arguments ?? {},
+      });
+
+      if (approval.outcome !== "approved") {
+        return buildToolErrorResult(approval.message);
+      }
+
+      return this.options.registry.callTool(route.serverId, request.params);
+    });
+
+    return server;
+  }
+
+  private async createSession(route: ProxyRouteContext) {
+    const server = this.createServer(route);
+    let sessionId: string | null = null;
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      onsessioninitialized: (createdSessionId) => {
+        sessionId = createdSessionId;
+        this.sessions.set(createdSessionId, {
+          route,
+          server,
+          transport,
+        });
+      },
+    });
+    transport.onclose = () => {
+      if (sessionId) {
+        this.sessions.delete(sessionId);
+      }
+    };
+    await server.connect(transport);
+    return {
+      route,
+      server,
+      transport,
+    };
+  }
+
+}
+
+function sameRoute(left: ProxyRouteContext, right: ProxyRouteContext): boolean {
+  return left.taskId === right.taskId && left.serverId === right.serverId;
 }
 
 function matchProxyRoute(pathname: string): ProxyRouteContext | null {
