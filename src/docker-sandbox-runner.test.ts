@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { access, mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -102,15 +102,23 @@ function createSpawnHarness(taskChild: FakeChildProcess) {
   };
 }
 
-async function launchRunnerWithChild(taskChild: FakeChildProcess, onEvent: (event: SubAgentEvent) => Promise<void>, handshakeTimeoutMs = 10_000) {
+async function launchRunnerWithChild(
+  taskChild: FakeChildProcess,
+  onEvent: (event: SubAgentEvent) => Promise<void>,
+  options?: {
+    handshakeTimeoutMs?: number;
+    shareRoot?: string;
+    workerCodexConfigToml?: string | null;
+  },
+) {
   const timers = createTimerController();
   const harness = createSpawnHarness(taskChild);
   const runner = new DockerSandboxRunner({
     workerImage: "sandy-subagent:latest",
-    shareRoot: "/tmp/sandy-test-shares",
+    shareRoot: options?.shareRoot ?? "/tmp/sandy-test-shares",
     openAiApiKey: null,
     codexAuthFile: null,
-    handshakeTimeoutMs,
+    handshakeTimeoutMs: options?.handshakeTimeoutMs ?? 10_000,
     spawnImpl: harness.spawnImpl,
     setTimeoutImpl: timers.setTimeoutImpl,
     clearTimeoutImpl: timers.clearTimeoutImpl,
@@ -123,6 +131,7 @@ async function launchRunnerWithChild(taskChild: FakeChildProcess, onEvent: (even
       taskName: "test-task",
       taskBrief: "Inspect the environment.",
       channelFormatting: testFormatting,
+      workerCodexConfigToml: options?.workerCodexConfigToml,
     },
     onEvent,
   );
@@ -138,6 +147,20 @@ function flushEvents(): Promise<void> {
   return new Promise((resolve) => {
     setImmediate(resolve);
   });
+}
+
+async function waitFor(check: () => Promise<void>, attempts = 10): Promise<void> {
+  let lastError: unknown = null;
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      await check();
+      return;
+    } catch (error) {
+      lastError = error;
+      await flushEvents();
+    }
+  }
+  throw lastError;
 }
 
 test("DockerSandboxRunner waits for an explicit worker_connected handshake", async () => {
@@ -162,7 +185,7 @@ test("DockerSandboxRunner reports a disconnect when the handshake times out", as
   const events: SubAgentEvent[] = [];
   const { timers, invocations } = await launchRunnerWithChild(taskChild, async (event) => {
     events.push(event);
-  }, 5);
+  }, { handshakeTimeoutMs: 5 });
 
   timers.triggerAll();
   await flushEvents();
@@ -323,6 +346,33 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
 
   await runner.deleteTaskShare("task-1");
   await assert.rejects(access(taskShare));
+  await rm(shareRoot, { recursive: true, force: true });
+});
+
+test("DockerSandboxRunner mounts worker Codex config from a temp path outside the task share", async () => {
+  const shareRoot = mkdtempSync(join(tmpdir(), "sandy-share-config-"));
+  const taskChild = new FakeChildProcess();
+
+  const { invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
+    shareRoot,
+    workerCodexConfigToml: "model = \"gpt-5\"\n",
+  });
+
+  const taskShare = join(shareRoot, "task-1");
+  assert.deepEqual(await readdir(taskShare), []);
+
+  const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
+  assert.ok(dockerRunInvocation);
+  const configMountArg = dockerRunInvocation.args.find((arg) => arg.endsWith(":/root/.codex/config.toml:ro"));
+  assert.ok(configMountArg);
+  assert.doesNotMatch(configMountArg, /\/task-1\/config\.toml:/);
+
+  const configHostPath = configMountArg.slice(0, configMountArg.indexOf(":/root/.codex/config.toml:ro"));
+  assert.match(configHostPath, /sandy-worker-codex-config-/);
+  assert.equal(await readFile(configHostPath, "utf8"), "model = \"gpt-5\"\n");
+
+  taskChild.emit("exit", 0, null);
+  await waitFor(() => assert.rejects(access(configHostPath)));
   await rm(shareRoot, { recursive: true, force: true });
 });
 

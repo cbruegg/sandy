@@ -1,12 +1,13 @@
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createInterface } from "node:readline";
-import { logger } from "../logger.js";
-import type { SandboxHandle, SandboxRunner, LaunchTaskRequest, ShareInspection } from "./sandbox-runner.js";
-import type { HostCommand, PrivilegeResolutionResult, SubAgentEvent } from "../types.js";
-import { parseSubAgentEvent, serializeHostCommand } from "../types.js";
-import { sharedWorkspaceMountPath } from "../shared-workspace.js";
+import {mkdir, mkdtemp, readdir, rm, writeFile} from "node:fs/promises";
+import {join, relative, resolve} from "node:path";
+import {type ChildProcessWithoutNullStreams, spawn} from "node:child_process";
+import {createInterface} from "node:readline";
+import {tmpdir} from "node:os";
+import {logger} from "../logger.js";
+import type {LaunchTaskRequest, SandboxHandle, SandboxRunner, ShareInspection} from "./sandbox-runner.js";
+import type {HostCommand, PrivilegeResolutionResult, SubAgentEvent} from "../types.js";
+import {parseSubAgentEvent, serializeHostCommand} from "../types.js";
+import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 
 type DockerSandboxRunnerOptions = {
   workerImage: string;
@@ -48,11 +49,27 @@ export class DockerSandboxRunner implements SandboxRunner {
       ...(builtWorkerConfig?.environment ?? {}),
       ...(request.workerEnvironment ?? {}),
     };
+    let workerCodexConfigTempDir: string | null = null;
     let workerCodexConfigHostPath: string | null = null;
     if (workerCodexConfig) {
-      workerCodexConfigHostPath = join(sharePath, ".sandy-worker-codex-config.toml");
-      await writeFile(workerCodexConfigHostPath, workerCodexConfig, "utf8");
+      workerCodexConfigTempDir = await mkdtemp(join(tmpdir(), "sandy-worker-codex-config-"));
+      workerCodexConfigHostPath = join(workerCodexConfigTempDir, "config.toml");
+      try {
+        await writeFile(workerCodexConfigHostPath, workerCodexConfig, "utf8");
+      } catch (error) {
+        await rm(workerCodexConfigTempDir, { recursive: true, force: true });
+        throw error;
+      }
     }
+
+    let tempConfigCleanedUp = false;
+    const cleanupWorkerCodexConfig = async (): Promise<void> => {
+      if (tempConfigCleanedUp || !workerCodexConfigTempDir) {
+        return;
+      }
+      tempConfigCleanedUp = true;
+      await rm(workerCodexConfigTempDir, { recursive: true, force: true });
+    };
 
     const containerName = `sandy-${request.taskId}`;
     let finished = false;
@@ -210,6 +227,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       }
       finished = true;
       clearHandshakeTimer();
+      void cleanupWorkerCodexConfig();
       logger.error("sandbox.launch_failed", {
         taskId: request.taskId,
         message: error.message,
@@ -228,6 +246,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     });
 
     child.on("exit", (code, signal) => {
+      void cleanupWorkerCodexConfig();
       if (finished) {
         return;
       }
