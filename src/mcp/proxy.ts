@@ -209,23 +209,25 @@ export class SandyMcpProxy {
       prompts: {},
     });
 
+    const getClient = async () => this.options.registry.getClient(route.serverId);
+
     server.setRequestHandler(ListToolsRequestSchema, async (request) => {
-      return this.options.registry.listTools(route.serverId, request.params);
+      return (await getClient()).listTools(request.params);
     });
     server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
-      return this.options.registry.listResources(route.serverId, request.params);
+      return (await getClient()).listResources(request.params);
     });
     server.setRequestHandler(ListResourceTemplatesRequestSchema, async (request) => {
-      return this.options.registry.listResourceTemplates(route.serverId, request.params);
+      return (await getClient()).listResourceTemplates(request.params);
     });
     server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-      return this.options.registry.readResource(route.serverId, request.params);
+      return (await getClient()).readResource(request.params);
     });
     server.setRequestHandler(ListPromptsRequestSchema, async (request) => {
-      return this.options.registry.listPrompts(route.serverId, request.params);
+      return (await getClient()).listPrompts(request.params);
     });
     server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-      return this.options.registry.getPrompt(route.serverId, request.params);
+      return (await getClient()).getPrompt(request.params);
     });
     server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const approval = await this.options.authorizeToolCall({
@@ -239,7 +241,7 @@ export class SandyMcpProxy {
         return buildToolErrorResult(approval.message);
       }
 
-      return this.options.registry.callTool(route.serverId, request.params);
+      return (await getClient()).callTool(request.params);
     });
 
     return server;

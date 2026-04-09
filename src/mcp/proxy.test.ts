@@ -1,17 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import * as toml from "@iarna/toml";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { SandyMcpProxy } from "./proxy.js";
 import type { McpServerRegistry } from "./server-registry.js";
-import type {
-  CallToolRequest,
-  GetPromptRequest,
-  ListPromptsRequest,
-  ListResourcesRequest,
-  ListResourceTemplatesRequest,
-  ListToolsRequest,
-  ReadResourceRequest,
-} from "@modelcontextprotocol/sdk/types.js";
 
 type InitializeResponse = {
   result: {
@@ -30,7 +22,17 @@ type ListToolsResponse = {
 };
 
 class FakeRegistry implements McpServerRegistry {
-  async listTools(_serverId: string, _params?: ListToolsRequest["params"]) {
+  private readonly client = new FakeClient() as unknown as Client;
+
+  async getClient(_serverId: string): Promise<Client> {
+    return this.client;
+  }
+
+  async close() {}
+}
+
+class FakeClient {
+  async listTools() {
     return {
       tools: [{
         name: "add_task",
@@ -47,15 +49,15 @@ class FakeRegistry implements McpServerRegistry {
     };
   }
 
-  async listResources(_serverId: string, _params?: ListResourcesRequest["params"]) {
+  async listResources() {
     return { resources: [] };
   }
 
-  async listResourceTemplates(_serverId: string, _params?: ListResourceTemplatesRequest["params"]) {
+  async listResourceTemplates() {
     return { resourceTemplates: [] };
   }
 
-  async readResource(_serverId: string, _params: ReadResourceRequest["params"]) {
+  async readResource() {
     return {
       contents: [{
         uri: "file:///unused.txt",
@@ -64,11 +66,11 @@ class FakeRegistry implements McpServerRegistry {
     };
   }
 
-  async listPrompts(_serverId: string, _params?: ListPromptsRequest["params"]) {
+  async listPrompts() {
     return { prompts: [] };
   }
 
-  async getPrompt(_serverId: string, _params: GetPromptRequest["params"]) {
+  async getPrompt() {
     return {
       messages: [{
         role: "user" as const,
@@ -80,7 +82,7 @@ class FakeRegistry implements McpServerRegistry {
     };
   }
 
-  async callTool(_serverId: string, _params: CallToolRequest["params"]) {
+  async callTool() {
     return {
       content: [{
         type: "text" as const,
@@ -88,8 +90,6 @@ class FakeRegistry implements McpServerRegistry {
       }],
     };
   }
-
-  async close() {}
 }
 
 test("SandyMcpProxy serves initialize and follow-up MCP requests on the same session", async () => {

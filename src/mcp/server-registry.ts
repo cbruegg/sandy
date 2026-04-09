@@ -1,15 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type {
-  CallToolRequest,
-  GetPromptRequest,
-  ListPromptsRequest,
-  ListResourcesRequest,
-  ListResourceTemplatesRequest,
-  ListToolsRequest,
-  ReadResourceRequest,
-} from "@modelcontextprotocol/sdk/types.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpServerConfig } from "../config.js";
 import { SandyOAuthClientProvider } from "./oauth-provider.js";
@@ -21,16 +12,7 @@ type ClientRecord = {
 };
 
 export interface McpServerRegistry {
-  listTools(serverId: string, params?: ListToolsRequest["params"]): Promise<Awaited<ReturnType<Client["listTools"]>>>;
-  listResources(serverId: string, params?: ListResourcesRequest["params"]): Promise<Awaited<ReturnType<Client["listResources"]>>>;
-  listResourceTemplates(
-    serverId: string,
-    params?: ListResourceTemplatesRequest["params"],
-  ): Promise<Awaited<ReturnType<Client["listResourceTemplates"]>>>;
-  readResource(serverId: string, params: ReadResourceRequest["params"]): Promise<Awaited<ReturnType<Client["readResource"]>>>;
-  listPrompts(serverId: string, params?: ListPromptsRequest["params"]): Promise<Awaited<ReturnType<Client["listPrompts"]>>>;
-  getPrompt(serverId: string, params: GetPromptRequest["params"]): Promise<Awaited<ReturnType<Client["getPrompt"]>>>;
-  callTool(serverId: string, params: CallToolRequest["params"]): Promise<Awaited<ReturnType<Client["callTool"]>>>;
+  getClient(serverId: string): Promise<Client>;
   close(): Promise<void>;
 }
 
@@ -42,34 +24,6 @@ export class McpServerRegistryImpl implements McpServerRegistry {
     private readonly mcpServers: Record<string, McpServerConfig>,
   ) {}
 
-  async listTools(serverId: string, params?: ListToolsRequest["params"]) {
-    return (await this.getClient(serverId)).listTools(params);
-  }
-
-  async listResources(serverId: string, params?: ListResourcesRequest["params"]) {
-    return (await this.getClient(serverId)).listResources(params);
-  }
-
-  async listResourceTemplates(serverId: string, params?: ListResourceTemplatesRequest["params"]) {
-    return (await this.getClient(serverId)).listResourceTemplates(params);
-  }
-
-  async readResource(serverId: string, params: ReadResourceRequest["params"]) {
-    return (await this.getClient(serverId)).readResource(params);
-  }
-
-  async listPrompts(serverId: string, params?: ListPromptsRequest["params"]) {
-    return (await this.getClient(serverId)).listPrompts(params);
-  }
-
-  async getPrompt(serverId: string, params: GetPromptRequest["params"]) {
-    return (await this.getClient(serverId)).getPrompt(params);
-  }
-
-  async callTool(serverId: string, params: CallToolRequest["params"]) {
-    return (await this.getClient(serverId)).callTool(params);
-  }
-
   async close(): Promise<void> {
     for (const record of this.clients.values()) {
       await record.transport.close();
@@ -77,7 +31,7 @@ export class McpServerRegistryImpl implements McpServerRegistry {
     this.clients.clear();
   }
 
-  private async getClient(serverId: string): Promise<Client> {
+  async getClient(serverId: string): Promise<Client> {
     const existing = this.clients.get(serverId);
     if (existing) {
       return existing.client;
