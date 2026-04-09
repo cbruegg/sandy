@@ -1,64 +1,83 @@
-import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import {existsSync, readFileSync} from "node:fs";
+import {homedir} from "node:os";
+import {dirname, join, resolve} from "node:path";
 import * as toml from "@iarna/toml";
-import { z } from "zod";
+import {z} from "zod";
 
 const logLevelSchema = z.enum(["debug", "info", "warn", "error"]);
 const mcpTransportSchema = z.enum(["streamable_http", "stdio"]);
 
-const sandyConfigSchema = z.object({
-  logging: z.object({
-    level: logLevelSchema.default("info"),
-    debug: z.boolean().default(false),
-  }).default({
-    level: "info",
-    debug: false,
-  }),
-  telegram: z.object({
-    bot_token: z.string().min(1),
-  }),
-  auth: z.object({
-    openai_api_key: z.string().min(1).nullable().optional(),
-    codex_auth_file: z.string().min(1).nullable().optional(),
-  }).default({}),
-  worker: z.object({
-    image: z.string().min(1).default("sandy-subagent:latest"),
-    share_root: z.string().min(1).default("/tmp/sandy-shares"),
-  }).default({
-    image: "sandy-subagent:latest",
-    share_root: "/tmp/sandy-shares",
-  }),
-  stt: z.object({
-    api_key: z.string().min(1).nullable().optional(),
-    base_url: z.string().min(1).default("https://api.openai.com/v1"),
-    model: z.string().min(1).default("gpt-4o-mini-transcribe"),
-  }).default({
-    base_url: "https://api.openai.com/v1",
-    model: "gpt-4o-mini-transcribe",
-  }),
-  mcp: z.object({
-    servers: z.record(z.string(), z.object({
-      transport: mcpTransportSchema,
-      url: z.string().min(1).optional(),
-      command: z.string().min(1).optional(),
-      args: z.array(z.string()).default([]),
-      env: z.record(z.string(), z.string()).default({}),
-      oauth_scopes: z.array(z.string()).default([]),
-    }).strict()).default({}),
-  }).default({
-    servers: {},
-  }),
-  approvals: z.object({
-    mcp: z.record(z.string(), z.object({
-      always_allow_tools: z.array(z.string()).default([]),
-    }).strict()).default({}),
-  }).default({
-    mcp: {},
-  }),
-}).strict();
+const DEFAULT_LOG_LEVEL: z.infer<typeof logLevelSchema> = "info";
+const DEFAULT_DEBUG_LOGGING_ENABLED = false;
+const DEFAULT_WORKER_IMAGE = "sandy-subagent:latest";
+const DEFAULT_SHARE_ROOT = "/tmp/sandy-shares";
+const DEFAULT_STT_BASE_URL = "https://api.openai.com/v1";
+const DEFAULT_STT_MODEL = "gpt-4o-mini-transcribe";
 
-type SandyConfigFile = z.infer<typeof sandyConfigSchema>;
+function defaultConfigPath(): string {
+  return join(homedir(), ".config", "sandy", "config.toml");
+}
+
+function defaultCodexAuthFilePath(): string {
+  return join(homedir(), ".codex", "auth.json");
+}
+
+function buildSandyConfigSchema(defaultCodexAuthFilePath: string) {
+  return z.object({
+    logging: z.object({
+      level: logLevelSchema.default(DEFAULT_LOG_LEVEL),
+      debug: z.boolean().default(DEFAULT_DEBUG_LOGGING_ENABLED),
+    }).default({
+      level: DEFAULT_LOG_LEVEL,
+      debug: DEFAULT_DEBUG_LOGGING_ENABLED,
+    }),
+    telegram: z.object({
+      bot_token: z.string().min(1),
+    }),
+    auth: z.object({
+      openai_api_key: z.string().min(1).nullable().optional(),
+      codex_auth_file: z.string().min(1).nullable().default(defaultCodexAuthFilePath),
+    }).default({
+      codex_auth_file: defaultCodexAuthFilePath,
+    }),
+    worker: z.object({
+      image: z.string().min(1).default(DEFAULT_WORKER_IMAGE),
+      share_root: z.string().min(1).default(DEFAULT_SHARE_ROOT),
+    }).default({
+      image: DEFAULT_WORKER_IMAGE,
+      share_root: DEFAULT_SHARE_ROOT,
+    }),
+    stt: z.object({
+      api_key: z.string().min(1).nullable().optional(),
+      base_url: z.string().min(1).default(DEFAULT_STT_BASE_URL),
+      model: z.string().min(1).default(DEFAULT_STT_MODEL),
+    }).default({
+      base_url: DEFAULT_STT_BASE_URL,
+      model: DEFAULT_STT_MODEL,
+    }),
+    mcp: z.object({
+      servers: z.record(z.string(), z.object({
+        transport: mcpTransportSchema,
+        url: z.string().min(1).optional(),
+        command: z.string().min(1).optional(),
+        args: z.array(z.string()).default([]),
+        env: z.record(z.string(), z.string()).default({}),
+        oauth_scopes: z.array(z.string()).default([]),
+      }).strict()).default({}),
+    }).default({
+      servers: {},
+    }),
+    approvals: z.object({
+      mcp: z.record(z.string(), z.object({
+        always_allow_tools: z.array(z.string()).default([]),
+      }).strict()).default({}),
+    }).default({
+      mcp: {},
+    }),
+  }).strict();
+}
+
+type SandyConfigFile = z.infer<ReturnType<typeof buildSandyConfigSchema>>;
 export type SandyConfigFileData = SandyConfigFile;
 
 export type McpServerConfig = {
@@ -90,10 +109,6 @@ type SandyConfig = {
 
 type EnvSource = NodeJS.ProcessEnv;
 
-function defaultConfigPath(): string {
-  return join(homedir(), ".config", "sandy", "config.toml");
-}
-
 function resolveConfigPath(env: EnvSource): string {
   const configured = env.SANDY_CONFIG_FILE?.trim();
   if (configured) {
@@ -104,11 +119,13 @@ function resolveConfigPath(env: EnvSource): string {
 
 function resolveCodexAuthFile(configuredPath: string | null | undefined): string | null {
   if (configuredPath) {
-    return resolve(configuredPath);
+    const resolvedPath = resolve(configuredPath);
+    if (resolvedPath !== defaultCodexAuthFilePath()) {
+      return resolvedPath;
+    }
+    return existsSync(resolvedPath) ? resolvedPath : null;
   }
-
-  const defaultPath = join(homedir(), ".codex", "auth.json");
-  return existsSync(defaultPath) ? defaultPath : null;
+  return null;
 }
 
 function normalizeMcpServerConfig(config: SandyConfigFile["mcp"]["servers"][string]): McpServerConfig {
@@ -183,7 +200,7 @@ export function renderConfigToml(value: SandyConfigFile): string {
 }
 
 export function parseConfigTomlFile(raw: string): SandyConfigFileData {
-  return sandyConfigSchema.parse(normalizeParsedToml(toml.parse(raw)));
+  return buildSandyConfigSchema(defaultCodexAuthFilePath()).parse(normalizeParsedToml(toml.parse(raw)));
 }
 
 function removeNulls(value: unknown): unknown {

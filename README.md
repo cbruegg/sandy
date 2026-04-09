@@ -19,41 +19,45 @@ status, completed work, and known gaps relative to that target, see `PLAN_v1.md`
 
 ### Configuration
 
-Sandy now reads its runtime config from `~/.config/sandy/config.toml` by default.
+Sandy reads its runtime config from `~/.config/sandy/config.toml` by default.
 The only environment variable still used for configuration is:
 
 - `SANDY_CONFIG_FILE`: optional override for the Sandy config file path.
 
 Example config:
+Commented entries below show built-in defaults. Uncommented values are required or example overrides.
 
 ```toml
 [logging]
-level = "info"
-debug = false
+# level = "info"
+# debug = false
 
 [telegram]
 bot_token = "123456:telegram-token"
 
 [auth]
-openai_api_key = ""
-codex_auth_file = "/Users/you/.codex/auth.json"
+# codex_auth_file = "~/.codex/auth.json"
+# openai_api_key = "sk-..." # optional override, no default
 
 [worker]
-image = "sandy-subagent:latest"
-share_root = "/tmp/sandy-shares"
+# image = "sandy-subagent:latest"
+# share_root = "/tmp/sandy-shares"
 
+# Optional STT config for voice message support.
+# If `stt.api_key` is not set, voice messages are not supported and will be rejected with an error message.
 [stt]
-api_key = ""
-base_url = "https://api.openai.com/v1"
-model = "gpt-4o-mini-transcribe"
+# api_key = "stt-api-key" # optional override, no default
+# base_url = "https://api.openai.com/v1"
+# model = "gpt-4o-mini-transcribe"
 
+# Optional:
 [mcp.servers.todoist]
 transport = "streamable_http"
 url = "https://todoist.example/mcp"
-oauth_scopes = ["data:read"]
+# oauth_scopes = []
 
 [approvals.mcp.todoist]
-always_allow_tools = ["list_projects"]
+# always_allow_tools = []
 ```
 
 Auth behavior:
