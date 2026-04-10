@@ -70,27 +70,6 @@ function normalizeTelegramTextInput(
   base: Pick<UserTextEvent, "chatId" | "messageId" | "timestamp">,
   rawText: string,
 ): NormalizedChatEvent {
-  const normalized = rawText.trim().toLowerCase();
-
-  if (normalized === "/cancel" || normalized === "cancel") {
-    return { ...base, kind: "cancel_request" };
-  }
-  if (normalized === "/report" || normalized === "report") {
-    return { ...base, kind: "danger_report" };
-  }
-  if (normalized === "/approve" || normalized === "approve") {
-    return { ...base, kind: "approval_response", decision: "approve_once" };
-  }
-  if (normalized === "/approve_session" || normalized === "approve session" || normalized === "allow for task") {
-    return { ...base, kind: "approval_response", decision: "approve_worker_session" };
-  }
-  if (normalized === "/approve_always" || normalized === "approve always" || normalized === "always allow") {
-    return { ...base, kind: "approval_response", decision: "approve_always" };
-  }
-  if (normalized === "/deny" || normalized === "deny") {
-    return { ...base, kind: "approval_response", decision: "deny" };
-  }
-
   return {
     ...base,
     kind: "user_text",

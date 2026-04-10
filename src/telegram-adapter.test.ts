@@ -33,8 +33,8 @@ test("normalizeTelegramUpdate maps report callback to a danger report event", as
   });
 });
 
-test("normalizeTelegramUpdate maps text commands and unsupported media deterministically", async () => {
-  const cancelEvent = await normalizeTelegramUpdate({
+test("normalizeTelegramUpdate maps text input and unsupported media deterministically", async () => {
+  const textEvent = await normalizeTelegramUpdate({
     update_id: 2,
     message: {
       message_id: 5,
@@ -44,11 +44,14 @@ test("normalizeTelegramUpdate maps text commands and unsupported media determini
     },
   } as Update);
 
-  assert.deepEqual(cancelEvent, {
-    kind: "cancel_request",
+  assert.deepEqual(textEvent, {
+    kind: "user_text",
     chatId: "99",
     messageId: "5",
     timestamp: "2023-11-14T22:13:30.000Z",
+    text: "/cancel",
+    rawText: "/cancel",
+    attachments: [],
   });
 
   const voiceEvent = await normalizeTelegramUpdate({
@@ -226,7 +229,7 @@ test("TelegramBotApiAdapter transcribes voice messages into normal text events",
   }]);
 });
 
-test("TelegramBotApiAdapter routes transcribed voice commands like normal text commands", async () => {
+test("TelegramBotApiAdapter keeps transcribed voice command text as plain user text", async () => {
   const fakeBot = new FakeTelegramBot();
   const handlerEvents: unknown[] = [];
   const adapter = new TelegramBotApiAdapter({
@@ -261,10 +264,13 @@ test("TelegramBotApiAdapter routes transcribed voice commands like normal text c
   await adapter.stop();
 
   assert.deepEqual(handlerEvents, [{
-    kind: "cancel_request",
+    kind: "user_text",
     chatId: "99",
     messageId: "9",
     timestamp: "2023-11-14T22:14:10.000Z",
+    text: "/cancel",
+    rawText: "/cancel",
+    attachments: [],
   }]);
 });
 
