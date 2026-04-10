@@ -49,6 +49,8 @@ export class SandyMcpProxy {
   private readonly workerBaseUrlHost: string;
 
   constructor(private readonly options: SandyMcpProxyOptions) {
+    // Unfortunately we have to bind to 0.0.0.0 for the worker to be able to connect back to us from the Docker network,
+    // but we validate connections in handleHttpRequest
     this.host = options.host ?? "0.0.0.0";
     this.workerBaseUrlHost = options.workerBaseUrlHost ?? "host.docker.internal";
   }
