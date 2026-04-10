@@ -200,6 +200,9 @@ export function renderConfigToml(value: SandyConfigFile): string {
 }
 
 export function parseConfigTomlFile(raw: string): SandyConfigFileData {
+  // @iarna/toml attaches symbol-keyed metadata to parsed table objects.
+  // Zod record schemas treat those symbols as keys and reject the value,
+  // so normalize the tree into plain string-keyed objects before parsing.
   return buildSandyConfigSchema(defaultCodexAuthFilePath()).parse(normalizeParsedToml(toml.parse(raw)));
 }
 
