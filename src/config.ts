@@ -8,7 +8,6 @@ const logLevelSchema = z.enum(["debug", "info", "warn", "error"]);
 const mcpTransportSchema = z.literal("streamable_http");
 
 const DEFAULT_LOG_LEVEL: z.infer<typeof logLevelSchema> = "info";
-const DEFAULT_DEBUG_LOGGING_ENABLED = false;
 const DEFAULT_WORKER_IMAGE = "sandy-subagent:latest";
 const DEFAULT_SHARE_ROOT = "/tmp/sandy-shares";
 const DEFAULT_STT_BASE_URL = "https://api.openai.com/v1";
@@ -26,10 +25,8 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string) {
   return z.object({
     logging: z.object({
       level: logLevelSchema.default(DEFAULT_LOG_LEVEL),
-      debug: z.boolean().default(DEFAULT_DEBUG_LOGGING_ENABLED),
     }).default({
       level: DEFAULT_LOG_LEVEL,
-      debug: DEFAULT_DEBUG_LOGGING_ENABLED,
     }),
     telegram: z.object({
       bot_token: z.string().min(1),
@@ -86,20 +83,22 @@ export type McpServerConfig = {
   oauthScopes: string[];
 };
 
+type SandyAuthMode =
+  | { mode: "api_key"; openAiApiKey: string }
+  | { mode: "codex_auth_file"; codexAuthFile: string }
+  | { mode: "ambient_codex_auth" };
+
 type SandyConfig = {
   configFilePath: string;
   configDirectory: string;
   logLevel: z.infer<typeof logLevelSchema>;
-  debugLoggingEnabled: boolean;
   telegramBotToken: string;
-  openAiApiKey: string | null;
-  codexAuthFile: string | null;
   workerImage: string;
   shareRoot: string;
   sttApiKey: string | null;
   sttBaseUrl: string;
   sttModel: string;
-  authMode: "api_key" | "codex_auth_file" | "ambient_codex_auth";
+  authMode: SandyAuthMode;
   mcpServers: Record<string, McpServerConfig>;
   persistentMcpApprovals: Record<string, string[]>;
 };
@@ -141,17 +140,17 @@ export function parseConfigToml(raw: string, configFilePath = defaultConfigPath(
   const parsed = parseConfigTomlFile(raw);
   const codexAuthFile = resolveCodexAuthFile(parsed.auth.codex_auth_file);
   const rawApiKey = parsed.auth.openai_api_key ?? null;
-  const openAiApiKey = codexAuthFile ? null : rawApiKey;
-  const authMode = codexAuthFile ? "codex_auth_file" : rawApiKey ? "api_key" : "ambient_codex_auth";
+  const authMode: SandyAuthMode = codexAuthFile
+    ? { mode: "codex_auth_file", codexAuthFile }
+    : rawApiKey
+      ? { mode: "api_key", openAiApiKey: rawApiKey }
+      : { mode: "ambient_codex_auth" };
 
   return {
     configFilePath,
     configDirectory: dirname(configFilePath),
     logLevel: parsed.logging.level,
-    debugLoggingEnabled: parsed.logging.debug,
     telegramBotToken: parsed.telegram.bot_token,
-    openAiApiKey,
-    codexAuthFile,
     workerImage: parsed.worker.image,
     shareRoot: parsed.worker.share_root,
     sttApiKey: parsed.stt.api_key ?? null,

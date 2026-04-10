@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { configureLogger, logger } from "./logger.js";
 
-test("logger.debugContent writes info logs only when debug content logging is enabled", () => {
+test("logger.debugContent writes info logs only when logging level is debug", () => {
   const originalConsoleLog = console.log;
   const lines: string[] = [];
   console.log = (line?: unknown) => {
@@ -11,8 +11,7 @@ test("logger.debugContent writes info logs only when debug content logging is en
 
   try {
     configureLogger({
-      minLevel: "info",
-      debugContentEnabled: true,
+      minLevel: "debug",
     });
     logger.debugContent("test.enabled", {
       text: "hello",
@@ -20,7 +19,6 @@ test("logger.debugContent writes info logs only when debug content logging is en
 
     configureLogger({
       minLevel: "info",
-      debugContentEnabled: false,
     });
     logger.debugContent("test.disabled", {
       text: "goodbye",
@@ -29,7 +27,6 @@ test("logger.debugContent writes info logs only when debug content logging is en
     console.log = originalConsoleLog;
     configureLogger({
       minLevel: "info",
-      debugContentEnabled: false,
     });
   }
 

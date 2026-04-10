@@ -20,14 +20,13 @@ export async function startApp(): Promise<void> {
   const config = loadConfig();
   configureLogger({
     minLevel: config.logLevel,
-    debugContentEnabled: config.debugLoggingEnabled,
   });
 
   logger.info("app.starting", {
     configFilePath: config.configFilePath,
     workerImage: config.workerImage,
     shareRoot: config.shareRoot,
-    authMode: config.authMode,
+    authMode: config.authMode.mode,
     sttEnabled: config.sttApiKey !== null,
   });
 
@@ -44,9 +43,9 @@ export async function startApp(): Promise<void> {
     transcriptionProvider: transcriptionProvider ?? undefined,
   });
 
-  const codex = config.openAiApiKey
+  const codex = config.authMode.mode === "api_key"
     ? new Codex({
-        apiKey: config.openAiApiKey,
+        apiKey: config.authMode.openAiApiKey,
       })
     : new Codex();
 
@@ -66,8 +65,8 @@ export async function startApp(): Promise<void> {
     {
       workerImage: config.workerImage,
       shareRoot: config.shareRoot,
-      openAiApiKey: config.openAiApiKey,
-      codexAuthFile: config.codexAuthFile,
+      openAiApiKey: config.authMode.mode === "api_key" ? config.authMode.openAiApiKey : null,
+      codexAuthFile: config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthFile : null,
       workerCodexConfigBuilder: (taskId) => mcpWorkerLaunchConfigBuilder.build(taskId),
       workerNetworkName,
     },

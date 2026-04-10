@@ -16,9 +16,10 @@ codex_auth_file = "/tmp/codex-auth.json"
 `);
 
   assert.equal(config.telegramBotToken, "telegram-token");
-  assert.equal(config.codexAuthFile, "/tmp/codex-auth.json");
-  assert.equal(config.openAiApiKey, null);
-  assert.equal(config.authMode, "codex_auth_file");
+  assert.deepEqual(config.authMode, {
+    mode: "codex_auth_file",
+    codexAuthFile: "/tmp/codex-auth.json",
+  });
   assert.equal(config.sttApiKey, null);
   assert.equal(config.sttBaseUrl, "https://api.openai.com/v1");
   assert.equal(config.sttModel, "gpt-4o-mini-transcribe");
@@ -91,8 +92,10 @@ test("parseConfigToml expands the default codex auth path when present", async (
 bot_token = "telegram-token"
 `);
 
-    assert.equal(config.codexAuthFile, join(homedir(), ".codex", "auth.json"));
-    assert.equal(config.authMode, "codex_auth_file");
+    assert.deepEqual(config.authMode, {
+      mode: "codex_auth_file",
+      codexAuthFile: join(homedir(), ".codex", "auth.json"),
+    });
   } finally {
     if (originalHome === undefined) {
       delete process.env.HOME;

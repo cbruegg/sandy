@@ -9,13 +9,11 @@ const levelPriority: Record<LogLevel, number> = {
 
 type LoggerConfig = {
   minLevel: LogLevel;
-  debugContentEnabled: boolean;
 };
 
 class SandyLogger {
   private config: LoggerConfig = {
     minLevel: "info",
-    debugContentEnabled: false,
   };
 
   configure(config: Partial<LoggerConfig>): void {
@@ -42,10 +40,10 @@ class SandyLogger {
   }
 
   debugContent(event: string, data?: Record<string, unknown>): void {
-    if (!this.config.debugContentEnabled) {
+    if (this.config.minLevel !== "debug") {
       return;
     }
-    this.write("info", event, data);
+    this.write("debug", event, data);
   }
 
   private write(level: LogLevel, event: string, data?: Record<string, unknown>): void {
