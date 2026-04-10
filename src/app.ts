@@ -3,8 +3,11 @@ import { CodexMainAgentController } from "./agent/main-agent-controller.js";
 import { TelegramBotApiAdapter } from "./channel/telegram-adapter.js";
 import { loadConfig } from "./config.js";
 import { configureLogger, logger } from "./logger.js";
+import { SandyMcpProxyAccess } from "./mcp/proxy-access.js";
+import { McpProxyEndpointState } from "./mcp/proxy-endpoint-state.js";
 import { SandyMcpProxy } from "./mcp/proxy.js";
 import { McpServerRegistryImpl } from "./mcp/server-registry.js";
+import { McpWorkerLaunchConfigBuilder } from "./mcp/worker-launch-config-builder.js";
 import { SandyOrchestrator } from "./orchestrator.js";
 import { TomlPersistentApprovalStore } from "./privilege/persistent-approval-store.js";
 import { PrivilegeBrokerImpl } from "./privilege/privilege-broker.js";
@@ -49,18 +52,13 @@ export async function startApp(): Promise<void> {
   const mainAgent = new CodexMainAgentController(codex);
 
   const mcpServerRegistry = new McpServerRegistryImpl(config.configDirectory, config.mcpServers);
-  let orchestrator: SandyOrchestrator | null = null;
-  const mcpProxy = new SandyMcpProxy({
-    mcpServers: config.mcpServers,
-    registry: mcpServerRegistry,
-    authorizeToolCall: async (input) => {
-      if (!orchestrator) {
-        throw new Error("Sandy orchestrator is not ready to authorize MCP tool calls.");
-      }
-      return orchestrator.authorizeMcpToolCall(input);
-    },
-  });
-  await mcpProxy.start();
+  const mcpProxyAccess = new SandyMcpProxyAccess();
+  const mcpProxyEndpointState = new McpProxyEndpointState();
+  const mcpWorkerLaunchConfigBuilder = new McpWorkerLaunchConfigBuilder(
+    config.mcpServers,
+    mcpProxyAccess,
+    mcpProxyEndpointState,
+  );
 
   const sandboxRunner = new DockerSandboxRunner(
     {
@@ -68,11 +66,11 @@ export async function startApp(): Promise<void> {
       shareRoot: config.shareRoot,
       openAiApiKey: config.openAiApiKey,
       codexAuthFile: config.codexAuthFile,
-      workerCodexConfigBuilder: (taskId) => mcpProxy.buildWorkerLaunchConfig(taskId),
+      workerCodexConfigBuilder: async (taskId) => mcpWorkerLaunchConfigBuilder.build(taskId),
     },
   );
 
-  orchestrator = new SandyOrchestrator({
+  const orchestrator = new SandyOrchestrator({
     channel,
     mainAgent,
     sandboxRunner,
@@ -80,6 +78,14 @@ export async function startApp(): Promise<void> {
     privilegeBroker: new PrivilegeBrokerImpl(),
     persistentApprovalStore: new TomlPersistentApprovalStore(config.configFilePath, config.persistentMcpApprovals),
   });
+
+  const mcpProxy = new SandyMcpProxy({
+    access: mcpProxyAccess,
+    endpointState: mcpProxyEndpointState,
+    registry: mcpServerRegistry,
+    authorizeToolCall: orchestrator.authorizeMcpToolCall.bind(orchestrator),
+  });
+  await mcpProxy.start();
 
   await channel.start(async (event) => orchestrator.handleChatEvent(event));
   logger.info("app.started");

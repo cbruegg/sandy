@@ -118,6 +118,10 @@ async function launchRunnerWithChild(
     shareRoot: options?.shareRoot ?? "/tmp/sandy-test-shares",
     openAiApiKey: null,
     codexAuthFile: null,
+    workerCodexConfigBuilder: async () => ({
+      codexConfigToml: null,
+      environment: {},
+    }),
     handshakeTimeoutMs: options?.handshakeTimeoutMs ?? 10_000,
     spawnImpl: harness.spawnImpl,
     setTimeoutImpl: timers.setTimeoutImpl,
@@ -331,6 +335,10 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
     shareRoot,
     openAiApiKey: null,
     codexAuthFile: null,
+    workerCodexConfigBuilder: async () => ({
+      codexConfigToml: null,
+      environment: {},
+    }),
   });
 
   const taskShare = join(shareRoot, "task-1");
@@ -385,6 +393,10 @@ test("DockerSandboxRunner rejects share inspection outside the configured share 
     shareRoot,
     openAiApiKey: null,
     codexAuthFile: null,
+    workerCodexConfigBuilder: async () => ({
+      codexConfigToml: null,
+      environment: {},
+    }),
   });
 
   await mkdir(shareRoot, { recursive: true });
@@ -409,6 +421,10 @@ test("DockerSandboxRunner rejects share deletion outside the configured share ro
     shareRoot,
     openAiApiKey: null,
     codexAuthFile: null,
+    workerCodexConfigBuilder: async () => ({
+      codexConfigToml: null,
+      environment: {},
+    }),
   });
 
   await mkdir(shareRoot, { recursive: true });

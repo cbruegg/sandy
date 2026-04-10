@@ -14,10 +14,10 @@ type DockerSandboxRunnerOptions = {
   shareRoot: string;
   openAiApiKey: string | null;
   codexAuthFile: string | null;
-  workerCodexConfigBuilder?: (taskId: string) => {
+  workerCodexConfigBuilder: (taskId: string) => Promise<{
     codexConfigToml: string | null;
     environment: Record<string, string>;
-  };
+  }>;
   handshakeTimeoutMs?: number;
   spawnImpl?: typeof spawn;
   setTimeoutImpl?: typeof setTimeout;
@@ -43,7 +43,7 @@ export class DockerSandboxRunner implements SandboxRunner {
   ): Promise<SandboxHandle> {
     const sharePath = this.getTaskSharePath(request.taskId);
     await mkdir(sharePath, { recursive: true });
-    const builtWorkerConfig = this.options.workerCodexConfigBuilder?.(request.taskId) ?? null;
+    const builtWorkerConfig = await this.options.workerCodexConfigBuilder(request.taskId);
     const workerCodexConfig = request.workerCodexConfigToml ?? builtWorkerConfig?.codexConfigToml ?? null;
     const workerEnvironment = {
       ...(builtWorkerConfig?.environment ?? {}),

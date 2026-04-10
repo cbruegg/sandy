@@ -2,8 +2,12 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as toml from "@iarna/toml";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import type { McpServerConfig } from "../config.js";
+import { SandyMcpProxyAccess } from "./proxy-access.js";
+import { McpProxyEndpointState } from "./proxy-endpoint-state.js";
 import { SandyMcpProxy } from "./proxy.js";
 import type { McpServerRegistry } from "./server-registry.js";
+import { McpWorkerLaunchConfigBuilder } from "./worker-launch-config-builder.js";
 
 type InitializeResponse = {
   result: {
@@ -93,19 +97,23 @@ class FakeClient {
 }
 
 test("SandyMcpProxy serves initialize and follow-up MCP requests on the same session", async () => {
+  const mcpServers: Record<string, McpServerConfig> = {
+    todoist: {
+      transport: "streamable_http",
+      url: "https://todoist.example/mcp",
+      command: null,
+      args: [],
+      env: {},
+      oauthScopes: [],
+    },
+  };
+  const access = new SandyMcpProxyAccess();
+  const endpointState = new McpProxyEndpointState();
   const proxy = new SandyMcpProxy({
+    access,
+    endpointState,
     host: "127.0.0.1",
     workerBaseUrlHost: "127.0.0.1",
-    mcpServers: {
-      todoist: {
-        transport: "streamable_http",
-        url: "https://todoist.example/mcp",
-        command: null,
-        args: [],
-        env: {},
-        oauthScopes: [],
-      },
-    },
     registry: new FakeRegistry(),
     authorizeToolCall: async () => ({
       requestId: "approval-1",
@@ -117,17 +125,17 @@ test("SandyMcpProxy serves initialize and follow-up MCP requests on the same ses
   await proxy.start();
 
   try {
-    const launchConfig = proxy.buildWorkerLaunchConfig("task-1");
+    const launchConfig = await new McpWorkerLaunchConfigBuilder(mcpServers, access, endpointState).build("task-1");
     assert.ok(launchConfig.codexConfigToml);
-    const config = toml.parse(launchConfig.codexConfigToml) as {
+    const parsed = toml.parse(launchConfig.codexConfigToml) as {
       mcp_servers: {
         todoist: {
-          url: string;
+          bearer_token_env_var: string;
         };
       };
     };
-    const url = config.mcp_servers.todoist.url;
-    const authToken = launchConfig.environment.SANDY_MCP_PROXY_TOKEN;
+    const url = `${await endpointState.getWorkerBaseUrl()}/mcp/tasks/task-1/servers/todoist`;
+    const authToken = launchConfig.environment[parsed.mcp_servers.todoist.bearer_token_env_var];
 
     const initializeResponse = await fetch(url, {
       method: "POST",
@@ -196,6 +204,129 @@ test("SandyMcpProxy serves initialize and follow-up MCP requests on the same ses
     assert.equal(listToolsResponse.status, 200);
     const listToolsPayload = await readSseJson<ListToolsResponse>(listToolsResponse);
     assert.equal(listToolsPayload.result.tools[0].name, "add_task");
+  } finally {
+    await proxy.stop();
+  }
+});
+
+test("SandyMcpProxy accepts the same task token across different MCP server routes", async () => {
+  const mcpServers: Record<string, McpServerConfig> = {
+    todoist: {
+      transport: "streamable_http",
+      url: "https://todoist.example/mcp",
+      command: null,
+      args: [],
+      env: {},
+      oauthScopes: [],
+    },
+    github: {
+      transport: "streamable_http",
+      url: "https://github.example/mcp",
+      command: null,
+      args: [],
+      env: {},
+      oauthScopes: [],
+    },
+  };
+  const access = new SandyMcpProxyAccess();
+  const endpointState = new McpProxyEndpointState();
+  const proxy = new SandyMcpProxy({
+    access,
+    endpointState,
+    host: "127.0.0.1",
+    workerBaseUrlHost: "127.0.0.1",
+    registry: new FakeRegistry(),
+    authorizeToolCall: async () => ({
+      requestId: "approval-1",
+      outcome: "approved",
+      message: "approved",
+    }),
+  });
+
+  await proxy.start();
+
+  try {
+    const launchConfig = await new McpWorkerLaunchConfigBuilder(mcpServers, access, endpointState).build("task-1");
+    assert.ok(launchConfig.codexConfigToml);
+    const parsed = toml.parse(launchConfig.codexConfigToml) as {
+      mcp_servers: {
+        todoist: { bearer_token_env_var: string };
+        github: { bearer_token_env_var: string };
+      };
+    };
+    const authToken = launchConfig.environment[parsed.mcp_servers.todoist.bearer_token_env_var];
+
+    const response = await fetch(`${await endpointState.getWorkerBaseUrl()}/mcp/tasks/task-1/servers/github`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${authToken}`,
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-11-25",
+          capabilities: {},
+          clientInfo: {
+            name: "test-client",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    assert.equal(response.status, 200);
+  } finally {
+    await proxy.stop();
+  }
+});
+
+test("SandyMcpProxy translates invalid worker grants into an HTTP auth response", async () => {
+  const access = new SandyMcpProxyAccess();
+  const endpointState = new McpProxyEndpointState();
+  const proxy = new SandyMcpProxy({
+    access,
+    endpointState,
+    host: "127.0.0.1",
+    workerBaseUrlHost: "127.0.0.1",
+    registry: new FakeRegistry(),
+    authorizeToolCall: async () => ({
+      requestId: "approval-1",
+      outcome: "approved",
+      message: "approved",
+    }),
+  });
+
+  await proxy.start();
+
+  try {
+    const response = await fetch(`${await endpointState.getWorkerBaseUrl()}/mcp/tasks/task-1/servers/todoist`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer invalid-token",
+        accept: "application/json, text/event-stream",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-11-25",
+          capabilities: {},
+          clientInfo: {
+            name: "test-client",
+            version: "1.0.0",
+          },
+        },
+      }),
+    });
+
+    assert.equal(response.status, 401);
+    assert.match(await response.text(), /jwt|token/i);
   } finally {
     await proxy.stop();
   }

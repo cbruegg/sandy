@@ -1,7 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { randomBytes, randomUUID } from "node:crypto";
-import * as toml from "@iarna/toml";
-import jwt from "jsonwebtoken";
+import { randomUUID } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
@@ -14,29 +12,19 @@ import {
   ReadResourceRequestSchema,
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
-import type { McpServerConfig } from "../config.js";
+import { McpProxyEndpointState } from "./proxy-endpoint-state.js";
+import { SandyMcpProxyAccess } from "./proxy-access.js";
 import type { McpServerRegistry } from "./server-registry.js";
 import type { PrivilegeResolutionResult } from "../types.js";
-
-const workerProxyTokenEnvVar = "SANDY_MCP_PROXY_TOKEN";
-
-type McpProxyTokenPayload = {
-  taskId: string;
-  serverIds: string[];
-};
 
 type ProxyRouteContext = {
   taskId: string;
   serverId: string;
 };
 
-type McpWorkerLaunchConfig = {
-  codexConfigToml: string | null;
-  environment: Record<string, string>;
-};
-
 type SandyMcpProxyOptions = {
-  mcpServers: Record<string, McpServerConfig>;
+  access: SandyMcpProxyAccess;
+  endpointState: McpProxyEndpointState;
   registry: McpServerRegistry;
   authorizeToolCall: (input: {
     taskId: string;
@@ -49,7 +37,6 @@ type SandyMcpProxyOptions = {
 };
 
 export class SandyMcpProxy {
-  private readonly secret = randomBytes(32).toString("hex");
   private readonly sessions = new Map<string, {
     route: ProxyRouteContext;
     server: Server;
@@ -58,7 +45,6 @@ export class SandyMcpProxy {
   private httpServer = createServer((req, res) => {
     void this.handleHttpRequest(req, res);
   });
-  private port: number | null = null;
   private readonly host: string;
   private readonly workerBaseUrlHost: string;
 
@@ -80,7 +66,7 @@ export class SandyMcpProxy {
     if (!address || typeof address === "string") {
       throw new Error("Failed to determine MCP proxy port.");
     }
-    this.port = address.port;
+    this.options.endpointState.setWorkerBaseUrl(this.buildWorkerBaseUrl(address.port));
   }
 
   async stop(): Promise<void> {
@@ -100,46 +86,8 @@ export class SandyMcpProxy {
     });
   }
 
-  buildWorkerLaunchConfig(taskId: string): McpWorkerLaunchConfig {
-    if (Object.keys(this.options.mcpServers).length === 0) {
-      return {
-        codexConfigToml: null,
-        environment: {},
-      };
-    }
-
-    if (this.port === null) {
-      throw new Error("MCP proxy must be started before building worker launch config.");
-    }
-
-    const token = jwt.sign({
-      taskId,
-      serverIds: Object.keys(this.options.mcpServers),
-    } satisfies McpProxyTokenPayload, this.secret, {
-      expiresIn: "1d",
-    });
-    const config = {
-      mcp_servers: Object.fromEntries(
-        Object.keys(this.options.mcpServers).map((serverId) => [serverId, {
-          url: this.buildWorkerServerUrl(taskId, serverId),
-          bearer_token_env_var: workerProxyTokenEnvVar,
-        }]),
-      ),
-    };
-
-    return {
-      codexConfigToml: toml.stringify(config),
-      environment: {
-        [workerProxyTokenEnvVar]: token,
-      },
-    };
-  }
-
-  private buildWorkerServerUrl(taskId: string, serverId: string): string {
-    if (this.port === null) {
-      throw new Error("MCP proxy port is not available.");
-    }
-    return `http://${this.workerBaseUrlHost}:${this.port}/mcp/tasks/${encodeURIComponent(taskId)}/servers/${encodeURIComponent(serverId)}`;
+  private buildWorkerBaseUrl(port: number): string {
+    return `http://${this.workerBaseUrlHost}:${port}`;
   }
 
   private async handleHttpRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -158,16 +106,13 @@ export class SandyMcpProxy {
       return;
     }
 
-    try {
-      const payload = jwt.verify(authHeader.slice("Bearer ".length), this.secret) as McpProxyTokenPayload;
-      if (payload.taskId !== route.taskId || !payload.serverIds.includes(route.serverId)) {
-        res.statusCode = 403;
-        res.end("Bearer token does not grant access to this task or server.");
-        return;
-      }
-    } catch (error) {
-      res.statusCode = 401;
-      res.end(error instanceof Error ? error.message : "Invalid bearer token.");
+    const validation = this.options.access.validateWorkerGrant({
+      taskId: route.taskId,
+      bearerToken: authHeader.slice("Bearer ".length),
+    });
+    if (!validation.ok) {
+      res.statusCode = validation.code === "invalid_token" ? 401 : 403;
+      res.end(validation.message);
       return;
     }
 
