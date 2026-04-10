@@ -5,6 +5,7 @@ import { PassThrough } from "node:stream";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { McpSidecarManager } from "./sidecar-manager.js";
 import { SandyMcpProxyAccess } from "./proxy-access.js";
+import { createMcpWorkerNetworkName } from "./worker-network-name.js";
 
 class FakeChildProcess extends EventEmitter {
   public readonly stdin = new PassThrough();
@@ -39,6 +40,7 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
   }) as typeof import("node:child_process").spawn;
 
   const access = new SandyMcpProxyAccess("shared-secret");
+  const workerNetworkName = createMcpWorkerNetworkName();
   const manager = new McpSidecarManager({
     configDirectory: "/tmp/sandy-config",
     mcpServers: {
@@ -48,6 +50,7 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
         oauthScopes: [],
       },
     },
+    workerNetworkName,
     sidecarImage: "sandy-mcp-proxy:latest",
     spawnImpl,
     authorizeToolCall: async () => ({
@@ -62,7 +65,7 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
 
   assert.equal(invocations[0].args[0], "network");
   assert.equal(invocations[0].args[1], "create");
-  assert.equal(invocations[0].args[2], manager.workerNetworkName);
+  assert.equal(invocations[0].args[2], workerNetworkName);
   assert.ok(invocations.some((invocation) => invocation.args[0] === "run" && invocation.args.includes("--network-alias")));
   assert.ok(invocations.some((invocation) => invocation.args[0] === "network" && invocation.args[1] === "rm"));
   assert.match(stdinContent, /"type":"bootstrap"/);

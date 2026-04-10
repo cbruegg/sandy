@@ -6,6 +6,7 @@ import { configureLogger, logger } from "./logger.js";
 import { SandyMcpProxyAccess } from "./mcp/proxy-access.js";
 import { McpSidecarManager } from "./mcp/sidecar-manager.js";
 import { McpWorkerLaunchConfigBuilder } from "./mcp/worker-launch-config-builder.js";
+import { createMcpWorkerNetworkName } from "./mcp/worker-network-name.js";
 import { SandyOrchestrator } from "./orchestrator.js";
 import { TomlPersistentApprovalStore } from "./privilege/persistent-approval-store.js";
 import { PrivilegeBrokerImpl } from "./privilege/privilege-broker.js";
@@ -52,28 +53,13 @@ export async function startApp(): Promise<void> {
   const mainAgent = new CodexMainAgentController(codex);
 
   const mcpProxyAccess = new SandyMcpProxyAccess();
-  let orchestrator: SandyOrchestrator | null = null;
-  let sidecarManager: McpSidecarManager | null = null;
-
-  if (Object.keys(config.mcpServers).length > 0) {
-    sidecarManager = new McpSidecarManager({
-      configDirectory: config.configDirectory,
-      mcpServers: config.mcpServers,
-      sidecarImage: mcpSidecarImage,
-      authorizeToolCall: async (input) => {
-        if (!orchestrator) {
-          throw new Error("MCP authorization requested before orchestrator startup completed.");
-        }
-        return await orchestrator.authorizeMcpToolCall(input);
-      },
-    }, mcpProxyAccess);
-    await sidecarManager.start();
-  }
+  const mcpEnabled = Object.keys(config.mcpServers).length > 0;
+  const workerNetworkName = mcpEnabled ? createMcpWorkerNetworkName() : null;
 
   const mcpWorkerLaunchConfigBuilder = new McpWorkerLaunchConfigBuilder(
     config.mcpServers,
     mcpProxyAccess,
-    sidecarManager !== null,
+    mcpEnabled,
   );
 
   const sandboxRunner = new DockerSandboxRunner(
@@ -83,11 +69,11 @@ export async function startApp(): Promise<void> {
       openAiApiKey: config.openAiApiKey,
       codexAuthFile: config.codexAuthFile,
       workerCodexConfigBuilder: (taskId) => mcpWorkerLaunchConfigBuilder.build(taskId),
-      workerNetworkName: sidecarManager?.workerNetworkName ?? null,
+      workerNetworkName,
     },
   );
 
-  orchestrator = new SandyOrchestrator({
+  const orchestrator = new SandyOrchestrator({
     channel,
     mainAgent,
     sandboxRunner,
@@ -95,6 +81,16 @@ export async function startApp(): Promise<void> {
     privilegeBroker: new PrivilegeBrokerImpl(),
     persistentApprovalStore: new TomlPersistentApprovalStore(config.configFilePath, config.persistentMcpApprovals),
   });
+
+  const sidecarManager = !mcpEnabled || !workerNetworkName ? null : new McpSidecarManager({
+    configDirectory: config.configDirectory,
+    mcpServers: config.mcpServers,
+    workerNetworkName,
+    sidecarImage: mcpSidecarImage,
+    authorizeToolCall: (input) => orchestrator.authorizeMcpToolCall(input),
+  }, mcpProxyAccess);
+
+  await sidecarManager?.start();
 
   const shutdown = async () => {
     await sidecarManager?.stop();

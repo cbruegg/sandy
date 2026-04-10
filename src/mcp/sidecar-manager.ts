@@ -15,6 +15,7 @@ import {
 type McpSidecarManagerOptions = {
   configDirectory: string;
   mcpServers: Record<string, McpServerConfig>;
+  workerNetworkName: string;
   sidecarImage: string;
   startupTimeoutMs?: number;
   spawnImpl?: typeof spawn;
@@ -29,7 +30,6 @@ type McpSidecarManagerOptions = {
 };
 
 export class McpSidecarManager {
-  readonly workerNetworkName = `sandy-mcp-${randomUUID()}`;
   private readonly containerName = `sandy-mcp-proxy-${randomUUID()}`;
   private readonly startupTimeoutMs: number;
   private readonly spawnImpl: typeof spawn;
@@ -57,7 +57,7 @@ export class McpSidecarManager {
     this.started = true;
     const oauthStateDirectory = buildHostOauthStateDirectory(this.options.configDirectory);
     await mkdir(oauthStateDirectory, { recursive: true });
-    await this.runDockerCommand(["network", "create", this.workerNetworkName]);
+    await this.runDockerCommand(["network", "create", this.options.workerNetworkName]);
 
     const child = this.spawnImpl("docker", [
       "run",
@@ -66,7 +66,7 @@ export class McpSidecarManager {
       "--name",
       this.containerName,
       "--network",
-      this.workerNetworkName,
+      this.options.workerNetworkName,
       "--network-alias",
       "sandy-mcp-proxy",
       "-v",
@@ -168,7 +168,7 @@ export class McpSidecarManager {
       await startupPromise;
       logger.info("mcp.sidecar.started", {
         containerName: this.containerName,
-        networkName: this.workerNetworkName,
+        networkName: this.options.workerNetworkName,
       });
     } catch (error) {
       await this.stop();
@@ -195,7 +195,7 @@ export class McpSidecarManager {
     }
 
     if (this.started) {
-      await this.runDockerCommand(["network", "rm", this.workerNetworkName], true);
+      await this.runDockerCommand(["network", "rm", this.options.workerNetworkName], true);
     }
   }
 
