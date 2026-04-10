@@ -5,7 +5,7 @@ import * as toml from "@iarna/toml";
 import {z} from "zod";
 
 const logLevelSchema = z.enum(["debug", "info", "warn", "error"]);
-const mcpTransportSchema = z.enum(["streamable_http", "stdio"]);
+const mcpTransportSchema = z.literal("streamable_http");
 
 const DEFAULT_LOG_LEVEL: z.infer<typeof logLevelSchema> = "info";
 const DEFAULT_DEBUG_LOGGING_ENABLED = false;
@@ -81,11 +81,8 @@ type SandyConfigFile = z.infer<ReturnType<typeof buildSandyConfigSchema>>;
 export type SandyConfigFileData = SandyConfigFile;
 
 export type McpServerConfig = {
-  transport: "streamable_http" | "stdio";
-  url: string | null;
-  command: string | null;
-  args: string[];
-  env: Record<string, string>;
+  transport: "streamable_http";
+  url: string;
   oauthScopes: string[];
 };
 
@@ -129,19 +126,13 @@ function resolveCodexAuthFile(configuredPath: string | null | undefined): string
 }
 
 function normalizeMcpServerConfig(config: SandyConfigFile["mcp"]["servers"][string]): McpServerConfig {
-  if (config.transport === "streamable_http" && !config.url) {
+  if (!config.url) {
     throw new Error("MCP streamable_http servers require a url.");
-  }
-  if (config.transport === "stdio" && !config.command) {
-    throw new Error("MCP stdio servers require a command.");
   }
 
   return {
     transport: config.transport,
-    url: config.url ?? null,
-    command: config.command ?? null,
-    args: config.args,
-    env: config.env,
+    url: config.url,
     oauthScopes: config.oauth_scopes,
   };
 }

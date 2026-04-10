@@ -1,7 +1,6 @@
 import * as toml from "@iarna/toml";
 import type { McpServerConfig } from "../config.js";
-import { SandyMcpProxyAccess, workerProxyTokenEnvVar } from "./proxy-access.js";
-import { McpProxyEndpointState } from "./proxy-endpoint-state.js";
+import { SandyMcpProxyAccess, mcpProxyWorkerBaseUrl, workerProxyTokenEnvVar } from "./proxy-access.js";
 
 type McpWorkerLaunchConfig = {
   codexConfigToml: string | null;
@@ -19,12 +18,12 @@ export class McpWorkerLaunchConfigBuilder {
   constructor(
     mcpServers: Record<string, McpServerConfig>,
     private readonly access: SandyMcpProxyAccess,
-    private readonly endpointState: McpProxyEndpointState,
+    private readonly sidecarEnabled: boolean,
   ) {
     this.serverIds = Object.keys(mcpServers);
   }
 
-  async build(taskId: string): Promise<McpWorkerLaunchConfig> {
+  build(taskId: string): McpWorkerLaunchConfig {
     if (this.serverIds.length === 0) {
       return {
         codexConfigToml: null,
@@ -32,12 +31,14 @@ export class McpWorkerLaunchConfigBuilder {
       };
     }
 
-    const workerBaseUrl = await this.endpointState.getWorkerBaseUrl();
+    if (!this.sidecarEnabled) {
+      throw new Error("MCP sidecar runtime is not configured.");
+    }
     const config = {
       mcp_servers: Object.fromEntries(
         this.serverIds.map((serverId) => [serverId, {
-          url: this.buildWorkerServerUrl(workerBaseUrl, { taskId, serverId }),
-          bearer_token_env_var: buildWorkerProxyTokenEnvVar(),
+          url: this.buildWorkerServerUrl(mcpProxyWorkerBaseUrl, { taskId, serverId }),
+          bearer_token_env_var: workerProxyTokenEnvVar,
         }]),
       ),
     };
@@ -53,8 +54,4 @@ export class McpWorkerLaunchConfigBuilder {
   private buildWorkerServerUrl(workerBaseUrl: string, route: WorkerServerRoute): string {
     return `${workerBaseUrl}/mcp/tasks/${encodeURIComponent(route.taskId)}/servers/${encodeURIComponent(route.serverId)}`;
   }
-}
-
-function buildWorkerProxyTokenEnvVar(): string {
-  return workerProxyTokenEnvVar;
 }

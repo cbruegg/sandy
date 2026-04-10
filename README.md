@@ -52,6 +52,7 @@ bot_token = "123456:telegram-token"
 
 # Optional:
 [mcp.servers.todoist]
+# Currently the only allowed transport:
 transport = "streamable_http"
 url = "https://todoist.example/mcp"
 # oauth_scopes = []
@@ -78,7 +79,13 @@ npm install
 Build the worker image:
 
 ```bash
-docker build -t sandy-subagent:latest .
+docker build --target worker-runtime -t sandy-subagent:latest .
+```
+
+Build the MCP sidecar image:
+
+```bash
+docker build --target mcp-proxy-runtime -t sandy-mcp-proxy:latest .
 ```
 
 Build the TypeScript sources:
@@ -208,11 +215,11 @@ Privilege evaluation requests are forwarded to the user verbatim, without the ma
 As such, these requests from the sub-agent must use a special message type on the container control channel that is then
 *not* forwarded to the main agent, but instead directly to the user.
 
-For MCP, Sandy exposes configured upstream servers to workers through a host-side proxy. The worker receives Codex MCP
-configuration pointing at that proxy plus a Sandy-issued JWT bearer token valid for one day. Upstream OAuth credentials
-stay on the host. By default, each MCP tool call is treated as a privilege request, and the user can approve it once,
-for the current worker session, or permanently. Permanent approvals are written back to Sandy's TOML config file
-automatically.
+For MCP, Sandy exposes configured upstream servers to workers through an app-wide Docker sidecar on a dedicated Docker
+network. The worker receives Codex MCP configuration pointing at that sidecar plus a Sandy-issued JWT bearer token
+valid for one day. Upstream OAuth credentials stay in the host's Sandy config directory and are mounted into the
+sidecar. By default, each MCP tool call is treated as a privilege request, and the user can approve it once, for the
+current worker session, or permanently. Permanent approvals are written back to Sandy's TOML config file automatically.
 
 Channel-native file transfer is separate from privilege evaluation. User uploads go straight into the shared workspace,
 and sub-agent requests to send files back to the user through the channel do not require approval as long as the file

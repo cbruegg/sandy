@@ -5,12 +5,12 @@ import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { McpServerConfig } from "../config.js";
 import { mcpAdminMessages } from "../messages.js";
 import { SandyOAuthClientProvider } from "./oauth-provider.js";
+import { buildHostOauthStateDirectory } from "./oauth-paths.js";
 
 type McpServerStatus = {
   serverId: string;
   transport: McpServerConfig["transport"];
-  url: string | null;
-  command: string | null;
+  url: string;
   oauthConfigured: boolean;
 };
 
@@ -25,7 +25,6 @@ export class SandyMcpAdminService {
       serverId,
       transport: config.transport,
       url: config.url,
-      command: config.command,
       oauthConfigured: config.oauthScopes.length > 0,
     }));
   }
@@ -38,7 +37,6 @@ export class SandyMcpAdminService {
         serverId,
         transport: config.transport,
         url: config.url,
-        command: config.command,
         oauthConfigured: config.oauthScopes.length > 0,
       },
       loggedIn: (await provider.tokens()) !== undefined,
@@ -47,7 +45,7 @@ export class SandyMcpAdminService {
 
   async login(serverId: string): Promise<void> {
     const config = this.requireServer(serverId);
-    if (config.transport !== "streamable_http" || !config.url) {
+    if (config.transport !== "streamable_http") {
       throw new Error(mcpAdminMessages.oauthLoginUnsupported(serverId));
     }
 
@@ -103,7 +101,7 @@ export class SandyMcpAdminService {
     onRedirect?: (url: URL) => void,
   ): SandyOAuthClientProvider {
     return new SandyOAuthClientProvider({
-      stateFilePath: join(this.configDirectory, "oauth", `${serverId}.json`),
+      stateFilePath: join(buildHostOauthStateDirectory(this.configDirectory), `${serverId}.json`),
       redirectUrl,
       onRedirect,
       interactive,

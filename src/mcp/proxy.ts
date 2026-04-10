@@ -12,7 +12,6 @@ import {
   ReadResourceRequestSchema,
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
-import { McpProxyEndpointState } from "./proxy-endpoint-state.js";
 import { SandyMcpProxyAccess } from "./proxy-access.js";
 import type { McpServerRegistry } from "./server-registry.js";
 import type { PrivilegeResolutionResult } from "../types.js";
@@ -24,7 +23,6 @@ type ProxyRouteContext = {
 
 type SandyMcpProxyOptions = {
   access: SandyMcpProxyAccess;
-  endpointState: McpProxyEndpointState;
   registry: McpServerRegistry;
   authorizeToolCall: (input: {
     taskId: string;
@@ -33,7 +31,7 @@ type SandyMcpProxyOptions = {
     arguments: unknown;
   }) => Promise<PrivilegeResolutionResult>;
   host?: string;
-  workerBaseUrlHost?: string;
+  port?: number;
 };
 
 export class SandyMcpProxy {
@@ -46,19 +44,17 @@ export class SandyMcpProxy {
     void this.handleHttpRequest(req, res);
   });
   private readonly host: string;
-  private readonly workerBaseUrlHost: string;
+  private readonly port: number;
 
   constructor(private readonly options: SandyMcpProxyOptions) {
-    // Unfortunately we have to bind to 0.0.0.0 for the worker to be able to connect back to us from the Docker network,
-    // but we validate connections in handleHttpRequest
     this.host = options.host ?? "0.0.0.0";
-    this.workerBaseUrlHost = options.workerBaseUrlHost ?? "host.docker.internal";
+    this.port = options.port ?? 0;
   }
 
   async start(): Promise<void> {
     await new Promise<void>((resolve, reject) => {
       this.httpServer.once("error", reject);
-      this.httpServer.listen(0, this.host, () => {
+      this.httpServer.listen(this.port, this.host, () => {
         this.httpServer.off("error", reject);
         resolve();
       });
@@ -68,7 +64,6 @@ export class SandyMcpProxy {
     if (!address || typeof address === "string") {
       throw new Error("Failed to determine MCP proxy port.");
     }
-    this.options.endpointState.setWorkerBaseUrl(this.buildWorkerBaseUrl(address.port));
   }
 
   async stop(): Promise<void> {
@@ -86,10 +81,6 @@ export class SandyMcpProxy {
         resolve();
       });
     });
-  }
-
-  private buildWorkerBaseUrl(port: number): string {
-    return `http://${this.workerBaseUrlHost}:${port}`;
   }
 
   private async handleHttpRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {

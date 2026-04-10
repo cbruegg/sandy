@@ -1,5 +1,4 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpServerConfig } from "../config.js";
@@ -20,7 +19,7 @@ export class McpServerRegistryImpl implements McpServerRegistry {
   private readonly clients = new Map<string, ClientRecord>();
 
   constructor(
-    private readonly configDirectory: string,
+    private readonly oauthStateDirectory: string,
     private readonly mcpServers: Record<string, McpServerConfig>,
   ) {}
 
@@ -56,29 +55,12 @@ export class McpServerRegistryImpl implements McpServerRegistry {
   }
 
   private createTransport(serverId: string, config: McpServerConfig): Transport {
-    if (config.transport === "streamable_http") {
-      if (!config.url) {
-        throw new Error(`MCP server "${serverId}" is missing its url.`);
-      }
-
-      const provider = new SandyOAuthClientProvider({
-        stateFilePath: join(this.configDirectory, "oauth", `${serverId}.json`),
-        interactive: false,
-      });
-      return new StreamableHTTPClientTransport(new URL(config.url), {
-        authProvider: provider,
-      });
-    }
-
-    if (!config.command) {
-      throw new Error(`MCP server "${serverId}" is missing its command.`);
-    }
-
-    return new StdioClientTransport({
-      command: config.command,
-      args: config.args,
-      env: config.env,
-      stderr: "pipe",
+    const provider = new SandyOAuthClientProvider({
+      stateFilePath: join(this.oauthStateDirectory, `${serverId}.json`),
+      interactive: false,
+    });
+    return new StreamableHTTPClientTransport(new URL(config.url), {
+      authProvider: provider,
     });
   }
 }

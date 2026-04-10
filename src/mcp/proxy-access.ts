@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import jwt from "jsonwebtoken";
 
 export const workerProxyTokenEnvVar = "SANDY_MCP_PROXY_TOKEN";
+export const mcpProxyWorkerBaseUrl = "http://sandy-mcp-proxy:8080";
 
 type McpProxyTokenPayload = {
   taskId: string;
@@ -20,7 +21,11 @@ type McpWorkerGrantValidationResult =
     };
 
 export class SandyMcpProxyAccess {
-  private readonly secret = randomBytes(32).toString("hex");
+  constructor(private readonly secret: string = randomBytes(32).toString("hex")) {}
+
+  get sharedSecret(): string {
+    return this.secret;
+  }
 
   issueWorkerGrant(taskId: string): McpWorkerGrant {
     return {

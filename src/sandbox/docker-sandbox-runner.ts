@@ -14,10 +14,11 @@ type DockerSandboxRunnerOptions = {
   shareRoot: string;
   openAiApiKey: string | null;
   codexAuthFile: string | null;
-  workerCodexConfigBuilder: (taskId: string) => Promise<{
+  workerNetworkName?: string | null;
+  workerCodexConfigBuilder: (taskId: string) => {
     codexConfigToml: string | null;
     environment: Record<string, string>;
-  }>;
+  };
   handshakeTimeoutMs?: number;
   spawnImpl?: typeof spawn;
   setTimeoutImpl?: typeof setTimeout;
@@ -43,7 +44,7 @@ export class DockerSandboxRunner implements SandboxRunner {
   ): Promise<SandboxHandle> {
     const sharePath = this.getTaskSharePath(request.taskId);
     await mkdir(sharePath, { recursive: true });
-    const builtWorkerConfig = await this.options.workerCodexConfigBuilder(request.taskId);
+    const builtWorkerConfig = this.options.workerCodexConfigBuilder(request.taskId);
     const workerCodexConfig = request.workerCodexConfigToml ?? builtWorkerConfig?.codexConfigToml ?? null;
     const workerEnvironment = {
       ...(builtWorkerConfig?.environment ?? {}),
@@ -121,9 +122,14 @@ export class DockerSandboxRunner implements SandboxRunner {
       );
     }
 
+    if (this.options.workerNetworkName) {
+      dockerArgs.push(
+        "--network",
+        this.options.workerNetworkName,
+      );
+    }
+
     dockerArgs.push(
-      "--add-host",
-      "host.docker.internal:host-gateway",
       "-v",
       `${sharePath}:${sharedWorkspaceMountPath}`,
       this.options.workerImage,

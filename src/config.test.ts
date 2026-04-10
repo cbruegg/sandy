@@ -67,9 +67,6 @@ always_allow_tools = ["list_projects"]
     assert.deepEqual(config.mcpServers.todoist, {
       transport: "streamable_http",
       url: "https://todoist.example/mcp",
-      command: null,
-      args: [],
-      env: {},
       oauthScopes: ["data:read"],
     });
     assert.deepEqual(config.persistentMcpApprovals.todoist, ["list_projects"]);
@@ -104,4 +101,17 @@ bot_token = "telegram-token"
     }
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("parseConfigToml rejects stdio MCP servers", () => {
+  assert.throws(() => {
+    parseConfigToml(`
+[telegram]
+bot_token = "telegram-token"
+
+[mcp.servers.local]
+transport = "stdio"
+command = "node"
+`);
+  }, /streamable_http|Invalid input/);
 });

@@ -109,6 +109,7 @@ async function launchRunnerWithChild(
     handshakeTimeoutMs?: number;
     shareRoot?: string;
     workerCodexConfigToml?: string | null;
+    workerNetworkName?: string | null;
   },
 ) {
   const timers = createTimerController();
@@ -118,10 +119,11 @@ async function launchRunnerWithChild(
     shareRoot: options?.shareRoot ?? "/tmp/sandy-test-shares",
     openAiApiKey: null,
     codexAuthFile: null,
-    workerCodexConfigBuilder: async () => ({
+    workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
     }),
+    workerNetworkName: options?.workerNetworkName,
     handshakeTimeoutMs: options?.handshakeTimeoutMs ?? 10_000,
     spawnImpl: harness.spawnImpl,
     setTimeoutImpl: timers.setTimeoutImpl,
@@ -335,7 +337,7 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
     shareRoot,
     openAiApiKey: null,
     codexAuthFile: null,
-    workerCodexConfigBuilder: async () => ({
+    workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
     }),
@@ -384,6 +386,19 @@ test("DockerSandboxRunner mounts worker Codex config from a temp path outside th
   await rm(shareRoot, { recursive: true, force: true });
 });
 
+test("DockerSandboxRunner joins the configured worker network when provided", async () => {
+  const taskChild = new FakeChildProcess();
+  const { invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
+    workerNetworkName: "sandy-mcp-net",
+  });
+
+  const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
+  assert.ok(dockerRunInvocation);
+  assert.ok(dockerRunInvocation.args.includes("--network"));
+  assert.ok(dockerRunInvocation.args.includes("sandy-mcp-net"));
+  assert.ok(!dockerRunInvocation.args.includes("host.docker.internal:host-gateway"));
+});
+
 test("DockerSandboxRunner rejects share inspection outside the configured share root", async () => {
   const baseRoot = mkdtempSync(join(tmpdir(), "sandy-share-escape-"));
   const shareRoot = join(baseRoot, "shares");
@@ -393,7 +408,7 @@ test("DockerSandboxRunner rejects share inspection outside the configured share 
     shareRoot,
     openAiApiKey: null,
     codexAuthFile: null,
-    workerCodexConfigBuilder: async () => ({
+    workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
     }),
@@ -421,7 +436,7 @@ test("DockerSandboxRunner rejects share deletion outside the configured share ro
     shareRoot,
     openAiApiKey: null,
     codexAuthFile: null,
-    workerCodexConfigBuilder: async () => ({
+    workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
     }),

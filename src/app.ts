@@ -4,9 +4,7 @@ import { TelegramBotApiAdapter } from "./channel/telegram-adapter.js";
 import { loadConfig } from "./config.js";
 import { configureLogger, logger } from "./logger.js";
 import { SandyMcpProxyAccess } from "./mcp/proxy-access.js";
-import { McpProxyEndpointState } from "./mcp/proxy-endpoint-state.js";
-import { SandyMcpProxy } from "./mcp/proxy.js";
-import { McpServerRegistryImpl } from "./mcp/server-registry.js";
+import { McpSidecarManager } from "./mcp/sidecar-manager.js";
 import { McpWorkerLaunchConfigBuilder } from "./mcp/worker-launch-config-builder.js";
 import { SandyOrchestrator } from "./orchestrator.js";
 import { TomlPersistentApprovalStore } from "./privilege/persistent-approval-store.js";
@@ -14,6 +12,8 @@ import { PrivilegeBrokerImpl } from "./privilege/privilege-broker.js";
 import { DockerSandboxRunner } from "./sandbox/docker-sandbox-runner.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
 import { OpenAiTranscriptionProvider } from "./transcription/openai-transcription-provider.js";
+
+const mcpSidecarImage = "sandy-mcp-proxy:latest";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -51,13 +51,29 @@ export async function startApp(): Promise<void> {
 
   const mainAgent = new CodexMainAgentController(codex);
 
-  const mcpServerRegistry = new McpServerRegistryImpl(config.configDirectory, config.mcpServers);
   const mcpProxyAccess = new SandyMcpProxyAccess();
-  const mcpProxyEndpointState = new McpProxyEndpointState();
+  let orchestrator: SandyOrchestrator | null = null;
+  let sidecarManager: McpSidecarManager | null = null;
+
+  if (Object.keys(config.mcpServers).length > 0) {
+    sidecarManager = new McpSidecarManager({
+      configDirectory: config.configDirectory,
+      mcpServers: config.mcpServers,
+      sidecarImage: mcpSidecarImage,
+      authorizeToolCall: async (input) => {
+        if (!orchestrator) {
+          throw new Error("MCP authorization requested before orchestrator startup completed.");
+        }
+        return await orchestrator.authorizeMcpToolCall(input);
+      },
+    }, mcpProxyAccess);
+    await sidecarManager.start();
+  }
+
   const mcpWorkerLaunchConfigBuilder = new McpWorkerLaunchConfigBuilder(
     config.mcpServers,
     mcpProxyAccess,
-    mcpProxyEndpointState,
+    sidecarManager !== null,
   );
 
   const sandboxRunner = new DockerSandboxRunner(
@@ -66,11 +82,12 @@ export async function startApp(): Promise<void> {
       shareRoot: config.shareRoot,
       openAiApiKey: config.openAiApiKey,
       codexAuthFile: config.codexAuthFile,
-      workerCodexConfigBuilder: async (taskId) => mcpWorkerLaunchConfigBuilder.build(taskId),
+      workerCodexConfigBuilder: (taskId) => mcpWorkerLaunchConfigBuilder.build(taskId),
+      workerNetworkName: sidecarManager?.workerNetworkName ?? null,
     },
   );
 
-  const orchestrator = new SandyOrchestrator({
+  orchestrator = new SandyOrchestrator({
     channel,
     mainAgent,
     sandboxRunner,
@@ -79,14 +96,16 @@ export async function startApp(): Promise<void> {
     persistentApprovalStore: new TomlPersistentApprovalStore(config.configFilePath, config.persistentMcpApprovals),
   });
 
-  const mcpProxy = new SandyMcpProxy({
-    access: mcpProxyAccess,
-    endpointState: mcpProxyEndpointState,
-    registry: mcpServerRegistry,
-    authorizeToolCall: orchestrator.authorizeMcpToolCall.bind(orchestrator),
+  const shutdown = async () => {
+    await sidecarManager?.stop();
+  };
+  process.once("SIGINT", () => {
+    void shutdown().finally(() => process.exit(130));
   });
-  await mcpProxy.start();
+  process.once("SIGTERM", () => {
+    void shutdown().finally(() => process.exit(143));
+  });
 
-  await channel.start(async (event) => orchestrator.handleChatEvent(event));
   logger.info("app.started");
+  await channel.start(async (event) => orchestrator.handleChatEvent(event));
 }

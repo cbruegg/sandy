@@ -203,6 +203,6 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
 - Sending a file from `/workspace/share` back to the user through the channel does not require privilege escalation.
 - Dynamic host directory mounts are out of scope for v1.
 - OneCLI capability enablement is out of scope for v1.
-- External MCP server access is in scope for v1 through Sandy's host-side proxy.
+- External MCP server access is in scope for v1 through Sandy's Docker sidecar proxy.
 - Sandy's own worker-tool flow is not rewritten to MCP in v1.
 - “STT” is the intended term for voice transcription in v1.
