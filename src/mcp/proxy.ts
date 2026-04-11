@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   CallToolRequestSchema,
@@ -37,7 +37,7 @@ type SandyMcpProxyOptions = {
 export class SandyMcpProxy {
   private readonly sessions = new Map<string, {
     route: ProxyRouteContext;
-    server: Server;
+    server: McpServer;
     transport: StreamableHTTPServerTransport;
   }>();
   private httpServer = createServer((req, res) => {
@@ -68,6 +68,7 @@ export class SandyMcpProxy {
 
   async stop(): Promise<void> {
     for (const session of this.sessions.values()) {
+      await session.server.close();
       await session.transport.close();
     }
     this.sessions.clear();
@@ -135,39 +136,39 @@ export class SandyMcpProxy {
     }
   }
 
-  private createServer(route: ProxyRouteContext): Server {
-    const server = new Server({
+  private createServer(route: ProxyRouteContext): McpServer {
+    const server = new McpServer({
       name: "Sandy MCP Proxy",
       version: "1.0.0",
-    });
-
-    server.registerCapabilities({
-      tools: {},
-      resources: {},
-      prompts: {},
+    }, {
+      capabilities: {
+        tools: {},
+        resources: {},
+        prompts: {},
+      },
     });
 
     const getClient = async () => this.options.registry.getClient(route.serverId);
 
-    server.setRequestHandler(ListToolsRequestSchema, async (request) => {
+    server.server.setRequestHandler(ListToolsRequestSchema, async (request) => {
       return (await getClient()).listTools(request.params);
     });
-    server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
+    server.server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
       return (await getClient()).listResources(request.params);
     });
-    server.setRequestHandler(ListResourceTemplatesRequestSchema, async (request) => {
+    server.server.setRequestHandler(ListResourceTemplatesRequestSchema, async (request) => {
       return (await getClient()).listResourceTemplates(request.params);
     });
-    server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    server.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
       return (await getClient()).readResource(request.params);
     });
-    server.setRequestHandler(ListPromptsRequestSchema, async (request) => {
+    server.server.setRequestHandler(ListPromptsRequestSchema, async (request) => {
       return (await getClient()).listPrompts(request.params);
     });
-    server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+    server.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
       return (await getClient()).getPrompt(request.params);
     });
-    server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const approval = await this.options.authorizeToolCall({
         taskId: route.taskId,
         serverId: route.serverId,
