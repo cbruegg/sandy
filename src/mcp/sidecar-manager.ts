@@ -212,26 +212,15 @@ export class McpSidecarManager {
         message: failureMessage,
       });
 
-      try {
-        this.sendToSidecar({
-          type: "authorization_result",
+      this.sendToSidecar({
+        type: "authorization_result",
+        requestId: message.requestId,
+        result: {
           requestId: message.requestId,
-          result: {
-            requestId: message.requestId,
-            outcome: "failed",
-            message: failureMessage,
-          } satisfies PrivilegeResolutionResult,
-        });
-      } catch (sendError) {
-        logger.warn("mcp.sidecar.authorization_result_failed", {
-          requestId: message.requestId,
-          taskId: message.taskId,
-          serverId: message.serverId,
-          toolName: message.toolName,
-          message: sendError instanceof Error ? sendError.message : "Unknown authorization result delivery failure.",
-        });
-      }
-    });
+          outcome: "failed",
+          message: failureMessage,
+        } satisfies PrivilegeResolutionResult,
+      })    });
   }
 
   private async handleAuthorizationRequest(message: McpSidecarAuthorizationRequestMessage): Promise<void> {
