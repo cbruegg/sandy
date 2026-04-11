@@ -113,9 +113,19 @@ function resolveConfigPath(env: EnvSource): string {
   return defaultConfigPath();
 }
 
+function expandHomeShorthand(path: string): string {
+  if (path === "~") {
+    return homedir();
+  }
+  if (path.startsWith("~/")) {
+    return join(homedir(), path.slice(2));
+  }
+  return path;
+}
+
 function resolveCodexAuthFile(configuredPath: string | null | undefined): string | null {
   if (configuredPath) {
-    const resolvedPath = resolve(configuredPath);
+    const resolvedPath = resolve(expandHomeShorthand(configuredPath));
     if (resolvedPath !== defaultCodexAuthFilePath()) {
       return resolvedPath;
     }

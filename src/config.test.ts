@@ -106,6 +106,40 @@ bot_token = "telegram-token"
   }
 });
 
+test("parseConfigToml expands tilde-prefixed codex auth paths", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sandy-config-"));
+  const fakeHome = await mkdtemp(join(root, "home-"));
+  const authDir = join(fakeHome, ".codex");
+  const authFilePath = join(authDir, "auth.json");
+  const originalHome = process.env.HOME;
+
+  try {
+    await mkdir(authDir, { recursive: true });
+    await writeFile(authFilePath, "{}");
+    process.env.HOME = fakeHome;
+
+    const config = parseConfigToml(`
+[telegram]
+bot_token = "telegram-token"
+
+[auth]
+codex_auth_file = "~/.codex/auth.json"
+`);
+
+    assert.deepEqual(config.authMode, {
+      mode: "codex_auth_file",
+      codexAuthFile: authFilePath,
+    });
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("parseConfigToml rejects stdio MCP servers", () => {
   assert.throws(() => {
     parseConfigToml(`
