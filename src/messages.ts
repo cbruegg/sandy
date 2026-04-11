@@ -16,8 +16,10 @@ export const messages = {
     "Voice messages are disabled. Configure STT in Sandy's config file to enable transcription.",
   voiceTranscriptionFailed: (): string =>
     "Voice transcription failed. Please try again or send the request as text.",
+  nextPlannedStep: (step: string): string => `Next planned step: ${step}`,
+  commandProgress: (status: string, command: string): string => `Command ${status}: ${command}`,
   taskComplete: (text: string): string => `Task complete:\n${text}`,
-  taskCompleted: (taskId: string): string => `Task "${taskId}" completed.`,
+  taskCompleted: (taskName: string): string => `Task "${taskName}" completed.`,
   taskFailed: (message: string): string => `Task failed: ${message}`,
   noActiveTaskToCancel: (): string => "There is no active task to cancel.",
   noPendingPrivilegeRequest: (): string => "There is no pending privilege request.",
@@ -67,6 +69,10 @@ export const messages = {
     `Allowed ${serverId}.${toolName} from persistent config.`,
   mcpToolAllowedAndPersisted: (serverId: string, toolName: string): string =>
     `Allowed ${serverId}.${toolName} and updated Sandy's config file.`,
+  mcpToolProgress: (status: string, serverId: string, toolName: string, payload: unknown): string =>
+    status === "completed"
+      ? `MCP ${status}: ${serverId}.${toolName} ${describeMcpToolPayload(payload)}`
+      : `MCP ${status}: ${serverId}.${toolName}`,
 } as const;
 
 export const mcpAdminMessages = {
@@ -116,4 +122,13 @@ function describePrivilegeActions(request: PrivilegeRequest): string {
     return "Choose approve once, allow in this task, always allow, or deny.";
   }
   return "Approve or deny this request.";
+}
+
+function describeMcpToolPayload(payload: unknown): string {
+  try {
+    const serialized = JSON.stringify(payload);
+    return serialized ?? "null";
+  } catch {
+    return "[unserializable payload]";
+  }
 }

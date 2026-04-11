@@ -141,7 +141,7 @@ export class SandyOrchestrator {
           break;
         case "task_done":
           if (session.activeTask.status !== "completed") {
-            await this.deps.channel.sendText(chatId, messages.taskCompleted(taskId));
+            await this.deps.channel.sendText(chatId, messages.taskCompleted(session.activeTask.taskName));
             await this.finishActiveTask(session, "completed");
           }
           break;
