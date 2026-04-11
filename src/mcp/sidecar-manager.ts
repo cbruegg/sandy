@@ -7,6 +7,7 @@ import { logger } from "../logger.js";
 import type { PrivilegeResolutionResult } from "../types.js";
 import { SandyMcpProxyAccess } from "./proxy-access.js";
 import { buildHostOauthStateDirectory, sidecarOauthMountPath } from "./oauth-paths.js";
+import { mcpProxyContainerAlias } from "./proxy-route.js";
 import {
   parseMcpSidecarToHostMessage,
   type McpSidecarAuthorizationRequestMessage,
@@ -68,7 +69,7 @@ export class McpSidecarManager {
       "--network",
       this.options.workerNetworkName,
       "--network-alias",
-      "sandy-mcp-proxy",
+      mcpProxyContainerAlias,
       "-v",
       `${oauthStateDirectory}:${sidecarOauthMountPath}`,
       this.options.sidecarImage,

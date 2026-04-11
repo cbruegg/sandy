@@ -1,15 +1,11 @@
 import * as toml from "@iarna/toml";
 import type { McpServerConfig } from "../config.js";
 import { SandyMcpProxyAccess, mcpProxyWorkerBaseUrl, workerProxyTokenEnvVar } from "./proxy-access.js";
+import { buildMcpProxyWorkerUrl } from "./proxy-route.js";
 
 type McpWorkerLaunchConfig = {
   codexConfigToml: string | null;
   environment: Record<string, string>;
-};
-
-type WorkerServerRoute = {
-  taskId: string;
-  serverId: string;
 };
 
 export class McpWorkerLaunchConfigBuilder {
@@ -37,7 +33,7 @@ export class McpWorkerLaunchConfigBuilder {
     const config = {
       mcp_servers: Object.fromEntries(
         this.serverIds.map((serverId) => [serverId, {
-          url: this.buildWorkerServerUrl(mcpProxyWorkerBaseUrl, { taskId, serverId }),
+          url: buildMcpProxyWorkerUrl({ taskId, serverId }, mcpProxyWorkerBaseUrl),
           bearer_token_env_var: workerProxyTokenEnvVar,
         }]),
       ),
@@ -49,9 +45,5 @@ export class McpWorkerLaunchConfigBuilder {
         [workerProxyTokenEnvVar]: this.access.issueWorkerGrant(taskId).bearerToken,
       },
     };
-  }
-
-  private buildWorkerServerUrl(workerBaseUrl: string, route: WorkerServerRoute): string {
-    return `${workerBaseUrl}/mcp/tasks/${encodeURIComponent(route.taskId)}/servers/${encodeURIComponent(route.serverId)}`;
   }
 }

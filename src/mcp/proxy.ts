@@ -13,13 +13,9 @@ import {
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import { SandyMcpProxyAccess } from "./proxy-access.js";
+import { parseMcpProxyPath, type McpProxyRoute } from "./proxy-route.js";
 import type { McpServerRegistry } from "./server-registry.js";
 import type { PrivilegeResolutionResult } from "../types.js";
-
-type ProxyRouteContext = {
-  taskId: string;
-  serverId: string;
-};
 
 type SandyMcpProxyOptions = {
   access: SandyMcpProxyAccess;
@@ -36,7 +32,7 @@ type SandyMcpProxyOptions = {
 
 export class SandyMcpProxy {
   private readonly sessions = new Map<string, {
-    route: ProxyRouteContext;
+    route: McpProxyRoute;
     server: McpServer;
     transport: StreamableHTTPServerTransport;
   }>();
@@ -85,8 +81,7 @@ export class SandyMcpProxy {
   }
 
   private async handleHttpRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    const requestUrl = new URL(req.url ?? "/", `http://${req.headers.host ?? "127.0.0.1"}`);
-    const route = matchProxyRoute(requestUrl.pathname);
+    const route = parseMcpProxyPath(new URL(req.url ?? "/", "http://127.0.0.1").pathname);
     if (!route) {
       res.statusCode = 404;
       res.end("Not found");
@@ -136,7 +131,7 @@ export class SandyMcpProxy {
     }
   }
 
-  private createServer(route: ProxyRouteContext): McpServer {
+  private createServer(route: McpProxyRoute): McpServer {
     const server = new McpServer({
       name: "Sandy MCP Proxy",
       version: "1.0.0",
@@ -186,7 +181,7 @@ export class SandyMcpProxy {
     return server;
   }
 
-  private async createSession(route: ProxyRouteContext) {
+  private async createSession(route: McpProxyRoute) {
     const server = this.createServer(route);
     let sessionId: string | null = null;
     const transport = new StreamableHTTPServerTransport({
@@ -215,19 +210,8 @@ export class SandyMcpProxy {
 
 }
 
-function sameRoute(left: ProxyRouteContext, right: ProxyRouteContext): boolean {
+function sameRoute(left: McpProxyRoute, right: McpProxyRoute): boolean {
   return left.taskId === right.taskId && left.serverId === right.serverId;
-}
-
-function matchProxyRoute(pathname: string): ProxyRouteContext | null {
-  const match = /^\/mcp\/tasks\/([^/]+)\/servers\/([^/]+)$/.exec(pathname);
-  if (!match) {
-    return null;
-  }
-  return {
-    taskId: decodeURIComponent(match[1]),
-    serverId: decodeURIComponent(match[2]),
-  };
 }
 
 function buildToolErrorResult(message: string): CallToolResult {

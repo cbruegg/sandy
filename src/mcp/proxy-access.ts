@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
 import jwt from "jsonwebtoken";
+export { mcpProxyWorkerBaseUrl } from "./proxy-route.js";
 
 export const workerProxyTokenEnvVar = "SANDY_MCP_PROXY_TOKEN";
-export const mcpProxyWorkerBaseUrl = "http://sandy-mcp-proxy:8080";
 
 type McpProxyTokenPayload = {
   taskId: string;
