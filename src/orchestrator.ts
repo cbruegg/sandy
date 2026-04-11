@@ -238,7 +238,7 @@ export class SandyOrchestrator {
           const decision = await this.deps.mainAgent.decide({
             chatId: event.chatId,
             newVisibleEntries,
-            activeTask: null,
+            activeTask: session.activeTask,
             channelFormatting: this.channelFormatting,
           });
 
