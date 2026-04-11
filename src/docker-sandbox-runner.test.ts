@@ -108,7 +108,7 @@ async function launchRunnerWithChild(
   options?: {
     handshakeTimeoutMs?: number;
     shareRoot?: string;
-    workerCodexConfigToml?: string | null;
+    builtWorkerCodexConfigToml?: string | null;
     workerNetworkName?: string | null;
   },
 ) {
@@ -120,7 +120,7 @@ async function launchRunnerWithChild(
     openAiApiKey: null,
     codexAuthFile: null,
     workerCodexConfigBuilder: () => ({
-      codexConfigToml: null,
+      codexConfigToml: options?.builtWorkerCodexConfigToml ?? null,
       environment: {},
     }),
     workerNetworkName: options?.workerNetworkName,
@@ -137,7 +137,6 @@ async function launchRunnerWithChild(
       taskName: "test-task",
       taskBrief: "Inspect the environment.",
       channelFormatting: testFormatting,
-      workerCodexConfigToml: options?.workerCodexConfigToml,
     },
     onEvent,
   );
@@ -365,7 +364,7 @@ test("DockerSandboxRunner mounts worker Codex config from a temp path outside th
 
   const { invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
     shareRoot,
-    workerCodexConfigToml: "model = \"gpt-5\"\n",
+    builtWorkerCodexConfigToml: "model = \"gpt-5\"\n",
   });
 
   const taskShare = join(shareRoot, "task-1");

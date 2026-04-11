@@ -45,11 +45,8 @@ export class DockerSandboxRunner implements SandboxRunner {
     const sharePath = this.getTaskSharePath(request.taskId);
     await mkdir(sharePath, { recursive: true });
     const builtWorkerConfig = this.options.workerCodexConfigBuilder(request.taskId);
-    const workerCodexConfig = request.workerCodexConfigToml ?? builtWorkerConfig?.codexConfigToml ?? null;
-    const workerEnvironment = {
-      ...(builtWorkerConfig?.environment ?? {}),
-      ...(request.workerEnvironment ?? {}),
-    };
+    const workerCodexConfig = builtWorkerConfig?.codexConfigToml ?? null;
+    const workerEnvironment = builtWorkerConfig?.environment ?? {};
     let workerCodexConfigTempDir: string | null = null;
     let workerCodexConfigHostPath: string | null = null;
     if (workerCodexConfig) {
