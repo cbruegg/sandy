@@ -27,6 +27,12 @@ const testFormatting: ChannelFormatting = {
   instructions: "Use simple Telegram HTML.",
 };
 
+function expectDefined<T>(value: T | null | undefined, message: string): NonNullable<T> {
+  assert.notEqual(value, undefined, message);
+  assert.notEqual(value, null, message);
+  return value as NonNullable<T>;
+}
+
 class RecordingChannel implements ChannelAdapter {
   public readonly sentTexts: Array<{ chatId: string; text: string }> = [];
   public readonly taskUpdates: Array<{ chatId: string; text: string }> = [];
@@ -232,8 +238,9 @@ test("orchestrator launches a task and discards pending output on danger report"
   const session = store.getOrCreate("chat-1");
   assert.equal(session.activeTask, null);
   assert.equal(session.pendingTaskSummary, null);
-  assert.deepEqual(contextTexts(mainAgent.contexts[0]), ["Inspect the repository"]);
-  assert.deepEqual(mainAgent.contexts[0]?.channelFormatting, testFormatting);
+  const firstContext = expectDefined(mainAgent.contexts[0], "Expected main-agent context.");
+  assert.deepEqual(contextTexts(firstContext), ["Inspect the repository"]);
+  assert.deepEqual(firstContext.channelFormatting, testFormatting);
 });
 
 test("orchestrator accepts active-task output without storing host-side history", async () => {
@@ -317,10 +324,11 @@ test("orchestrator stages attached files into the task share before launching th
   });
 
   assert.equal(channel.savedAttachments.length, 1);
-  assert.match(channel.savedAttachments[0].targetDirectory, /inbox\/message_1$/);
-  assert.match(runner.launches[0].taskBrief, /Files attached by the user are already available/);
-  assert.match(runner.launches[0].taskBrief, /\/workspace\/share\/inbox\/message_1\/1-input\.csv/);
-  assert.deepEqual(contextTexts(mainAgent.contexts[0]), ["Analyze this\n\nAttached files:\n- input.csv"]);
+  assert.match(expectDefined(channel.savedAttachments[0], "Expected saved attachment batch.").targetDirectory, /inbox\/message_1$/);
+  const launch = expectDefined(runner.launches[0], "Expected launch.");
+  assert.match(launch.taskBrief, /Files attached by the user are already available/);
+  assert.match(launch.taskBrief, /\/workspace\/share\/inbox\/message_1\/1-input\.csv/);
+  assert.deepEqual(contextTexts(expectDefined(mainAgent.contexts[0], "Expected main-agent context.")), ["Analyze this\n\nAttached files:\n- input.csv"]);
 });
 
 test("orchestrator stages attached files into the active task share and notifies the worker", async () => {
@@ -424,14 +432,15 @@ test("orchestrator applies supported privilege requests deterministically and ou
       targetPath: "/workspace/share/input.txt",
       reason: "Need a local fixture file.",
     },
-    taskId: runner.launches[0].taskId,
-    taskSharePath: `/tmp/${runner.launches[0].taskId}`,
+    taskId: expectDefined(runner.launches[0], "Expected launch.").taskId,
+    taskSharePath: `/tmp/${expectDefined(runner.launches[0], "Expected launch.").taskId}`,
   }]);
   assert.deepEqual(runner.handle.privilegeResults, [{
     requestId,
     outcome: "approved",
     message: "Applied copy_into_share.",
   }]);
+  assert.ok(requestId);
   assert.equal(channel.sentTexts.at(-1)?.text, messages.privilegeApproved(requestId, "Applied copy_into_share."));
 });
 
@@ -630,7 +639,7 @@ test("orchestrator sends worker-requested shared files back through the channel"
 
   assert.deepEqual(channel.sentFiles, [{
     chatId: "chat-file-out",
-    filePath: `/tmp/${runner.launches[0].taskId}/results/output.txt`,
+    filePath: `/tmp/${expectDefined(runner.launches[0], "Expected launch.").taskId}/results/output.txt`,
     caption: "Generated output",
   }]);
 });
@@ -839,9 +848,10 @@ test("orchestrator releases completed-task output only when the user continues n
 
   const session = store.getOrCreate("chat-5");
   assert.equal(session.pendingTaskSummary, null);
-  assert.equal(contextTexts(mainAgent.contexts[1]).at(-1), "thanks");
-  assert.match(contextTexts(mainAgent.contexts[1])[0] ?? "", /Outcome: completed/);
-  assert.match(contextTexts(mainAgent.contexts[1])[0] ?? "", /found 8 CPUs/);
+  const followUpContext = expectDefined(mainAgent.contexts[1], "Expected follow-up context.");
+  assert.equal(contextTexts(followUpContext).at(-1), "thanks");
+  assert.match(contextTexts(followUpContext)[0] ?? "", /Outcome: completed/);
+  assert.match(contextTexts(followUpContext)[0] ?? "", /found 8 CPUs/);
 });
 
 test("orchestrator discards completed-task output when the user sends a danger report next", async () => {
@@ -976,9 +986,10 @@ test("orchestrator keeps final_result output pending until the user continues no
 
   session = store.getOrCreate("chat-6");
   assert.equal(session.pendingTaskSummary, null);
-  assert.equal(contextTexts(mainAgent.contexts[1]).at(-1), "thanks");
-  assert.match(contextTexts(mainAgent.contexts[1])[0] ?? "", /Outcome: completed/);
-  assert.match(contextTexts(mainAgent.contexts[1])[0] ?? "", /The environment has 8 CPUs/);
+  const followUpContext = expectDefined(mainAgent.contexts[1], "Expected follow-up context.");
+  assert.equal(contextTexts(followUpContext).at(-1), "thanks");
+  assert.match(contextTexts(followUpContext)[0] ?? "", /Outcome: completed/);
+  assert.match(contextTexts(followUpContext)[0] ?? "", /The environment has 8 CPUs/);
 });
 
 test("orchestrator marks worker disconnects as task failure and clears the task", async () => {

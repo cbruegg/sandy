@@ -44,7 +44,7 @@ export function parseWorkerToolCall(text: string): WorkerToolCall | null {
       if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
         throw new Error("Tool payload must be a JSON object.");
       }
-      if (payload.type !== undefined && payload.type !== entry.name) {
+      if (payload["type"] !== undefined && payload["type"] !== entry.name) {
         throw new Error(`Tool payload type must be "${entry.name}" when provided.`);
       }
       return {

@@ -24,8 +24,12 @@ export function parseMcpProxyPath(pathname: string): McpProxyRoute | null {
   if (!match) {
     return null;
   }
+  const [, taskId, serverId] = match;
+  if (!taskId || !serverId) {
+    return null;
+  }
   return {
-    taskId: decodeURIComponent(match[1]),
-    serverId: decodeURIComponent(match[2]),
+    taskId: decodeURIComponent(taskId),
+    serverId: decodeURIComponent(serverId),
   };
 }

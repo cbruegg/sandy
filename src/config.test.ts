@@ -65,12 +65,12 @@ always_allow_tools = ["list_projects"]
 
     assert.equal(config.configFilePath, configFilePath);
     assert.equal(config.telegramBotToken, "telegram-token");
-    assert.deepEqual(config.mcpServers.todoist, {
+    assert.deepEqual(config.mcpServers["todoist"], {
       transport: "streamable_http",
       url: "https://todoist.example/mcp",
       oauthScopes: ["data:read"],
     });
-    assert.deepEqual(config.persistentMcpApprovals.todoist, ["list_projects"]);
+    assert.deepEqual(config.persistentMcpApprovals["todoist"], ["list_projects"]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -81,12 +81,12 @@ test("parseConfigToml expands the default codex auth path when present", async (
   const fakeHome = await mkdtemp(join(root, "home-"));
   const authDir = join(fakeHome, ".codex");
   const authFilePath = join(authDir, "auth.json");
-  const originalHome = process.env.HOME;
+  const originalHome = process.env["HOME"];
 
   try {
     await mkdir(authDir, { recursive: true });
     await writeFile(authFilePath, "{}");
-    process.env.HOME = fakeHome;
+    process.env["HOME"] = fakeHome;
     const config = parseConfigToml(`
 [telegram]
 bot_token = "telegram-token"
@@ -98,9 +98,9 @@ bot_token = "telegram-token"
     });
   } finally {
     if (originalHome === undefined) {
-      delete process.env.HOME;
+      delete process.env["HOME"];
     } else {
-      process.env.HOME = originalHome;
+      process.env["HOME"] = originalHome;
     }
     await rm(root, { recursive: true, force: true });
   }
@@ -111,12 +111,12 @@ test("parseConfigToml expands tilde-prefixed codex auth paths", async () => {
   const fakeHome = await mkdtemp(join(root, "home-"));
   const authDir = join(fakeHome, ".codex");
   const authFilePath = join(authDir, "auth.json");
-  const originalHome = process.env.HOME;
+  const originalHome = process.env["HOME"];
 
   try {
     await mkdir(authDir, { recursive: true });
     await writeFile(authFilePath, "{}");
-    process.env.HOME = fakeHome;
+    process.env["HOME"] = fakeHome;
 
     const config = parseConfigToml(`
 [telegram]
@@ -132,9 +132,9 @@ codex_auth_file = "~/.codex/auth.json"
     });
   } finally {
     if (originalHome === undefined) {
-      delete process.env.HOME;
+      delete process.env["HOME"];
     } else {
-      process.env.HOME = originalHome;
+      process.env["HOME"] = originalHome;
     }
     await rm(root, { recursive: true, force: true });
   }

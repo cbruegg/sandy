@@ -30,7 +30,7 @@ test("OpenAiTranscriptionProvider uses the default OpenAI endpoint and model", a
     ? headers.get("Authorization")
     : Array.isArray(headers)
       ? headers.find(([key]) => key === "Authorization")?.[1]
-      : headers?.Authorization;
+      : headers?.["Authorization"];
 
   assert.equal(transcript, "hello world");
   assert.equal(requestUrl, "https://api.openai.com/v1/audio/transcriptions");

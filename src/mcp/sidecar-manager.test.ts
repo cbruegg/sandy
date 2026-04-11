@@ -64,9 +64,11 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
   await manager.start();
   await manager.stop();
 
-  assert.equal(invocations[0][0], "network");
-  assert.equal(invocations[0][1], "create");
-  assert.equal(invocations[0][2], workerNetworkName);
+  const firstInvocation = invocations[0];
+  assert.ok(firstInvocation);
+  assert.equal(firstInvocation[0], "network");
+  assert.equal(firstInvocation[1], "create");
+  assert.equal(firstInvocation[2], workerNetworkName);
   assert.ok(invocations.some((invocation) => invocation[0] === "run" && invocation.includes("--network-alias")));
   assert.ok(invocations.some((invocation) => invocation[0] === "network" && invocation[1] === "rm"));
   assert.match(stdinContent, /"type":"bootstrap"/);

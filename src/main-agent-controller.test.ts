@@ -15,6 +15,12 @@ const testFormatting: ChannelFormatting = {
   instructions: "Use simple Telegram HTML.",
 };
 
+function expectDefined<T>(value: T | null | undefined, message: string): NonNullable<T> {
+  assert.notEqual(value, undefined, message);
+  assert.notEqual(value, null, message);
+  return value as NonNullable<T>;
+}
+
 class RecordingThread {
   public readonly inputs: string[] = [];
 
@@ -105,12 +111,12 @@ test("CodexMainAgentController starts threads in a unique temp directory with no
   assert.equal(decision.action, "reply");
   assert.equal(codex.startedThreads.length, 1);
 
-  const options = codex.startedThreads[0];
+  const options = expectDefined(codex.startedThreads[0], "Expected started thread options.");
   assert.equal(options.approvalPolicy, "never");
   assert.equal(options.sandboxMode, "read-only");
   assert.equal(options.skipGitRepoCheck, true);
   assert.match(options.workingDirectory ?? "", /^.+sandy-main-agent-/);
-  assert.match(codex.threads[0].inputs[0], /Required JSON schema:/);
+  assert.match(expectDefined(codex.threads[0], "Expected thread.").inputs[0] ?? "", /Required JSON schema:/);
 });
 
 test("buildMainAgentPrompt includes the precise decision schema", () => {
@@ -135,9 +141,12 @@ test("CodexMainAgentController sends only the entries provided for each decision
   await controller.decide(makeContext(["world"]));
 
   assert.equal(codex.threads.length, 1);
-  assert.equal(codex.threads[0].inputs.length, 2);
+  const thread = expectDefined(codex.threads[0], "Expected thread.");
+  assert.equal(thread.inputs.length, 2);
 
-  const [firstInput, secondInput] = codex.threads[0].inputs;
+  const [firstInput, secondInput] = thread.inputs;
+  assert.ok(firstInput);
+  assert.ok(secondInput);
   assert.match(firstInput, /"text": "hello"/);
   assert.doesNotMatch(firstInput, /"text": "world"/);
   assert.match(secondInput, /"text": "world"/);
@@ -151,8 +160,9 @@ test("CodexMainAgentController retries when the model returns invalid JSON", asy
   const decision = await controller.decide(makeContext(["hello"]));
 
   assert.equal(decision.action, "reply");
-  assert.equal(codex.threads[0].inputs.length, 2);
-  assert.match(codex.threads[0].inputs[1], /Your last response was not valid JSON/);
+  const thread = expectDefined(codex.threads[0], "Expected thread.");
+  assert.equal(thread.inputs.length, 2);
+  assert.match(thread.inputs[1] ?? "", /Your last response was not valid JSON/);
 });
 
 test("CodexMainAgentController gives up after repeated validation failures", async () => {
@@ -163,5 +173,5 @@ test("CodexMainAgentController gives up after repeated validation failures", asy
     controller.decide(makeContext(["hello"])),
     /Main agent failed to return a valid decision after 3 attempts/,
   );
-  assert.equal(codex.threads[0].inputs.length, 3);
+  assert.equal(expectDefined(codex.threads[0], "Expected thread.").inputs.length, 3);
 });

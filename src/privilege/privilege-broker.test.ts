@@ -98,12 +98,12 @@ test("PrivilegeBrokerImpl expands ~/ for host paths", async () => {
   const taskSharePath = join(root, "share");
   const exportDir = await mkdtemp(join(fakeHome, "sandy-privilege-export-"));
   const targetPath = join(exportDir, "result.txt");
-  const originalHome = process.env.HOME;
+  const originalHome = process.env["HOME"];
   await mkdir(taskSharePath, { recursive: true });
   await writeFile(join(taskSharePath, "result.txt"), "hello from share");
 
   try {
-    process.env.HOME = fakeHome;
+    process.env["HOME"] = fakeHome;
 
     const result = await broker.apply(
       {
@@ -125,9 +125,9 @@ test("PrivilegeBrokerImpl expands ~/ for host paths", async () => {
     assert.equal(await readFile(targetPath, "utf8"), "hello from share");
   } finally {
     if (originalHome === undefined) {
-      delete process.env.HOME;
+      delete process.env["HOME"];
     } else {
-      process.env.HOME = originalHome;
+      process.env["HOME"] = originalHome;
     }
     await rm(exportDir, { recursive: true, force: true });
   }

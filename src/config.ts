@@ -106,7 +106,7 @@ type SandyConfig = {
 type EnvSource = NodeJS.ProcessEnv;
 
 function resolveConfigPath(env: EnvSource): string {
-  const configured = env.SANDY_CONFIG_FILE?.trim();
+  const configured = env["SANDY_CONFIG_FILE"]?.trim();
   if (configured) {
     return resolve(configured);
   }

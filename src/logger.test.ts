@@ -31,7 +31,9 @@ test("logger.debugContent writes debug logs only when logging level is debug", (
   }
 
   assert.equal(lines.length, 1);
-  const payload = JSON.parse(lines[0]) as {
+  const firstLine = lines[0];
+  assert.ok(firstLine);
+  const payload = JSON.parse(firstLine) as {
     level: string;
     event: string;
     data: { text: string };

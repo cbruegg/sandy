@@ -48,7 +48,7 @@ function createRequest(input: {
 }) {
   const headers: Record<string, string> = {};
   if (input.authorization) {
-    headers.authorization = input.authorization;
+    headers["authorization"] = input.authorization;
   }
   if (input.sessionId) {
     headers["mcp-session-id"] = input.sessionId;

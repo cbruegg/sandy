@@ -400,7 +400,7 @@ test("TelegramBotApiAdapter sends local files as Telegram documents", async () =
 
   assert.equal(fakeBot.sentDocuments.length, 1);
   assert.equal(fakeBot.sentDocuments[0]?.chatId, "7");
-  assert.equal(fakeBot.sentDocuments[0]?.other?.caption, "Generated result");
+  assert.equal(fakeBot.sentDocuments[0]?.other?.["caption"], "Generated result");
 });
 
 class FakeTelegramBot {
