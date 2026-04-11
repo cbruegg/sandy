@@ -1,5 +1,4 @@
 import { createServer } from "node:http";
-import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
 import type { McpServerConfig } from "../config.js";
@@ -114,7 +113,6 @@ async function startLoopbackCallbackServer(): Promise<{
   waitForCode: () => Promise<string>;
   close: () => Promise<void>;
 }> {
-  await mkdir(join(process.cwd(), ".tmp"), { recursive: true });
   let resolveCode: ((value: string) => void) | null = null;
   let rejectCode: ((reason?: unknown) => void) | null = null;
   const codePromise = new Promise<string>((resolve, reject) => {
