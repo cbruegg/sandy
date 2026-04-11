@@ -13,18 +13,6 @@ export type TaskStatus =
   | "cancelled"
   | "failed";
 
-export type TaskMetadata = {
-  taskId: string;
-  taskName: string;
-  status: TaskStatus;
-  startedAt: string;
-  lastActivityAt: string;
-  hasPendingQuarantinedOutput: boolean;
-  hasPendingPrivilegeRequest: boolean;
-  approvedMcpTools: McpToolGrant[];
-  workerConnected: boolean;
-};
-
 export type ActiveTaskState = {
   taskId: string;
   taskName: string;

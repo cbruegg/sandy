@@ -1,5 +1,5 @@
 import type { ChannelFormatting } from "./channel.js";
-import type { TaskMetadata } from "./task-state.js";
+import type { ActiveTaskState } from "./task-state.js";
 import type { TranscriptEntry } from "./transcript.js";
 
 export type MainAgentDecision =
@@ -16,6 +16,6 @@ export type MainAgentDecision =
 export type DecideContext = {
   chatId: string;
   newVisibleEntries: TranscriptEntry[];
-  activeTask: TaskMetadata | null;
+  activeTask: ActiveTaskState | null;
   channelFormatting: ChannelFormatting;
 };
