@@ -88,6 +88,8 @@ Build the MCP sidecar image:
 docker build --target mcp-proxy-runtime -t sandy-mcp-proxy:latest .
 ```
 
+The host runtime is intentionally not containerized, because it is designed to mediate host-system access directly.
+
 Build the Bun bundles and verify linting, TypeScript type-checking, and dependency hygiene:
 
 ```bash
