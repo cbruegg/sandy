@@ -209,6 +209,9 @@ export class SandyOrchestrator {
       case "cancel_request":
         await this.deps.channel.sendText(event.chatId, messages.noActiveTaskToCancel());
         return;
+      case "mark_finished_request":
+        await this.deps.channel.sendText(event.chatId, messages.noActiveTaskToFinish());
+        return;
       case "approval_response":
         if (session.pendingShareDeletion) {
           if (event.requestId && event.requestId !== session.pendingShareDeletion.requestId) {
@@ -271,6 +274,13 @@ export class SandyOrchestrator {
       case "cancel_request":
         await this.cancelActiveTask(session, "Cancelled at the user's request.");
         await this.deps.channel.sendText(event.chatId, messages.taskCancelled(activeTask.taskName));
+        return;
+      case "mark_finished_request":
+        if (activeTask.pendingPrivilegeRequest) {
+          await this.deps.channel.sendText(event.chatId, messages.privilegeRequestStillPending());
+          return;
+        }
+        await this.requireHandle(activeTask.taskId).markFinished();
         return;
       case "danger_report":
         if (activeTask.pendingPrivilegeRequest) {

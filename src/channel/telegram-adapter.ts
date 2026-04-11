@@ -173,10 +173,15 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     });
     await this.sendFormattedMessage(chatId, text, {
       reply_markup: {
-        inline_keyboard: [[
-          { text: buttonLabels.reportDangerousOutput, callback_data: "report" },
-          { text: buttonLabels.cancelTask, callback_data: "cancel" },
-        ]],
+        inline_keyboard: [
+          [
+            { text: buttonLabels.reportDangerousOutput, callback_data: "report" },
+            { text: buttonLabels.abortTask, callback_data: "cancel" },
+          ],
+          [
+            { text: buttonLabels.markAsFinished, callback_data: "mark_finished" },
+          ],
+        ],
       },
     });
   }
@@ -273,7 +278,7 @@ function buildPrivilegeKeyboard(request: PrivilegeRequest): Array<Array<{ text: 
       ],
       [
         { text: buttonLabels.reportDangerousOutput, callback_data: "report" },
-        { text: buttonLabels.cancelTask, callback_data: "cancel" },
+        { text: buttonLabels.abortTask, callback_data: "cancel" },
       ],
     ];
   }
@@ -285,7 +290,7 @@ function buildPrivilegeKeyboard(request: PrivilegeRequest): Array<Array<{ text: 
     ],
     [
       { text: buttonLabels.reportDangerousOutput, callback_data: "report" },
-      { text: buttonLabels.cancelTask, callback_data: "cancel" },
+      { text: buttonLabels.abortTask, callback_data: "cancel" },
     ],
   ];
 }

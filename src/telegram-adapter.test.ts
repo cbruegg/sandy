@@ -33,6 +33,34 @@ test("normalizeTelegramUpdate maps report callback to a danger report event", as
   });
 });
 
+test("normalizeTelegramUpdate maps mark-finished callback to a finish request event", async () => {
+  const event = await normalizeTelegramUpdate({
+    update_id: 11,
+    callback_query: {
+      id: "cb-finish-1",
+      data: "mark_finished",
+      from: {
+        id: 5,
+        is_bot: false,
+        first_name: "User",
+      },
+      chat_instance: "instance-finish-1",
+      message: {
+        message_id: 22,
+        date: 1_700_000_100,
+        chat: { id: 42, type: "private" },
+      },
+    },
+  } as Update);
+
+  assert.deepEqual(event, {
+    kind: "mark_finished_request",
+    chatId: "42",
+    messageId: "callback:cb-finish-1",
+    timestamp: "2023-11-14T22:15:00.000Z",
+  });
+});
+
 test("normalizeTelegramUpdate maps text input and unsupported media deterministically", async () => {
   const textEvent = await normalizeTelegramUpdate({
     update_id: 2,
@@ -327,6 +355,35 @@ test("TelegramBotApiAdapter sends sanitized HTML with parse_mode", async () => {
     text: "Use <b>bold</b> and &lt;u&gt;underline&lt;/u&gt;.",
     other: {
       parse_mode: "HTML",
+    },
+  });
+});
+
+test("TelegramBotApiAdapter sends task updates with abort and mark-finished controls", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const adapter = new TelegramBotApiAdapter({
+    token: "test-token",
+    botFactory: () => fakeBot,
+  });
+
+  await adapter.sendTaskUpdate("7", "Still working.");
+
+  assert.deepEqual(fakeBot.sentMessages[0], {
+    chatId: "7",
+    text: "Still working.",
+    other: {
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "Report dangerous output", callback_data: "report" },
+            { text: "Abort task", callback_data: "cancel" },
+          ],
+          [
+            { text: "Mark as finished", callback_data: "mark_finished" },
+          ],
+        ],
+      },
     },
   });
 });

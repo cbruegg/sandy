@@ -304,6 +304,18 @@ export class DockerSandboxRunner implements SandboxRunner {
           await reportDisconnect(this.describeWriteFailure(error));
         }
       },
+      markFinished: async () => {
+        logger.info("sandbox.mark_finished", {
+          taskId: request.taskId,
+        });
+        try {
+          await this.sendToWorker(child, {
+            type: "mark_finished",
+          });
+        } catch (error) {
+          await reportDisconnect(this.describeWriteFailure(error));
+        }
+      },
       close: () => {
         if (finished || shutdownRequested) {
           return Promise.resolve();

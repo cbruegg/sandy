@@ -16,6 +16,7 @@ export type ShareInspection = {
 export interface SandboxHandle {
   sendUserMessage(text: string): Promise<void>;
   resolvePrivilege(result: PrivilegeResolutionResult): Promise<void>;
+  markFinished(): Promise<void>;
   close(): Promise<void>;
   cancel(reason: string): Promise<void>;
 }

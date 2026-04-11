@@ -289,6 +289,23 @@ async function main(): Promise<void> {
     });
   };
 
+  const enqueueMarkedFinish = () => {
+    queue = queue.then(async () => {
+      currentAbort = new AbortController();
+      try {
+        await emitTaskSummary(thread);
+        send({ type: "task_done" });
+      } finally {
+        currentAbort = null;
+      }
+    }).catch((error) => {
+      send({
+        type: "task_error",
+        message: error instanceof Error ? error.message : "Sub-agent worker finalization failed.",
+      });
+    });
+  };
+
   const input = createInterface({
     input: process.stdin,
     crlfDelay: Infinity,
@@ -318,6 +335,9 @@ async function main(): Promise<void> {
           break;
         case "privilege_result":
           enqueueTurn(buildPrivilegeResolutionInput(command.result));
+          break;
+        case "mark_finished":
+          enqueueMarkedFinish();
           break;
         case "cancel":
           currentAbort?.abort();

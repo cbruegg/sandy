@@ -17,6 +17,10 @@ export type CancelRequestEvent = ChatEventBase & {
   kind: "cancel_request";
 };
 
+export type MarkFinishedRequestEvent = ChatEventBase & {
+  kind: "mark_finished_request";
+};
+
 export type ApprovalResponseEvent = ChatEventBase & {
   kind: "approval_response";
   decision: "approve" | "approve_once" | "approve_worker_session" | "approve_always" | "deny";
@@ -35,6 +39,7 @@ export type UnsupportedInputEvent = ChatEventBase & {
 export type NormalizedChatEvent =
   | UserTextEvent
   | CancelRequestEvent
+  | MarkFinishedRequestEvent
   | ApprovalResponseEvent
   | DangerReportEvent
   | UnsupportedInputEvent;

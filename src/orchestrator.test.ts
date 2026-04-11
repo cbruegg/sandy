@@ -116,6 +116,7 @@ function contextTexts(context: DecideContext): string[] {
 class FakeSandboxHandle implements SandboxHandle {
   public readonly userMessages: string[] = [];
   public readonly privilegeResults: PrivilegeResolutionResult[] = [];
+  public markFinishedCalls = 0;
   public closeCalls = 0;
   public readonly cancellations: string[] = [];
 
@@ -125,6 +126,10 @@ class FakeSandboxHandle implements SandboxHandle {
 
   async resolvePrivilege(result: PrivilegeResolutionResult): Promise<void> {
     this.privilegeResults.push(result);
+  }
+
+  async markFinished(): Promise<void> {
+    this.markFinishedCalls += 1;
   }
 
   async close(): Promise<void> {
@@ -662,6 +667,68 @@ test("orchestrator closes the sandbox handle on normal task completion", async (
   });
 
   assert.equal(runner.handle.closeCalls, 1);
+});
+
+test("orchestrator asks the worker to finalize when the user marks the task as finished", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Inspect the environment.",
+      taskName: "env-inspection",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-mark-finished",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Inspect the environment",
+    rawText: "Inspect the environment",
+    attachments: [],
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "mark_finished_request",
+    chatId: "chat-mark-finished",
+    messageId: "callback:1",
+    timestamp: "2026-04-01T00:00:05.000Z",
+  });
+
+  assert.equal(runner.handle.markFinishedCalls, 1);
+
+  await runner.emit({
+    type: "task_summary",
+    summary: [
+      "Outcome: completed",
+      "Summary: Finished based on the visible progress.",
+      "Artifacts: none",
+      "Open questions: none",
+    ].join("\n"),
+  });
+
+  await runner.emit({
+    type: "task_done",
+  });
+
+  const session = store.getOrCreate("chat-mark-finished");
+  assert.equal(session.activeTask, null);
+  assert.deepEqual(session.pendingTaskSummary, {
+    taskName: "env-inspection",
+    summary: [
+      "Outcome: completed",
+      "Summary: Finished based on the visible progress.",
+      "Artifacts: none",
+      "Open questions: none",
+    ].join("\n"),
+  });
 });
 
 test("orchestrator uses the task name in task_done completion messages", async () => {

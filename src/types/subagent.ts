@@ -72,6 +72,9 @@ export type HostCommand =
   | {
       type: "cancel";
       reason: string;
+    }
+  | {
+      type: "mark_finished";
     };
 
 const subAgentEventSchema = z.discriminatedUnion("type", [

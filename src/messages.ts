@@ -2,7 +2,8 @@ import type {PrivilegeRequest} from "./types.js";
 
 export const buttonLabels = {
   reportDangerousOutput: "Report dangerous output",
-  cancelTask: "Cancel task",
+  abortTask: "Abort task",
+  markAsFinished: "Mark as finished",
   approve: "Approve once",
   approveWorkerSession: "Allow in task",
   approveAlways: "Always allow",
@@ -22,6 +23,7 @@ export const messages = {
     `Task "${taskName}" completed.\n\nSummary:\n${summary}`,
   taskFailed: (message: string): string => `Task failed: ${message}`,
   noActiveTaskToCancel: (): string => "There is no active task to cancel.",
+  noActiveTaskToFinish: (): string => "There is no active task to mark as finished.",
   noPendingPrivilegeRequest: (): string => "There is no pending privilege request.",
   noActiveOutputToReport: (): string => "There is no active sub-agent output to report.",
   discardedPendingOutput: (): string => "Discarded the pending sub-agent output.",

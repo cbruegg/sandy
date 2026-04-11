@@ -2,6 +2,7 @@ import type { Update } from "grammy/types";
 import type {
   ApprovalResponseEvent,
   DangerReportEvent,
+  MarkFinishedRequestEvent,
   NormalizedChatEvent,
   UserTextEvent,
 } from "../types.js";
@@ -148,6 +149,14 @@ function normalizeCallbackQuery(update: Update): NormalizedChatEvent | null {
       ...base,
       kind: "cancel_request",
     };
+  }
+
+  if (data === "mark_finished") {
+    const event: MarkFinishedRequestEvent = {
+      ...base,
+      kind: "mark_finished_request",
+    };
+    return event;
   }
 
   return null;
