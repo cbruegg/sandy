@@ -70,7 +70,7 @@ export const workerToolDefinitions = {
     }).strict(),
   },
   complete_task: {
-    description: "Signal to the host that the task is fully complete and ready for final summary handoff. You must emit this at the very end.",
+    description: "Signal to the host that the tasks the user stated so far are fully complete. You *must* emit this at the very end.",
     requiresPrivilegeEscalation: false,
     schema: z.object({
       type: z.literal("complete_task"),
