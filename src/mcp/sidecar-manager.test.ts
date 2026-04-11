@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
+import { setImmediate as setImmediateCallback } from "node:timers";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { McpSidecarManager } from "./sidecar-manager.js";
 import { SandyMcpProxyAccess } from "./proxy-access.js";
@@ -25,9 +26,9 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
   sidecarChild.stdin.on("data", (chunk: Buffer | string) => {
     stdinContent += String(chunk);
   });
-  const invocations: Array<{ command: string; args: string[] }> = [];
-  const spawnImpl = ((command: string, args: readonly string[]) => {
-    invocations.push({ command, args: [...args] });
+  const invocations: string[][] = [];
+  const spawnImpl = ((_command: string, args: readonly string[]) => {
+    invocations.push([...args]);
     const child = new FakeChildProcess();
     if (args[0] === "run") {
       sidecarChild.stdout.write('{"type":"ready"}\n');
@@ -63,11 +64,67 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
   await manager.start();
   await manager.stop();
 
-  assert.equal(invocations[0].args[0], "network");
-  assert.equal(invocations[0].args[1], "create");
-  assert.equal(invocations[0].args[2], workerNetworkName);
-  assert.ok(invocations.some((invocation) => invocation.args[0] === "run" && invocation.args.includes("--network-alias")));
-  assert.ok(invocations.some((invocation) => invocation.args[0] === "network" && invocation.args[1] === "rm"));
+  assert.equal(invocations[0][0], "network");
+  assert.equal(invocations[0][1], "create");
+  assert.equal(invocations[0][2], workerNetworkName);
+  assert.ok(invocations.some((invocation) => invocation[0] === "run" && invocation.includes("--network-alias")));
+  assert.ok(invocations.some((invocation) => invocation[0] === "network" && invocation[1] === "rm"));
   assert.match(stdinContent, /"type":"bootstrap"/);
   assert.match(stdinContent, /"workerProxyTokenSecret":"shared-secret"/);
+});
+
+test("McpSidecarManager returns a failed authorization result when authorization handling throws", async () => {
+  const sidecarChild = new FakeChildProcess();
+  let stdinContent = "";
+  sidecarChild.stdin.on("data", (chunk: Buffer | string) => {
+    stdinContent += String(chunk);
+  });
+
+  const spawnImpl = ((_command: string, args: readonly string[]) => {
+    const child = new FakeChildProcess();
+    if (args[0] === "run") {
+      sidecarChild.stdout.write('{"type":"ready"}\n');
+      return sidecarChild as unknown as ChildProcessWithoutNullStreams;
+    }
+    queueMicrotask(() => {
+      child.emit("exit", 0, null);
+    });
+    return child as unknown as ChildProcessWithoutNullStreams;
+  }) as typeof import("node:child_process").spawn;
+
+  const manager = new McpSidecarManager({
+    configDirectory: "/tmp/sandy-config",
+    mcpServers: {
+      todoist: {
+        transport: "streamable_http",
+        url: "https://todoist.example/mcp",
+        oauthScopes: [],
+      },
+    },
+    workerNetworkName: createMcpWorkerNetworkName(),
+    sidecarImage: "sandy-mcp-proxy:latest",
+    spawnImpl,
+    authorizeToolCall: async () => {
+      throw new Error("approval service unavailable");
+    },
+  }, new SandyMcpProxyAccess("shared-secret"));
+
+  await manager.start();
+  sidecarChild.stdout.write(
+    JSON.stringify({
+      type: "authorization_request",
+      requestId: "request-1",
+      taskId: "task-1",
+      serverId: "todoist",
+      toolName: "list_tasks",
+      arguments: { project: "Inbox" },
+    }) + "\n",
+  );
+  await new Promise<void>((resolve) => setImmediateCallback(resolve));
+  await manager.stop();
+
+  assert.match(stdinContent, /"type":"authorization_result"/);
+  assert.match(stdinContent, /"requestId":"request-1"/);
+  assert.match(stdinContent, /"outcome":"failed"/);
+  assert.match(stdinContent, /approval service unavailable/);
 });

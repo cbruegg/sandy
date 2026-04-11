@@ -121,7 +121,7 @@ export class McpSidecarManager {
             return;
           }
           if (message.type === "authorization_request") {
-            void this.handleAuthorizationRequest(message);
+            this.dispatchAuthorizationRequest(message);
             return;
           }
         } catch (error) {
@@ -198,6 +198,40 @@ export class McpSidecarManager {
     if (this.started) {
       await this.runDockerCommand(["network", "rm", this.options.workerNetworkName], true);
     }
+  }
+
+  private dispatchAuthorizationRequest(message: McpSidecarAuthorizationRequestMessage): void {
+    void this.handleAuthorizationRequest(message).catch((error) => {
+      const failureMessage = error instanceof Error ? error.message : "Unknown authorization request failure.";
+
+      logger.warn("mcp.sidecar.authorization_request_failed", {
+        requestId: message.requestId,
+        taskId: message.taskId,
+        serverId: message.serverId,
+        toolName: message.toolName,
+        message: failureMessage,
+      });
+
+      try {
+        this.sendToSidecar({
+          type: "authorization_result",
+          requestId: message.requestId,
+          result: {
+            requestId: message.requestId,
+            outcome: "failed",
+            message: failureMessage,
+          } satisfies PrivilegeResolutionResult,
+        });
+      } catch (sendError) {
+        logger.warn("mcp.sidecar.authorization_result_failed", {
+          requestId: message.requestId,
+          taskId: message.taskId,
+          serverId: message.serverId,
+          toolName: message.toolName,
+          message: sendError instanceof Error ? sendError.message : "Unknown authorization result delivery failure.",
+        });
+      }
+    });
   }
 
   private async handleAuthorizationRequest(message: McpSidecarAuthorizationRequestMessage): Promise<void> {

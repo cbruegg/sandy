@@ -40,6 +40,9 @@ export const messages = {
   privilegeDenied: (requestId: string): string => `Denied privilege request ${requestId}.`,
   privilegeRejected: (requestId: string, detail: string): string => `Rejected privilege request ${requestId}.\n${detail}`,
   privilegeFailed: (requestId: string, detail: string): string => `Privilege request ${requestId} failed.\n${detail}`,
+  userDeniedPrivilegeRequest: (requestId: string): string => `The user denied privilege request ${requestId}.`,
+  unsupportedPrivilegeRequestType: (requestType: string): string =>
+    `Privilege request type "${requestType}" is not supported by this runtime.`,
   staleShareDeletionRequest: (): string => "That shared workspace deletion request is no longer pending.",
   shareDeletionRequestPrompt: (taskName: string, summary: string): string =>
     `Task "${taskName}" left files in its shared workspace.\n\n${summary}\n\nApprove to delete this workspace, or deny to keep it.`,
@@ -47,6 +50,23 @@ export const messages = {
   sharePreserved: (taskName: string): string => `Kept the shared workspace for task "${taskName}".`,
   privilegeRequestPrompt: (request: PrivilegeRequest): string =>
     `Privilege request:\n${describePrivilegeRequest(request)}\n\n${describePrivilegeActions(request)}`,
+  taskEndedBeforePrivilegeRequestResolved: (taskId: string, requestId: string): string =>
+    `Task ${taskId} ended before privilege request ${requestId} could be resolved.`,
+  taskNotActive: (taskId: string): string => `Task ${taskId} is not active.`,
+  taskNoLongerActive: (taskId: string): string => `Task ${taskId} is no longer active.`,
+  anotherPrivilegeRequestPendingForTask: (): string => "Another privilege request is already pending for this task.",
+  unsupportedMcpPrivilegeRequest: (serverId: string, toolName: string): string =>
+    `Unsupported MCP privilege request ${serverId}.${toolName}.`,
+  userDeniedMcpToolCall: (serverId: string, toolName: string): string =>
+    `The user denied MCP tool call ${serverId}.${toolName}.`,
+  mcpToolAllowedOnce: (serverId: string, toolName: string): string =>
+    `Allowed ${serverId}.${toolName} once.`,
+  mcpToolAllowedForWorkerSession: (serverId: string, toolName: string): string =>
+    `Allowed ${serverId}.${toolName} for this worker session.`,
+  mcpToolAllowedFromPersistentConfig: (serverId: string, toolName: string): string =>
+    `Allowed ${serverId}.${toolName} from persistent config.`,
+  mcpToolAllowedAndPersisted: (serverId: string, toolName: string): string =>
+    `Allowed ${serverId}.${toolName} and updated Sandy's config file.`,
 } as const;
 
 export const mcpAdminMessages = {

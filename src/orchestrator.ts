@@ -411,7 +411,7 @@ export class SandyOrchestrator {
       result = {
         requestId: request.requestId,
         outcome: "denied",
-        message: `The user denied privilege request ${request.requestId}.`,
+        message: messages.userDeniedPrivilegeRequest(request.requestId),
       };
     } else if (!isSupportedPrivilegeRequest(request.payload)) {
       result = this.buildUnsupportedPrivilegeResult(request);
@@ -486,8 +486,8 @@ export class SandyOrchestrator {
       requestId: request.requestId,
       outcome: "rejected",
       message: request.kind === "host_operation"
-        ? `Privilege request type "${request.payload.type}" is not supported by this runtime.`
-        : `Unsupported MCP privilege request ${request.serverId}.${request.toolName}.`,
+        ? messages.unsupportedPrivilegeRequestType(request.payload.type)
+        : messages.unsupportedMcpPrivilegeRequest(request.serverId, request.toolName),
     };
   }
 
@@ -571,7 +571,10 @@ export class SandyOrchestrator {
       this.pendingMcpPrivilegeResolvers.get(task.pendingPrivilegeRequest.requestId)?.({
         requestId: task.pendingPrivilegeRequest.requestId,
         outcome: "failed",
-        message: `Task ${task.taskId} ended before privilege request ${task.pendingPrivilegeRequest.requestId} could be resolved.`,
+        message: messages.taskEndedBeforePrivilegeRequestResolved(
+          task.taskId,
+          task.pendingPrivilegeRequest.requestId,
+        ),
       });
       this.pendingMcpPrivilegeResolvers.delete(task.pendingPrivilegeRequest.requestId);
     }
@@ -678,7 +681,7 @@ export class SandyOrchestrator {
       return {
         requestId: randomUUID(),
         outcome: "rejected",
-        message: `Task ${input.taskId} is not active.`,
+        message: messages.taskNotActive(input.taskId),
       };
     }
 
@@ -688,7 +691,7 @@ export class SandyOrchestrator {
       return {
         requestId: randomUUID(),
         outcome: "rejected",
-        message: `Task ${input.taskId} is not active.`,
+        message: messages.taskNotActive(input.taskId),
       };
     }
 
@@ -696,7 +699,7 @@ export class SandyOrchestrator {
       return {
         requestId: randomUUID(),
         outcome: "approved",
-        message: `Allowed ${input.serverId}.${input.toolName} for this worker session.`,
+        message: messages.mcpToolAllowedForWorkerSession(input.serverId, input.toolName),
         scope: "worker_session",
       };
     }
@@ -705,7 +708,7 @@ export class SandyOrchestrator {
       return {
         requestId: randomUUID(),
         outcome: "approved",
-        message: `Allowed ${input.serverId}.${input.toolName} from persistent config.`,
+        message: messages.mcpToolAllowedFromPersistentConfig(input.serverId, input.toolName),
         scope: "always",
       };
     }
@@ -714,7 +717,7 @@ export class SandyOrchestrator {
       return {
         requestId: randomUUID(),
         outcome: "failed",
-        message: "Another privilege request is already pending for this task.",
+        message: messages.anotherPrivilegeRequestPendingForTask(),
       };
     }
 
@@ -745,7 +748,7 @@ export class SandyOrchestrator {
       return {
         requestId: request.requestId,
         outcome: "failed",
-        message: `Task ${session.chatId} is no longer active.`,
+        message: messages.taskNoLongerActive(session.chatId),
       };
     }
 
@@ -754,14 +757,14 @@ export class SandyOrchestrator {
         return {
           requestId: request.requestId,
           outcome: "denied",
-          message: `The user denied MCP tool call ${request.serverId}.${request.toolName}.`,
+          message: messages.userDeniedMcpToolCall(request.serverId, request.toolName),
         };
       case "approve":
       case "approve_once":
         return {
           requestId: request.requestId,
           outcome: "approved",
-          message: `Allowed ${request.serverId}.${request.toolName} once.`,
+          message: messages.mcpToolAllowedOnce(request.serverId, request.toolName),
           scope: "once",
         };
       case "approve_worker_session":
@@ -769,7 +772,7 @@ export class SandyOrchestrator {
         return {
           requestId: request.requestId,
           outcome: "approved",
-          message: `Allowed ${request.serverId}.${request.toolName} for this worker session.`,
+          message: messages.mcpToolAllowedForWorkerSession(request.serverId, request.toolName),
           scope: "worker_session",
         };
       case "approve_always":
@@ -777,7 +780,7 @@ export class SandyOrchestrator {
         return {
           requestId: request.requestId,
           outcome: "approved",
-          message: `Allowed ${request.serverId}.${request.toolName} and updated Sandy's config file.`,
+          message: messages.mcpToolAllowedAndPersisted(request.serverId, request.toolName),
           scope: "always",
         };
       default:
