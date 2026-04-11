@@ -1,7 +1,7 @@
-import test from "node:test";
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PrivilegeBrokerImpl } from "./privilege-broker.js";
 
@@ -94,29 +94,41 @@ test("PrivilegeBrokerImpl rejects share path traversal", async () => {
 test("PrivilegeBrokerImpl expands ~/ for host paths", async () => {
   const broker = new PrivilegeBrokerImpl();
   const root = await mkdtemp(join(tmpdir(), "sandy-privilege-broker-"));
+  const fakeHome = await mkdtemp(join(root, "home-"));
   const taskSharePath = join(root, "share");
-  const exportDir = await mkdtemp(join(homedir(), "sandy-privilege-export-"));
+  const exportDir = await mkdtemp(join(fakeHome, "sandy-privilege-export-"));
   const targetPath = join(exportDir, "result.txt");
+  const originalHome = process.env.HOME;
   await mkdir(taskSharePath, { recursive: true });
   await writeFile(join(taskSharePath, "result.txt"), "hello from share");
 
-  const result = await broker.apply(
-    {
-      type: "copy_out_of_share",
-      reason: "Export result.",
-      sourcePath: "/workspace/share/result.txt",
-      targetPath: `~/${targetPath.slice(homedir().length + 1)}`,
-    },
-    {
-      taskId: "task-5",
-      taskSharePath,
-    },
-  );
+  try {
+    process.env.HOME = fakeHome;
 
-  assert.deepEqual(result, {
-    outcome: "approved",
-    message: `Copied /workspace/share/result.txt out of the shared workspace to ${targetPath}.`,
-  });
-  assert.equal(await readFile(targetPath, "utf8"), "hello from share");
-  await rm(exportDir, { recursive: true, force: true });
+    const result = await broker.apply(
+      {
+        type: "copy_out_of_share",
+        reason: "Export result.",
+        sourcePath: "/workspace/share/result.txt",
+        targetPath: `~/${targetPath.slice(fakeHome.length + 1)}`,
+      },
+      {
+        taskId: "task-5",
+        taskSharePath,
+      },
+    );
+
+    assert.deepEqual(result, {
+      outcome: "approved",
+      message: `Copied /workspace/share/result.txt out of the shared workspace to ${targetPath}.`,
+    });
+    assert.equal(await readFile(targetPath, "utf8"), "hello from share");
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
+    await rm(exportDir, { recursive: true, force: true });
+  }
 });

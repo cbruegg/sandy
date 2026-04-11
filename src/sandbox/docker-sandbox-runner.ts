@@ -1,4 +1,4 @@
-import {mkdir, mkdtemp, readdir, rm, writeFile} from "node:fs/promises";
+import {copyFile, mkdir, mkdtemp, readdir, rm, writeFile} from "node:fs/promises";
 import {join, relative, resolve} from "node:path";
 import {type ChildProcessWithoutNullStreams, spawn} from "node:child_process";
 import {createInterface} from "node:readline";
@@ -47,26 +47,35 @@ export class DockerSandboxRunner implements SandboxRunner {
     const builtWorkerConfig = this.options.workerCodexConfigBuilder(request.taskId);
     const workerCodexConfig = builtWorkerConfig?.codexConfigToml ?? null;
     const workerEnvironment = builtWorkerConfig?.environment ?? {};
-    let workerCodexConfigTempDir: string | null = null;
-    let workerCodexConfigHostPath: string | null = null;
-    if (workerCodexConfig) {
-      workerCodexConfigTempDir = await mkdtemp(join(tmpdir(), "sandy-worker-codex-config-"));
-      workerCodexConfigHostPath = join(workerCodexConfigTempDir, "config.toml");
-      try {
-        await writeFile(workerCodexConfigHostPath, workerCodexConfig, "utf8");
-      } catch (error) {
-        await rm(workerCodexConfigTempDir, { recursive: true, force: true });
-        throw error;
+    let workerCodexHomeTempDir: string | null = null;
+    const needsWorkerCodexHome = Boolean(this.options.codexAuthFile || workerCodexConfig);
+    if (needsWorkerCodexHome) {
+      workerCodexHomeTempDir = await mkdtemp(join(tmpdir(), "sandy-worker-codex-home-"));
+      if (this.options.codexAuthFile) {
+        try {
+          await copyFile(this.options.codexAuthFile, join(workerCodexHomeTempDir, "auth.json"));
+        } catch (error) {
+          await rm(workerCodexHomeTempDir, { recursive: true, force: true });
+          throw error;
+        }
+      }
+      if (workerCodexConfig) {
+        try {
+          await writeFile(join(workerCodexHomeTempDir, "config.toml"), workerCodexConfig, "utf8");
+        } catch (error) {
+          await rm(workerCodexHomeTempDir, { recursive: true, force: true });
+          throw error;
+        }
       }
     }
 
     let tempConfigCleanedUp = false;
     const cleanupWorkerCodexConfig = async (): Promise<void> => {
-      if (tempConfigCleanedUp || !workerCodexConfigTempDir) {
+      if (tempConfigCleanedUp || !workerCodexHomeTempDir) {
         return;
       }
       tempConfigCleanedUp = true;
-      await rm(workerCodexConfigTempDir, { recursive: true, force: true });
+      await rm(workerCodexHomeTempDir, { recursive: true, force: true });
     };
 
     const containerName = `sandy-${request.taskId}`;
@@ -105,17 +114,10 @@ export class DockerSandboxRunner implements SandboxRunner {
       dockerArgs.push("-e", `${name}=${value}`);
     }
 
-    if (this.options.codexAuthFile) {
+    if (workerCodexHomeTempDir) {
       dockerArgs.push(
         "-v",
-        `${this.options.codexAuthFile}:/root/.codex/auth.json:ro`,
-      );
-    }
-
-    if (workerCodexConfigHostPath) {
-      dockerArgs.push(
-        "-v",
-        `${workerCodexConfigHostPath}:/root/.codex/config.toml:ro`,
+        `${workerCodexHomeTempDir}:/root/.codex`,
       );
     }
 

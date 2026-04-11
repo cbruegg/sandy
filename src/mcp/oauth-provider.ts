@@ -69,7 +69,7 @@ export class SandyOAuthClientProvider implements OAuthClientProvider {
 
   async redirectToAuthorization(authorizationUrl: URL): Promise<void> {
     if (!this.options.interactive) {
-      throw new Error(`Authorization is required for this MCP server. Run "node dist/index.js mcp login <serverId>" first.`);
+      throw new Error(`Authorization is required for this MCP server. Run "sandy mcp login <serverId>" first.`);
     }
     await this.options.onRedirect?.(authorizationUrl);
   }

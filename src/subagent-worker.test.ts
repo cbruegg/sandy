@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { messages } from "./messages.js";
 import {
@@ -39,6 +39,8 @@ test("buildInitialTaskInputWithCapabilities includes package-manager guidance wh
     "Install dependencies if needed.",
     null,
     [
+      "Detected JavaScript runtime and package manager: Bun.",
+      "Use bun run, bun test, bun install, and bunx for JavaScript or TypeScript tasks in this container.",
       "Detected package manager: zypper.",
       "You can install or update openSUSE Tumbleweed packages in this container with zypper when needed.",
       "Detected package manager: Homebrew.",
@@ -46,6 +48,8 @@ test("buildInitialTaskInputWithCapabilities includes package-manager guidance wh
     ],
   );
 
+  assert.match(input, /Detected JavaScript runtime and package manager: Bun\./);
+  assert.match(input, /Use bun run, bun test, bun install, and bunx/);
   assert.match(input, /Detected package manager: zypper\./);
   assert.match(input, /openSUSE Tumbleweed packages/);
   assert.match(input, /Detected package manager: Homebrew\./);

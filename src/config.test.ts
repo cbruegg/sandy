@@ -1,7 +1,7 @@
-import test from "node:test";
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, parseConfigToml } from "./config.js";
 
@@ -94,7 +94,7 @@ bot_token = "telegram-token"
 
     assert.deepEqual(config.authMode, {
       mode: "codex_auth_file",
-      codexAuthFile: join(homedir(), ".codex", "auth.json"),
+      codexAuthFile: authFilePath,
     });
   } finally {
     if (originalHome === undefined) {

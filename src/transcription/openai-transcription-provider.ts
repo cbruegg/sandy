@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import type { TranscriptionInput, TranscriptionProvider } from "./transcription-provider.js";
 
-type FetchLike = typeof fetch;
+type FetchLike = (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => ReturnType<typeof fetch>;
 
 type OpenAiTranscriptionProviderOptions = {
   apiKey: string;

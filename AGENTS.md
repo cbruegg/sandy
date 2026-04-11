@@ -17,13 +17,14 @@ Sandy is a TypeScript project with the application code under `src/`.
 
 ## Build, Test, and Development Commands
 
-- `npm install`: install project dependencies.
-- `npm run build`: compile TypeScript to `dist/`.
-- `npm start`: run the built host application from `dist/index.js`.
-- `npm test`: rebuild and run the Node test suite from compiled output.
+- `bun install`: install project dependencies and update `bun.lock`.
+- `bun run build`: run linting, explicit TypeScript type-checking, Bun bundling, and `knip`.
+- `bun start`: run the host application from `src/index.ts` with Bun.
+- `bun run test`: rebuild and run the Bun test suite.
+- `bun run build:exe`: build the host single-file executable.
 - `docker build -t sandy-subagent:latest .`: build the worker container image used by sub-agents.
 
-Run both `npm run build` and `npm test` before committing changes that affect TypeScript or runtime logic. The explicit build step matters even when tests pass, because it verifies the full TypeScript project still compiles cleanly.
+Run both `bun run build` and `bun run test` before committing changes that affect TypeScript or runtime logic. The explicit build step matters even when tests pass, because it verifies the full project still type-checks and bundles cleanly under Bun.
 
 ## Coding Style & Naming Conventions
 
@@ -39,7 +40,7 @@ There is no formatter or linter configured yet, so keep style consistent with th
 
 ## Testing Guidelines
 
-Tests use the built-in Node test runner via `node --test`. Place tests next to the related code as `*.test.ts`. High test coverage is expected for orchestration behavior, normalization, privilege routing, and failure handling. Prefer small fakes over networked or Docker-backed integration in unit tests.
+Tests use Bun's test runner via `bun test`. Place tests next to the related code as `*.test.ts`. High test coverage is expected for orchestration behavior, normalization, privilege routing, and failure handling. Prefer small fakes over networked or Docker-backed integration in unit tests.
 
 ## Documentation Maintenance
 

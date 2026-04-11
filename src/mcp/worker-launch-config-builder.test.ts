@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import * as toml from "@iarna/toml";
 import type { McpServerConfig } from "../config.js";

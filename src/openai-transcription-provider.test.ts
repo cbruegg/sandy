@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "bun:test";
 import { OpenAiTranscriptionProvider } from "./transcription/openai-transcription-provider.js";
 
 test("OpenAiTranscriptionProvider uses the default OpenAI endpoint and model", async () => {
-  let requestUrl: RequestInfo | URL = "";
+  let requestUrl = "";
   let requestInit: RequestInit | undefined;
   const provider = new OpenAiTranscriptionProvider({
     apiKey: "sk-test",
     fetchFn: async (input, init) => {
-      requestUrl = input instanceof URL ? input.toString() : input;
+      requestUrl = requestInputToUrl(input);
       requestInit = init;
       return new Response(JSON.stringify({ text: "hello world" }), {
         status: 200,
@@ -33,7 +33,7 @@ test("OpenAiTranscriptionProvider uses the default OpenAI endpoint and model", a
       : headers?.Authorization;
 
   assert.equal(transcript, "hello world");
-  assert.equal(formatRequestUrl(requestUrl), "https://api.openai.com/v1/audio/transcriptions");
+  assert.equal(requestUrl, "https://api.openai.com/v1/audio/transcriptions");
   assert.equal(requestInit?.method, "POST");
   assert.equal(authorizationHeader, "Bearer sk-test");
   const body = requestInit?.body;
@@ -42,12 +42,12 @@ test("OpenAiTranscriptionProvider uses the default OpenAI endpoint and model", a
 });
 
 test("OpenAiTranscriptionProvider trims the base URL before appending the transcription path", async () => {
-  let requestUrl: RequestInfo | URL = "";
+  let requestUrl = "";
   const provider = new OpenAiTranscriptionProvider({
     apiKey: "sk-test",
     baseUrl: "https://transcribe.example/v1///",
     fetchFn: async (input) => {
-      requestUrl = input instanceof URL ? input.toString() : input;
+      requestUrl = requestInputToUrl(input);
       return new Response(JSON.stringify({ text: "done" }), {
         status: 200,
         headers: {
@@ -62,15 +62,15 @@ test("OpenAiTranscriptionProvider trims the base URL before appending the transc
     fileName: "voice.ogg",
   });
 
-  assert.equal(formatRequestUrl(requestUrl), "https://transcribe.example/v1/audio/transcriptions");
+  assert.equal(requestUrl, "https://transcribe.example/v1/audio/transcriptions");
 });
 
-function formatRequestUrl(input: RequestInfo | URL): string {
-  if (input instanceof URL) {
-    return input.toString();
-  }
+function requestInputToUrl(input: string | URL | Request): string {
   if (typeof input === "string") {
     return input;
+  }
+  if (input instanceof URL) {
+    return input.toString();
   }
   return input.url;
 }

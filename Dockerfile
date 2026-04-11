@@ -1,22 +1,19 @@
-FROM node:22-bookworm-slim AS build
+FROM oven/bun:1 AS build
 WORKDIR /app
 
-COPY package.json package-lock.json tsconfig.json eslint.config.mjs knip.json ./
-RUN npm ci
+COPY package.json bun.lock tsconfig.json eslint.config.mjs knip.json ./
+RUN bun install --frozen-lockfile
 
 COPY src ./src
-RUN npm run build
+RUN bun run build
 
-FROM node:22-bookworm-slim AS node-runtime-base
+FROM oven/bun:1 AS runtime-base
 WORKDIR /app
-
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
 
 COPY --from=build /app/dist ./dist
 
-FROM node-runtime-base AS mcp-proxy-runtime
-CMD ["node", "dist/mcp/sidecar.js"]
+FROM runtime-base AS mcp-proxy-runtime
+CMD ["bun", "dist/mcp/sidecar.js"]
 
 FROM opensuse/tumbleweed:latest AS worker-runtime
 WORKDIR /workspace
@@ -39,8 +36,11 @@ RUN zypper --non-interactive refresh \
     shadow \
     sudo \
     tar \
+    unzip \
     which \
   && zypper clean --all
+
+RUN curl -fsSL https://bun.sh/install | bash
 
 RUN useradd --create-home --shell /bin/bash linuxbrew \
   && mkdir -p /home/linuxbrew/.linuxbrew \
@@ -51,11 +51,9 @@ RUN su - linuxbrew -c 'NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.g
 RUN printf '#!/bin/sh\nexec sudo -u linuxbrew -H /home/linuxbrew/.linuxbrew/bin/brew "$@"\n' > /usr/local/bin/brew \
   && chmod 0755 /usr/local/bin/brew
 
-ENV PATH="/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
-
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+ENV BUN_INSTALL="/root/.bun"
+ENV PATH="${BUN_INSTALL}/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
 
 COPY --from=build /app/dist ./dist
 
-CMD ["node", "dist/subagent/worker.js"]
+CMD ["bun", "dist/subagent/worker.js"]

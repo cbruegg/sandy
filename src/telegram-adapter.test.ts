@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import type { Update } from "grammy/types";
 import { sanitizeTelegramHtml } from "./channel/telegram-html.js";

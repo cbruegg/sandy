@@ -61,6 +61,18 @@ export function buildTaskSummaryInput(): string {
 
 function detectRuntimeCapabilities(): string[] {
   const capabilities: string[] = [];
+  const bunVersion = spawnSync("bun", ["--version"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+
+  if (bunVersion.status === 0) {
+    capabilities.push(
+      "Detected JavaScript runtime and package manager: Bun.",
+      "Use bun run, bun test, bun install, and bunx for JavaScript or TypeScript tasks in this container.",
+    );
+  }
+
   const zypperVersion = spawnSync("zypper", ["--version"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"],

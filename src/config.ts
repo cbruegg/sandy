@@ -1,8 +1,8 @@
 import {existsSync, readFileSync} from "node:fs";
-import {homedir} from "node:os";
 import {dirname, join, resolve} from "node:path";
 import * as toml from "@iarna/toml";
 import {z} from "zod";
+import {resolveHomeDirectory} from "./home-directory.js";
 
 const logLevelSchema = z.enum(["debug", "info", "warn", "error"]);
 const mcpTransportSchema = z.literal("streamable_http");
@@ -14,11 +14,11 @@ const DEFAULT_STT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_STT_MODEL = "gpt-4o-mini-transcribe";
 
 function defaultConfigPath(): string {
-  return join(homedir(), ".config", "sandy", "config.toml");
+  return join(resolveHomeDirectory(), ".config", "sandy", "config.toml");
 }
 
 function defaultCodexAuthFilePath(): string {
-  return join(homedir(), ".codex", "auth.json");
+  return join(resolveHomeDirectory(), ".codex", "auth.json");
 }
 
 function buildSandyConfigSchema(defaultCodexAuthFilePath: string) {
@@ -115,10 +115,10 @@ function resolveConfigPath(env: EnvSource): string {
 
 function expandHomeShorthand(path: string): string {
   if (path === "~") {
-    return homedir();
+    return resolveHomeDirectory();
   }
   if (path.startsWith("~/")) {
-    return join(homedir(), path.slice(2));
+    return join(resolveHomeDirectory(), path.slice(2));
   }
   return path;
 }

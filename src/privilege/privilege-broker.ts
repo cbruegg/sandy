@@ -1,6 +1,6 @@
 import {cp, mkdir} from "node:fs/promises";
-import {homedir} from "node:os";
 import {dirname, isAbsolute, resolve} from "node:path";
+import {resolveHomeDirectory} from "../home-directory.js";
 import {resolveTaskShareHostPath} from "../shared-workspace.js";
 import type {PrivilegedWorkerToolPayload} from "../subagent/worker-tool-registry.js";
 
@@ -87,10 +87,10 @@ function resolveAbsoluteHostPath(inputPath: string, fieldName: string): string {
 
 function expandHomePath(inputPath: string): string {
   if (inputPath === "~") {
-    return homedir();
+    return resolveHomeDirectory();
   }
   if (inputPath.startsWith("~/")) {
-    return resolve(homedir(), inputPath.slice(2));
+    return resolve(resolveHomeDirectory(), inputPath.slice(2));
   }
   return inputPath;
 }

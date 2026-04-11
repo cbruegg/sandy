@@ -10,7 +10,7 @@ status, completed work, and known gaps relative to that target, see `PLAN_v1.md`
 
 ### Prerequisites
 
-- Node.js 22 or newer.
+- Bun 1.3 or newer.
 - Docker installed and available as `docker`.
 - A Telegram bot token.
 - Either:
@@ -73,7 +73,7 @@ Auth behavior:
 Install dependencies:
 
 ```bash
-npm install
+bun install
 ```
 
 Build the worker image:
@@ -88,31 +88,37 @@ Build the MCP sidecar image:
 docker build --target mcp-proxy-runtime -t sandy-mcp-proxy:latest .
 ```
 
-Build the TypeScript sources:
+Build the Bun bundles and verify linting, TypeScript type-checking, and dependency hygiene:
 
 ```bash
-npm run build
+bun run build
 ```
 
 Run lint checks:
 
 ```bash
-npm run lint
+bun run lint
+```
+
+Run TypeScript type-checking explicitly:
+
+```bash
+bun run typecheck
 ```
 
 Start Sandy:
 
 ```bash
-npm start
+bun start
 ```
 
 Manage MCP server auth:
 
 ```bash
-npm start -- mcp list
-npm start -- mcp status todoist
-npm start -- mcp login todoist
-npm start -- mcp logout todoist
+bun start -- mcp list
+bun start -- mcp status todoist
+bun start -- mcp login todoist
+bun start -- mcp logout todoist
 ```
 
 The host emits structured JSON logs to stdout/stderr for significant events such as startup, Telegram message handling,
@@ -123,10 +129,18 @@ data.
 Run tests:
 
 ```bash
-npm test
+bun run test
 ```
 
-`npm run build` now runs ESLint first, so any lint violation fails the build before TypeScript compilation.
+Build single-file executables:
+
+```bash
+bun run build:exe
+bun run build:exe:worker
+bun run build:exe:mcp
+```
+
+`bun run build` still performs explicit TypeScript type-checking via `tsc --noEmit`; Bun’s runtime transpilation is not used as a substitute for static type-checking.
 
 ## Architecture
 

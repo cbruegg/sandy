@@ -1,4 +1,4 @@
-import test from "node:test";
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -358,7 +358,7 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
   await rm(shareRoot, { recursive: true, force: true });
 });
 
-test("DockerSandboxRunner mounts worker Codex config from a temp path outside the task share", async () => {
+test("DockerSandboxRunner mounts a writable worker Codex home from a temp path outside the task share", async () => {
   const shareRoot = mkdtempSync(join(tmpdir(), "sandy-share-config-"));
   const taskChild = new FakeChildProcess();
 
@@ -372,16 +372,17 @@ test("DockerSandboxRunner mounts worker Codex config from a temp path outside th
 
   const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
   assert.ok(dockerRunInvocation);
-  const configMountArg = dockerRunInvocation.args.find((arg) => arg.endsWith(":/root/.codex/config.toml:ro"));
-  assert.ok(configMountArg);
-  assert.doesNotMatch(configMountArg, /\/task-1\/config\.toml:/);
+  const codexMountArg = dockerRunInvocation.args.find((arg) => arg.endsWith(":/root/.codex"));
+  assert.ok(codexMountArg);
+  assert.doesNotMatch(codexMountArg, /\/task-1\/.*:\/root\/\.codex/);
 
-  const configHostPath = configMountArg.slice(0, configMountArg.indexOf(":/root/.codex/config.toml:ro"));
-  assert.match(configHostPath, /sandy-worker-codex-config-/);
+  const codexHomeHostPath = codexMountArg.slice(0, codexMountArg.indexOf(":/root/.codex"));
+  assert.match(codexHomeHostPath, /sandy-worker-codex-home-/);
+  const configHostPath = join(codexHomeHostPath, "config.toml");
   assert.equal(await readFile(configHostPath, "utf8"), "model = \"gpt-5\"\n");
 
   taskChild.emit("exit", 0, null);
-  await waitFor(() => assert.rejects(access(configHostPath)));
+  await waitFor(() => assert.rejects(access(codexHomeHostPath)));
   await rm(shareRoot, { recursive: true, force: true });
 });
 
