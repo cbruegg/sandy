@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { configureLogger, logger } from "./logger.js";
 
-test("logger.debugContent writes info logs only when logging level is debug", () => {
+test("logger.debugContent writes debug logs only when logging level is debug", () => {
   const originalConsoleLog = console.log;
   const lines: string[] = [];
   console.log = (line?: unknown) => {
@@ -36,7 +36,7 @@ test("logger.debugContent writes info logs only when logging level is debug", ()
     event: string;
     data: { text: string };
   };
-  assert.equal(payload.level, "info");
+  assert.equal(payload.level, "debug");
   assert.equal(payload.event, "test.enabled");
   assert.equal(payload.data.text, "hello");
 });
