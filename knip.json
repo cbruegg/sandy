@@ -1,5 +1,6 @@
 {
   "entry": [
+    "src/mcp/sidecar.ts",
     "src/**/*.test.ts"
   ],
   "project": [

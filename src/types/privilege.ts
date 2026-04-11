@@ -1,11 +1,28 @@
-import type {PrivilegedWorkerToolPayload} from "../subagent/worker-tool-registry.js";
+import { z } from "zod";
+import type { PrivilegedWorkerToolPayload } from "../subagent/worker-tool-registry.js";
 
-export type PrivilegeRequest = {
+const privilegeApprovalScopeSchema = z.enum(["once", "worker_session", "always"]);
+
+export type HostOperationPrivilegeRequest = {
+  kind: "host_operation";
   requestId: string;
   payload: PrivilegedWorkerToolPayload;
 };
-export type PrivilegeResolutionResult = {
+
+export type McpToolCallPrivilegeRequest = {
+  kind: "mcp_tool_call";
   requestId: string;
-  outcome: "approved" | "denied" | "rejected" | "failed";
-  message: string;
+  serverId: string;
+  toolName: string;
+  arguments: unknown;
 };
+
+export type PrivilegeRequest = HostOperationPrivilegeRequest | McpToolCallPrivilegeRequest;
+
+export const privilegeResolutionResultSchema = z.object({
+  requestId: z.string().min(1),
+  outcome: z.enum(["approved", "denied", "rejected", "failed"]),
+  message: z.string(),
+  scope: privilegeApprovalScopeSchema.optional(),
+});
+export type PrivilegeResolutionResult = z.infer<typeof privilegeResolutionResultSchema>;

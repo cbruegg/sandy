@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { messages } from "./messages.js";
 import {
   buildInitialTaskInput,
   buildInitialTaskInputWithCapabilities,
@@ -62,6 +63,27 @@ test("buildPrivilegeResolutionInput explains the host privilege result to the su
   assert.match(input, /approved/);
   assert.match(input, /Copied \/tmp\/input.txt into the shared workspace\./);
   assert.match(input, /Continue the task from here\./);
+});
+
+test("mcpToolProgress includes payloads for completed MCP calls", () => {
+  assert.equal(
+    messages.mcpToolProgress("completed", "filesystem", "read_file", { path: "/tmp/report.txt" }),
+    'MCP completed: filesystem.read_file {"path":"/tmp/report.txt"}',
+  );
+});
+
+test("commandProgress formats command execution updates", () => {
+  assert.equal(
+    messages.commandProgress("completed", "npm test"),
+    "Command completed: npm test",
+  );
+});
+
+test("nextPlannedStep formats todo-list progress updates", () => {
+  assert.equal(
+    messages.nextPlannedStep("Run the final verification"),
+    "Next planned step: Run the final verification",
+  );
 });
 
 test("parseWorkerToolCall parses privilege-escalated worker tools", () => {

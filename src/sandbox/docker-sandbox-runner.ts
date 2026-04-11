@@ -1,18 +1,24 @@
-import { mkdir, readdir, rm } from "node:fs/promises";
-import { join, relative, resolve } from "node:path";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createInterface } from "node:readline";
-import { logger } from "../logger.js";
-import type { SandboxHandle, SandboxRunner, LaunchTaskRequest, ShareInspection } from "./sandbox-runner.js";
-import type { HostCommand, PrivilegeResolutionResult, SubAgentEvent } from "../types.js";
-import { parseSubAgentEvent, serializeHostCommand } from "../types.js";
-import { sharedWorkspaceMountPath } from "../shared-workspace.js";
+import {mkdir, mkdtemp, readdir, rm, writeFile} from "node:fs/promises";
+import {join, relative, resolve} from "node:path";
+import {type ChildProcessWithoutNullStreams, spawn} from "node:child_process";
+import {createInterface} from "node:readline";
+import {tmpdir} from "node:os";
+import {logger} from "../logger.js";
+import type {LaunchTaskRequest, SandboxHandle, SandboxRunner, ShareInspection} from "./sandbox-runner.js";
+import type {HostCommand, PrivilegeResolutionResult, SubAgentEvent} from "../types.js";
+import {parseSubAgentEvent, serializeHostCommand} from "../types.js";
+import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 
 type DockerSandboxRunnerOptions = {
   workerImage: string;
   shareRoot: string;
   openAiApiKey: string | null;
   codexAuthFile: string | null;
+  workerNetworkName?: string | null;
+  workerCodexConfigBuilder: (taskId: string) => {
+    codexConfigToml: string | null;
+    environment: Record<string, string>;
+  };
   handshakeTimeoutMs?: number;
   spawnImpl?: typeof spawn;
   setTimeoutImpl?: typeof setTimeout;
@@ -38,6 +44,30 @@ export class DockerSandboxRunner implements SandboxRunner {
   ): Promise<SandboxHandle> {
     const sharePath = this.getTaskSharePath(request.taskId);
     await mkdir(sharePath, { recursive: true });
+    const builtWorkerConfig = this.options.workerCodexConfigBuilder(request.taskId);
+    const workerCodexConfig = builtWorkerConfig?.codexConfigToml ?? null;
+    const workerEnvironment = builtWorkerConfig?.environment ?? {};
+    let workerCodexConfigTempDir: string | null = null;
+    let workerCodexConfigHostPath: string | null = null;
+    if (workerCodexConfig) {
+      workerCodexConfigTempDir = await mkdtemp(join(tmpdir(), "sandy-worker-codex-config-"));
+      workerCodexConfigHostPath = join(workerCodexConfigTempDir, "config.toml");
+      try {
+        await writeFile(workerCodexConfigHostPath, workerCodexConfig, "utf8");
+      } catch (error) {
+        await rm(workerCodexConfigTempDir, { recursive: true, force: true });
+        throw error;
+      }
+    }
+
+    let tempConfigCleanedUp = false;
+    const cleanupWorkerCodexConfig = async (): Promise<void> => {
+      if (tempConfigCleanedUp || !workerCodexConfigTempDir) {
+        return;
+      }
+      tempConfigCleanedUp = true;
+      await rm(workerCodexConfigTempDir, { recursive: true, force: true });
+    };
 
     const containerName = `sandy-${request.taskId}`;
     let finished = false;
@@ -71,10 +101,28 @@ export class DockerSandboxRunner implements SandboxRunner {
       dockerArgs.push("-e", `OPENAI_API_KEY=${this.options.openAiApiKey}`);
     }
 
+    for (const [name, value] of Object.entries(workerEnvironment)) {
+      dockerArgs.push("-e", `${name}=${value}`);
+    }
+
     if (this.options.codexAuthFile) {
       dockerArgs.push(
         "-v",
         `${this.options.codexAuthFile}:/root/.codex/auth.json:ro`,
+      );
+    }
+
+    if (workerCodexConfigHostPath) {
+      dockerArgs.push(
+        "-v",
+        `${workerCodexConfigHostPath}:/root/.codex/config.toml:ro`,
+      );
+    }
+
+    if (this.options.workerNetworkName) {
+      dockerArgs.push(
+        "--network",
+        this.options.workerNetworkName,
       );
     }
 
@@ -182,6 +230,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       }
       finished = true;
       clearHandshakeTimer();
+      void cleanupWorkerCodexConfig();
       logger.error("sandbox.launch_failed", {
         taskId: request.taskId,
         message: error.message,
@@ -200,6 +249,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     });
 
     child.on("exit", (code, signal) => {
+      void cleanupWorkerCodexConfig();
       if (finished) {
         return;
       }

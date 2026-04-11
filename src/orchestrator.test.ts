@@ -643,6 +643,39 @@ test("orchestrator closes the sandbox handle on normal task completion", async (
   assert.equal(runner.handle.closeCalls, 1);
 });
 
+test("orchestrator uses the task name in task_done completion messages", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Inspect the environment.",
+      taskName: "env-inspection",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-task-name",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Inspect the environment",
+    rawText: "Inspect the environment",
+    attachments: [],
+  });
+
+  await runner.emit({
+    type: "task_done",
+  });
+
+  assert.equal(channel.sentTexts.at(-1)?.text, messages.taskCompleted("env-inspection"));
+});
+
 test("orchestrator releases completed-task output only when the user continues normally", async () => {
   const channel = new RecordingChannel();
   const runner = new FakeSandboxRunner();

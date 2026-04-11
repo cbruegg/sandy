@@ -7,7 +7,18 @@ RUN npm ci
 COPY src ./src
 RUN npm run build
 
-FROM opensuse/tumbleweed:latest
+FROM node:22-bookworm-slim AS node-runtime-base
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY --from=build /app/dist ./dist
+
+FROM node-runtime-base AS mcp-proxy-runtime
+CMD ["node", "dist/mcp/sidecar.js"]
+
+FROM opensuse/tumbleweed:latest AS worker-runtime
 WORKDIR /workspace
 
 RUN zypper --non-interactive refresh \

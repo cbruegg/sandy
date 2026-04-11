@@ -70,21 +70,6 @@ function normalizeTelegramTextInput(
   base: Pick<UserTextEvent, "chatId" | "messageId" | "timestamp">,
   rawText: string,
 ): NormalizedChatEvent {
-  const normalized = rawText.trim().toLowerCase();
-
-  if (normalized === "/cancel" || normalized === "cancel") {
-    return { ...base, kind: "cancel_request" };
-  }
-  if (normalized === "/report" || normalized === "report") {
-    return { ...base, kind: "danger_report" };
-  }
-  if (normalized === "/approve" || normalized === "approve") {
-    return { ...base, kind: "approval_response", decision: "approve" };
-  }
-  if (normalized === "/deny" || normalized === "deny") {
-    return { ...base, kind: "approval_response", decision: "deny" };
-  }
-
   return {
     ...base,
     kind: "user_text",
@@ -114,8 +99,28 @@ function normalizeCallbackQuery(update: Update): NormalizedChatEvent | null {
     const event: ApprovalResponseEvent = {
       ...base,
       kind: "approval_response",
-      decision: "approve",
+      decision: "approve_once",
       requestId: data.slice("approve:".length) || undefined,
+    };
+    return event;
+  }
+
+  if (data.startsWith("approve_session:")) {
+    const event: ApprovalResponseEvent = {
+      ...base,
+      kind: "approval_response",
+      decision: "approve_worker_session",
+      requestId: data.slice("approve_session:".length) || undefined,
+    };
+    return event;
+  }
+
+  if (data.startsWith("approve_always:")) {
+    const event: ApprovalResponseEvent = {
+      ...base,
+      kind: "approval_response",
+      decision: "approve_always",
+      requestId: data.slice("approve_always:".length) || undefined,
     };
     return event;
   }

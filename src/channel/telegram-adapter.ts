@@ -185,20 +185,11 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     logger.info("telegram.send_privilege_request", {
       chatId,
       requestId: request.requestId,
-      requestType: request.payload.type,
+      requestType: request.kind === "host_operation" ? request.payload.type : `${request.serverId}.${request.toolName}`,
     });
     await this.sendFormattedMessage(chatId, messages.privilegeRequestPrompt(request), {
       reply_markup: {
-        inline_keyboard: [
-          [
-            { text: buttonLabels.approve, callback_data: `approve:${request.requestId}` },
-            { text: buttonLabels.deny, callback_data: `deny:${request.requestId}` },
-          ],
-          [
-            { text: buttonLabels.reportDangerousOutput, callback_data: "report" },
-            { text: buttonLabels.cancelTask, callback_data: "cancel" },
-          ],
-        ],
+        inline_keyboard: buildPrivilegeKeyboard(request),
       },
     });
   }
@@ -253,6 +244,36 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       ...other,
     });
   }
+}
+
+function buildPrivilegeKeyboard(request: PrivilegeRequest): Array<Array<{ text: string; callback_data: string }>> {
+  if (request.kind === "mcp_tool_call") {
+    return [
+      [
+        { text: buttonLabels.approve, callback_data: `approve:${request.requestId}` },
+        { text: buttonLabels.approveWorkerSession, callback_data: `approve_session:${request.requestId}` },
+      ],
+      [
+        { text: buttonLabels.approveAlways, callback_data: `approve_always:${request.requestId}` },
+        { text: buttonLabels.deny, callback_data: `deny:${request.requestId}` },
+      ],
+      [
+        { text: buttonLabels.reportDangerousOutput, callback_data: "report" },
+        { text: buttonLabels.cancelTask, callback_data: "cancel" },
+      ],
+    ];
+  }
+
+  return [
+    [
+      { text: buttonLabels.approve, callback_data: `approve:${request.requestId}` },
+      { text: buttonLabels.deny, callback_data: `deny:${request.requestId}` },
+    ],
+    [
+      { text: buttonLabels.reportDangerousOutput, callback_data: "report" },
+      { text: buttonLabels.cancelTask, callback_data: "cancel" },
+    ],
+  ];
 }
 
 function previewText(text: string): string {

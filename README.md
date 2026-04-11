@@ -19,38 +19,54 @@ status, completed work, and known gaps relative to that target, see `PLAN_v1.md`
 
 ### Configuration
 
-Required environment variables:
+Sandy reads its runtime config from `~/.config/sandy/config.toml` by default.
+The only environment variable still used for configuration is:
 
-- `TELEGRAM_BOT_TOKEN`: Telegram bot token for the channel adapter.
+- `SANDY_CONFIG_FILE`: optional override for the Sandy config file path.
 
-Optional environment variables:
+Example config:
+Commented entries below show built-in defaults. Uncommented values are required or example overrides.
 
-- `OPENAI_API_KEY`: API key passed to the host controller and sub-agent worker. If omitted, Sandy uses local Codex ChatGPT auth when available.
-- `SANDY_STT_API_KEY`: API key used for voice-message transcription. If unset, Telegram voice messages remain disabled.
-- `SANDY_STT_BASE_URL`: OpenAI-compatible base URL for STT requests. Default: `https://api.openai.com/v1`.
-- `SANDY_STT_MODEL`: Transcription model name sent to the STT endpoint. Default: `gpt-4o-mini-transcribe`.
-- `SANDY_CODEX_AUTH_FILE`: Override path to the host Codex `auth.json` file that should be mounted into sub-agent containers. Default: `~/.codex/auth.json` when present.
-- `SANDY_LOG_LEVEL`: Minimum host log level. Supported values: `debug`, `info`, `warn`, `error`. Default: `info`.
-- `SANDY_DEBUG`: When set to exactly `true`, Sandy also logs full inbound user messages and LLM model responses from the main agent and sub-agent paths. Default: unset.
-- `SANDY_WORKER_IMAGE`: Docker image used for sub-agents. Default: `sandy-subagent:latest` built from this repository's openSUSE Tumbleweed + Homebrew `Dockerfile`.
-- `SANDY_SHARE_ROOT`: Host directory under which per-sub-agent shared volumes are created. Default: `/tmp/sandy-shares`.
+```toml
+[logging]
+# level = "info"
+# debug = false
 
-Example:
+[telegram]
+bot_token = "123456:telegram-token"
 
-```bash
-export TELEGRAM_BOT_TOKEN=...
-export SANDY_STT_API_KEY=...
-export SANDY_LOG_LEVEL=info
-export SANDY_DEBUG=true
-export SANDY_WORKER_IMAGE=sandy-subagent:latest
-export SANDY_SHARE_ROOT=/tmp/sandy-shares
+[auth]
+# codex_auth_file = "~/.codex/auth.json"
+# openai_api_key = "sk-..." # optional override, no default
+
+[worker]
+# image = "sandy-subagent:latest"
+# share_root = "/tmp/sandy-shares"
+
+# Optional STT config for voice message support.
+# If `stt.api_key` is not set, voice messages are not supported and will be rejected with an error message.
+[stt]
+# api_key = "stt-api-key" # optional override, no default
+# base_url = "https://api.openai.com/v1"
+# model = "gpt-4o-mini-transcribe"
+
+# Optional:
+[mcp.servers.todoist]
+# Currently the only allowed transport:
+transport = "streamable_http"
+url = "https://todoist.example/mcp"
+# oauth_scopes = []
+
+[approvals.mcp.todoist]
+# always_allow_tools = []
 ```
 
 Auth behavior:
 
-- If the host already has Codex logged in with ChatGPT and `~/.codex/auth.json` exists, Sandy mounts that file into the sub-agent container automatically.
-- If `OPENAI_API_KEY` is set and no Codex auth file is available, Sandy passes the API key to the main agent and sub-agent worker.
-- If both are present, Sandy prefers the Codex ChatGPT auth file and does not pass `OPENAI_API_KEY`.
+- If the host already has Codex logged in with ChatGPT and `auth.codex_auth_file` exists, Sandy mounts that file into the sub-agent container automatically.
+- If `auth.openai_api_key` is set and no Codex auth file is available, Sandy passes the API key to the main agent and sub-agent worker.
+- If both are present, Sandy prefers the Codex ChatGPT auth file and does not pass the API key.
+- OAuth for upstream MCP servers is handled on the host through the Sandy CLI, not inside Telegram chats.
 
 ### Build and run
 
@@ -63,7 +79,13 @@ npm install
 Build the worker image:
 
 ```bash
-docker build -t sandy-subagent:latest .
+docker build --target worker-runtime -t sandy-subagent:latest .
+```
+
+Build the MCP sidecar image:
+
+```bash
+docker build --target mcp-proxy-runtime -t sandy-mcp-proxy:latest .
 ```
 
 Build the TypeScript sources:
@@ -84,9 +106,18 @@ Start Sandy:
 npm start
 ```
 
+Manage MCP server auth:
+
+```bash
+npm start -- mcp list
+npm start -- mcp status todoist
+npm start -- mcp login todoist
+npm start -- mcp logout todoist
+```
+
 The host emits structured JSON logs to stdout/stderr for significant events such as startup, Telegram message handling,
 main-agent decisions, task lifecycle transitions, privilege requests, and sandbox/container failures.
-If `SANDY_DEBUG=true`, those logs also include full user message content and model responses, which may contain sensitive
+If `logging.debug=true`, those logs also include full user message content and model responses, which may contain sensitive
 data.
 
 Run tests:
@@ -109,7 +140,7 @@ Each channel also defines its own formatting contract for user-visible agent out
 
 Allowed message types are text messages, file uploads (with images receiving dedicated handling) and voice messages.
 Voice messages are transcribed to text using STT, and the resulting text is then processed as a normal text message.
-In the current implementation, voice support is enabled only when `SANDY_STT_API_KEY` is configured. By default,
+In the current implementation, voice support is enabled only when `stt.api_key` is configured. By default,
 Sandy sends STT requests to the OpenAI API with `gpt-4o-mini-transcribe`, and the endpoint can be overridden with an
 OpenAI-compatible base URL.
 
@@ -176,14 +207,19 @@ Sub-agents may request access to additional resources from the user, such as:
 - Certain host files to be copied in and out of the shared volume.
 - Read-only mount access to a specific directory on the host machine.
 - Read-write mount access to a specific directory on the host machine.
-- MCP servers that the main agent can connect to; note that the main agent tells the sub-agent which MCP servers it can
-  connect to on launch of the sub-agent already.
+- MCP tools exposed through Sandy's host-side MCP proxy.
 - Tools to send authenticated HTTPS requests through OneCLI,
   [similar to NanoClaw](https://docs.nanoclaw.dev/concepts/security#6-credential-handling).
 
 Privilege evaluation requests are forwarded to the user verbatim, without the main agent getting to see them.
 As such, these requests from the sub-agent must use a special message type on the container control channel that is then
 *not* forwarded to the main agent, but instead directly to the user.
+
+For MCP, Sandy exposes configured upstream servers to workers through an app-wide Docker sidecar on a dedicated Docker
+network. The worker receives Codex MCP configuration pointing at that sidecar plus a Sandy-issued JWT bearer token
+valid for one day. Upstream OAuth credentials stay in the host's Sandy config directory and are mounted into the
+sidecar. By default, each MCP tool call is treated as a privilege request, and the user can approve it once, for the
+current worker session, or permanently. Permanent approvals are written back to Sandy's TOML config file automatically.
 
 Channel-native file transfer is separate from privilege evaluation. User uploads go straight into the shared workspace,
 and sub-agent requests to send files back to the user through the channel do not require approval as long as the file
@@ -192,6 +228,9 @@ path stays under `/workspace/share`.
 The user can then choose to approve or deny the request, and if they approve it using predefined phrases or emoji
 reactions, the host runtime deterministically performs the requested operation without the LLM of the main
 agent involved. It then notifies the sub-agent of the result so it can proceed with its execution.
+
+Sandy's own host-mediated worker tools are not rewritten to MCP in v1. External MCP access and Sandy's native
+copy/file-send flows coexist for now.
 
 ## Testing
 

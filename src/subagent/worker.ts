@@ -1,27 +1,13 @@
-import { createInterface } from "node:readline";
-import { pathToFileURL } from "node:url";
-import {
-  Codex,
-  type CommandExecutionItem,
-  type Thread,
-  type ThreadEvent,
-  type TodoListItem,
-} from "@openai/codex-sdk";
-import {
-  type ChannelFormatting,
-  type HostCommand,
-  type SubAgentEvent,
-} from "../types.js";
-import { sharedWorkspaceMountPath } from "../shared-workspace.js";
-import { workerToolDefinitions } from "./worker-tools.js";
-import {
-  parseWorkerToolCall,
-  workerToolCallToSubAgentEvent,
-} from "./worker-protocol.js";
-import {
-  buildInitialTaskInput,
-  buildPrivilegeResolutionInput,
-} from "./worker-prompt.js";
+import {createInterface} from "node:readline";
+import {pathToFileURL} from "node:url";
+import {Codex, type Thread, type ThreadEvent, type TodoListItem,} from "@openai/codex-sdk";
+import {type ChannelFormatting, type HostCommand, type SubAgentEvent,} from "../types.js";
+import {sharedWorkspaceMountPath} from "../shared-workspace.js";
+import {workerToolDefinitions} from "./worker-tools.js";
+import {parseWorkerToolCall, workerToolCallToSubAgentEvent,} from "./worker-protocol.js";
+import {buildInitialTaskInput, buildPrivilegeResolutionInput,} from "./worker-prompt.js";
+import {messages} from "../messages.js";
+
 type ThreadEventDisposition = "none" | "privileged_tool_call" | "send_file_to_channel" | "terminal_error";
 type WorkerToolEventParseResult =
   | { kind: "none" }
@@ -82,11 +68,7 @@ function progressFromTodoList(item: TodoListItem): string | null {
   if (!next) {
     return null;
   }
-  return `Next planned step: ${next.text}`;
-}
-
-function progressFromCommand(item: CommandExecutionItem): string {
-  return `Command ${item.status}: ${item.command}`;
+  return messages.nextPlannedStep(next.text);
 }
 
 async function streamTurn(thread: Thread, input: string): Promise<void> {
@@ -138,7 +120,7 @@ function handleThreadEvent(event: ThreadEvent): ThreadEventDisposition {
       if (event.item.type === "command_execution") {
         send({
           type: "progress",
-          message: progressFromCommand(event.item),
+          message: messages.commandProgress(event.item.status, event.item.command),
         });
       }
       if (event.item.type === "todo_list") {
@@ -149,6 +131,12 @@ function handleThreadEvent(event: ThreadEvent): ThreadEventDisposition {
             message,
           });
         }
+      }
+      if (event.item.type === "mcp_tool_call") {
+        send({
+          type: "progress",
+          message: messages.mcpToolProgress(event.item.status, event.item.server, event.item.tool, event.item.arguments),
+        });
       }
       return "none";
     case "turn.completed":
