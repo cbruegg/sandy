@@ -66,7 +66,13 @@ export function parseWorkerToolCall(text: string): WorkerToolCall | null {
 
 export function workerToolCallToSubAgentEvent(
   call: WorkerToolCall,
-): Extract<SubAgentEvent, { type: "tool_call" }> {
+): Extract<SubAgentEvent, { type: "tool_call" }> | Extract<SubAgentEvent, { type: "task_done" }> {
+  if (call.tool === "complete_task") {
+    return {
+      type: "task_done",
+    };
+  }
+
   return {
     type: "tool_call",
     call: call.payload,

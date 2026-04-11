@@ -16,7 +16,7 @@ export class InMemorySessionStore implements SessionStore {
     const session: SessionState = {
       chatId,
       activeTask: null,
-      pendingQuarantinedOutputs: [],
+      pendingTaskSummary: null,
       pendingShareDeletion: null,
     };
     this.sessions.set(chatId, session);

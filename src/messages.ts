@@ -18,8 +18,8 @@ export const messages = {
     "Voice transcription failed. Please try again or send the request as text.",
   nextPlannedStep: (step: string): string => `Next planned step: ${step}`,
   commandProgress: (status: string, command: string): string => `Command ${status}: ${command}`,
-  taskComplete: (text: string): string => `Task complete:\n${text}`,
-  taskCompleted: (taskName: string): string => `Task "${taskName}" completed.`,
+  taskSummaryReady: (taskName: string, summary: string): string =>
+    `Task "${taskName}" completed.\n\nSummary:\n${summary}`,
   taskFailed: (message: string): string => `Task failed: ${message}`,
   noActiveTaskToCancel: (): string => "There is no active task to cancel.",
   noPendingPrivilegeRequest: (): string => "There is no pending privilege request.",

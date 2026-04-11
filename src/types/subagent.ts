@@ -3,7 +3,8 @@ import type {WorkerToolPayload} from "../subagent/worker-tool-registry.js";
 import {createWorkerToolPayloadSchema} from "../subagent/worker-tool-registry.js";
 import type {PrivilegeResolutionResult} from "./privilege.js";
 
-const workerToolCallSchema = createWorkerToolPayloadSchema();
+const workerToolCallSchema = createWorkerToolPayloadSchema((entry) => entry.name !== "complete_task");
+type HostMediatedWorkerToolPayload = Exclude<WorkerToolPayload, { type: "complete_task" }>;
 
 export type ProgressEvent = {
   type: "progress";
@@ -20,9 +21,14 @@ export type FinalResultEvent = {
   text: string;
 };
 
+export type TaskSummaryEvent = {
+  type: "task_summary";
+  summary: string;
+};
+
 export type ToolCallEvent = {
   type: "tool_call";
-  call: WorkerToolPayload;
+  call: HostMediatedWorkerToolPayload;
 };
 
 export type TaskDoneEvent = {
@@ -47,6 +53,7 @@ export type SubAgentEvent =
   | ProgressEvent
   | AssistantOutputEvent
   | FinalResultEvent
+  | TaskSummaryEvent
   | ToolCallEvent
   | TaskDoneEvent
   | TaskErrorEvent
@@ -81,6 +88,10 @@ const subAgentEventSchema = z.discriminatedUnion("type", [
     text: z.string(),
   }).strict(),
   z.object({
+    type: z.literal("task_summary"),
+    summary: z.string(),
+  }).strict(),
+  z.object({
     type: z.literal("tool_call"),
     call: workerToolCallSchema,
   }).strict(),
@@ -101,7 +112,7 @@ const subAgentEventSchema = z.discriminatedUnion("type", [
 ]);
 
 export function parseSubAgentEvent(raw: string): SubAgentEvent {
-  return subAgentEventSchema.parse(JSON.parse(raw));
+  return subAgentEventSchema.parse(JSON.parse(raw)) as SubAgentEvent;
 }
 
 export function serializeHostCommand(command: HostCommand): string {

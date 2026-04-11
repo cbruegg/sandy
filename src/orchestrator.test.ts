@@ -68,6 +68,10 @@ class RecordingChannel implements ChannelAdapter {
     this.taskUpdates.push({ chatId, text });
   }
 
+  async sendReportableText(chatId: string, text: string): Promise<void> {
+    this.sentTexts.push({ chatId, text });
+  }
+
   async sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void> {
     this.privilegeRequests.push({ chatId, request });
   }
@@ -177,7 +181,7 @@ class FakePrivilegeBroker implements PrivilegeBroker {
   }
 }
 
-test("orchestrator launches a task and discards quarantined output on danger report", async () => {
+test("orchestrator launches a task and discards pending output on danger report", async () => {
   const channel = new RecordingChannel();
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
@@ -222,12 +226,12 @@ test("orchestrator launches a task and discards quarantined output on danger rep
 
   const session = store.getOrCreate("chat-1");
   assert.equal(session.activeTask, null);
-  assert.deepEqual(session.pendingQuarantinedOutputs, []);
+  assert.equal(session.pendingTaskSummary, null);
   assert.deepEqual(contextTexts(mainAgent.contexts[0]), ["Inspect the repository"]);
   assert.deepEqual(mainAgent.contexts[0]?.channelFormatting, testFormatting);
 });
 
-test("orchestrator accepts active-task quarantined output without storing host-side history", async () => {
+test("orchestrator accepts active-task output without storing host-side history", async () => {
   const channel = new RecordingChannel();
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
@@ -270,8 +274,7 @@ test("orchestrator accepts active-task quarantined output without storing host-s
   });
 
   const session = store.getOrCreate("chat-2");
-  assert.deepEqual(session.pendingQuarantinedOutputs, []);
-  assert.equal(session.activeTask?.quarantinedOutputs.length ?? 0, 0);
+  assert.equal(session.pendingTaskSummary, null);
   assert.match(runner.handle.userMessages[0] ?? "", /Use the main branch\./);
   assert.equal(mainAgent.contexts.length, 1);
 });
@@ -527,7 +530,7 @@ test("orchestrator terminates the task when the user reports a pending privilege
   );
 });
 
-test("orchestrator keeps completed-task output quarantined until the user sends another message", async () => {
+test("orchestrator keeps completed-task summary pending until the user sends another message", async () => {
   const channel = new RecordingChannel();
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
@@ -559,12 +562,30 @@ test("orchestrator keeps completed-task output quarantined until the user sends 
   });
 
   await runner.emit({
+    type: "task_summary",
+    summary: [
+      "Outcome: completed",
+      "Summary: Inspected the environment and found 8 CPUs.",
+      "Artifacts: none",
+      "Open questions: none",
+    ].join("\n"),
+  });
+
+  await runner.emit({
     type: "task_done",
   });
 
   const session = store.getOrCreate("chat-4");
   assert.equal(session.activeTask, null);
-  assert.deepEqual(session.pendingQuarantinedOutputs, ["The environment has 8 CPUs."]);
+  assert.deepEqual(session.pendingTaskSummary, {
+    taskName: "env-inspection",
+    summary: [
+      "Outcome: completed",
+      "Summary: Inspected the environment and found 8 CPUs.",
+      "Artifacts: none",
+      "Open questions: none",
+    ].join("\n"),
+  });
 });
 
 test("orchestrator sends worker-requested shared files back through the channel", async () => {
@@ -673,7 +694,18 @@ test("orchestrator uses the task name in task_done completion messages", async (
     type: "task_done",
   });
 
-  assert.equal(channel.sentTexts.at(-1)?.text, messages.taskCompleted("env-inspection"));
+  assert.equal(
+    channel.sentTexts.at(-1)?.text,
+    messages.taskSummaryReady(
+      "env-inspection",
+      [
+        "Outcome: completed",
+        'Summary: The task ended without a worker-provided handoff summary. Task name: env-inspection. Brief: Inspect the environment.',
+        "Artifacts: unknown",
+        "Open questions: Review the visible task updates above if more detail is needed.",
+      ].join("\n"),
+    ),
+  );
 });
 
 test("orchestrator releases completed-task output only when the user continues normally", async () => {
@@ -715,6 +747,16 @@ test("orchestrator releases completed-task output only when the user continues n
   });
 
   await runner.emit({
+    type: "task_summary",
+    summary: [
+      "Outcome: completed",
+      "Summary: Inspected the environment and found 8 CPUs.",
+      "Artifacts: none",
+      "Open questions: none",
+    ].join("\n"),
+  });
+
+  await runner.emit({
     type: "task_done",
   });
 
@@ -729,8 +771,10 @@ test("orchestrator releases completed-task output only when the user continues n
   });
 
   const session = store.getOrCreate("chat-5");
-  assert.deepEqual(session.pendingQuarantinedOutputs, []);
-  assert.deepEqual(contextTexts(mainAgent.contexts[1]), ["The environment has 8 CPUs.", "thanks"]);
+  assert.equal(session.pendingTaskSummary, null);
+  assert.equal(contextTexts(mainAgent.contexts[1]).at(-1), "thanks");
+  assert.match(contextTexts(mainAgent.contexts[1])[0] ?? "", /Outcome: completed/);
+  assert.match(contextTexts(mainAgent.contexts[1])[0] ?? "", /found 8 CPUs/);
 });
 
 test("orchestrator discards completed-task output when the user sends a danger report next", async () => {
@@ -765,6 +809,16 @@ test("orchestrator discards completed-task output when the user sends a danger r
   });
 
   await runner.emit({
+    type: "task_summary",
+    summary: [
+      "Outcome: completed",
+      "Summary: Inspected the filesystem.",
+      "Artifacts: none",
+      "Open questions: none",
+    ].join("\n"),
+  });
+
+  await runner.emit({
     type: "task_done",
   });
 
@@ -777,11 +831,11 @@ test("orchestrator discards completed-task output when the user sends a danger r
 
   const session = store.getOrCreate("chat-5");
   assert.equal(session.activeTask, null);
-  assert.deepEqual(session.pendingQuarantinedOutputs, []);
+  assert.equal(session.pendingTaskSummary, null);
   assert.equal(channel.sentTexts.at(-1)?.text, messages.discardedPendingOutput());
 });
 
-test("orchestrator keeps final_result output quarantined until the user continues normally", async () => {
+test("orchestrator keeps final_result output pending until the user continues normally", async () => {
   const channel = new RecordingChannel();
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
@@ -821,8 +875,27 @@ test("orchestrator keeps final_result output quarantined until the user continue
 
   let session = store.getOrCreate("chat-6");
   assert.equal(session.activeTask, null);
-  assert.deepEqual(session.pendingQuarantinedOutputs, ["The environment has 8 CPUs."]);
-  assert.equal(channel.sentTexts.at(-1)?.text, messages.taskComplete("The environment has 8 CPUs."));
+  assert.deepEqual(session.pendingTaskSummary, {
+    taskName: "env-inspection",
+    summary: [
+      "Outcome: completed",
+      "Summary: The environment has 8 CPUs.",
+      "Artifacts: none",
+      "Open questions: none",
+    ].join("\n"),
+  });
+  assert.equal(
+    channel.sentTexts.at(-1)?.text,
+    messages.taskSummaryReady(
+      "env-inspection",
+      [
+        "Outcome: completed",
+        "Summary: The environment has 8 CPUs.",
+        "Artifacts: none",
+        "Open questions: none",
+      ].join("\n"),
+    ),
+  );
 
   await orchestrator.handleChatEvent({
     kind: "user_text",
@@ -835,8 +908,10 @@ test("orchestrator keeps final_result output quarantined until the user continue
   });
 
   session = store.getOrCreate("chat-6");
-  assert.deepEqual(session.pendingQuarantinedOutputs, []);
-  assert.deepEqual(contextTexts(mainAgent.contexts[1]), ["The environment has 8 CPUs.", "thanks"]);
+  assert.equal(session.pendingTaskSummary, null);
+  assert.equal(contextTexts(mainAgent.contexts[1]).at(-1), "thanks");
+  assert.match(contextTexts(mainAgent.contexts[1])[0] ?? "", /Outcome: completed/);
+  assert.match(contextTexts(mainAgent.contexts[1])[0] ?? "", /The environment has 8 CPUs/);
 });
 
 test("orchestrator marks worker disconnects as task failure and clears the task", async () => {

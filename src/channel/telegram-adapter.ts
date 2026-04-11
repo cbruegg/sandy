@@ -181,6 +181,20 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     });
   }
 
+  async sendReportableText(chatId: string, text: string): Promise<void> {
+    logger.debug("telegram.send_reportable_text", {
+      chatId,
+      textPreview: previewText(text),
+    });
+    await this.sendFormattedMessage(chatId, text, {
+      reply_markup: {
+        inline_keyboard: [[
+          { text: buttonLabels.reportDangerousOutput, callback_data: "report" },
+        ]],
+      },
+    });
+  }
+
   async sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void> {
     logger.info("telegram.send_privilege_request", {
       chatId,

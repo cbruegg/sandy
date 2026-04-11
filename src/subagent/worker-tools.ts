@@ -69,4 +69,11 @@ export const workerToolDefinitions = {
       caption: z.string().optional(),
     }).strict(),
   },
+  complete_task: {
+    description: "Signal to the host that the task is fully complete and ready for final summary handoff. You must emit this at the very end.",
+    requiresPrivilegeEscalation: false,
+    schema: z.object({
+      type: z.literal("complete_task"),
+    }).strict(),
+  },
 } as const satisfies Record<string, WorkerToolDefinition>;

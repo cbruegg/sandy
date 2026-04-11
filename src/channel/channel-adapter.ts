@@ -16,6 +16,7 @@ export interface ChannelAdapter {
   sendFile(chatId: string, filePath: string, caption?: string): Promise<void>;
   sendText(chatId: string, text: string): Promise<void>;
   sendTaskUpdate(chatId: string, text: string): Promise<void>;
+  sendReportableText(chatId: string, text: string): Promise<void>;
   sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void>;
   sendShareDeletionRequest(chatId: string, requestId: string, taskName: string, summary: string): Promise<void>;
 }

@@ -21,9 +21,10 @@ export type ActiveTaskState = {
   startedAt: string;
   lastActivityAt: string;
   pendingPrivilegeRequest: PrivilegeRequest | null;
-  quarantinedOutputs: string[];
   approvedMcpTools: McpToolGrant[];
   workerConnected: boolean;
+  hasReportableOutput: boolean;
+  taskSummary: string | null;
 };
 
 export type PendingShareDeletion = {
@@ -36,6 +37,9 @@ export type PendingShareDeletion = {
 export type SessionState = {
   chatId: string;
   activeTask: ActiveTaskState | null;
-  pendingQuarantinedOutputs: string[];
+  pendingTaskSummary: {
+    taskName: string;
+    summary: string;
+  } | null;
   pendingShareDeletion: PendingShareDeletion | null;
 };

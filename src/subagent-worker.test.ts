@@ -5,6 +5,7 @@ import {
   buildInitialTaskInput,
   buildInitialTaskInputWithCapabilities,
   buildPrivilegeResolutionInput,
+  buildTaskSummaryInput,
   parseWorkerToolCall,
   workerToolCallToSubAgentEvent,
 } from "./subagent/worker.js";
@@ -27,6 +28,7 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
   assert.match(input, /Schema:/);
   assert.match(input, /Use a tool by emitting exactly one line with no surrounding text/);
   assert.match(input, /Send a file that already exists in the shared workspace back to the user through the channel adapter/);
+  assert.match(input, /SANDY_COMPLETE_TASK/);
   assert.match(input, /Telegram HTML/);
   assert.match(input, /<code>/);
   assert.match(input, /leave a summary file\./);
@@ -63,6 +65,15 @@ test("buildPrivilegeResolutionInput explains the host privilege result to the su
   assert.match(input, /approved/);
   assert.match(input, /Copied \/tmp\/input.txt into the shared workspace\./);
   assert.match(input, /Continue the task from here\./);
+});
+
+test("buildTaskSummaryInput requests a host-facing handoff summary", () => {
+  const input = buildTaskSummaryInput();
+
+  assert.match(input, /host-facing handoff summary/);
+  assert.match(input, /Do not emit any Sandy tool calls/);
+  assert.match(input, /Outcome: <completed\|partial\|failed>/);
+  assert.match(input, /Artifacts:/);
 });
 
 test("mcpToolProgress includes payloads for completed MCP calls", () => {
@@ -145,6 +156,16 @@ test("workerToolCallToSubAgentEvent converts privileged tools into tool-call eve
   });
 });
 
+test("workerToolCallToSubAgentEvent converts explicit completion signals into task_done events", () => {
+  const call = parseWorkerToolCall('SANDY_COMPLETE_TASK {}');
+
+  const event = workerToolCallToSubAgentEvent(call!);
+
+  assert.deepEqual(event, {
+    type: "task_done",
+  });
+});
+
 test("parseSubAgentEvent accepts tool-call events", () => {
   const event = parseSubAgentEvent(
     '{"type":"tool_call","call":{"type":"send_file_to_channel","path":"/workspace/share/result.txt","caption":"Generated result file."}}',
@@ -157,5 +178,14 @@ test("parseSubAgentEvent accepts tool-call events", () => {
       path: "/workspace/share/result.txt",
       caption: "Generated result file.",
     },
+  });
+});
+
+test("parseSubAgentEvent accepts task-summary events", () => {
+  const event = parseSubAgentEvent('{"type":"task_summary","summary":"Outcome: completed"}');
+
+  assert.deepEqual(event, {
+    type: "task_summary",
+    summary: "Outcome: completed",
   });
 });

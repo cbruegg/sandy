@@ -128,20 +128,29 @@ export class SandyOrchestrator {
           }
           break;
         case "assistant_output":
-          session.activeTask.quarantinedOutputs.push(event.text);
+          session.activeTask.hasReportableOutput = true;
           await this.deps.channel.sendTaskUpdate(chatId, event.text);
+          break;
+        case "task_summary":
+          this.recordTaskSummary(session, event.summary);
           break;
         case "tool_call":
           await this.routeWorkerToolCall(chatId, session, event.call);
           break;
         case "final_result":
-          session.activeTask.quarantinedOutputs.push(event.text);
-          await this.deps.channel.sendText(chatId, messages.taskComplete(event.text));
+          session.activeTask.hasReportableOutput = true;
+          this.recordTaskSummary(session, [
+            "Outcome: completed",
+            `Summary: ${event.text}`,
+            "Artifacts: none",
+            "Open questions: none",
+          ].join("\n"));
+          await this.sendTaskSummaryForReview(chatId, session);
           await this.finishActiveTask(session, "completed");
           break;
         case "task_done":
           if (session.activeTask.status !== "completed") {
-            await this.deps.channel.sendText(chatId, messages.taskCompleted(session.activeTask.taskName));
+            await this.sendTaskSummaryForReview(chatId, session);
             await this.finishActiveTask(session, "completed");
           }
           break;
@@ -152,7 +161,7 @@ export class SandyOrchestrator {
             message: event.message,
           });
           await this.deps.channel.sendText(chatId, messages.taskFailed(event.message));
-          await this.finishActiveTask(session, "failed", { discardQuarantine: true });
+          await this.finishActiveTask(session, "failed");
           break;
       }
     } catch (error) {
@@ -212,11 +221,11 @@ export class SandyOrchestrator {
         await this.deps.channel.sendText(event.chatId, messages.noPendingPrivilegeRequest());
         return;
       case "danger_report":
-        if (session.pendingQuarantinedOutputs.length === 0) {
+        if (!session.pendingTaskSummary) {
           await this.deps.channel.sendText(event.chatId, messages.noActiveOutputToReport());
           return;
         }
-        session.pendingQuarantinedOutputs = [];
+        session.pendingTaskSummary = null;
         await this.deps.channel.sendText(event.chatId, messages.discardedPendingOutput());
         return;
       case "user_text":
@@ -226,7 +235,7 @@ export class SandyOrchestrator {
         }
         {
           const newVisibleEntries = [
-            ...this.releasePendingOutputs(session),
+            ...this.releasePendingTaskSummaries(session),
             {
               role: "user" as const,
               kind: "user_text",
@@ -269,7 +278,7 @@ export class SandyOrchestrator {
           await this.deps.channel.sendText(event.chatId, messages.taskTerminatedAfterDangerousPrivilegeRequest(activeTask.taskName));
           return;
         }
-        if (activeTask.quarantinedOutputs.length === 0) {
+        if (!activeTask.hasReportableOutput) {
           await this.deps.channel.sendText(event.chatId, messages.noPendingOutputToReport());
           return;
         }
@@ -292,7 +301,7 @@ export class SandyOrchestrator {
           await this.deps.channel.sendText(event.chatId, messages.privilegeRequestStillPending());
           return;
         }
-        this.releaseActiveTaskQuarantine(session);
+        activeTask.hasReportableOutput = false;
         await this.requireHandle(activeTask.taskId).sendUserMessage(
           buildWorkerFollowUpInput(event.text, await this.stageAttachments(event.chatId, event.messageId, event.attachments, activeTask.taskId)),
         );
@@ -329,9 +338,10 @@ export class SandyOrchestrator {
           startedAt: now,
           lastActivityAt: now,
           pendingPrivilegeRequest: null,
-          quarantinedOutputs: [],
           approvedMcpTools: [],
           workerConnected: false,
+          hasReportableOutput: false,
+          taskSummary: null,
         };
 
         const handle = await this.deps.sandboxRunner.launchTask(
@@ -361,37 +371,55 @@ export class SandyOrchestrator {
     }
   }
 
-  private releaseActiveTaskQuarantine(session: SessionState): void {
-    if (!session.activeTask || session.activeTask.quarantinedOutputs.length === 0) {
-      return;
-    }
-
-    logger.info("task.quarantine_released", {
-      chatId: session.chatId,
-      taskId: session.activeTask.taskId,
-      count: session.activeTask.quarantinedOutputs.length,
-    });
-    session.activeTask.quarantinedOutputs = [];
-  }
-
-  private releasePendingOutputs(session: SessionState): TranscriptEntry[] {
-    if (session.pendingQuarantinedOutputs.length === 0) {
+  /**
+   * Releases buffered task summaries into the next main-agent turn.
+   */
+  private releasePendingTaskSummaries(session: SessionState): TranscriptEntry[] {
+    if (!session.pendingTaskSummary) {
       return [];
     }
 
-    logger.info("task.pending_quarantine_released", {
+    logger.info("task.pending_output_released", {
       chatId: session.chatId,
-      count: session.pendingQuarantinedOutputs.length,
+      taskName: session.pendingTaskSummary.taskName,
     });
     const timestamp = new Date().toISOString();
-    const releasedEntries = session.pendingQuarantinedOutputs.map((text) => ({
+    const releasedEntries = [{
       role: "assistant" as const,
-      kind: "released_sub_agent_output",
+      kind: "released_task_summary",
       timestamp,
-      text,
-    }));
-    session.pendingQuarantinedOutputs = [];
+      text: session.pendingTaskSummary.summary,
+    }];
+    session.pendingTaskSummary = null;
     return releasedEntries;
+  }
+
+  private recordTaskSummary(session: SessionState, summary: string): void {
+    const activeTask = session.activeTask;
+    if (!activeTask) {
+      return;
+    }
+
+    const trimmedSummary = summary.trim();
+    if (!trimmedSummary) {
+      return;
+    }
+
+    activeTask.taskSummary = trimmedSummary;
+  }
+
+  private async sendTaskSummaryForReview(chatId: string, session: SessionState): Promise<void> {
+    const activeTask = session.activeTask;
+    if (!activeTask) {
+      return;
+    }
+
+    const summary = activeTask.taskSummary ?? this.buildCompletedTaskFallbackSummary(activeTask);
+    session.pendingTaskSummary = {
+      taskName: activeTask.taskName,
+      summary,
+    };
+    await this.deps.channel.sendReportableText(chatId, messages.taskSummaryReady(activeTask.taskName, summary));
   }
 
   private async resolvePendingPrivilegeRequest(
@@ -533,13 +561,13 @@ export class SandyOrchestrator {
       reason,
     });
     await this.requireHandle(activeTask.taskId).cancel(reason);
-    await this.finishActiveTask(session, "failed", { discardQuarantine: true });
+    await this.finishActiveTask(session, "cancelled", { discardSummary: true });
   }
 
   private async finishActiveTask(
     session: SessionState,
     status: ActiveTaskStatus,
-    options?: { discardQuarantine?: boolean },
+    options?: { discardSummary?: boolean },
   ): Promise<void> {
     const activeTask = session.activeTask;
     if (!activeTask) {
@@ -550,7 +578,7 @@ export class SandyOrchestrator {
     await this.closeActiveTask(session, options);
   }
 
-  private async closeActiveTask(session: SessionState, options?: { discardQuarantine?: boolean }): Promise<void> {
+  private async closeActiveTask(session: SessionState, options?: { discardSummary?: boolean }): Promise<void> {
     const task = session.activeTask;
     if (!task) {
       return;
@@ -559,8 +587,8 @@ export class SandyOrchestrator {
     if (handle) {
       await handle.close();
     }
-    if (!options?.discardQuarantine && task.quarantinedOutputs.length > 0) {
-      session.pendingQuarantinedOutputs.push(...task.quarantinedOutputs);
+    if (options?.discardSummary) {
+      session.pendingTaskSummary = null;
     }
     logger.info("task.cleared", {
       chatId: session.chatId,
@@ -599,7 +627,7 @@ export class SandyOrchestrator {
         message: notifyError instanceof Error ? notifyError.message : "Unknown notification failure.",
       });
     }
-    await this.closeActiveTask(session, { discardQuarantine: true });
+    await this.closeActiveTask(session);
   }
 
   private async failTaskAfterWorkerDisconnect(session: SessionState, message: string): Promise<void> {
@@ -611,6 +639,15 @@ export class SandyOrchestrator {
     session.activeTask.status = "failed";
     await this.deps.channel.sendText(session.chatId, message);
     await this.closeActiveTask(session);
+  }
+
+  private buildCompletedTaskFallbackSummary(task: NonNullable<SessionState["activeTask"]>): string {
+    return [
+      "Outcome: completed",
+      `Summary: The task ended without a worker-provided handoff summary. Task name: ${task.taskName}. Brief: ${task.taskBrief}`,
+      "Artifacts: unknown",
+      "Open questions: Review the visible task updates above if more detail is needed.",
+    ].join("\n");
   }
 
   private requireHandle(taskId: string): SandboxHandle {

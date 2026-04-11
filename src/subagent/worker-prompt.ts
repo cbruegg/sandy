@@ -45,6 +45,20 @@ export function buildPrivilegeResolutionInput(result: PrivilegeResolutionResult)
   ].join("\n");
 }
 
+export function buildTaskSummaryInput(): string {
+  return [
+    "Your task work is complete.",
+    "Write a short host-facing handoff summary of this task.",
+    "Do not address the user directly.",
+    "Do not emit any Sandy tool calls.",
+    "Use this exact structure:",
+    "Outcome: <completed|partial|failed>",
+    "Summary: <what you accomplished and the current state>",
+    "Artifacts: <files created or updated in /workspace/share, or \"none\">",
+    "Open questions: <remaining blockers, follow-ups, or \"none\">",
+  ].join("\n");
+}
+
 function detectRuntimeCapabilities(): string[] {
   const capabilities: string[] = [];
   const zypperVersion = spawnSync("zypper", ["--version"], {
