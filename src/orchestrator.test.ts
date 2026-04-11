@@ -1059,6 +1059,38 @@ test("orchestrator fails the active task if channel file delivery fails", async 
   assert.equal(runner.handle.closeCalls, 1);
 });
 
+test("orchestrator reports top-level chat event failures back to the user", async () => {
+  const channel = new RecordingChannel();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: {
+      async decide(): Promise<MainAgentDecision> {
+        throw new Error("You've hit your usage limit.");
+      },
+    },
+    sandboxRunner: new FakeSandboxRunner(),
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-top-level-error",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Do the thing",
+    rawText: "Do the thing",
+    attachments: [],
+  });
+
+  assert.equal(
+    channel.sentTexts.at(-1)?.text,
+    messages.handlerFailed("You've hit your usage limit."),
+  );
+  assert.equal(store.getOrCreate("chat-top-level-error").activeTask, null);
+});
+
 test("orchestrator prompts before deleting a non-empty shared workspace", async () => {
   const channel = new RecordingChannel();
   const runner = new FakeSandboxRunner();

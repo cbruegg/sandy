@@ -59,41 +59,61 @@ export class SandyOrchestrator {
 
   async handleChatEvent(event: NormalizedChatEvent): Promise<void> {
     const session = this.deps.sessionStore.getOrCreate(event.chatId);
-    logger.info("chat.event_handled", {
-      chatId: event.chatId,
-      kind: event.kind,
-      hasActiveTask: session.activeTask !== null,
-    });
-    if (event.kind === "user_text") {
-      logger.debugContent("chat.user_message", {
+    try {
+      logger.info("chat.event_handled", {
         chatId: event.chatId,
-        messageId: event.messageId,
-        text: event.text,
-        attachments: event.attachments.map((attachment) => ({
-          attachmentId: attachment.attachmentId,
-          kind: attachment.kind,
-          fileName: attachment.fileName ?? null,
-          mimeType: attachment.mimeType ?? null,
-        })),
+        kind: event.kind,
+        hasActiveTask: session.activeTask !== null,
       });
-    }
+      if (event.kind === "user_text") {
+        logger.debugContent("chat.user_message", {
+          chatId: event.chatId,
+          messageId: event.messageId,
+          text: event.text,
+          attachments: event.attachments.map((attachment) => ({
+            attachmentId: attachment.attachmentId,
+            kind: attachment.kind,
+            fileName: attachment.fileName ?? null,
+            mimeType: attachment.mimeType ?? null,
+          })),
+        });
+      }
 
-    if (event.kind === "unsupported_input") {
-      logger.warn("chat.unsupported_input", {
+      if (event.kind === "unsupported_input") {
+        logger.warn("chat.unsupported_input", {
+          chatId: event.chatId,
+          inputType: event.inputType,
+        });
+        await this.deps.channel.sendText(event.chatId, messages.unsupportedInput(event.inputType));
+        return;
+      }
+
+      if (!session.activeTask) {
+        await this.routeIdleChatEvent(session, event);
+        return;
+      }
+
+      await this.routeActiveTaskChatEvent(session, event);
+      this.deps.sessionStore.save(session);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown chat event handling failure.";
+      logger.error("chat.event_handler_failed", {
         chatId: event.chatId,
-        inputType: event.inputType,
+        kind: event.kind,
+        hasActiveTask: session.activeTask !== null,
+        message,
       });
-      await this.deps.channel.sendText(event.chatId, messages.unsupportedInput(event.inputType));
-      return;
-    }
 
-    if (!session.activeTask) {
-      await this.routeIdleChatEvent(session, event);
-      return;
+      try {
+        await this.deps.channel.sendText(event.chatId, messages.handlerFailed(message));
+      } catch (notifyError) {
+        logger.error("chat.event_failure_notification_failed", {
+          chatId: event.chatId,
+          kind: event.kind,
+          message: notifyError instanceof Error ? notifyError.message : "Unknown notification failure.",
+        });
+      }
     }
-
-    await this.routeActiveTaskChatEvent(session, event);
-    this.deps.sessionStore.save(session);
   }
 
   private async routeSubAgentEvent(chatId: string, taskId: string, event: SubAgentEvent): Promise<void> {

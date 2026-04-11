@@ -22,6 +22,7 @@ export const messages = {
   taskSummaryReady: (taskName: string, summary: string): string =>
     `Task "${taskName}" completed.\n\nSummary:\n${summary}`,
   taskFailed: (message: string): string => `Task failed: ${message}`,
+  handlerFailed: (message: string): string => `Something went wrong: ${message}`,
   noActiveTaskToCancel: (): string => "There is no active task to cancel.",
   noActiveTaskToFinish: (): string => "There is no active task to mark as finished.",
   noPendingPrivilegeRequest: (): string => "There is no pending privilege request.",

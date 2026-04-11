@@ -176,6 +176,7 @@ test("TelegramBotApiAdapter keeps handling later updates after a handler error",
   await adapter.stop();
 
   assert.equal(handlerCalls, 2);
+  assert.equal(fakeBot.sentMessages.length, 0);
 });
 
 test("TelegramBotApiAdapter acknowledges callback queries", async () => {
