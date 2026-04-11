@@ -725,10 +725,24 @@ export class SandyOrchestrator {
       toolName: input.toolName,
       arguments: input.arguments,
     };
+    const previousStatus = activeTask.status;
     activeTask.pendingPrivilegeRequest = request;
     activeTask.status = "awaiting_privilege_decision";
     this.deps.sessionStore.save(session);
-    await this.deps.channel.sendPrivilegeRequest(chatId, request);
+    try {
+      await this.deps.channel.sendPrivilegeRequest(chatId, request);
+    } catch (error) {
+      activeTask.pendingPrivilegeRequest = null;
+      activeTask.status = previousStatus;
+      this.deps.sessionStore.save(session);
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: error instanceof Error
+          ? `Failed to deliver MCP privilege request: ${error.message}`
+          : "Failed to deliver MCP privilege request.",
+      };
+    }
 
     return new Promise<PrivilegeResolutionResult>((resolve) => {
       this.pendingMcpPrivilegeResolvers.set(request.requestId, resolve);

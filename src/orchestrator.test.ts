@@ -35,6 +35,7 @@ class RecordingChannel implements ChannelAdapter {
   public readonly shareDeletionRequests: Array<{ chatId: string; requestId: string; taskName: string; summary: string }> = [];
   public readonly savedAttachments: Array<{ chatId: string; attachments: MessageAttachment[]; targetDirectory: string }> = [];
   public sendFileError: Error | null = null;
+  public sendPrivilegeRequestError: Error | null = null;
 
   async start(): Promise<void> {}
   async stop(): Promise<void> {}
@@ -69,6 +70,9 @@ class RecordingChannel implements ChannelAdapter {
   }
 
   async sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void> {
+    if (this.sendPrivilegeRequestError) {
+      throw this.sendPrivilegeRequestError;
+    }
     this.privilegeRequests.push({ chatId, request });
   }
 
@@ -475,6 +479,54 @@ test("orchestrator rejects unsupported privilege requests without prompting the 
       'Privilege request type "enable_mcp" is not supported by this runtime.',
     ),
   );
+});
+
+test("orchestrator rolls back MCP privilege state when sending the prompt fails", async () => {
+  const channel = new RecordingChannel();
+  channel.sendPrivilegeRequestError = new Error("Telegram API unavailable.");
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Need MCP access.",
+      taskName: "mcp-check",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-mcp-send-failure",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Check MCP access",
+    rawText: "Check MCP access",
+    attachments: [],
+  });
+
+  const taskId = runner.launches[0]?.taskId;
+  assert.ok(taskId);
+
+  const result = await orchestrator.authorizeMcpToolCall({
+    taskId,
+    serverId: "github",
+    toolName: "list_issues",
+    arguments: {},
+  });
+
+  const session = store.getOrCreate("chat-mcp-send-failure");
+  assert.deepEqual(result, {
+    requestId: result.requestId,
+    outcome: "failed",
+    message: "Failed to deliver MCP privilege request: Telegram API unavailable.",
+  });
+  assert.equal(session.activeTask?.status, "running");
+  assert.equal(session.activeTask?.pendingPrivilegeRequest, null);
+  assert.equal(channel.privilegeRequests.length, 0);
 });
 
 test("orchestrator terminates the task when the user reports a pending privilege request as dangerous", async () => {
