@@ -1,0 +1,14 @@
+name: CI (PR)
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  ci:
+    uses: ./.github/workflows/_shared-build.yml
+    with:
+      publish: false
