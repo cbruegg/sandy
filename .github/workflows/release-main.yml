@@ -22,6 +22,7 @@ jobs:
     needs: release
     env:
       GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
     steps:
       - name: Download executable artifacts
         uses: actions/download-artifact@v4
@@ -37,9 +38,9 @@ jobs:
 
       - name: Publish rolling release
         run: |
-          if gh release view main-build >/dev/null 2>&1; then
-            gh release upload main-build release-assets/* --clobber
-            gh release edit main-build --title "Main build" --latest=false --target "${{ github.sha }}"
+          if gh release view main-build --repo "$REPO" >/dev/null 2>&1; then
+            gh release upload main-build release-assets/* --clobber --repo "$REPO"
+            gh release edit main-build --repo "$REPO" --title "Main build" --latest=false --target "${{ github.sha }}"
           else
-            gh release create main-build release-assets/* --title "Main build" --notes "" --prerelease --latest=false --target "${{ github.sha }}"
+            gh release create main-build release-assets/* --repo "$REPO" --title "Main build" --notes "" --prerelease --latest=false --target "${{ github.sha }}"
           fi
