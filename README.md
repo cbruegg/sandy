@@ -40,7 +40,7 @@ bot_token = "123456:telegram-token"
 # openai_api_key = "sk-..." # optional override, no default
 
 [worker]
-# image = "sandy-subagent:latest" # local dev override; published images default automatically when baked release metadata is present
+# image = "sandy-subagent:latest"
 # share_root = "/tmp/sandy-shares"
 
 # Optional STT config for voice message support.
@@ -51,9 +51,6 @@ bot_token = "123456:telegram-token"
 # model = "gpt-4o-mini-transcribe"
 
 # Optional:
-[mcp]
-# sidecar_image = "sandy-mcp-proxy:latest" # local dev override; published images default automatically when baked release metadata is present
-
 [mcp.servers.todoist]
 # Currently the only allowed transport:
 transport = "streamable_http"
@@ -91,20 +88,7 @@ Build the MCP sidecar image:
 docker build --target mcp-proxy-runtime -t sandy-mcp-proxy:latest .
 ```
 
-Build the main-agent image:
-
-```bash
-docker build --target main-agent-runtime -t sandy-main-agent:latest .
-```
-
-Published images from `main` are available as:
-
-- `ghcr.io/cbruegg/sandy-main-agent:latest`
-- `ghcr.io/cbruegg/sandy-subagent:latest`
-- `ghcr.io/cbruegg/sandy-mcp-proxy:latest`
-
-For a containerized deployment, see
-[`examples/main-agent/compose.yaml`](examples/main-agent/compose.yaml).
+The host runtime is intentionally not containerized, because it is designed to mediate host-system access directly.
 
 Build the Bun bundles and verify linting, TypeScript type-checking, and dependency hygiene:
 

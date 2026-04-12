@@ -8,8 +8,6 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
 - Implemented today:
   - Bun-based local runtime, package-manager, and test-runner workflow, with explicit `tsc --noEmit` type-checking kept in the build.
   - `bun build` support for both bundled JS outputs and single-file executable builds for the host entrypoints.
-  - Published Docker build targets for the main-agent runtime, MCP proxy sidecar, and worker runtime.
-  - Published Docker images on GHCR, with the main-agent image defaulting worker and MCP sidecar launches to matching `sha-<commit>` image tags.
   - `grammY`-based Telegram transport with deterministic normalization into Sandy chat events.
   - Recovery from transient Telegram polling or handler errors without crashing the host process.
   - A narrow main-agent controller that decides whether to reply directly or launch a sub-agent.
@@ -36,8 +34,6 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - Host-side MCP proxying for configured upstream MCP servers, with per-task JWT authentication for workers.
   - Host-admin MCP OAuth login flow through `sandy mcp <list|status|login|logout>`.
   - MCP privilege approval scopes `once`, `worker_session`, and `always allow`, with `always allow` persisted automatically to the Sandy TOML config.
-  - Containerized main-agent deployment support through a Docker image that talks to the host Docker daemon via the mounted Docker socket.
-  - Sample Docker Compose deployment with Watchtower for the published main-agent image.
 - Not fully implemented yet:
   - Image handling.
   - Host-side enforcement for approved resource requests beyond shared-workspace file copy and MCP tool access, such as mount setup and OneCLI enablement.
