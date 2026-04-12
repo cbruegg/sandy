@@ -65,7 +65,7 @@ jobs:
 
       - name: Upload executable artifact
         if: inputs.publish
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sandy-${{ matrix.target }}
           path: release-bundles/sandy-${{ matrix.target }}.zip
