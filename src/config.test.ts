@@ -41,6 +41,48 @@ model = "custom-transcribe-model"
   assert.equal(config.sttModel, "custom-transcribe-model");
 });
 
+test("parseConfigToml falls back to local Docker image defaults when release image metadata is absent", () => {
+  const config = parseConfigToml(`
+[telegram]
+bot_token = "telegram-token"
+`, "/tmp/sandy-config.toml");
+
+  assert.equal(config.workerImage, "sandy-subagent:latest");
+  assert.equal(config.mcpSidecarImage, "sandy-mcp-proxy:latest");
+});
+
+test("parseConfigToml derives published Docker image defaults from release image metadata", () => {
+  const config = parseConfigToml(`
+[telegram]
+bot_token = "telegram-token"
+`, "/tmp/sandy-config.toml", {
+    imageRegistry: "ghcr.io/example",
+    gitRevision: "abcdef0123456789",
+  });
+
+  assert.equal(config.workerImage, "ghcr.io/example/sandy-subagent:sha-abcdef0123456789");
+  assert.equal(config.mcpSidecarImage, "ghcr.io/example/sandy-mcp-proxy:sha-abcdef0123456789");
+});
+
+test("parseConfigToml prefers explicit config image overrides over baked defaults", () => {
+  const config = parseConfigToml(`
+[telegram]
+bot_token = "telegram-token"
+
+[worker]
+image = "custom-worker:dev"
+
+[mcp]
+sidecar_image = "custom-sidecar:dev"
+`, "/tmp/sandy-config.toml", {
+    imageRegistry: "ghcr.io/example",
+    gitRevision: "abcdef0123456789",
+  });
+
+  assert.equal(config.workerImage, "custom-worker:dev");
+  assert.equal(config.mcpSidecarImage, "custom-sidecar:dev");
+});
+
 test("loadConfig reads the path from SANDY_CONFIG_FILE", async () => {
   const root = await mkdtemp(join(tmpdir(), "sandy-config-"));
   const configFilePath = join(root, "config.toml");
@@ -71,6 +113,8 @@ always_allow_tools = ["list_projects"]
       oauthScopes: ["data:read"],
     });
     assert.deepEqual(config.persistentMcpApprovals["todoist"], ["list_projects"]);
+    assert.equal(config.workerImage, "sandy-subagent:latest");
+    assert.equal(config.mcpSidecarImage, "sandy-mcp-proxy:latest");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

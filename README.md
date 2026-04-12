@@ -40,7 +40,7 @@ bot_token = "123456:telegram-token"
 # openai_api_key = "sk-..." # optional override, no default
 
 [worker]
-# image = "sandy-subagent:latest"
+# image = "sandy-subagent:latest" # explicit override; otherwise Sandy uses a baked GHCR sha tag when present, or this local default
 # share_root = "/tmp/sandy-shares"
 
 # Optional STT config for voice message support.
@@ -51,6 +51,9 @@ bot_token = "123456:telegram-token"
 # model = "gpt-4o-mini-transcribe"
 
 # Optional:
+[mcp]
+# sidecar_image = "sandy-mcp-proxy:latest" # explicit override; otherwise Sandy uses a baked GHCR sha tag when present, or this local default
+
 [mcp.servers.todoist]
 # Currently the only allowed transport:
 transport = "streamable_http"
@@ -89,6 +92,11 @@ docker build --target mcp-proxy-runtime -t sandy-mcp-proxy:latest .
 ```
 
 The host runtime is intentionally not containerized, because it is designed to mediate host-system access directly.
+
+Published Sandy executables built in GitHub Actions are baked with the matching `github.sha` and default to
+`ghcr.io/<owner>/sandy-subagent:sha-<git revision>` and `ghcr.io/<owner>/sandy-mcp-proxy:sha-<git revision>`.
+Local `bun start` runs and locally built executables fall back to `sandy-subagent:latest` and
+`sandy-mcp-proxy:latest` unless the config file overrides them.
 
 Build the Bun bundles and verify linting, TypeScript type-checking, and dependency hygiene:
 
