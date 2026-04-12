@@ -14,8 +14,6 @@ import { DockerSandboxRunner } from "./sandbox/docker-sandbox-runner.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
 import { OpenAiTranscriptionProvider } from "./transcription/openai-transcription-provider.js";
 
-const mcpSidecarImage = "sandy-mcp-proxy:latest";
-
 export async function startApp(): Promise<void> {
   const config = loadConfig();
   configureLogger({
@@ -25,6 +23,7 @@ export async function startApp(): Promise<void> {
   logger.info("app.starting", {
     configFilePath: config.configFilePath,
     workerImage: config.workerImage,
+    mcpSidecarImage: config.mcpSidecarImage,
     shareRoot: config.shareRoot,
     authMode: config.authMode.mode,
     sttEnabled: config.sttApiKey !== null,
@@ -85,7 +84,7 @@ export async function startApp(): Promise<void> {
     configDirectory: config.configDirectory,
     mcpServers: config.mcpServers,
     workerNetworkName,
-    sidecarImage: mcpSidecarImage,
+    sidecarImage: config.mcpSidecarImage,
     authorizeToolCall: (input) => orchestrator.authorizeMcpToolCall(input),
   }, mcpProxyAccess);
 

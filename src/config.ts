@@ -8,10 +8,11 @@ const logLevelSchema = z.enum(["debug", "info", "warn", "error"]);
 const mcpTransportSchema = z.literal("streamable_http");
 
 const DEFAULT_LOG_LEVEL: z.infer<typeof logLevelSchema> = "info";
-const DEFAULT_WORKER_IMAGE = "sandy-subagent:latest";
 const DEFAULT_SHARE_ROOT = "/tmp/sandy-shares";
 const DEFAULT_STT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_STT_MODEL = "gpt-4o-mini-transcribe";
+const LOCAL_DEFAULT_WORKER_IMAGE = "sandy-subagent:latest";
+const LOCAL_DEFAULT_SIDECAR_IMAGE = "sandy-mcp-proxy:latest";
 
 function defaultConfigPath(): string {
   return join(resolveHomeDirectory(), ".config", "sandy", "config.toml");
@@ -21,7 +22,30 @@ function defaultCodexAuthFilePath(): string {
   return join(resolveHomeDirectory(), ".codex", "auth.json");
 }
 
-function buildSandyConfigSchema(defaultCodexAuthFilePath: string) {
+function resolveDefaultImageReferences(env: EnvSource): {
+  workerImage: string;
+  sidecarImage: string;
+} {
+  const registry = env["SANDY_IMAGE_REGISTRY"]?.trim();
+  const version = env["SANDY_IMAGE_VERSION"]?.trim();
+
+  if (!registry || !version) {
+    return {
+      workerImage: LOCAL_DEFAULT_WORKER_IMAGE,
+      sidecarImage: LOCAL_DEFAULT_SIDECAR_IMAGE,
+    };
+  }
+
+  return {
+    workerImage: `${registry}/sandy-subagent:${version}`,
+    sidecarImage: `${registry}/sandy-mcp-proxy:${version}`,
+  };
+}
+
+function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages: {
+  workerImage: string;
+  sidecarImage: string;
+}) {
   return z.object({
     logging: z.object({
       level: logLevelSchema.default(DEFAULT_LOG_LEVEL),
@@ -38,10 +62,10 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string) {
       codex_auth_file: defaultCodexAuthFilePath,
     }),
     worker: z.object({
-      image: z.string().min(1).default(DEFAULT_WORKER_IMAGE),
+      image: z.string().min(1).default(defaultImages.workerImage),
       share_root: z.string().min(1).default(DEFAULT_SHARE_ROOT),
     }).default({
-      image: DEFAULT_WORKER_IMAGE,
+      image: defaultImages.workerImage,
       share_root: DEFAULT_SHARE_ROOT,
     }),
     stt: z.object({
@@ -53,6 +77,7 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string) {
       model: DEFAULT_STT_MODEL,
     }),
     mcp: z.object({
+      sidecar_image: z.string().min(1).default(defaultImages.sidecarImage),
       servers: z.record(z.string(), z.object({
         transport: mcpTransportSchema,
         url: z.string().min(1).optional(),
@@ -62,6 +87,7 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string) {
         oauth_scopes: z.array(z.string()).default([]),
       }).strict()).default({}),
     }).default({
+      sidecar_image: defaultImages.sidecarImage,
       servers: {},
     }),
     approvals: z.object({
@@ -94,6 +120,7 @@ type SandyConfig = {
   logLevel: z.infer<typeof logLevelSchema>;
   telegramBotToken: string;
   workerImage: string;
+  mcpSidecarImage: string;
   shareRoot: string;
   sttApiKey: string | null;
   sttBaseUrl: string;
@@ -146,8 +173,8 @@ function normalizeMcpServerConfig(config: SandyConfigFile["mcp"]["servers"][stri
   };
 }
 
-export function parseConfigToml(raw: string, configFilePath = defaultConfigPath()): SandyConfig {
-  const parsed = parseConfigTomlFile(raw);
+export function parseConfigToml(raw: string, configFilePath = defaultConfigPath(), env: EnvSource = process.env): SandyConfig {
+  const parsed = parseConfigTomlFile(raw, env);
   const codexAuthFile = resolveCodexAuthFile(parsed.auth.codex_auth_file);
   const rawApiKey = parsed.auth.openai_api_key ?? null;
   const authMode: SandyAuthMode = codexAuthFile
@@ -162,6 +189,7 @@ export function parseConfigToml(raw: string, configFilePath = defaultConfigPath(
     logLevel: parsed.logging.level,
     telegramBotToken: parsed.telegram.bot_token,
     workerImage: parsed.worker.image,
+    mcpSidecarImage: parsed.mcp.sidecar_image,
     shareRoot: parsed.worker.share_root,
     sttApiKey: parsed.stt.api_key ?? null,
     sttBaseUrl: parsed.stt.base_url,
@@ -188,7 +216,7 @@ export function loadConfig(env: EnvSource = process.env): SandyConfig {
   }
 
   try {
-    return parseConfigToml(raw, configFilePath);
+    return parseConfigToml(raw, configFilePath, env);
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Unknown config parse failure.";
     throw new Error(`Invalid Sandy config at ${configFilePath}: ${detail}`, { cause: error });
@@ -199,11 +227,14 @@ export function renderConfigToml(value: SandyConfigFile): string {
   return toml.stringify(removeNulls(value) as toml.JsonMap);
 }
 
-export function parseConfigTomlFile(raw: string): SandyConfigFileData {
+export function parseConfigTomlFile(raw: string, env: EnvSource = process.env): SandyConfigFileData {
   // @iarna/toml attaches symbol-keyed metadata to parsed table objects.
   // Zod record schemas treat those symbols as keys and reject the value,
   // so normalize the tree into plain string-keyed objects before parsing.
-  return buildSandyConfigSchema(defaultCodexAuthFilePath()).parse(normalizeParsedToml(toml.parse(raw)));
+  return buildSandyConfigSchema(
+    defaultCodexAuthFilePath(),
+    resolveDefaultImageReferences(env),
+  ).parse(normalizeParsedToml(toml.parse(raw)));
 }
 
 function removeNulls(value: unknown): unknown {

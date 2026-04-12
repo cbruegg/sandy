@@ -7,10 +7,20 @@ RUN bun install --frozen-lockfile
 COPY src ./src
 RUN bun run build
 
+FROM docker:28-cli AS docker-cli
+
 FROM oven/bun:1 AS runtime-base
 WORKDIR /app
 
 COPY --from=build /app/dist ./dist
+
+FROM runtime-base AS main-agent-runtime
+ARG SANDY_IMAGE_REGISTRY=""
+ARG SANDY_IMAGE_VERSION=""
+ENV SANDY_IMAGE_REGISTRY="${SANDY_IMAGE_REGISTRY}"
+ENV SANDY_IMAGE_VERSION="${SANDY_IMAGE_VERSION}"
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+CMD ["bun", "dist/index.js"]
 
 FROM runtime-base AS mcp-proxy-runtime
 CMD ["bun", "dist/mcp/sidecar.js"]
