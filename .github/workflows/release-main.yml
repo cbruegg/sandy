@@ -22,6 +22,7 @@ jobs:
     needs: release
     env:
       GH_TOKEN: ${{ github.token }}
+      IMAGE_TAG: sha-${{ github.sha }}
     steps:
       - name: Download executable artifacts
         uses: actions/download-artifact@v4
@@ -32,6 +33,36 @@ jobs:
         run: |
           mkdir -p release-assets
           find artifacts -type f -maxdepth 2 -exec cp {} release-assets/ \;
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Wait for published Docker images
+        run: |
+          # The auto-updater switches the host binary to the new git revision and
+          # then relies on the baked default Docker image tags for that same
+          # revision. Do not publish the release assets until both GHCR images
+          # are visible, or clients may update into a build whose worker images
+          # are not available yet.
+          for image in sandy-subagent sandy-mcp-proxy; do
+            ref="ghcr.io/${{ github.repository_owner }}/${image}:${IMAGE_TAG}"
+            found=""
+            for attempt in $(seq 1 30); do
+              if docker buildx imagetools inspect "$ref" >/dev/null 2>&1; then
+                found="yes"
+                break
+              fi
+              sleep 10
+            done
+            if [[ -z "$found" ]]; then
+              echo "Image not visible yet: $ref" >&2
+              exit 1
+            fi
+          done
 
       - name: Publish rolling release
         run: |
