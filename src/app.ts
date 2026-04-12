@@ -92,6 +92,7 @@ export async function startApp(): Promise<void> {
   await sidecarManager?.start();
 
   const shutdown = async () => {
+    await sandboxRunner.shutdown?.();
     await sidecarManager?.stop();
   };
   process.once("SIGINT", () => {

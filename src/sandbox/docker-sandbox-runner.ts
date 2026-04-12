@@ -30,6 +30,12 @@ export class DockerSandboxRunner implements SandboxRunner {
   private readonly spawnImpl: typeof spawn;
   private readonly setTimeoutImpl: typeof setTimeout;
   private readonly clearTimeoutImpl: typeof clearTimeout;
+  private readonly activeContainers = new Map<string, {
+    child: ChildProcessWithoutNullStreams;
+    cleanupWorkerCodexConfig: () => Promise<void>;
+  }>();
+  private shutdownPromise: Promise<void> | null = null;
+  private shutdownRequested = false;
 
   constructor(private readonly options: DockerSandboxRunnerOptions) {
     this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? 10_000;
@@ -42,6 +48,9 @@ export class DockerSandboxRunner implements SandboxRunner {
     request: LaunchTaskRequest,
     onEvent: (event: SubAgentEvent) => Promise<void>,
   ): Promise<SandboxHandle> {
+    if (this.shutdownRequested) {
+      throw new Error("Sandbox runner is shutting down and cannot launch new tasks.");
+    }
     const sharePath = this.getTaskSharePath(request.taskId);
     await mkdir(sharePath, { recursive: true });
     const builtWorkerConfig = this.options.workerCodexConfigBuilder(request.taskId);
@@ -137,6 +146,10 @@ export class DockerSandboxRunner implements SandboxRunner {
     const child = this.spawnImpl("docker", dockerArgs, {
       stdio: ["pipe", "pipe", "pipe"],
     });
+    this.activeContainers.set(containerName, {
+      child,
+      cleanupWorkerCodexConfig,
+    });
 
     const handshakeTimer = this.setTimeoutImpl(() => {
       if (workerConnected || terminalEventSeen || shutdownRequested) {
@@ -227,6 +240,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     });
 
     child.on("error", (error) => {
+      this.activeContainers.delete(containerName);
       if (finished) {
         return;
       }
@@ -251,6 +265,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     });
 
     child.on("exit", (code, signal) => {
+      this.activeContainers.delete(containerName);
       void cleanupWorkerCodexConfig();
       if (finished) {
         return;
@@ -347,6 +362,32 @@ export class DockerSandboxRunner implements SandboxRunner {
         await this.sendDockerKill(containerName);
       },
     };
+  }
+
+  async shutdown(): Promise<void> {
+    if (this.shutdownPromise) {
+      return this.shutdownPromise;
+    }
+
+    this.shutdownRequested = true;
+    const activeContainers = [...this.activeContainers.entries()];
+    this.shutdownPromise = Promise.all(activeContainers.map(async ([containerName, activeContainer]) => {
+      logger.info("sandbox.shutdown_terminating", {
+        containerName,
+      });
+      activeContainer.child.kill("SIGTERM");
+      await Promise.all([
+        activeContainer.cleanupWorkerCodexConfig(),
+        this.sendDockerKill(containerName),
+      ]);
+      this.activeContainers.delete(containerName);
+    })).then(() => {
+      logger.info("sandbox.shutdown_complete", {
+        containerCount: activeContainers.length,
+      });
+    });
+
+    return this.shutdownPromise;
   }
 
   async inspectTaskShare(taskId: string): Promise<ShareInspection> {

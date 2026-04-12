@@ -26,4 +26,5 @@ export interface SandboxRunner {
   inspectTaskShare(taskId: string): Promise<ShareInspection>;
   deleteTaskShare(taskId: string): Promise<void>;
   getTaskSharePath(taskId: string): string;
+  shutdown?(): Promise<void>;
 }

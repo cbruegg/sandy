@@ -329,6 +329,63 @@ test("DockerSandboxRunner close shuts down the worker stdin without reporting a 
   assert.deepEqual(events, [{ type: "worker_connected" }]);
 });
 
+test("DockerSandboxRunner shutdown terminates every active container it started", async () => {
+  const firstTaskChild = new FakeChildProcess();
+  const secondTaskChild = new FakeChildProcess();
+  const invocations: Array<{ command: string; args: string[] }> = [];
+  const taskChildren = [firstTaskChild, secondTaskChild];
+
+  const spawnImpl = ((command: string, args: readonly string[]) => {
+    invocations.push({ command, args: [...args] });
+    if (args[0] === "run") {
+      const taskChild = taskChildren.shift();
+      assert.ok(taskChild, "Expected a task child for docker run.");
+      return taskChild as unknown as ChildProcessWithoutNullStreams;
+    }
+
+    const cleanupChild = new FakeChildProcess();
+    queueMicrotask(() => {
+      cleanupChild.emit("exit", 0, null);
+    });
+    return cleanupChild as unknown as ChildProcessWithoutNullStreams;
+  }) as typeof import("node:child_process").spawn;
+
+  const runner = new DockerSandboxRunner({
+    workerImage: "sandy-subagent:latest",
+    shareRoot: "/tmp/sandy-test-shares",
+    openAiApiKey: null,
+    codexAuthFile: null,
+    workerCodexConfigBuilder: () => ({
+      codexConfigToml: null,
+      environment: {},
+    }),
+    spawnImpl,
+  });
+
+  await runner.launchTask({
+    chatId: "chat-1",
+    taskId: "task-1",
+    taskName: "test-task-1",
+    taskBrief: "Inspect the environment.",
+    channelFormatting: testFormatting,
+  }, async () => {});
+
+  await runner.launchTask({
+    chatId: "chat-1",
+    taskId: "task-2",
+    taskName: "test-task-2",
+    taskBrief: "Inspect the environment again.",
+    channelFormatting: testFormatting,
+  }, async () => {});
+
+  await runner.shutdown();
+  await flushEvents();
+
+  assert.deepEqual(firstTaskChild.killSignals, ["SIGTERM"]);
+  assert.deepEqual(secondTaskChild.killSignals, ["SIGTERM"]);
+  assert.equal(invocations.filter((invocation) => invocation.args[0] === "rm").length, 2);
+});
+
 test("DockerSandboxRunner inspects and deletes task shares on the host", async () => {
   const shareRoot = mkdtempSync(join(tmpdir(), "sandy-share-test-"));
   const runner = new DockerSandboxRunner({
