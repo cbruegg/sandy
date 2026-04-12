@@ -26,12 +26,14 @@ jobs:
       - name: Download executable artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: sandy-bun-*
+          merge-multiple: true
           path: artifacts
 
       - name: Collect release assets
         run: |
           mkdir -p release-assets
-          find artifacts -type f -maxdepth 2 -exec cp {} release-assets/ \;
+          find artifacts -maxdepth 1 -type f -exec cp {} release-assets/ \;
 
       - name: Publish rolling release
         run: |
