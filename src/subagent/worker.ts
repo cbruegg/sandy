@@ -252,7 +252,7 @@ function classifyToolEventDisposition(
   return workerToolDefinitions[toolType].requiresPrivilegeEscalation ? "privileged_tool_call" : "none";
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const taskBrief = getRequiredEnv("SANDY_TASK_BRIEF");
   const apiKey = getOptionalEnv("OPENAI_API_KEY");
   const channelFormatting = parseChannelFormatting(getOptionalEnv("SANDY_CHANNEL_FORMATTING"));

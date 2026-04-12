@@ -23,6 +23,7 @@ codex_auth_file = "/tmp/codex-auth.json"
   assert.equal(config.sttApiKey, null);
   assert.equal(config.sttBaseUrl, "https://api.openai.com/v1");
   assert.equal(config.sttModel, "gpt-4o-mini-transcribe");
+  assert.equal(config.autoUpdatesEnabled, true);
 });
 
 test("parseConfigToml enables STT from the config file", () => {
@@ -69,6 +70,9 @@ test("parseConfigToml prefers explicit config image overrides over baked default
 [telegram]
 bot_token = "telegram-token"
 
+[updates]
+enabled = false
+
 [worker]
 image = "custom-worker:dev"
 
@@ -79,6 +83,54 @@ sidecar_image = "custom-sidecar:dev"
     gitRevision: "abcdef0123456789",
   });
 
+  assert.equal(config.workerImage, "custom-worker:dev");
+  assert.equal(config.mcpSidecarImage, "custom-sidecar:dev");
+  assert.deepEqual(config.explicitImageOverrides, {
+    workerImage: true,
+    mcpSidecarImage: true,
+  });
+});
+
+test("parseConfigToml rejects explicit worker image overrides when auto-updates stay enabled", () => {
+  assert.throws(() => {
+    parseConfigToml(`
+[telegram]
+bot_token = "telegram-token"
+
+[worker]
+image = "custom-worker:dev"
+`);
+  }, /\[updates\]\.enabled = false/);
+});
+
+test("parseConfigToml rejects explicit MCP sidecar image overrides when auto-updates stay enabled", () => {
+  assert.throws(() => {
+    parseConfigToml(`
+[telegram]
+bot_token = "telegram-token"
+
+[mcp]
+sidecar_image = "custom-sidecar:dev"
+`);
+  }, /\[updates\]\.enabled = false/);
+});
+
+test("parseConfigToml allows pinned Docker images when auto-updates are disabled explicitly", () => {
+  const config = parseConfigToml(`
+[telegram]
+bot_token = "telegram-token"
+
+[updates]
+enabled = false
+
+[worker]
+image = "custom-worker:dev"
+
+[mcp]
+sidecar_image = "custom-sidecar:dev"
+`);
+
+  assert.equal(config.autoUpdatesEnabled, false);
   assert.equal(config.workerImage, "custom-worker:dev");
   assert.equal(config.mcpSidecarImage, "custom-sidecar:dev");
 });

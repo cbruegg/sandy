@@ -12,6 +12,7 @@ const DEFAULT_LOG_LEVEL: z.infer<typeof logLevelSchema> = "info";
 const DEFAULT_SHARE_ROOT = "/tmp/sandy-shares";
 const DEFAULT_STT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_STT_MODEL = "gpt-4o-mini-transcribe";
+const DEFAULT_AUTO_UPDATES_ENABLED = true;
 
 function defaultConfigPath(): string {
   return join(resolveHomeDirectory(), ".config", "sandy", "config.toml");
@@ -73,6 +74,11 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
     }).default({
       mcp: {},
     }),
+    updates: z.object({
+      enabled: z.boolean().default(DEFAULT_AUTO_UPDATES_ENABLED),
+    }).default({
+      enabled: DEFAULT_AUTO_UPDATES_ENABLED,
+    }),
   }).strict();
 }
 
@@ -104,6 +110,15 @@ type SandyConfig = {
   authMode: SandyAuthMode;
   mcpServers: Record<string, McpServerConfig>;
   persistentMcpApprovals: Record<string, string[]>;
+  autoUpdatesEnabled: boolean;
+  // The resolved image values alone are not enough here because a user may
+  // explicitly pin an image to the same string as the baked default. The
+  // updater conflict is about explicit configuration intent, not the final
+  // resolved value.
+  explicitImageOverrides: {
+    workerImage: boolean;
+    mcpSidecarImage: boolean;
+  };
 };
 
 type EnvSource = NodeJS.ProcessEnv;
@@ -154,7 +169,8 @@ export function parseConfigToml(
   configFilePath = defaultConfigPath(),
   buildMetadata?: SandyBuildMetadata,
 ): SandyConfig {
-  const parsed = parseConfigTomlFile(raw, buildMetadata);
+  const parsedFile = parseConfigTomlFile(raw, buildMetadata);
+  const parsed = parsedFile.data;
   const codexAuthFile = resolveCodexAuthFile(parsed.auth.codex_auth_file);
   const rawApiKey = parsed.auth.openai_api_key ?? null;
   const authMode: SandyAuthMode = codexAuthFile
@@ -162,6 +178,16 @@ export function parseConfigToml(
     : rawApiKey
       ? { mode: "api_key", openAiApiKey: rawApiKey }
       : { mode: "ambient_codex_auth" };
+
+  if (parsed.updates.enabled && (parsedFile.explicitImageOverrides.workerImage || parsedFile.explicitImageOverrides.mcpSidecarImage)) {
+    const configuredImages = [
+      parsedFile.explicitImageOverrides.workerImage ? "worker.image" : null,
+      parsedFile.explicitImageOverrides.mcpSidecarImage ? "mcp.sidecar_image" : null,
+    ].filter((value): value is string => value !== null);
+    throw new Error(
+      `Automatic updates require Sandy-managed Docker image defaults. Explicitly configured ${configuredImages.join(", ")} conflicts with [updates].enabled = true. Set [updates].enabled = false to keep pinned images.`,
+    );
+  }
 
   return {
     configFilePath,
@@ -181,6 +207,8 @@ export function parseConfigToml(
     persistentMcpApprovals: Object.fromEntries(
       Object.entries(parsed.approvals.mcp).map(([identifier, approval]) => [identifier, approval.always_allow_tools]),
     ),
+    autoUpdatesEnabled: parsed.updates.enabled,
+    explicitImageOverrides: parsedFile.explicitImageOverrides,
   };
 }
 
@@ -207,14 +235,46 @@ export function renderConfigToml(value: SandyConfigFile): string {
   return toml.stringify(removeNulls(value) as toml.JsonMap);
 }
 
-export function parseConfigTomlFile(raw: string, buildMetadata?: SandyBuildMetadata): SandyConfigFileData {
+export function parseConfigTomlFile(
+  raw: string,
+  buildMetadata?: SandyBuildMetadata,
+): {
+  data: SandyConfigFileData;
+  explicitImageOverrides: {
+    workerImage: boolean;
+    mcpSidecarImage: boolean;
+  };
+} {
   // @iarna/toml attaches symbol-keyed metadata to parsed table objects.
   // Zod record schemas treat those symbols as keys and reject the value,
   // so normalize the tree into plain string-keyed objects before parsing.
-  return buildSandyConfigSchema(
-    defaultCodexAuthFilePath(),
-    resolveDefaultImageReferences(buildMetadata),
-  ).parse(normalizeParsedToml(toml.parse(raw)));
+  const parsedToml = normalizeParsedToml(toml.parse(raw));
+  // Track whether the config file explicitly set these fields. Comparing only
+  // resolved values would miss the case where a user pins an image to the same
+  // string as the baked default, which still needs to disable auto-updates.
+  const explicitImageOverrides = {
+    workerImage: hasOwnString(parsedToml, ["worker", "image"]),
+    mcpSidecarImage: hasOwnString(parsedToml, ["mcp", "sidecar_image"]),
+  };
+
+  return {
+    data: buildSandyConfigSchema(
+      defaultCodexAuthFilePath(),
+      resolveDefaultImageReferences(buildMetadata),
+    ).parse(parsedToml),
+    explicitImageOverrides,
+  };
+}
+
+function hasOwnString(value: unknown, path: string[]): boolean {
+  let current: unknown = value;
+  for (const segment of path) {
+    if (!current || typeof current !== "object" || !(segment in current)) {
+      return false;
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+  return typeof current === "string";
 }
 
 function removeNulls(value: unknown): unknown {

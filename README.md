@@ -54,6 +54,9 @@ bot_token = "123456:telegram-token"
 [mcp]
 # sidecar_image = "sandy-mcp-proxy:latest" # explicit override; otherwise Sandy uses a baked GHCR sha tag when present, or this local default
 
+[updates]
+# enabled = true
+
 [mcp.servers.todoist]
 # Currently the only allowed transport:
 transport = "streamable_http"
@@ -70,6 +73,12 @@ Auth behavior:
 - If `auth.openai_api_key` is set and no Codex auth file is available, Sandy passes the API key to the main agent and sub-agent worker.
 - If both are present, Sandy prefers the Codex ChatGPT auth file and does not pass the API key.
 - OAuth for upstream MCP servers is handled on the host through the Sandy CLI, not inside Telegram chats.
+
+Update behavior:
+
+- `updates.enabled` defaults to `true`.
+- GitHub-built Sandy executables regularly check for a newer rolling GitHub release and restart to install it once idle.
+- If you explicitly pin `worker.image` or `mcp.sidecar_image`, you must also set `[updates].enabled = false`. Sandy refuses to start with pinned Docker images while automatic updates remain enabled.
 
 ### Build and run
 
@@ -146,6 +155,7 @@ Build single-file executables:
 
 ```bash
 bun run build:exe
+bun run build:exe:updater
 bun run build:exe:worker
 bun run build:exe:mcp
 ```

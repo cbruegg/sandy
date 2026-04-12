@@ -26,7 +26,7 @@ export class TomlPersistentApprovalStore implements PersistentApprovalStore {
     }
 
     const raw = await readFile(this.configFilePath, "utf8");
-    const parsed = parseConfigTomlFile(raw);
+    const parsed = parseConfigTomlFile(raw).data;
     const next = applyPersistentApproval(parsed, serverId, toolName);
     const rendered = renderConfigToml(next);
     const tempFilePath = join(dirname(this.configFilePath), `.tmp-${process.pid}-${Date.now()}-config.toml`);

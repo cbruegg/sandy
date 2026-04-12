@@ -41,24 +41,34 @@ jobs:
           export const embeddedBuildMetadata = {
             gitRevision: '${{ github.sha }}',
             imageRegistry: 'ghcr.io/${{ github.repository_owner }}',
+            githubRepository: '${{ github.repository }}',
+            updateReleaseTag: 'main-build',
           } as const;
           EOF
 
-      - name: Build single-file executable
+      - name: Build single-file executables
         run: |
           mkdir -p bin
           EXT=""
           if [[ "${{ matrix.target }}" == bun-windows-* ]]; then
             EXT=".exe"
           fi
-          bun build --compile --target="${{ matrix.target }}" --outfile "bin/sandy-${{ matrix.target }}${EXT}" ./src/index.ts
+          bun build --compile --target="${{ matrix.target }}" --outfile "bin/sandy-${{ matrix.target }}${EXT}" ./src/entrypoint-main.ts
+          bun build --compile --target="${{ matrix.target }}" --outfile "bin/sandy-updater-${{ matrix.target }}${EXT}" ./src/entrypoint-updater.ts
+
+      - name: Package executable bundle
+        run: |
+          mkdir -p release-bundles
+          zip -j "release-bundles/sandy-${{ matrix.target }}.zip" \
+            "bin/sandy-${{ matrix.target }}"* \
+            "bin/sandy-updater-${{ matrix.target }}"*
 
       - name: Upload executable artifact
         if: inputs.publish
         uses: actions/upload-artifact@v4
         with:
           name: sandy-${{ matrix.target }}
-          path: bin/sandy-${{ matrix.target }}*
+          path: release-bundles/sandy-${{ matrix.target }}.zip
           if-no-files-found: error
 
   build-docker-images:

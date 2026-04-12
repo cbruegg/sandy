@@ -17,6 +17,8 @@ export const messages = {
     "Voice messages are disabled. Configure STT in Sandy's config file to enable transcription.",
   voiceTranscriptionFailed: (): string =>
     "Voice transcription failed. Please try again or send the request as text.",
+  updateInstalling: (revision: string): string =>
+    `A Sandy update is ready. Restarting now to install ${revision}.`,
   nextPlannedStep: (step: string): string => `Next planned step: ${step}`,
   commandProgress: (status: string, command: string): string => `Command ${status}: ${command}`,
   taskSummaryReady: (taskName: string, summary: string): string =>

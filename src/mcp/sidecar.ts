@@ -10,7 +10,7 @@ function send(message: object): void {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const input = createInterface({
     input: process.stdin,
     crlfDelay: Infinity,
@@ -103,5 +103,3 @@ async function readBootstrapMessage(input: ReturnType<typeof createInterface>): 
     });
   });
 }
-
-await main();

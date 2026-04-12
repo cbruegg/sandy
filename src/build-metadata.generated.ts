@@ -2,4 +2,6 @@
 export const embeddedBuildMetadata = {
   gitRevision: undefined,
   imageRegistry: undefined,
+  githubRepository: undefined,
+  updateReleaseTag: undefined,
 } as const;

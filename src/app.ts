@@ -13,6 +13,8 @@ import { PrivilegeBrokerImpl } from "./privilege/privilege-broker.js";
 import { DockerSandboxRunner } from "./sandbox/docker-sandbox-runner.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
 import { OpenAiTranscriptionProvider } from "./transcription/openai-transcription-provider.js";
+import { resolvePublishedUpdateSource } from "./build-metadata.js";
+import { SelfUpdateCoordinator } from "./update/self-update.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -71,11 +73,13 @@ export async function startApp(): Promise<void> {
     },
   );
 
+  const sessionStore = new InMemorySessionStore();
+
   const orchestrator = new SandyOrchestrator({
     channel,
     mainAgent,
     sandboxRunner,
-    sessionStore: new InMemorySessionStore(),
+    sessionStore,
     privilegeBroker: new PrivilegeBrokerImpl(),
     persistentApprovalStore: new TomlPersistentApprovalStore(config.configFilePath, config.persistentMcpApprovals),
   });
@@ -91,9 +95,39 @@ export async function startApp(): Promise<void> {
   await sidecarManager?.start();
 
   const shutdown = async () => {
+    updateCoordinator.stop();
+    await channel.stop();
     await sandboxRunner.shutdown?.();
     await sidecarManager?.stop();
   };
+
+  const updateCoordinator = new SelfUpdateCoordinator({
+    enabled: config.autoUpdatesEnabled,
+    currentExecutablePath: process.execPath,
+    currentArgs: process.argv.slice(1),
+    currentWorkingDirectory: process.cwd(),
+    updateSource: resolvePublishedUpdateSource(),
+    canInstallUpdate: () => sessionStore.listSessions().every((session) =>
+      session.activeTask === null
+      && session.pendingTaskSummary === null
+      && session.pendingShareDeletion === null),
+    notifyChats: async (message) => {
+      const chatIds = Array.from(new Set(sessionStore.listSessions().map((session) => session.chatId)));
+      await Promise.all(chatIds.map(async (chatId) => {
+        try {
+          await channel.sendText(chatId, message);
+        } catch (error) {
+          logger.warn("update.notification_failed", {
+            chatId,
+            message: error instanceof Error ? error.message : "Unknown update notification failure.",
+          });
+        }
+      }));
+    },
+    prepareForRestart: shutdown,
+  });
+  updateCoordinator.start();
+
   process.once("SIGINT", () => {
     void shutdown().finally(() => process.exit(130));
   });
