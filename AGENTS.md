@@ -19,7 +19,7 @@ Sandy is a TypeScript project with the application code under `src/`.
 
 - `bun install`: install project dependencies and update `bun.lock`.
 - `bun run build`: run linting, explicit TypeScript type-checking, Bun bundling, and `knip`.
-- `bun start`: run the host application from `src/index.ts` with Bun.
+- `bun start`: run the host application from `src/entrypoint-main.ts` with Bun.
 - `bun run test`: rebuild and run the Bun test suite.
 - `bun run build:exe`: build the host single-file executable.
 - `docker build --target worker-runtime -t sandy-subagent:latest .`: build the worker container image used by sub-agents.

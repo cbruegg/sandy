@@ -14,7 +14,7 @@ WORKDIR /app
 COPY --from=build /app/dist ./dist
 
 FROM runtime-base AS mcp-proxy-runtime
-CMD ["bun", "dist/mcp/sidecar.js"]
+CMD ["bun", "dist/entrypoint-mcp-proxy.js"]
 
 FROM opensuse/tumbleweed:latest AS worker-runtime
 WORKDIR /workspace
