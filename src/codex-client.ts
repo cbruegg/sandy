@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 import { Codex, type CodexOptions } from "@openai/codex-sdk";
 import { embeddedCodexVersion } from "./codex-version.generated.js";
 import { resolveHomeDirectory } from "./home-directory.js";
+import { logger } from "./logger.js";
 
 const SANDY_CODEX_PATH_ENV = "SANDY_CODEX_PATH";
 const CODEX_RELEASE_REPOSITORY = "openai/codex";
@@ -229,12 +230,21 @@ async function runCommand(command: string, args: string[]): Promise<void> {
 
 async function pruneCodexCache(cacheRoot: string, keepVersion: string): Promise<void> {
   const entries = await readdir(cacheRoot, { withFileTypes: true }).catch(() => []);
+  const removedVersions: string[] = [];
   await Promise.all(entries.map(async (entry) => {
     if (!entry.isDirectory() || entry.name === keepVersion) {
       return;
     }
     await rm(join(cacheRoot, entry.name), { recursive: true, force: true });
+    removedVersions.push(entry.name);
   }));
+  if (removedVersions.length > 0) {
+    logger.info("codex.cache_pruned", {
+      cacheRoot,
+      keepVersion,
+      removedVersions,
+    });
+  }
 }
 
 async function fetchCodexReleaseAsset(
@@ -263,6 +273,10 @@ export async function ensureManagedCodexPath(options: EnsureManagedCodexOptions 
   const env = options.env ?? process.env;
   const configuredPath = resolveConfiguredCodexPath(env);
   if (configuredPath) {
+    logger.info("codex.path_override", {
+      path: configuredPath,
+      source: SANDY_CODEX_PATH_ENV,
+    });
     return configuredPath;
   }
 
@@ -275,7 +289,18 @@ export async function ensureManagedCodexPath(options: EnsureManagedCodexOptions 
   const cacheRoot = options.cacheRoot ?? resolveCodexCacheRoot(env);
   const versionDirectory = join(cacheRoot, version);
   const binaryPath = join(versionDirectory, CODEX_BINARY_NAME);
+  logger.info("codex.resolve_started", {
+    version,
+    cacheRoot,
+    assetName: asset.assetName,
+    platform: process.platform,
+    arch: process.arch,
+  });
   if (isExecutableFile(binaryPath)) {
+    logger.info("codex.cache_hit", {
+      version,
+      binaryPath,
+    });
     await pruneCodexCache(cacheRoot, version);
     return binaryPath;
   }
@@ -283,16 +308,46 @@ export async function ensureManagedCodexPath(options: EnsureManagedCodexOptions 
   const fetchFn = options.fetchFn ?? fetch;
   await mkdir(cacheRoot, { recursive: true });
   const stagingDirectory = await mkdtemp(join(tmpdir(), "sandy-codex-"));
+  logger.info("codex.download_started", {
+    version,
+    assetName: asset.assetName,
+    cacheRoot,
+    stagingDirectory,
+  });
 
   try {
+    logger.debug("codex.release_metadata_fetching", {
+      version,
+      releaseTag: `${CODEX_RELEASE_TAG_PREFIX}${version}`,
+    });
     const releaseAsset = await fetchCodexReleaseAsset(version, asset.assetName, fetchFn);
     const downloadedAssetPath = join(stagingDirectory, asset.assetName);
+    logger.info("codex.asset_downloading", {
+      version,
+      assetName: releaseAsset.name,
+      size: releaseAsset.size,
+      url: releaseAsset.browserDownloadUrl,
+    });
     await downloadVerifiedAsset(fetchFn, releaseAsset, downloadedAssetPath);
     await mkdir(versionDirectory, { recursive: true });
+    logger.info("codex.asset_extracting", {
+      version,
+      assetName: releaseAsset.name,
+      versionDirectory,
+    });
     await extractCodexAsset(downloadedAssetPath, asset, versionDirectory);
     await pruneCodexCache(cacheRoot, version);
+    logger.info("codex.download_ready", {
+      version,
+      binaryPath,
+    });
     return binaryPath;
   } catch (error) {
+    logger.error("codex.download_failed", {
+      version,
+      cacheRoot,
+      message: error instanceof Error ? error.message : "Unknown Codex download failure.",
+    });
     await rm(versionDirectory, { recursive: true, force: true }).catch(() => {});
     throw error;
   } finally {
