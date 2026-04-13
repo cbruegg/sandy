@@ -44,7 +44,7 @@ export class McpSidecarManager {
     private readonly options: McpSidecarManagerOptions,
     private readonly access: SandyMcpProxyAccess,
   ) {
-    this.startupTimeoutMs = options.startupTimeoutMs ?? 60_000;
+    this.startupTimeoutMs = options.startupTimeoutMs ?? 300_000;
     this.spawnImpl = options.spawnImpl ?? spawn;
     this.setTimeoutImpl = options.setTimeoutImpl ?? setTimeout;
     this.clearTimeoutImpl = options.clearTimeoutImpl ?? clearTimeout;

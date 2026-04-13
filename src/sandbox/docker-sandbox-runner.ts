@@ -26,7 +26,7 @@ type DockerSandboxRunnerOptions = {
   clearTimeoutImpl?: typeof clearTimeout;
 };
 
-const DEFAULT_HANDSHAKE_TIMEOUT_MS = 90_000;
+const DEFAULT_HANDSHAKE_TIMEOUT_MS = 300_000;
 
 export class DockerSandboxRunner implements SandboxRunner {
   private readonly handshakeTimeoutMs: number;
