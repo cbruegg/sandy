@@ -13,6 +13,7 @@ const CODEX_RELEASE_REPOSITORY = "openai/codex";
 const CODEX_RELEASE_TAG_PREFIX = "rust-v";
 const CODEX_BINARY_NAME = process.platform === "win32" ? "codex.exe" : "codex";
 const CODEX_NPM_NAME = "@openai/codex";
+const CODEX_SDK_NPM_NAME = "@openai/codex-sdk";
 const moduleRequire = createRequire(import.meta.url);
 
 type SupportedPlatform = "linux" | "darwin" | "win32";
@@ -104,7 +105,9 @@ export function resolveManagedCodexAsset(platform: NodeJS.Platform, arch: string
 }
 
 export function resolveCodexVersion(): string {
-  const packageJson = moduleRequire(`${CODEX_NPM_NAME}/package.json`) as { version?: unknown };
+  const codexSdkPackageJsonPath = moduleRequire.resolve(`${CODEX_SDK_NPM_NAME}/package.json`);
+  const codexSdkRequire = createRequire(codexSdkPackageJsonPath);
+  const packageJson = codexSdkRequire(`${CODEX_NPM_NAME}/package.json`) as { version?: unknown };
   if (typeof packageJson.version !== "string" || !packageJson.version.trim()) {
     throw new Error(`Unable to determine ${CODEX_NPM_NAME} version.`);
   }
