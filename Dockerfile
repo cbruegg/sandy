@@ -57,4 +57,4 @@ ENV PATH="${BUN_INSTALL}/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/home
 
 COPY --from=build /app/dist ./dist
 
-CMD ["bun", "dist/subagent/worker.js"]
+CMD ["bun", "dist/entrypoint-worker.js"]
