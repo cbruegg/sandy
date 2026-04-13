@@ -12,7 +12,6 @@ import { logger } from "./logger.js";
 const SANDY_CODEX_PATH_ENV = "SANDY_CODEX_PATH";
 const CODEX_RELEASE_REPOSITORY = "openai/codex";
 const CODEX_RELEASE_TAG_PREFIX = "rust-v";
-const CODEX_BINARY_NAME = process.platform === "win32" ? "codex.exe" : "codex";
 const CODEX_NPM_NAME = "@openai/codex";
 
 type SupportedPlatform = "linux" | "darwin" | "win32";
@@ -36,6 +35,8 @@ type EnsureManagedCodexOptions = {
   env?: NodeJS.ProcessEnv;
   execPath?: string;
   fetchFn?: typeof fetch;
+  platform?: NodeJS.Platform;
+  arch?: string;
 };
 
 function isExecutableFile(path: string): boolean {
@@ -120,6 +121,10 @@ export function resolveCodexCacheRoot(env: NodeJS.ProcessEnv = process.env): str
   return join(homeDirectory, ".local", "share", "sandy", "codex");
 }
 
+function resolveCodexBinaryName(platform: NodeJS.Platform): string {
+  return platform === "win32" ? "codex.exe" : "codex";
+}
+
 function buildReleaseApiUrl(repository: string, releaseTag: string): string {
   return `https://api.github.com/repos/${repository}/releases/tags/${releaseTag}`;
 }
@@ -200,8 +205,9 @@ async function extractCodexAsset(
   assetPath: string,
   asset: ManagedCodexAsset,
   versionDirectory: string,
+  platform: NodeJS.Platform,
 ): Promise<string> {
-  const finalBinaryPath = join(versionDirectory, CODEX_BINARY_NAME);
+  const finalBinaryPath = join(versionDirectory, resolveCodexBinaryName(platform));
   if (asset.archive === "raw") {
     await rename(assetPath, finalBinaryPath);
   } else {
@@ -280,21 +286,27 @@ export async function ensureManagedCodexPath(options: EnsureManagedCodexOptions 
     return configuredPath;
   }
 
+  const platform = options.platform ?? process.platform;
+  const arch = options.arch ?? process.arch;
   const version = resolveCodexVersion();
-  const asset = resolveManagedCodexAsset(process.platform, process.arch);
-  if (!asset) {
-    throw new Error(`Unsupported Codex platform: ${process.platform} (${process.arch})`);
+  const asset = resolveManagedCodexAsset(platform, arch);
+  const targetTriple = resolveCodexTargetTriple(platform, arch);
+  if (!asset || !targetTriple) {
+    throw new Error(`Unsupported Codex platform: ${platform} (${arch})`);
   }
 
-  const cacheRoot = options.cacheRoot ?? resolveCodexCacheRoot(env);
+  const cacheRoot = options.cacheRoot
+    ?? (platform === process.platform && arch === process.arch
+      ? resolveCodexCacheRoot(env)
+      : join(resolveCodexCacheRoot(env), targetTriple));
   const versionDirectory = join(cacheRoot, version);
-  const binaryPath = join(versionDirectory, CODEX_BINARY_NAME);
+  const binaryPath = join(versionDirectory, resolveCodexBinaryName(platform));
   logger.info("codex.resolve_started", {
     version,
     cacheRoot,
     assetName: asset.assetName,
-    platform: process.platform,
-    arch: process.arch,
+    platform,
+    arch,
   });
   if (isExecutableFile(binaryPath)) {
     logger.info("codex.cache_hit", {
@@ -335,7 +347,7 @@ export async function ensureManagedCodexPath(options: EnsureManagedCodexOptions 
       assetName: releaseAsset.name,
       versionDirectory,
     });
-    await extractCodexAsset(downloadedAssetPath, asset, versionDirectory);
+    await extractCodexAsset(downloadedAssetPath, asset, versionDirectory, platform);
     await pruneCodexCache(cacheRoot, version);
     logger.info("codex.download_ready", {
       version,

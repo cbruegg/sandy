@@ -124,3 +124,29 @@ test("ensureManagedCodexPath reuses the cached matching version and prunes older
     await rm(cacheRoot, { recursive: true, force: true });
   }
 });
+
+test("ensureManagedCodexPath isolates cross-platform worker caches by target triple", async () => {
+  const cacheRoot = await mkdtemp(join(tmpdir(), "sandy-codex-cache-"));
+  const currentVersion = resolveCodexVersion();
+  const linuxTriple = resolveCodexTargetTriple("linux", "x64");
+  assert.ok(linuxTriple);
+
+  const workerVersionDir = join(cacheRoot, linuxTriple, currentVersion);
+  const workerBinaryPath = join(workerVersionDir, "codex");
+
+  try {
+    await mkdir(workerVersionDir, { recursive: true });
+    await writeFile(workerBinaryPath, "#!/bin/sh\nexit 0\n");
+    await chmod(workerBinaryPath, 0o755);
+
+    const resolved = await ensureManagedCodexPath({
+      cacheRoot: join(cacheRoot, linuxTriple),
+      platform: "linux",
+      arch: "x64",
+    });
+
+    assert.equal(resolved, workerBinaryPath);
+  } finally {
+    await rm(cacheRoot, { recursive: true, force: true });
+  }
+});

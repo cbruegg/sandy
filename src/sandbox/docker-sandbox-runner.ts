@@ -15,6 +15,7 @@ type DockerSandboxRunnerOptions = {
   shareRoot: string;
   openAiApiKey: string | null;
   codexAuthFile: string | null;
+  workerCodexBinaryPath?: string | null;
   workerNetworkName?: string | null;
   workerCodexConfigBuilder: (taskId: string) => {
     codexConfigToml: string | null;
@@ -123,6 +124,10 @@ export class DockerSandboxRunner implements SandboxRunner {
       dockerArgs.push("-e", `OPENAI_API_KEY=${this.options.openAiApiKey}`);
     }
 
+    if (this.options.workerCodexBinaryPath) {
+      dockerArgs.push("-e", "SANDY_CODEX_PATH=/usr/local/bin/codex");
+    }
+
     for (const [name, value] of Object.entries(workerEnvironment)) {
       dockerArgs.push("-e", `${name}=${value}`);
     }
@@ -131,6 +136,13 @@ export class DockerSandboxRunner implements SandboxRunner {
       dockerArgs.push(
         "-v",
         `${workerCodexHomeTempDir}:/root/.codex`,
+      );
+    }
+
+    if (this.options.workerCodexBinaryPath) {
+      dockerArgs.push(
+        "-v",
+        `${this.options.workerCodexBinaryPath}:/usr/local/bin/codex:ro`,
       );
     }
 

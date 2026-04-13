@@ -109,6 +109,7 @@ async function launchRunnerWithChild(
     handshakeTimeoutMs?: number;
     shareRoot?: string;
     builtWorkerCodexConfigToml?: string | null;
+    workerCodexBinaryPath?: string | null;
     workerNetworkName?: string | null;
   },
 ) {
@@ -119,6 +120,7 @@ async function launchRunnerWithChild(
     shareRoot: options?.shareRoot ?? "/tmp/sandy-test-shares",
     openAiApiKey: null,
     codexAuthFile: null,
+    workerCodexBinaryPath: options?.workerCodexBinaryPath,
     workerCodexConfigBuilder: () => ({
       codexConfigToml: options?.builtWorkerCodexConfigToml ?? null,
       environment: {},
@@ -392,6 +394,7 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
     shareRoot: "/tmp/sandy-test-shares",
     openAiApiKey: null,
     codexAuthFile: null,
+    workerCodexBinaryPath: null,
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
@@ -430,6 +433,7 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
     shareRoot,
     openAiApiKey: null,
     codexAuthFile: null,
+    workerCodexBinaryPath: null,
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
@@ -480,6 +484,20 @@ test("DockerSandboxRunner mounts a writable worker Codex home from a temp path o
   await rm(shareRoot, { recursive: true, force: true });
 });
 
+test("DockerSandboxRunner mounts the host-managed worker Codex binary read-only", async () => {
+  const taskChild = new FakeChildProcess();
+  const workerCodexBinaryPath = "/tmp/sandy-codex/linux/codex";
+
+  const { invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
+    workerCodexBinaryPath,
+  });
+
+  const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
+  assert.ok(dockerRunInvocation);
+  assert.ok(dockerRunInvocation.args.includes("SANDY_CODEX_PATH=/usr/local/bin/codex"));
+  assert.ok(dockerRunInvocation.args.includes(`${workerCodexBinaryPath}:/usr/local/bin/codex:ro`));
+});
+
 test("DockerSandboxRunner joins the configured worker network when provided", async () => {
   const taskChild = new FakeChildProcess();
   const { invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
@@ -502,6 +520,7 @@ test("DockerSandboxRunner rejects share inspection outside the configured share 
     shareRoot,
     openAiApiKey: null,
     codexAuthFile: null,
+    workerCodexBinaryPath: null,
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
@@ -530,6 +549,7 @@ test("DockerSandboxRunner rejects share deletion outside the configured share ro
     shareRoot,
     openAiApiKey: null,
     codexAuthFile: null,
+    workerCodexBinaryPath: null,
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},

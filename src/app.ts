@@ -1,7 +1,7 @@
 import { CodexMainAgentController } from "./agent/main-agent-controller.js";
 import { TelegramBotApiAdapter } from "./channel/telegram-adapter.js";
 import { loadConfig } from "./config.js";
-import { createCodexClient } from "./codex-client.js";
+import { createCodexClient, ensureManagedCodexPath } from "./codex-client.js";
 import { configureLogger, logger } from "./logger.js";
 import { SandyMcpProxyAccess } from "./mcp/proxy-access.js";
 import { McpSidecarManager } from "./mcp/sidecar-manager.js";
@@ -44,11 +44,18 @@ export async function startApp(): Promise<void> {
     transcriptionProvider: transcriptionProvider ?? undefined,
   });
 
-  const codex = config.authMode.mode === "api_key"
-    ? await createCodexClient({
-        apiKey: config.authMode.openAiApiKey,
-      })
-    : await createCodexClient();
+  // Pre-resolve the worker Codex binary so each container can reuse the cache instead of re-downloading it.
+  const [codex, workerCodexBinaryPath] = await Promise.all([
+    config.authMode.mode === "api_key"
+      ? createCodexClient({
+          apiKey: config.authMode.openAiApiKey,
+        })
+      : createCodexClient(),
+    ensureManagedCodexPath({
+      platform: "linux",
+      arch: process.arch,
+    }),
+  ]);
 
   const mainAgent = new CodexMainAgentController(codex);
 
@@ -68,6 +75,7 @@ export async function startApp(): Promise<void> {
       shareRoot: config.shareRoot,
       openAiApiKey: config.authMode.mode === "api_key" ? config.authMode.openAiApiKey : null,
       codexAuthFile: config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthFile : null,
+      workerCodexBinaryPath,
       workerCodexConfigBuilder: (taskId) => mcpWorkerLaunchConfigBuilder.build(taskId),
       workerNetworkName,
     },

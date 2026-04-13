@@ -223,6 +223,7 @@ classification and orchestration instead of local execution.
 Sub-agents are launched in isolated containers, initially using Docker.
 Allowed interfaces are internet access, a per-sub-agent shared volume for file exchange and the container control
 channel to the host runtime.
+- The host mounts a cached Linux Codex binary into each worker container read-only so workers do not re-download it.
 
 User file uploads are a normal channel capability rather than a privileged host operation. Sandy downloads uploaded
 files directly into the target sub-agent's shared workspace before launch, and can also stage additional uploads into
