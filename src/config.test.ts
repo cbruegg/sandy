@@ -23,7 +23,7 @@ codex_auth_file = "/tmp/codex-auth.json"
   assert.equal(config.sttApiKey, null);
   assert.equal(config.sttBaseUrl, "https://api.openai.com/v1");
   assert.equal(config.sttModel, "gpt-4o-mini-transcribe");
-  assert.equal(config.autoUpdatesEnabled, true);
+  assert.equal(config.updateMode, "disabled");
 });
 
 test("parseConfigToml enables STT from the config file", () => {
@@ -71,7 +71,7 @@ test("parseConfigToml prefers explicit config image overrides over baked default
 bot_token = "telegram-token"
 
 [updates]
-enabled = false
+mode = "disabled"
 
 [worker]
 image = "custom-worker:dev"
@@ -91,37 +91,58 @@ sidecar_image = "custom-sidecar:dev"
   });
 });
 
-test("parseConfigToml rejects explicit worker image overrides when auto-updates stay enabled", () => {
+test("parseConfigToml rejects explicit worker image overrides when update mode is relaunch", () => {
   assert.throws(() => {
     parseConfigToml(`
 [telegram]
 bot_token = "telegram-token"
+
+[updates]
+mode = "relaunch"
 
 [worker]
 image = "custom-worker:dev"
 `);
-  }, /\[updates\]\.enabled = false/);
+  }, /\[updates\]\.mode = "disabled"/);
 });
 
-test("parseConfigToml rejects explicit MCP sidecar image overrides when auto-updates stay enabled", () => {
+test("parseConfigToml rejects explicit MCP sidecar image overrides when update mode is relaunch", () => {
   assert.throws(() => {
     parseConfigToml(`
 [telegram]
 bot_token = "telegram-token"
 
+[updates]
+mode = "relaunch"
+
 [mcp]
 sidecar_image = "custom-sidecar:dev"
 `);
-  }, /\[updates\]\.enabled = false/);
+  }, /\[updates\]\.mode = "disabled"/);
 });
 
-test("parseConfigToml allows pinned Docker images when auto-updates are disabled explicitly", () => {
+test("parseConfigToml rejects explicit image overrides when update mode is exit", () => {
+  assert.throws(() => {
+    parseConfigToml(`
+[telegram]
+bot_token = "telegram-token"
+
+[updates]
+mode = "exit"
+
+[worker]
+image = "custom-worker:dev"
+`);
+  }, /\[updates\]\.mode = "disabled"/);
+});
+
+test("parseConfigToml allows pinned Docker images when update mode is disabled explicitly", () => {
   const config = parseConfigToml(`
 [telegram]
 bot_token = "telegram-token"
 
 [updates]
-enabled = false
+mode = "disabled"
 
 [worker]
 image = "custom-worker:dev"
@@ -130,7 +151,7 @@ image = "custom-worker:dev"
 sidecar_image = "custom-sidecar:dev"
 `);
 
-  assert.equal(config.autoUpdatesEnabled, false);
+  assert.equal(config.updateMode, "disabled");
   assert.equal(config.workerImage, "custom-worker:dev");
   assert.equal(config.mcpSidecarImage, "custom-sidecar:dev");
 });

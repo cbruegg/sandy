@@ -55,7 +55,7 @@ bot_token = "123456:telegram-token"
 # sidecar_image = "sandy-mcp-proxy:latest" # explicit override; otherwise Sandy uses a baked GHCR sha tag when present, or this local default
 
 [updates]
-# enabled = true
+# mode = "disabled" # one of: "disabled", "relaunch", "exit"
 
 [mcp.servers.todoist]
 # Currently the only allowed transport:
@@ -76,9 +76,12 @@ Auth behavior:
 
 Update behavior:
 
-- `updates.enabled` defaults to `true`.
-- GitHub-built Sandy executables regularly check for a newer rolling GitHub release and restart to install it once idle.
-- If you explicitly pin `worker.image` or `mcp.sidecar_image`, you must also set `[updates].enabled = false`. Sandy refuses to start with pinned Docker images while automatic updates remain enabled.
+- `updates.mode` defaults to `"disabled"`.
+- `updates.mode = "disabled"` turns off automatic executable updates.
+- `updates.mode = "relaunch"` stages an update, exits once idle, and has the updater relaunch Sandy directly.
+- `updates.mode = "exit"` replaces the on-disk Sandy executable first and then exits the running process so an external supervisor can restart it.
+- If you use `updates.mode = "exit"` under systemd, configure the unit with `Restart=always`. In this mode Sandy does not relaunch itself after updating.
+- If you explicitly pin `worker.image` or `mcp.sidecar_image`, you must also set `[updates].mode = "disabled"`. Sandy refuses to start with pinned Docker images while automatic updates remain enabled in either `"relaunch"` or `"exit"` mode.
 
 ### Build and run
 

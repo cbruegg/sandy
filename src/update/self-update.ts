@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
 import type { SandyUpdateSource } from "../build-metadata.js";
+import type { SandyUpdateMode } from "../config.js";
 
 const UPDATE_CHECK_INTERVAL_MS = 60_000;
 const GITHUB_API_VERSION = "2026-03-10";
@@ -50,7 +51,7 @@ type StagedUpdate = {
 };
 
 type SelfUpdateCoordinatorOptions = {
-  enabled: boolean;
+  mode: SandyUpdateMode;
   currentExecutablePath: string;
   currentArgs: string[];
   currentWorkingDirectory: string;
@@ -76,7 +77,7 @@ export class SelfUpdateCoordinator {
   }
 
   start(): void {
-    if (!this.options.enabled) {
+    if (this.options.mode === "disabled") {
       logger.info("update.disabled_in_config");
       return;
     }
@@ -91,6 +92,16 @@ export class SelfUpdateCoordinator {
     if (!this.targetAssets) {
       logger.warn("update.unavailable", {
         reason: "unsupported_platform",
+        platform: process.platform,
+        arch: process.arch,
+      });
+      return;
+    }
+
+    if (this.options.mode === "exit" && process.platform === "win32") {
+      logger.warn("update.unavailable", {
+        reason: "exit_mode_unsupported_platform",
+        detail: "Exit mode replaces the on-disk executable before the running process exits, which is not supported for Windows executables.",
         platform: process.platform,
         arch: process.arch,
       });
@@ -233,31 +244,126 @@ export class SelfUpdateCoordinator {
 
   private async installStagedUpdate(stagedUpdate: StagedUpdate): Promise<void> {
     this.restartStarted = true;
-    this.stop();
+    try {
+      await this.options.notifyChats(messages.updateInstalling(shortRevision(stagedUpdate.gitRevision)));
+      if (this.options.mode === "exit") {
+        await this.replaceExecutableThenExit(stagedUpdate);
+        return;
+      }
 
-    await this.options.notifyChats(messages.updateInstalling(shortRevision(stagedUpdate.gitRevision)));
+      await this.relaunchWithUpdater(stagedUpdate);
+    } catch (error) {
+      this.restartStarted = false;
+      throw error;
+    }
+  }
+
+  private async replaceExecutableThenExit(stagedUpdate: StagedUpdate): Promise<void> {
+    this.stop();
+    await runUpdaterProcess(
+      stagedUpdate.updaterPath,
+      buildReplaceOnlyPlan({
+        currentExecutablePath: this.options.currentExecutablePath,
+        replacementExecutablePath: stagedUpdate.binaryPath,
+        stageDirectory: stagedUpdate.stageDirectory,
+      }),
+    );
+    await this.options.prepareForRestart();
+    this.exitProcess(0);
+  }
+
+  private async relaunchWithUpdater(stagedUpdate: StagedUpdate): Promise<void> {
+    this.stop();
     await this.options.prepareForRestart();
 
-    const backupPath = join(dirname(this.options.currentExecutablePath), backupExecutableName(this.options.currentExecutablePath));
     const child = spawn(stagedUpdate.updaterPath, [], {
       detached: true,
       stdio: "ignore",
       env: {
         ...process.env,
-        SANDY_UPDATER_PLAN: JSON.stringify({
-          waitPid: process.pid,
-          targetExecutablePath: this.options.currentExecutablePath,
+        SANDY_UPDATER_PLAN: JSON.stringify(buildRelaunchPlan({
+          currentExecutablePath: this.options.currentExecutablePath,
           replacementExecutablePath: stagedUpdate.binaryPath,
-          backupExecutablePath: backupPath,
           relaunchArgs: this.options.currentArgs,
           currentWorkingDirectory: this.options.currentWorkingDirectory,
           stageDirectory: stagedUpdate.stageDirectory,
-        }),
+        })),
       },
     });
     child.unref();
     this.exitProcess(0);
   }
+}
+
+type BaseUpdaterPlan = {
+  targetExecutablePath: string;
+  replacementExecutablePath: string;
+  backupExecutablePath: string;
+  stageDirectory: string;
+};
+
+type RelaunchUpdaterPlan = BaseUpdaterPlan & {
+  mode: "relaunch";
+  waitPid: number;
+  relaunchArgs: string[];
+  currentWorkingDirectory: string;
+};
+
+type ReplaceOnlyUpdaterPlan = BaseUpdaterPlan & {
+  mode: "replace-only";
+};
+
+function buildRelaunchPlan(input: {
+  currentExecutablePath: string;
+  replacementExecutablePath: string;
+  relaunchArgs: string[];
+  currentWorkingDirectory: string;
+  stageDirectory: string;
+}): RelaunchUpdaterPlan {
+  return {
+    mode: "relaunch",
+    waitPid: process.pid,
+    targetExecutablePath: input.currentExecutablePath,
+    replacementExecutablePath: input.replacementExecutablePath,
+    backupExecutablePath: join(dirname(input.currentExecutablePath), backupExecutableName(input.currentExecutablePath)),
+    relaunchArgs: input.relaunchArgs,
+    currentWorkingDirectory: input.currentWorkingDirectory,
+    stageDirectory: input.stageDirectory,
+  };
+}
+
+function buildReplaceOnlyPlan(input: {
+  currentExecutablePath: string;
+  replacementExecutablePath: string;
+  stageDirectory: string;
+}): ReplaceOnlyUpdaterPlan {
+  return {
+    mode: "replace-only",
+    targetExecutablePath: input.currentExecutablePath,
+    replacementExecutablePath: input.replacementExecutablePath,
+    backupExecutablePath: join(dirname(input.currentExecutablePath), backupExecutableName(input.currentExecutablePath)),
+    stageDirectory: input.stageDirectory,
+  };
+}
+
+async function runUpdaterProcess(updaterPath: string, plan: ReplaceOnlyUpdaterPlan): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(updaterPath, [], {
+      stdio: "ignore",
+      env: {
+        ...process.env,
+        SANDY_UPDATER_PLAN: JSON.stringify(plan),
+      },
+    });
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`Updater exited with code ${code ?? "null"}.`));
+    });
+  });
 }
 
 async function downloadVerifiedAsset(

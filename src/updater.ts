@@ -1,15 +1,25 @@
-import { chmod, rename, rm } from "node:fs/promises";
+import { chmod, copyFile, rename, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
 
-type UpdaterPlan = {
-  waitPid: number;
+type BaseUpdaterPlan = {
   targetExecutablePath: string;
   replacementExecutablePath: string;
   backupExecutablePath: string;
-  relaunchArgs: string[];
-  currentWorkingDirectory: string;
   stageDirectory: string;
 };
+
+type RelaunchUpdaterPlan = BaseUpdaterPlan & {
+  mode: "relaunch";
+  waitPid: number;
+  relaunchArgs: string[];
+  currentWorkingDirectory: string;
+};
+
+type ReplaceOnlyUpdaterPlan = BaseUpdaterPlan & {
+  mode: "replace-only";
+};
+
+type UpdaterPlan = RelaunchUpdaterPlan | ReplaceOnlyUpdaterPlan;
 
 function readUpdaterPlan(): UpdaterPlan {
   const rawPlan = process.env["SANDY_UPDATER_PLAN"];
@@ -18,8 +28,8 @@ function readUpdaterPlan(): UpdaterPlan {
   }
 
   const parsed = JSON.parse(rawPlan) as Partial<UpdaterPlan>;
-  if (typeof parsed.waitPid !== "number" || parsed.waitPid <= 0) {
-    throw new Error("Invalid waitPid in SANDY_UPDATER_PLAN.");
+  if (parsed.mode !== "relaunch" && parsed.mode !== "replace-only") {
+    throw new Error("Invalid mode in SANDY_UPDATER_PLAN.");
   }
   if (typeof parsed.targetExecutablePath !== "string" || !parsed.targetExecutablePath) {
     throw new Error("Invalid targetExecutablePath in SANDY_UPDATER_PLAN.");
@@ -30,17 +40,25 @@ function readUpdaterPlan(): UpdaterPlan {
   if (typeof parsed.backupExecutablePath !== "string" || !parsed.backupExecutablePath) {
     throw new Error("Invalid backupExecutablePath in SANDY_UPDATER_PLAN.");
   }
-  if (!Array.isArray(parsed.relaunchArgs) || parsed.relaunchArgs.some((value) => typeof value !== "string")) {
-    throw new Error("Invalid relaunchArgs in SANDY_UPDATER_PLAN.");
-  }
-  if (typeof parsed.currentWorkingDirectory !== "string" || !parsed.currentWorkingDirectory) {
-    throw new Error("Invalid currentWorkingDirectory in SANDY_UPDATER_PLAN.");
-  }
   if (typeof parsed.stageDirectory !== "string" || !parsed.stageDirectory) {
     throw new Error("Invalid stageDirectory in SANDY_UPDATER_PLAN.");
   }
 
-  return parsed as UpdaterPlan;
+  if (parsed.mode === "relaunch") {
+    if (typeof parsed.waitPid !== "number" || parsed.waitPid <= 0) {
+      throw new Error("Invalid waitPid in SANDY_UPDATER_PLAN.");
+    }
+    if (!Array.isArray(parsed.relaunchArgs) || parsed.relaunchArgs.some((value) => typeof value !== "string")) {
+      throw new Error("Invalid relaunchArgs in SANDY_UPDATER_PLAN.");
+    }
+    if (typeof parsed.currentWorkingDirectory !== "string" || !parsed.currentWorkingDirectory) {
+      throw new Error("Invalid currentWorkingDirectory in SANDY_UPDATER_PLAN.");
+    }
+
+    return parsed as RelaunchUpdaterPlan;
+  }
+
+  return parsed as ReplaceOnlyUpdaterPlan;
 }
 
 function isProcessRunning(pid: number): boolean {
@@ -59,21 +77,26 @@ async function waitForProcessExit(pid: number): Promise<void> {
 }
 
 async function replaceExecutable(plan: UpdaterPlan): Promise<void> {
+  const temporaryExecutablePath = `${plan.targetExecutablePath}.new`;
+  await rm(temporaryExecutablePath, { force: true });
+  await copyFile(plan.replacementExecutablePath, temporaryExecutablePath);
+  if (process.platform !== "win32") {
+    await chmod(temporaryExecutablePath, 0o755);
+  }
+
   await rm(plan.backupExecutablePath, { force: true });
   await rename(plan.targetExecutablePath, plan.backupExecutablePath);
 
   try {
-    await rename(plan.replacementExecutablePath, plan.targetExecutablePath);
-    if (process.platform !== "win32") {
-      await chmod(plan.targetExecutablePath, 0o755);
-    }
+    await rename(temporaryExecutablePath, plan.targetExecutablePath);
   } catch (error) {
+    await rm(temporaryExecutablePath, { force: true }).catch(() => {});
     await rename(plan.backupExecutablePath, plan.targetExecutablePath);
     throw error;
   }
 }
 
-function relaunchExecutable(plan: UpdaterPlan): void {
+function relaunchExecutable(plan: RelaunchUpdaterPlan): void {
   const child = spawn(plan.targetExecutablePath, plan.relaunchArgs, {
     cwd: plan.currentWorkingDirectory,
     detached: true,
@@ -96,14 +119,18 @@ function delay(ms: number): Promise<void> {
 
 export async function runUpdater(): Promise<void> {
   const plan = readUpdaterPlan();
-  await waitForProcessExit(plan.waitPid);
+  if (plan.mode === "relaunch") {
+    await waitForProcessExit(plan.waitPid);
+  }
   await replaceExecutable(plan);
 
-  try {
-    relaunchExecutable(plan);
-  } catch (error) {
-    await rename(plan.backupExecutablePath, plan.targetExecutablePath).catch(() => {});
-    throw error;
+  if (plan.mode === "relaunch") {
+    try {
+      relaunchExecutable(plan);
+    } catch (error) {
+      await rename(plan.backupExecutablePath, plan.targetExecutablePath).catch(() => {});
+      throw error;
+    }
   }
 
   await cleanup(plan);

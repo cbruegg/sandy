@@ -102,7 +102,7 @@ export async function startApp(): Promise<void> {
   };
 
   const updateCoordinator = new SelfUpdateCoordinator({
-    enabled: config.autoUpdatesEnabled,
+    mode: config.updateMode,
     currentExecutablePath: process.execPath,
     currentArgs: process.argv.slice(1),
     currentWorkingDirectory: process.cwd(),

@@ -12,7 +12,8 @@ const DEFAULT_LOG_LEVEL: z.infer<typeof logLevelSchema> = "info";
 const DEFAULT_SHARE_ROOT = "/tmp/sandy-shares";
 const DEFAULT_STT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_STT_MODEL = "gpt-4o-mini-transcribe";
-const DEFAULT_AUTO_UPDATES_ENABLED = true;
+const updateModeSchema = z.enum(["disabled", "relaunch", "exit"]);
+const DEFAULT_UPDATE_MODE: z.infer<typeof updateModeSchema> = "disabled";
 
 function defaultConfigPath(): string {
   return join(resolveHomeDirectory(), ".config", "sandy", "config.toml");
@@ -75,9 +76,9 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
       mcp: {},
     }),
     updates: z.object({
-      enabled: z.boolean().default(DEFAULT_AUTO_UPDATES_ENABLED),
+      mode: updateModeSchema.default(DEFAULT_UPDATE_MODE),
     }).default({
-      enabled: DEFAULT_AUTO_UPDATES_ENABLED,
+      mode: DEFAULT_UPDATE_MODE,
     }),
   }).strict();
 }
@@ -90,6 +91,8 @@ export type McpServerConfig = {
   url: string;
   oauthScopes: string[];
 };
+
+export type SandyUpdateMode = z.infer<typeof updateModeSchema>;
 
 type SandyAuthMode =
   | { mode: "api_key"; openAiApiKey: string }
@@ -110,7 +113,7 @@ type SandyConfig = {
   authMode: SandyAuthMode;
   mcpServers: Record<string, McpServerConfig>;
   persistentMcpApprovals: Record<string, string[]>;
-  autoUpdatesEnabled: boolean;
+  updateMode: SandyUpdateMode;
   // The resolved image values alone are not enough here because a user may
   // explicitly pin an image to the same string as the baked default. The
   // updater conflict is about explicit configuration intent, not the final
@@ -179,13 +182,14 @@ export function parseConfigToml(
       ? { mode: "api_key", openAiApiKey: rawApiKey }
       : { mode: "ambient_codex_auth" };
 
-  if (parsed.updates.enabled && (parsedFile.explicitImageOverrides.workerImage || parsedFile.explicitImageOverrides.mcpSidecarImage)) {
+  if (parsed.updates.mode !== "disabled"
+    && (parsedFile.explicitImageOverrides.workerImage || parsedFile.explicitImageOverrides.mcpSidecarImage)) {
     const configuredImages = [
       parsedFile.explicitImageOverrides.workerImage ? "worker.image" : null,
       parsedFile.explicitImageOverrides.mcpSidecarImage ? "mcp.sidecar_image" : null,
     ].filter((value): value is string => value !== null);
     throw new Error(
-      `Automatic updates require Sandy-managed Docker image defaults. Explicitly configured ${configuredImages.join(", ")} conflicts with [updates].enabled = true. Set [updates].enabled = false to keep pinned images.`,
+      `Automatic updates require Sandy-managed Docker image defaults. Explicitly configured ${configuredImages.join(", ")} conflicts with [updates].mode = "${parsed.updates.mode}". Set [updates].mode = "disabled" to keep pinned images.`,
     );
   }
 
@@ -207,7 +211,7 @@ export function parseConfigToml(
     persistentMcpApprovals: Object.fromEntries(
       Object.entries(parsed.approvals.mcp).map(([identifier, approval]) => [identifier, approval.always_allow_tools]),
     ),
-    autoUpdatesEnabled: parsed.updates.enabled,
+    updateMode: parsed.updates.mode,
     explicitImageOverrides: parsedFile.explicitImageOverrides,
   };
 }
