@@ -603,6 +603,6 @@ function isDockerPullStatusMessage(message: string): boolean {
       return true;
     }
 
-    return /^[^:\s]+: (Pulling fs layer|Waiting|Downloading|Verifying Checksum|Download complete|Extracting|Pull complete)$/.test(line);
+    return /^(?:[^:\s]+: )?(Pulling fs layer|Waiting|Downloading|Verifying Checksum|Download complete|Extracting|Pull complete)$/.test(line);
   });
 }
