@@ -105,13 +105,14 @@ export function resolveManagedCodexAsset(platform: NodeJS.Platform, arch: string
 }
 
 export function resolveCodexVersion(): string {
-  const codexSdkPackageJsonPath = moduleRequire.resolve(`${CODEX_SDK_NPM_NAME}/package.json`);
-  const codexSdkRequire = createRequire(codexSdkPackageJsonPath);
-  const packageJson = codexSdkRequire(`${CODEX_NPM_NAME}/package.json`) as { version?: unknown };
-  if (typeof packageJson.version !== "string" || !packageJson.version.trim()) {
+  const packageJson = moduleRequire(`${CODEX_SDK_NPM_NAME}/package.json`) as {
+    dependencies?: Record<string, unknown>;
+  };
+  const version = packageJson.dependencies?.[CODEX_NPM_NAME];
+  if (typeof version !== "string" || !version.trim()) {
     throw new Error(`Unable to determine ${CODEX_NPM_NAME} version.`);
   }
-  return packageJson.version;
+  return version;
 }
 
 export function resolveCodexCacheRoot(env: NodeJS.ProcessEnv = process.env): string {
