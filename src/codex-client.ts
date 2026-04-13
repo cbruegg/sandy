@@ -1,0 +1,314 @@
+import { createHash } from "node:crypto";
+import { accessSync, constants } from "node:fs";
+import { chmod, mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
+import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
+import { Codex, type CodexOptions } from "@openai/codex-sdk";
+import { resolveHomeDirectory } from "./home-directory.js";
+
+const SANDY_CODEX_PATH_ENV = "SANDY_CODEX_PATH";
+const CODEX_RELEASE_REPOSITORY = "openai/codex";
+const CODEX_RELEASE_TAG_PREFIX = "rust-v";
+const CODEX_BINARY_NAME = process.platform === "win32" ? "codex.exe" : "codex";
+const CODEX_NPM_NAME = "@openai/codex";
+const moduleRequire = createRequire(import.meta.url);
+
+type SupportedPlatform = "linux" | "darwin" | "win32";
+type SupportedArch = "x64" | "arm64";
+
+type GitHubReleaseAsset = {
+  name: string;
+  browserDownloadUrl: string;
+  sha256: string;
+  size: number;
+};
+
+type ManagedCodexAsset = {
+  assetName: string;
+  archive: "tar.gz" | "raw";
+  extractedBinaryName: string;
+};
+
+type EnsureManagedCodexOptions = {
+  cacheRoot?: string;
+  env?: NodeJS.ProcessEnv;
+  execPath?: string;
+  fetchFn?: typeof fetch;
+};
+
+function isExecutableFile(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveConfiguredCodexPath(env: NodeJS.ProcessEnv): string | null {
+  const configuredPath = env[SANDY_CODEX_PATH_ENV]?.trim();
+  if (!configuredPath) {
+    return null;
+  }
+
+  const resolvedPath = isAbsolute(configuredPath) ? configuredPath : resolve(configuredPath);
+  if (!isExecutableFile(resolvedPath)) {
+    throw new Error(`Configured ${SANDY_CODEX_PATH_ENV} path is not executable: ${resolvedPath}`);
+  }
+  return resolvedPath;
+}
+
+function isSupportedPlatform(value: NodeJS.Platform): value is SupportedPlatform {
+  return value === "linux" || value === "darwin" || value === "win32";
+}
+
+function isSupportedArch(value: string): value is SupportedArch {
+  return value === "x64" || value === "arm64";
+}
+
+export function resolveCodexTargetTriple(platform: NodeJS.Platform, arch: string): string | null {
+  if (!isSupportedPlatform(platform) || !isSupportedArch(arch)) {
+    return null;
+  }
+
+  if (platform === "linux") {
+    return arch === "x64" ? "x86_64-unknown-linux-musl" : "aarch64-unknown-linux-musl";
+  }
+  if (platform === "darwin") {
+    return arch === "x64" ? "x86_64-apple-darwin" : "aarch64-apple-darwin";
+  }
+  return arch === "x64" ? "x86_64-pc-windows-msvc" : "aarch64-pc-windows-msvc";
+}
+
+export function resolveManagedCodexAsset(platform: NodeJS.Platform, arch: string): ManagedCodexAsset | null {
+  const targetTriple = resolveCodexTargetTriple(platform, arch);
+  if (!targetTriple) {
+    return null;
+  }
+
+  if (platform === "win32") {
+    return {
+      assetName: `codex-${targetTriple}.exe`,
+      archive: "raw",
+      extractedBinaryName: `codex-${targetTriple}.exe`,
+    };
+  }
+
+  return {
+    assetName: `codex-${targetTriple}.tar.gz`,
+    archive: "tar.gz",
+    extractedBinaryName: `codex-${targetTriple}`,
+  };
+}
+
+export function resolveCodexVersion(): string {
+  const packageJson = moduleRequire(`${CODEX_NPM_NAME}/package.json`) as { version?: unknown };
+  if (typeof packageJson.version !== "string" || !packageJson.version.trim()) {
+    throw new Error(`Unable to determine ${CODEX_NPM_NAME} version.`);
+  }
+  return packageJson.version;
+}
+
+export function resolveCodexCacheRoot(env: NodeJS.ProcessEnv = process.env): string {
+  const localAppData = env["LOCALAPPDATA"]?.trim();
+  if (process.platform === "win32" && localAppData) {
+    return join(localAppData, "Sandy", "codex");
+  }
+  const homeDirectory = env["HOME"]?.trim() || resolveHomeDirectory();
+  return join(homeDirectory, ".local", "share", "sandy", "codex");
+}
+
+function buildReleaseApiUrl(repository: string, releaseTag: string): string {
+  return `https://api.github.com/repos/${repository}/releases/tags/${releaseTag}`;
+}
+
+function parseGitHubReleaseAsset(value: unknown): GitHubReleaseAsset[] {
+  if (!value || typeof value !== "object") {
+    throw new Error("Invalid GitHub release payload.");
+  }
+
+  const release = value as {
+    assets?: unknown;
+  };
+  if (!Array.isArray(release.assets)) {
+    throw new Error("GitHub release payload is missing assets.");
+  }
+
+  return release.assets.map((asset) => {
+    if (!asset || typeof asset !== "object") {
+      throw new Error("GitHub release asset is invalid.");
+    }
+
+    const typedAsset = asset as {
+      name?: unknown;
+      browser_download_url?: unknown;
+      digest?: unknown;
+      size?: unknown;
+    };
+    if (typeof typedAsset.name !== "string" || !typedAsset.name.trim()) {
+      throw new Error("GitHub release asset is missing name.");
+    }
+    if (typeof typedAsset.browser_download_url !== "string" || !typedAsset.browser_download_url.trim()) {
+      throw new Error(`GitHub release asset ${typedAsset.name} is missing browser_download_url.`);
+    }
+    if (typeof typedAsset.digest !== "string" || !typedAsset.digest.startsWith("sha256:")) {
+      throw new Error(`GitHub release asset ${typedAsset.name} is missing a sha256 digest.`);
+    }
+    if (typeof typedAsset.size !== "number" || !Number.isFinite(typedAsset.size) || typedAsset.size < 0) {
+      throw new Error(`GitHub release asset ${typedAsset.name} is missing size.`);
+    }
+
+    return {
+      name: typedAsset.name,
+      browserDownloadUrl: typedAsset.browser_download_url,
+      sha256: typedAsset.digest.slice("sha256:".length),
+      size: typedAsset.size,
+    };
+  });
+}
+
+async function downloadVerifiedAsset(
+  fetchFn: typeof fetch,
+  asset: GitHubReleaseAsset,
+  targetPath: string,
+): Promise<void> {
+  const response = await fetchFn(asset.browserDownloadUrl);
+  if (!response.ok) {
+    throw new Error(`Codex asset download failed with status ${response.status}.`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.byteLength !== asset.size) {
+    throw new Error(`Downloaded Codex asset size mismatch for ${asset.name}.`);
+  }
+
+  const hash = createHash("sha256").update(buffer).digest("hex");
+  if (hash !== asset.sha256) {
+    throw new Error(`Downloaded Codex asset checksum mismatch for ${asset.name}.`);
+  }
+
+  await writeFile(targetPath, buffer);
+  const downloadedStats = await stat(targetPath);
+  if (downloadedStats.size !== asset.size) {
+    throw new Error(`Persisted Codex asset size mismatch for ${targetPath}.`);
+  }
+}
+
+async function extractCodexAsset(
+  assetPath: string,
+  asset: ManagedCodexAsset,
+  versionDirectory: string,
+): Promise<string> {
+  const finalBinaryPath = join(versionDirectory, CODEX_BINARY_NAME);
+  if (asset.archive === "raw") {
+    await rename(assetPath, finalBinaryPath);
+  } else {
+    await runCommand("tar", ["-xzf", assetPath, "-C", versionDirectory]);
+    await rename(join(versionDirectory, asset.extractedBinaryName), finalBinaryPath);
+  }
+  if (process.platform !== "win32") {
+    await chmod(finalBinaryPath, 0o755);
+  }
+  return finalBinaryPath;
+}
+
+async function runCommand(command: string, args: string[]): Promise<void> {
+  await new Promise<void>((resolvePromise, reject) => {
+    const child = spawn(command, args, { stdio: "ignore" });
+    child.once("error", (error) => reject(error));
+    child.once("exit", (code) => {
+      if (code === 0) {
+        resolvePromise();
+        return;
+      }
+      reject(new Error(`${command} exited with code ${code}.`));
+    });
+  });
+}
+
+async function pruneCodexCache(cacheRoot: string, keepVersion: string): Promise<void> {
+  const entries = await readdir(cacheRoot, { withFileTypes: true }).catch(() => []);
+  await Promise.all(entries.map(async (entry) => {
+    if (!entry.isDirectory() || entry.name === keepVersion) {
+      return;
+    }
+    await rm(join(cacheRoot, entry.name), { recursive: true, force: true });
+  }));
+}
+
+async function fetchCodexReleaseAsset(
+  version: string,
+  assetName: string,
+  fetchFn: typeof fetch,
+): Promise<GitHubReleaseAsset> {
+  const response = await fetchFn(buildReleaseApiUrl(CODEX_RELEASE_REPOSITORY, `${CODEX_RELEASE_TAG_PREFIX}${version}`), {
+    headers: {
+      accept: "application/vnd.github+json",
+    },
+  });
+  if (!response.ok) {
+    throw new Error(`Codex release metadata request failed with status ${response.status}.`);
+  }
+
+  const assets = parseGitHubReleaseAsset(await response.json());
+  const asset = assets.find((entry) => entry.name === assetName);
+  if (!asset) {
+    throw new Error(`Codex release ${version} is missing asset ${assetName}.`);
+  }
+  return asset;
+}
+
+export async function ensureManagedCodexPath(options: EnsureManagedCodexOptions = {}): Promise<string> {
+  const env = options.env ?? process.env;
+  const configuredPath = resolveConfiguredCodexPath(env);
+  if (configuredPath) {
+    return configuredPath;
+  }
+
+  const version = resolveCodexVersion();
+  const asset = resolveManagedCodexAsset(process.platform, process.arch);
+  if (!asset) {
+    throw new Error(`Unsupported Codex platform: ${process.platform} (${process.arch})`);
+  }
+
+  const cacheRoot = options.cacheRoot ?? resolveCodexCacheRoot(env);
+  const versionDirectory = join(cacheRoot, version);
+  const binaryPath = join(versionDirectory, CODEX_BINARY_NAME);
+  if (isExecutableFile(binaryPath)) {
+    await pruneCodexCache(cacheRoot, version);
+    return binaryPath;
+  }
+
+  const fetchFn = options.fetchFn ?? fetch;
+  await mkdir(cacheRoot, { recursive: true });
+  const stagingDirectory = await mkdtemp(join(tmpdir(), "sandy-codex-"));
+
+  try {
+    const releaseAsset = await fetchCodexReleaseAsset(version, asset.assetName, fetchFn);
+    const downloadedAssetPath = join(stagingDirectory, asset.assetName);
+    await downloadVerifiedAsset(fetchFn, releaseAsset, downloadedAssetPath);
+    await mkdir(versionDirectory, { recursive: true });
+    await extractCodexAsset(downloadedAssetPath, asset, versionDirectory);
+    await pruneCodexCache(cacheRoot, version);
+    return binaryPath;
+  } catch (error) {
+    await rm(versionDirectory, { recursive: true, force: true }).catch(() => {});
+    throw error;
+  } finally {
+    await rm(stagingDirectory, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+export async function createCodexClient(options: Omit<CodexOptions, "codexPathOverride"> = {}): Promise<Codex> {
+  const codexPathOverride = await ensureManagedCodexPath();
+  return new Codex({
+    ...options,
+    codexPathOverride,
+  });
+}
+
+export function resolveCodexPathOverride(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return resolveConfiguredCodexPath(env) ?? undefined;
+}

@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Codex, type ThreadOptions } from "@openai/codex-sdk";
+import type { ThreadOptions } from "@openai/codex-sdk";
 import { ZodError } from "zod";
 import { logger } from "../logger.js";
 import type { DecideContext, MainAgentDecision } from "../types.js";
@@ -33,8 +33,8 @@ export class CodexMainAgentController implements MainAgentController {
   private readonly threads = new Map<string, MainAgentThread>();
   private readonly threadDirectories = new Map<string, string>();
 
-  constructor(codex?: CodexClient) {
-    this.codex = codex ?? new Codex();
+  constructor(codex: CodexClient) {
+    this.codex = codex;
   }
 
   async decide(context: DecideContext): Promise<MainAgentDecision> {

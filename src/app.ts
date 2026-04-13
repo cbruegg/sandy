@@ -1,7 +1,7 @@
-import { Codex } from "@openai/codex-sdk";
 import { CodexMainAgentController } from "./agent/main-agent-controller.js";
 import { TelegramBotApiAdapter } from "./channel/telegram-adapter.js";
 import { loadConfig } from "./config.js";
+import { createCodexClient } from "./codex-client.js";
 import { configureLogger, logger } from "./logger.js";
 import { SandyMcpProxyAccess } from "./mcp/proxy-access.js";
 import { McpSidecarManager } from "./mcp/sidecar-manager.js";
@@ -45,10 +45,10 @@ export async function startApp(): Promise<void> {
   });
 
   const codex = config.authMode.mode === "api_key"
-    ? new Codex({
+    ? await createCodexClient({
         apiKey: config.authMode.openAiApiKey,
       })
-    : new Codex();
+    : await createCodexClient();
 
   const mainAgent = new CodexMainAgentController(codex);
 

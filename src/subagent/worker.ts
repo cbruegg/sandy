@@ -1,6 +1,7 @@
 import {createInterface} from "node:readline";
 import {pathToFileURL} from "node:url";
-import {Codex, type Thread, type ThreadEvent, type TodoListItem,} from "@openai/codex-sdk";
+import {type Thread, type ThreadEvent, type TodoListItem,} from "@openai/codex-sdk";
+import { createCodexClient } from "../codex-client.js";
 import {type ChannelFormatting, type HostCommand, type SubAgentEvent,} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {workerToolDefinitions} from "./worker-tools.js";
@@ -257,7 +258,7 @@ export async function main(): Promise<void> {
   const apiKey = getOptionalEnv("OPENAI_API_KEY");
   const channelFormatting = parseChannelFormatting(getOptionalEnv("SANDY_CHANNEL_FORMATTING"));
 
-  const codex = apiKey ? new Codex({ apiKey }) : new Codex();
+  const codex = apiKey ? await createCodexClient({ apiKey }) : await createCodexClient();
   const thread = codex.startThread({
     workingDirectory: sharedWorkspaceMountPath,
     skipGitRepoCheck: true,
