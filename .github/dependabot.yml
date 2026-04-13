@@ -1,7 +1,7 @@
 version: 2
 
 updates:
-  - package-ecosystem: npm
+  - package-ecosystem: bun
     directory: /
     schedule:
       interval: weekly
@@ -9,10 +9,9 @@ updates:
     labels:
       - dependencies
     groups:
-      production-dependencies:
-        dependency-type: production
-      development-dependencies:
-        dependency-type: development
+      bun-dependencies:
+        patterns:
+          - "*"
 
   - package-ecosystem: docker
     directory: /
