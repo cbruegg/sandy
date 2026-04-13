@@ -4,6 +4,7 @@ WORKDIR /app
 COPY package.json bun.lock tsconfig.json eslint.config.mjs knip.json ./
 RUN bun install --frozen-lockfile
 
+COPY scripts ./scripts
 COPY src ./src
 RUN bun run build
 
