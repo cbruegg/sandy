@@ -4,6 +4,7 @@ import {type ChildProcessWithoutNullStreams, spawn} from "node:child_process";
 import {createInterface} from "node:readline";
 import {tmpdir} from "node:os";
 import {logger} from "../logger.js";
+import {messages} from "../messages.js";
 import type {LaunchTaskRequest, SandboxHandle, SandboxRunner, ShareInspection} from "./sandbox-runner.js";
 import type {HostCommand, PrivilegeResolutionResult, SubAgentEvent} from "../types.js";
 import {parseSubAgentEvent, serializeHostCommand} from "../types.js";
@@ -25,6 +26,8 @@ type DockerSandboxRunnerOptions = {
   clearTimeoutImpl?: typeof clearTimeout;
 };
 
+const DEFAULT_HANDSHAKE_TIMEOUT_MS = 90_000;
+
 export class DockerSandboxRunner implements SandboxRunner {
   private readonly handshakeTimeoutMs: number;
   private readonly spawnImpl: typeof spawn;
@@ -38,7 +41,7 @@ export class DockerSandboxRunner implements SandboxRunner {
   private shutdownRequested = false;
 
   constructor(private readonly options: DockerSandboxRunnerOptions) {
-    this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? 10_000;
+    this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
     this.spawnImpl = options.spawnImpl ?? spawn;
     this.setTimeoutImpl = options.setTimeoutImpl ?? setTimeout;
     this.clearTimeoutImpl = options.clearTimeoutImpl ?? clearTimeout;
@@ -93,6 +96,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     let terminalEventSeen = false;
     let shutdownRequested = false;
     let disconnectReported = false;
+    let startupPullProgressReported = false;
     logger.info("sandbox.launching", {
       chatId: request.chatId,
       taskId: request.taskId,
@@ -228,10 +232,22 @@ export class DockerSandboxRunner implements SandboxRunner {
     child.stderr.on("data", (chunk) => {
       const message = String(chunk).trim();
       if (message) {
+        const userVisible = !isDockerPullStatusMessage(message);
         logger.warn("sandbox.stderr", {
           taskId: request.taskId,
           message,
+          userVisible,
         });
+        if (!userVisible) {
+          if (!startupPullProgressReported && !workerConnected && !terminalEventSeen) {
+            startupPullProgressReported = true;
+            emitEventSafely({
+              type: "progress",
+              message: messages.preparingWorkerContainer(),
+            });
+          }
+          return;
+        }
         emitEventSafely({
           type: "progress",
           message,
@@ -574,4 +590,19 @@ function isMissingPathError(error: unknown): error is NodeJS.ErrnoException {
 
 function isAbsolutePathEscape(path: string): boolean {
   return path.startsWith("/");
+}
+
+function isDockerPullStatusMessage(message: string): boolean {
+  const lines = message.split("\n").map((line) => line.trim()).filter(Boolean);
+  return lines.length > 0 && lines.every((line) => {
+    if (line.startsWith("Unable to find image '")) {
+      return true;
+    }
+
+    if (/^[^:\s]+: Pulling from /.test(line)) {
+      return true;
+    }
+
+    return /^[^:\s]+: (Pulling fs layer|Waiting|Downloading|Verifying Checksum|Download complete|Extracting|Pull complete)$/.test(line);
+  });
 }

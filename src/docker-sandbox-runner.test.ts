@@ -294,6 +294,43 @@ test("DockerSandboxRunner terminates the container if event delivery rejects", a
   assert.ok(invocations.some((invocation) => invocation.args[0] === "rm"));
 });
 
+test("DockerSandboxRunner suppresses noisy Docker pull stderr and emits one startup progress update", async () => {
+  const taskChild = new FakeChildProcess();
+  const events: SubAgentEvent[] = [];
+
+  await launchRunnerWithChild(taskChild, async (event) => {
+    events.push(event);
+  });
+
+  taskChild.stderr.write("Unable to find image 'ghcr.io/example/sandy-subagent:sha-abc' locally\n");
+  taskChild.stderr.write("sha-abc: Pulling from example/sandy-subagent\n");
+  taskChild.stderr.write("e94e463cb186: Pulling fs layer\nf429832b271f: Waiting\n");
+  taskChild.stderr.write("f429832b271f: Verifying Checksum\nf429832b271f: Download complete\n");
+  await flushEvents();
+
+  assert.deepEqual(events, [{
+    type: "progress",
+    message: "Preparing worker container. The worker image may need to be downloaded before the task can start.",
+  }]);
+});
+
+test("DockerSandboxRunner still forwards non-Docker stderr as progress", async () => {
+  const taskChild = new FakeChildProcess();
+  const events: SubAgentEvent[] = [];
+
+  await launchRunnerWithChild(taskChild, async (event) => {
+    events.push(event);
+  });
+
+  taskChild.stderr.write("background warning\n");
+  await flushEvents();
+
+  assert.deepEqual(events, [{
+    type: "progress",
+    message: "background warning",
+  }]);
+});
+
 test("DockerSandboxRunner cancellation does not emit a spurious disconnect", async () => {
   const taskChild = new FakeChildProcess();
   const events: SubAgentEvent[] = [];

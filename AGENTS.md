@@ -35,7 +35,7 @@ Use strict TypeScript with ES modules and 2-space indentation. Prefer small modu
 - `PascalCase` for classes and exported types
 - `camelCase` for functions and variables
 
-Keep user-facing strings in messages.ts instead of scattering literals through runtime logic. New prompts, status messages, and button labels should be added there so future i18n work stays localized.
+Keep all user-facing strings in `messages.ts` instead of scattering literals through runtime logic. This includes any text the user can see through a channel such as Telegram task updates, prompts, status messages, errors, summaries, and button labels. Add new channel-visible strings there so future i18n work stays localized.
 
 There is no formatter or linter configured yet, so keep style consistent with the existing code and avoid unrelated reformatting.
 
