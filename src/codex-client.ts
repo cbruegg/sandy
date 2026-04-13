@@ -4,8 +4,8 @@ import { chmod, mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from "nod
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
-import { createRequire } from "node:module";
 import { Codex, type CodexOptions } from "@openai/codex-sdk";
+import { embeddedCodexVersion } from "./codex-version.generated.js";
 import { resolveHomeDirectory } from "./home-directory.js";
 
 const SANDY_CODEX_PATH_ENV = "SANDY_CODEX_PATH";
@@ -13,8 +13,6 @@ const CODEX_RELEASE_REPOSITORY = "openai/codex";
 const CODEX_RELEASE_TAG_PREFIX = "rust-v";
 const CODEX_BINARY_NAME = process.platform === "win32" ? "codex.exe" : "codex";
 const CODEX_NPM_NAME = "@openai/codex";
-const CODEX_SDK_NPM_NAME = "@openai/codex-sdk";
-const moduleRequire = createRequire(import.meta.url);
 
 type SupportedPlatform = "linux" | "darwin" | "win32";
 type SupportedArch = "x64" | "arm64";
@@ -105,10 +103,7 @@ export function resolveManagedCodexAsset(platform: NodeJS.Platform, arch: string
 }
 
 export function resolveCodexVersion(): string {
-  const packageJson = moduleRequire(`${CODEX_SDK_NPM_NAME}/package.json`) as {
-    dependencies?: Record<string, unknown>;
-  };
-  const version = packageJson.dependencies?.[CODEX_NPM_NAME];
+  const version = embeddedCodexVersion;
   if (typeof version !== "string" || !version.trim()) {
     throw new Error(`Unable to determine ${CODEX_NPM_NAME} version.`);
   }
