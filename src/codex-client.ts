@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, statSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
@@ -45,7 +45,7 @@ type EnsureManagedCodexOptions = {
 function isExecutableFile(path: string): boolean {
   try {
     accessSync(path, constants.X_OK);
-    return true;
+    return !statSync(path).isDirectory();
   } catch {
     return false;
   }
@@ -62,6 +62,12 @@ function resolveConfiguredCodexPath(env: NodeJS.ProcessEnv): string | null {
     throw new Error(`Configured ${SANDY_CODEX_PATH_ENV} path is not executable: ${resolvedPath}`);
   }
   return resolvedPath;
+}
+
+function normalizeChildProcessEnv(env: NodeJS.ProcessEnv | Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+  );
 }
 
 function isSupportedPlatform(value: NodeJS.Platform): value is SupportedPlatform {
@@ -368,8 +374,10 @@ export async function ensureManagedCodexPath(options: EnsureManagedCodexOptions 
 
 export async function createCodexClient(options: Omit<CodexOptions, "codexPathOverride"> = {}): Promise<Codex> {
   const codexPathOverride = await ensureManagedCodexPath();
+  const env = options.env ? normalizeChildProcessEnv(options.env) : undefined;
   return new Codex({
     ...options,
+    env,
     codexPathOverride,
   });
 }
