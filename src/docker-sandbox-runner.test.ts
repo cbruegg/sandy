@@ -11,7 +11,7 @@ import { DockerSandboxRunner } from "./sandbox/docker-sandbox-runner.js";
 import type { ChannelFormatting, SubAgentEvent } from "./types.js";
 
 const testFormatting: ChannelFormatting = {
-  channel: "telegram",
+  channelId: "telegram",
   markup: "telegram_html",
   allowedTags: ["b", "i", "code", "pre"],
   instructions: "Use simple Telegram HTML.",

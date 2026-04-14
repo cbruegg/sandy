@@ -2,7 +2,7 @@ import {createInterface} from "node:readline";
 import {pathToFileURL} from "node:url";
 import {type Thread, type ThreadEvent, type TodoListItem,} from "@openai/codex-sdk";
 import { createCodexClient } from "../codex-client.js";
-import {type ChannelFormatting, type HostCommand, type SubAgentEvent,} from "../types.js";
+import {channelFormattingSchema, type ChannelFormatting, type HostCommand, type SubAgentEvent,} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {workerToolDefinitions} from "./worker-tools.js";
 import {parseWorkerToolCall, workerToolCallToSubAgentEvent,} from "./worker-protocol.js";
@@ -42,21 +42,7 @@ function parseChannelFormatting(raw: string | null): ChannelFormatting | null {
   if (!raw) {
     return null;
   }
-  const parsed = JSON.parse(raw) as Partial<ChannelFormatting>;
-  if (
-    parsed.channel !== "telegram" ||
-    parsed.markup !== "telegram_html" ||
-    !Array.isArray(parsed.allowedTags) ||
-    typeof parsed.instructions !== "string"
-  ) {
-    throw new Error("Invalid channel formatting metadata.");
-  }
-  return {
-    channel: parsed.channel,
-    markup: parsed.markup,
-    allowedTags: parsed.allowedTags.filter((entry: unknown): entry is string => typeof entry === "string"),
-    instructions: parsed.instructions,
-  };
+  return channelFormattingSchema.parse(JSON.parse(raw));
 }
 
 function send(event: SubAgentEvent): void {

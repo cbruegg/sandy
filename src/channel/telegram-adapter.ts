@@ -60,7 +60,7 @@ type TelegramAdapterOptions = {
 };
 
 const telegramFormatting: ChannelFormatting = {
-  channel: "telegram",
+  channelId: "telegram",
   markup: "telegram_html",
   allowedTags: telegramHtmlAllowedTags,
   instructions: "Format user-visible output as simple Telegram HTML using only <b>, <i>, <code>, and <pre>. Do not emit Markdown. Escape raw <, >, and & unless they are part of those exact tags.",

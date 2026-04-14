@@ -21,7 +21,7 @@ import type {
 import type { SupportedPrivilegeRequest } from "./privilege/privilege-broker.js";
 
 const testFormatting: ChannelFormatting = {
-  channel: "telegram",
+  channelId: "telegram",
   markup: "telegram_html",
   allowedTags: ["b", "i", "code", "pre"],
   instructions: "Use simple Telegram HTML.",
