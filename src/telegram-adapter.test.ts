@@ -405,6 +405,46 @@ test("TelegramBotApiAdapter ignores unauthorized sender messages", async () => {
   assert.equal(fakeBot.sentMessages.length, 0);
 });
 
+test("TelegramBotApiAdapter ignores unauthorized voice messages before normalization side effects", async () => {
+  const fakeBot = new FakeTelegramBot();
+  let fileDownloads = 0;
+  const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
+    token: "test-token",
+    botFactory: () => fakeBot,
+    fileDownloader: async () => {
+      fileDownloads += 1;
+      return new Uint8Array([1, 2, 3]).buffer;
+    },
+  });
+
+  let handlerCalls = 0;
+  await adapter.start(async () => {
+    handlerCalls += 1;
+  });
+
+  await fakeBot.dispatch({
+    update_id: 7_1,
+    message: {
+      message_id: 11_1,
+      date: 1_700_000_071,
+      chat: { id: 99, type: "private" },
+      from: { id: 77, is_bot: false, first_name: "Intruder", username: "intruder" },
+      voice: {
+        file_id: "voice-unauthorized",
+        file_unique_id: "voice-unauthorized-u1",
+        duration: 2,
+      },
+    },
+  } as Update);
+
+  await adapter.stop();
+
+  assert.equal(handlerCalls, 0);
+  assert.equal(fileDownloads, 0);
+  assert.equal(fakeBot.sentMessages.length, 0);
+});
+
 test("TelegramBotApiAdapter ignores owner messages outside private chats", async () => {
   const fakeBot = new FakeTelegramBot();
   const adapter = new TelegramBotApiAdapter({

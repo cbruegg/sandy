@@ -4,7 +4,12 @@ import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { buttonLabels, messages } from "../messages.js";
 import { sanitizeTelegramHtml, telegramHtmlAllowedTags } from "./telegram-html.js";
-import { normalizeTelegramUpdate, type TelegramNormalizedChatEvent } from "./telegram-normalization.js";
+import {
+  extractTelegramUpdateMetadata,
+  normalizeTelegramUpdate,
+  type TelegramNormalizedChatEvent,
+  type TelegramUpdateMetadata,
+} from "./telegram-normalization.js";
 import { downloadTelegramFile, saveTelegramAttachments } from "./telegram-files.js";
 import { normalizeTelegramUsername } from "./telegram-user.js";
 import type {
@@ -93,24 +98,25 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     }
 
     const middleware = async (ctx: TelegramContextLike): Promise<void> => {
+      const metadata = extractTelegramUpdateMetadata(ctx.update);
+      if (metadata && !this.isAuthorizedEvent(metadata)) {
+        logger.info("telegram.event_ignored_unauthorized", {
+          chatId: metadata.chatId,
+          chatType: metadata.chatType,
+          kind: metadata.kind,
+          messageId: metadata.messageId,
+          senderUserId: metadata.senderUserId,
+          senderUsername: metadata.senderUsername,
+        });
+        return;
+      }
+
       const event = await normalizeTelegramUpdate(ctx.update, {
         transcriptionProvider: this.transcriptionProvider,
         fileDownloader: async (fileId) => this.fileDownloader(this.bot.api, this.token, fileId),
         sendText: async (chatId, text) => this.sendText(chatId, text),
       });
       if (!event) {
-        return;
-      }
-
-      if (!this.isAuthorizedEvent(event)) {
-        logger.info("telegram.event_ignored_unauthorized", {
-          chatId: event.chatId,
-          chatType: event.chatType,
-          kind: event.kind,
-          messageId: event.messageId,
-          senderUserId: event.senderUserId,
-          senderUsername: event.senderUsername,
-        });
         return;
       }
 
@@ -280,7 +286,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     });
   }
 
-  private isAuthorizedEvent(event: TelegramNormalizedChatEvent): boolean {
+  private isAuthorizedEvent(event: TelegramNormalizedChatEvent | TelegramUpdateMetadata): boolean {
     if (event.chatType !== "private") {
       return false;
     }
