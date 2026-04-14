@@ -4,8 +4,9 @@ import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { buttonLabels, messages } from "../messages.js";
 import { sanitizeTelegramHtml, telegramHtmlAllowedTags } from "./telegram-html.js";
-import { normalizeTelegramUpdate } from "./telegram-normalization.js";
+import { normalizeTelegramUpdate, type TelegramNormalizedChatEvent } from "./telegram-normalization.js";
 import { downloadTelegramFile, saveTelegramAttachments } from "./telegram-files.js";
+import { normalizeTelegramUsername } from "./telegram-user.js";
 import type {
   ChannelFormatting,
   MessageAttachment,
@@ -46,6 +47,7 @@ type TelegramBotFactory = (token: string) => TelegramBotLike;
 
 type TelegramAdapterOptions = {
   token: string;
+  allowedUser: string;
   pollTimeoutSeconds?: number;
   botFactory?: TelegramBotFactory;
   transcriptionProvider?: TranscriptionProvider;
@@ -65,6 +67,7 @@ function defaultBotFactory(token: string): TelegramBotLike {
 
 export class TelegramBotApiAdapter implements ChannelAdapter {
   private readonly bot: TelegramBotLike;
+  private readonly allowedUser: string;
   private readonly pollTimeoutSeconds: number;
   private readonly token: string;
   private readonly transcriptionProvider: TranscriptionProvider | null;
@@ -73,6 +76,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
 
   constructor(options: TelegramAdapterOptions) {
     this.token = options.token;
+    this.allowedUser = options.allowedUser.trim();
     this.bot = (options.botFactory ?? defaultBotFactory)(options.token);
     this.pollTimeoutSeconds = options.pollTimeoutSeconds ?? 30;
     this.transcriptionProvider = options.transcriptionProvider ?? null;
@@ -95,6 +99,18 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
         sendText: async (chatId, text) => this.sendText(chatId, text),
       });
       if (!event) {
+        return;
+      }
+
+      if (!this.isAuthorizedEvent(event)) {
+        logger.info("telegram.event_ignored_unauthorized", {
+          chatId: event.chatId,
+          chatType: event.chatType,
+          kind: event.kind,
+          messageId: event.messageId,
+          senderUserId: event.senderUserId,
+          senderUsername: event.senderUsername,
+        });
         return;
       }
 
@@ -262,6 +278,18 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       parse_mode: "HTML",
       ...other,
     });
+  }
+
+  private isAuthorizedEvent(event: TelegramNormalizedChatEvent): boolean {
+    if (event.chatType !== "private") {
+      return false;
+    }
+
+    if (this.allowedUser.startsWith("@")) {
+      return normalizeTelegramUsername(event.senderUsername ?? undefined) === normalizeTelegramUsername(this.allowedUser);
+    }
+
+    return event.senderUserId === this.allowedUser;
   }
 }
 

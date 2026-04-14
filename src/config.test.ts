@@ -9,6 +9,7 @@ test("parseConfigToml prefers Codex auth file over openai_api_key when both are 
   const config = parseConfigToml(`
 [telegram]
 bot_token = "telegram-token"
+allowed_user = "123456"
 
 [auth]
 openai_api_key = "sk-test"
@@ -16,6 +17,7 @@ codex_auth_file = "/tmp/codex-auth.json"
 `);
 
   assert.equal(config.telegramBotToken, "telegram-token");
+  assert.equal(config.telegramAllowedUser, "123456");
   assert.deepEqual(config.authMode, {
     mode: "codex_auth_file",
     codexAuthFile: "/tmp/codex-auth.json",
@@ -30,10 +32,11 @@ codex_auth_file = "/tmp/codex-auth.json"
   });
 });
 
-test("parseConfigToml enables STT from the config file", () => {
+test("parseConfigToml accepts numeric telegram allowed_user values", () => {
   const config = parseConfigToml(`
 [telegram]
 bot_token = "telegram-token"
+allowed_user = 123456
 
 [stt]
 api_key = "sk-stt"
@@ -42,14 +45,26 @@ model = "custom-transcribe-model"
 `);
 
   assert.equal(config.sttApiKey, "sk-stt");
+  assert.equal(config.telegramAllowedUser, "123456");
   assert.equal(config.sttBaseUrl, "https://transcribe.example/v1/");
   assert.equal(config.sttModel, "custom-transcribe-model");
+});
+
+test("parseConfigToml accepts telegram allowed_user usernames", () => {
+  const config = parseConfigToml(`
+[telegram]
+bot_token = "telegram-token"
+allowed_user = "@cbruegg"
+`);
+
+  assert.equal(config.telegramAllowedUser, "@cbruegg");
 });
 
 test("parseConfigToml falls back to local Docker image defaults when release image metadata is absent", () => {
   const config = parseConfigToml(`
 [telegram]
 bot_token = "telegram-token"
+allowed_user = "123456"
 `, "/tmp/sandy-config.toml");
 
   assert.equal(config.workerImage, "sandy-subagent:latest");
@@ -60,6 +75,7 @@ test("parseConfigToml derives published Docker image defaults from release image
   const config = parseConfigToml(`
 [telegram]
 bot_token = "telegram-token"
+allowed_user = "123456"
 `, "/tmp/sandy-config.toml", {
     imageRegistry: "ghcr.io/example",
     gitRevision: "abcdef0123456789",
@@ -73,6 +89,7 @@ test("parseConfigToml prefers explicit config image overrides over baked default
   const config = parseConfigToml(`
 [telegram]
 bot_token = "telegram-token"
+allowed_user = "123456"
 
 [updates]
 mode = "disabled"
@@ -100,6 +117,7 @@ test("parseConfigToml rejects explicit worker image overrides when update mode i
     parseConfigToml(`
 [telegram]
 bot_token = "telegram-token"
+allowed_user = "123456"
 
 [updates]
 mode = "relaunch"
@@ -115,6 +133,7 @@ test("parseConfigToml rejects explicit MCP sidecar image overrides when update m
     parseConfigToml(`
 [telegram]
 bot_token = "telegram-token"
+allowed_user = "123456"
 
 [updates]
 mode = "relaunch"
@@ -130,6 +149,7 @@ test("parseConfigToml rejects explicit image overrides when update mode is exit"
     parseConfigToml(`
 [telegram]
 bot_token = "telegram-token"
+allowed_user = "123456"
 
 [updates]
 mode = "exit"
@@ -144,6 +164,7 @@ test("parseConfigToml allows pinned Docker images when update mode is disabled e
   const config = parseConfigToml(`
 [telegram]
 bot_token = "telegram-token"
+allowed_user = "123456"
 
 [updates]
 mode = "disabled"
@@ -164,6 +185,7 @@ test("parseConfigToml parses worker preinstall config", () => {
   const config = parseConfigToml(`
 [telegram]
 bot_token = "telegram-token"
+allowed_user = "123456"
 
 [worker.preinstall]
 commands = ["zypper --non-interactive install jq", "brew install gh"]
@@ -184,6 +206,7 @@ test("parseConfigToml rejects blank worker preinstall commands", () => {
     parseConfigToml(`
 [telegram]
 bot_token = "telegram-token"
+allowed_user = "123456"
 
 [worker.preinstall]
 commands = ["   "]
@@ -199,6 +222,7 @@ test("loadConfig reads the path from SANDY_CONFIG_FILE", async () => {
     await writeFile(configFilePath, `
 [telegram]
 bot_token = "telegram-token"
+allowed_user = "123456"
 
 [mcp.servers.todoist]
 transport = "streamable_http"
@@ -215,6 +239,7 @@ always_allow_tools = ["list_projects"]
 
     assert.equal(config.configFilePath, configFilePath);
     assert.equal(config.telegramBotToken, "telegram-token");
+    assert.equal(config.telegramAllowedUser, "123456");
     assert.deepEqual(config.mcpServers["todoist"], {
       transport: "streamable_http",
       url: "https://todoist.example/mcp",
@@ -242,6 +267,7 @@ test("parseConfigToml expands the default codex auth path when present", async (
     const config = parseConfigToml(`
 [telegram]
 bot_token = "telegram-token"
+allowed_user = "123456"
 `);
 
     assert.deepEqual(config.authMode, {
@@ -273,6 +299,7 @@ test("parseConfigToml expands tilde-prefixed codex auth paths", async () => {
     const config = parseConfigToml(`
 [telegram]
 bot_token = "telegram-token"
+allowed_user = "123456"
 
 [auth]
 codex_auth_file = "~/.codex/auth.json"
@@ -297,10 +324,30 @@ test("parseConfigToml rejects stdio MCP servers", () => {
     parseConfigToml(`
 [telegram]
 bot_token = "telegram-token"
+allowed_user = "123456"
 
 [mcp.servers.local]
 transport = "stdio"
 command = "node"
 `);
   }, /streamable_http|Invalid input/);
+});
+
+test("parseConfigToml rejects a missing telegram allowed_user", () => {
+  assert.throws(() => {
+    parseConfigToml(`
+[telegram]
+bot_token = "telegram-token"
+`);
+  }, /allowed_user|Invalid input/);
+});
+
+test("parseConfigToml rejects a blank telegram allowed_user", () => {
+  assert.throws(() => {
+    parseConfigToml(`
+[telegram]
+bot_token = "telegram-token"
+allowed_user = "   "
+`);
+  }, /allowed_user|Too small|Invalid input/);
 });

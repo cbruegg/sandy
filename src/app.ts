@@ -45,6 +45,7 @@ export async function startApp(): Promise<void> {
 
   const channel = new TelegramBotApiAdapter({
     token: config.telegramBotToken,
+    allowedUser: config.telegramAllowedUser,
     transcriptionProvider: transcriptionProvider ?? undefined,
   });
 
