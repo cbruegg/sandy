@@ -472,36 +472,33 @@ test("DockerSandboxRunner mounts a writable worker Codex home from a temp path o
 
   const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
   assert.ok(dockerRunInvocation);
-  const codexMountArg = dockerRunInvocation.args.find((arg) => arg.endsWith(":/root/.codex"));
+  const codexMountArg = dockerRunInvocation.args.find((arg) => arg.endsWith(":/run/sandy-codex-seed:ro"));
   assert.ok(codexMountArg);
-  assert.doesNotMatch(codexMountArg, /\/task-1\/.*:\/root\/\.codex/);
+  assert.doesNotMatch(codexMountArg, /\/task-1\/.*:\/run\/sandy-codex-seed:ro/);
 
-  const codexHomeHostPath = codexMountArg.slice(0, codexMountArg.indexOf(":/root/.codex"));
+  const codexHomeHostPath = codexMountArg.slice(0, codexMountArg.indexOf(":/run/sandy-codex-seed:ro"));
   assert.match(codexHomeHostPath, /sandy-worker-codex-home-/);
   const configHostPath = join(codexHomeHostPath, "config.toml");
   assert.equal(await readFile(configHostPath, "utf8"), "model = \"gpt-5\"\n");
 
+  const entrypointFlagIndex = dockerRunInvocation.args.indexOf("--entrypoint");
+  assert.notEqual(entrypointFlagIndex, -1);
+  assert.equal(dockerRunInvocation.args[entrypointFlagIndex + 1], "/bin/sh");
+
+  const imageIndex = entrypointFlagIndex + 2;
+  assert.equal(dockerRunInvocation.args[imageIndex], "sandy-subagent:latest");
+  assert.equal(dockerRunInvocation.args[imageIndex + 1], "-lc");
+
+  const startupScript = dockerRunInvocation.args[imageIndex + 2];
+  assert.ok(startupScript);
+  assert.match(startupScript, /mkdir -p \/root\/\.codex/);
+  assert.match(startupScript, /cp -R \/run\/sandy-codex-seed\/\. \/root\/\.codex/);
+  assert.match(startupScript, /exec bun dist\/entrypoint-worker\.js/);
+  assert.ok(!dockerRunInvocation.args.includes("--user"));
+
   taskChild.emit("exit", 0, null);
   await waitFor(() => assert.rejects(access(codexHomeHostPath)));
   await rm(shareRoot, { recursive: true, force: true });
-});
-
-test("DockerSandboxRunner runs the worker container as the host user when available", async () => {
-  if (typeof process.getuid !== "function" || typeof process.getgid !== "function") {
-    return;
-  }
-
-  const taskChild = new FakeChildProcess();
-  const { invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
-    builtWorkerCodexConfigToml: "model = \"gpt-5\"\n",
-  });
-
-  const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
-  assert.ok(dockerRunInvocation);
-
-  const userFlagIndex = dockerRunInvocation.args.indexOf("--user");
-  assert.notEqual(userFlagIndex, -1);
-  assert.equal(dockerRunInvocation.args[userFlagIndex + 1], `${process.getuid()}:${process.getgid()}`);
 });
 
 test("DockerSandboxRunner mounts the host-managed worker Codex binary read-only", async () => {
@@ -539,7 +536,9 @@ test("DockerSandboxRunner resolves the worker image at launch time", async () =>
 
   const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
   assert.ok(dockerRunInvocation);
-  assert.equal(dockerRunInvocation.args.at(-1), "sandy-worker-overlay:test");
+  const entrypointFlagIndex = dockerRunInvocation.args.indexOf("--entrypoint");
+  assert.notEqual(entrypointFlagIndex, -1);
+  assert.equal(dockerRunInvocation.args[entrypointFlagIndex + 2], "sandy-worker-overlay:test");
 });
 
 test("DockerSandboxRunner rejects share inspection outside the configured share root", async () => {

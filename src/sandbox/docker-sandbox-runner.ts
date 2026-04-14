@@ -10,6 +10,8 @@ import type {HostCommand, PrivilegeResolutionResult, SubAgentEvent} from "../typ
 import {parseSubAgentEvent, serializeHostCommand} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 
+const workerCodexSeedMountPath = "/run/sandy-codex-seed";
+
 type DockerSandboxRunnerOptions = {
   workerImage: string;
   resolveWorkerImage?: () => string;
@@ -121,11 +123,6 @@ export class DockerSandboxRunner implements SandboxRunner {
       `SANDY_CHANNEL_FORMATTING=${JSON.stringify(request.channelFormatting)}`,
     ];
 
-    const workerUser = resolveDockerWorkerUser();
-    if (workerUser) {
-      dockerArgs.push("--user", workerUser);
-    }
-
     if (this.options.openAiApiKey) {
       dockerArgs.push("-e", `OPENAI_API_KEY=${this.options.openAiApiKey}`);
     }
@@ -141,7 +138,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     if (workerCodexHomeTempDir) {
       dockerArgs.push(
         "-v",
-        `${workerCodexHomeTempDir}:/root/.codex`,
+        `${workerCodexHomeTempDir}:${workerCodexSeedMountPath}:ro`,
       );
     }
 
@@ -162,7 +159,15 @@ export class DockerSandboxRunner implements SandboxRunner {
     dockerArgs.push(
       "-v",
       `${sharePath}:${sharedWorkspaceMountPath}`,
+    );
+
+    const workerStartupScript = buildWorkerStartupScript(workerCodexHomeTempDir !== null);
+    dockerArgs.push(
+      "--entrypoint",
+      "/bin/sh",
       this.resolveWorkerImage(),
+      "-lc",
+      workerStartupScript,
     );
 
     const child = this.spawnImpl("docker", dockerArgs, {
@@ -629,10 +634,15 @@ function isDockerPullStatusMessage(message: string): boolean {
   });
 }
 
-function resolveDockerWorkerUser(): string | null {
-  if (typeof process.getuid !== "function" || typeof process.getgid !== "function") {
-    return null;
+function buildWorkerStartupScript(hasCodexSeedMount: boolean): string {
+  const commands = [
+    "mkdir -p /root/.codex",
+  ];
+
+  if (hasCodexSeedMount) {
+    commands.push(`cp -R ${workerCodexSeedMountPath}/. /root/.codex`);
   }
 
-  return `${process.getuid()}:${process.getgid()}`;
+  commands.push("exec bun dist/entrypoint-worker.js");
+  return commands.join(" && ");
 }
