@@ -25,6 +25,10 @@ function defaultCodexAuthFilePath(): string {
   return join(resolveHomeDirectory(), ".codex", "auth.json");
 }
 
+function normalizeTelegramAllowedUser(value: string | number): string {
+  return String(value).trim();
+}
+
 function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages: SandyImageDefaults) {
   return z.object({
     logging: z.object({
@@ -34,6 +38,9 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
     }),
     telegram: z.object({
       bot_token: z.string().min(1),
+      allowed_user: z.union([z.string(), z.number().int()])
+        .transform(normalizeTelegramAllowedUser)
+        .pipe(z.string().min(1)),
     }),
     auth: z.object({
       openai_api_key: z.string().min(1).nullable().optional(),
@@ -118,6 +125,7 @@ type SandyConfig = {
   configDirectory: string;
   logLevel: z.infer<typeof logLevelSchema>;
   telegramBotToken: string;
+  telegramAllowedUser: string;
   workerImage: string;
   mcpSidecarImage: string;
   shareRoot: string;
@@ -216,6 +224,7 @@ export function parseConfigToml(
     configDirectory: dirname(configFilePath),
     logLevel: parsed.logging.level,
     telegramBotToken: parsed.telegram.bot_token,
+    telegramAllowedUser: parsed.telegram.allowed_user,
     workerImage: parsed.worker.image,
     mcpSidecarImage: parsed.mcp.sidecar_image,
     shareRoot: parsed.worker.share_root,

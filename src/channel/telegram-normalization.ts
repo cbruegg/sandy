@@ -1,14 +1,25 @@
 import type { Update } from "grammy/types";
 import type {
-  ApprovalResponseEvent,
-  DangerReportEvent,
-  MarkFinishedRequestEvent,
   NormalizedChatEvent,
   UserTextEvent,
 } from "../types.js";
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
 import type { TranscriptionProvider } from "../transcription/transcription-provider.js";
+import { normalizeTelegramUsername } from "./telegram-user.js";
+
+type TelegramEventMetadata = {
+  chatType: "private" | "group" | "supergroup" | "channel";
+  senderUserId: string;
+  senderUsername: string | null;
+};
+
+export type TelegramNormalizedChatEvent = NormalizedChatEvent & TelegramEventMetadata;
+export type TelegramUpdateMetadata = TelegramEventMetadata & {
+  chatId: string;
+  messageId: string;
+  kind: NormalizedChatEvent["kind"] | "unknown";
+};
 
 type VoiceNormalizationDeps = {
   transcriptionProvider: TranscriptionProvider | null;
@@ -19,7 +30,7 @@ type VoiceNormalizationDeps = {
 export async function normalizeTelegramUpdate(
   update: Update,
   deps?: VoiceNormalizationDeps,
-): Promise<NormalizedChatEvent | null> {
+): Promise<TelegramNormalizedChatEvent | null> {
   const callbackEvent = normalizeCallbackQuery(update);
   if (callbackEvent) {
     return callbackEvent;
@@ -31,7 +42,10 @@ export async function normalizeTelegramUpdate(
 
   const base = {
     chatId: String(update.message.chat.id),
+    chatType: update.message.chat.type,
     messageId: String(update.message.message_id),
+    senderUserId: String(update.message.from?.id ?? ""),
+    senderUsername: normalizeTelegramUsername(update.message.from?.username),
     timestamp: nowFromUnix(update.message.date),
   };
 
@@ -67,10 +81,47 @@ export async function normalizeTelegramUpdate(
   return null;
 }
 
+export function extractTelegramUpdateMetadata(update: Update): TelegramUpdateMetadata | null {
+  const callbackMetadata = extractCallbackQueryMetadata(update);
+  if (callbackMetadata) {
+    return callbackMetadata;
+  }
+
+  if (!update.message) {
+    return null;
+  }
+
+  const base = {
+    chatId: String(update.message.chat.id),
+    chatType: update.message.chat.type,
+    messageId: String(update.message.message_id),
+    senderUserId: String(update.message.from?.id ?? ""),
+    senderUsername: normalizeTelegramUsername(update.message.from?.username),
+  };
+
+  if ("text" in update.message && typeof update.message.text === "string") {
+    return { ...base, kind: "user_text" };
+  }
+
+  if ("voice" in update.message && update.message.voice) {
+    return { ...base, kind: "unsupported_input" };
+  }
+
+  if ("photo" in update.message && update.message.photo) {
+    return { ...base, kind: "unsupported_input" };
+  }
+
+  if ("document" in update.message && update.message.document) {
+    return { ...base, kind: "user_text" };
+  }
+
+  return { ...base, kind: "unknown" };
+}
+
 function normalizeTelegramTextInput(
-  base: Pick<UserTextEvent, "chatId" | "messageId" | "timestamp">,
+  base: Pick<UserTextEvent, "chatId" | "messageId" | "timestamp"> & TelegramEventMetadata,
   rawText: string,
-): NormalizedChatEvent {
+): TelegramNormalizedChatEvent {
   return {
     ...base,
     kind: "user_text",
@@ -84,7 +135,7 @@ function nowFromUnix(seconds: number): string {
   return new Date(seconds * 1000).toISOString();
 }
 
-function normalizeCallbackQuery(update: Update): NormalizedChatEvent | null {
+function extractCallbackQueryMetadata(update: Update): TelegramUpdateMetadata | null {
   if (!update.callback_query?.data || !update.callback_query.message || !("date" in update.callback_query.message)) {
     return null;
   }
@@ -92,12 +143,48 @@ function normalizeCallbackQuery(update: Update): NormalizedChatEvent | null {
   const { data, message } = update.callback_query;
   const base = {
     chatId: String(message.chat.id),
+    chatType: message.chat.type,
     messageId: `callback:${update.callback_query.id}`,
+    senderUserId: String(update.callback_query.from.id),
+    senderUsername: normalizeTelegramUsername(update.callback_query.from.username),
+  };
+
+  if (data.startsWith("approve:") || data.startsWith("approve_session:") || data.startsWith("approve_always:") || data.startsWith("deny:")) {
+    return { ...base, kind: "approval_response" };
+  }
+
+  if (data === "report") {
+    return { ...base, kind: "danger_report" };
+  }
+
+  if (data === "cancel") {
+    return { ...base, kind: "cancel_request" };
+  }
+
+  if (data === "mark_finished") {
+    return { ...base, kind: "mark_finished_request" };
+  }
+
+  return { ...base, kind: "unknown" };
+}
+
+function normalizeCallbackQuery(update: Update): TelegramNormalizedChatEvent | null {
+  if (!update.callback_query?.data || !update.callback_query.message || !("date" in update.callback_query.message)) {
+    return null;
+  }
+
+  const { data, message } = update.callback_query;
+  const base = {
+    chatId: String(message.chat.id),
+    chatType: message.chat.type,
+    messageId: `callback:${update.callback_query.id}`,
+    senderUserId: String(update.callback_query.from.id),
+    senderUsername: normalizeTelegramUsername(update.callback_query.from.username),
     timestamp: nowFromUnix(message.date),
   };
 
   if (data.startsWith("approve:")) {
-    const event: ApprovalResponseEvent = {
+    const event: TelegramNormalizedChatEvent = {
       ...base,
       kind: "approval_response",
       decision: "approve_once",
@@ -107,7 +194,7 @@ function normalizeCallbackQuery(update: Update): NormalizedChatEvent | null {
   }
 
   if (data.startsWith("approve_session:")) {
-    const event: ApprovalResponseEvent = {
+    const event: TelegramNormalizedChatEvent = {
       ...base,
       kind: "approval_response",
       decision: "approve_worker_session",
@@ -117,7 +204,7 @@ function normalizeCallbackQuery(update: Update): NormalizedChatEvent | null {
   }
 
   if (data.startsWith("approve_always:")) {
-    const event: ApprovalResponseEvent = {
+    const event: TelegramNormalizedChatEvent = {
       ...base,
       kind: "approval_response",
       decision: "approve_always",
@@ -127,7 +214,7 @@ function normalizeCallbackQuery(update: Update): NormalizedChatEvent | null {
   }
 
   if (data.startsWith("deny:")) {
-    const event: ApprovalResponseEvent = {
+    const event: TelegramNormalizedChatEvent = {
       ...base,
       kind: "approval_response",
       decision: "deny",
@@ -137,7 +224,7 @@ function normalizeCallbackQuery(update: Update): NormalizedChatEvent | null {
   }
 
   if (data === "report") {
-    const event: DangerReportEvent = {
+    const event: TelegramNormalizedChatEvent = {
       ...base,
       kind: "danger_report",
     };
@@ -152,7 +239,7 @@ function normalizeCallbackQuery(update: Update): NormalizedChatEvent | null {
   }
 
   if (data === "mark_finished") {
-    const event: MarkFinishedRequestEvent = {
+    const event: TelegramNormalizedChatEvent = {
       ...base,
       kind: "mark_finished_request",
     };
@@ -163,10 +250,10 @@ function normalizeCallbackQuery(update: Update): NormalizedChatEvent | null {
 }
 
 async function normalizeVoiceMessage(
-  base: Pick<UserTextEvent, "chatId" | "messageId" | "timestamp">,
+  base: Pick<UserTextEvent, "chatId" | "messageId" | "timestamp"> & TelegramEventMetadata,
   voice: { file_id: string; mime_type?: string },
   deps?: VoiceNormalizationDeps,
-): Promise<NormalizedChatEvent | null> {
+): Promise<TelegramNormalizedChatEvent | null> {
   if (!deps) {
     return { ...base, kind: "unsupported_input", inputType: "voice" };
   }

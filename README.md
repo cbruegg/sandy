@@ -13,6 +13,7 @@ status, completed work, and known gaps relative to that target, see `PLAN_v1.md`
 - Bun 1.3 or newer.
 - Docker installed and available as `docker`.
 - A Telegram bot token.
+- The Telegram numeric user ID or username of the one person allowed to control Sandy.
 - Either:
   - a local Codex ChatGPT login on the host machine, or
   - an OpenAI API key.
@@ -34,6 +35,7 @@ Commented entries below show built-in defaults. Uncommented values are required 
 
 [telegram]
 bot_token = "123456:telegram-token"
+allowed_user = "123456789" # or "@cbruegg"
 
 [auth]
 # codex_auth_file = "~/.codex/auth.json"
@@ -74,7 +76,14 @@ url = "https://todoist.example/mcp"
 # always_allow_tools = []
 ```
 
-Auth behavior:
+Telegram auth behavior:
+
+- `telegram.allowed_user` is required. Set it to either a numeric Telegram user ID or a username like `@cbruegg`.
+- Username values are matched case-insensitively after removing a leading `@`.
+- Sandy ignores every Telegram update whose sender does not match `telegram.allowed_user`.
+- Sandy also ignores all non-private Telegram chats, even when the sender matches the configured user.
+
+Codex auth behavior:
 
 - If the host already has Codex logged in with ChatGPT and `auth.codex_auth_file` exists, Sandy mounts that file into the sub-agent container automatically.
 - If `auth.openai_api_key` is set and no Codex auth file is available, Sandy passes the API key to the main agent and sub-agent worker.

@@ -5,6 +5,9 @@ import { sanitizeTelegramHtml } from "./channel/telegram-html.js";
 import { TelegramBotApiAdapter, normalizeTelegramUpdate } from "./channel/telegram-adapter.js";
 import type { TranscriptionProvider } from "./transcription/transcription-provider.js";
 
+const OWNER_ID = "5";
+const OWNER_USERNAME = "cbruegg";
+
 test("normalizeTelegramUpdate maps report callback to a danger report event", async () => {
   const event = await normalizeTelegramUpdate({
     update_id: 1,
@@ -15,6 +18,7 @@ test("normalizeTelegramUpdate maps report callback to a danger report event", as
         id: 5,
         is_bot: false,
         first_name: "User",
+        username: "cbruegg",
       },
       chat_instance: "instance-1",
       message: {
@@ -28,7 +32,10 @@ test("normalizeTelegramUpdate maps report callback to a danger report event", as
   assert.deepEqual(event, {
     kind: "danger_report",
     chatId: "42",
+    chatType: "private",
     messageId: "callback:cb-1",
+    senderUserId: "5",
+    senderUsername: "cbruegg",
     timestamp: "2023-11-14T22:13:20.000Z",
   });
 });
@@ -43,6 +50,7 @@ test("normalizeTelegramUpdate maps mark-finished callback to a finish request ev
         id: 5,
         is_bot: false,
         first_name: "User",
+        username: "cbruegg",
       },
       chat_instance: "instance-finish-1",
       message: {
@@ -56,7 +64,10 @@ test("normalizeTelegramUpdate maps mark-finished callback to a finish request ev
   assert.deepEqual(event, {
     kind: "mark_finished_request",
     chatId: "42",
+    chatType: "private",
     messageId: "callback:cb-finish-1",
+    senderUserId: "5",
+    senderUsername: "cbruegg",
     timestamp: "2023-11-14T22:15:00.000Z",
   });
 });
@@ -68,6 +79,7 @@ test("normalizeTelegramUpdate maps text input and unsupported media deterministi
       message_id: 5,
       date: 1_700_000_010,
       chat: { id: 99, type: "private" },
+      from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
       text: "/cancel",
     },
   } as Update);
@@ -75,7 +87,10 @@ test("normalizeTelegramUpdate maps text input and unsupported media deterministi
   assert.deepEqual(textEvent, {
     kind: "user_text",
     chatId: "99",
+    chatType: "private",
     messageId: "5",
+    senderUserId: "5",
+    senderUsername: "cbruegg",
     timestamp: "2023-11-14T22:13:30.000Z",
     text: "/cancel",
     rawText: "/cancel",
@@ -88,6 +103,7 @@ test("normalizeTelegramUpdate maps text input and unsupported media deterministi
       message_id: 6,
       date: 1_700_000_020,
       chat: { id: 99, type: "private" },
+      from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
       voice: {
         file_id: "voice-1",
         file_unique_id: "voice-u1",
@@ -100,7 +116,10 @@ test("normalizeTelegramUpdate maps text input and unsupported media deterministi
     kind: "unsupported_input",
     inputType: "voice",
     chatId: "99",
+    chatType: "private",
     messageId: "6",
+    senderUserId: "5",
+    senderUsername: "cbruegg",
     timestamp: "2023-11-14T22:13:40.000Z",
   });
 
@@ -110,6 +129,7 @@ test("normalizeTelegramUpdate maps text input and unsupported media deterministi
       message_id: 7,
       date: 1_700_000_030,
       chat: { id: 99, type: "private" },
+      from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
       caption: "Use this input file.",
       document: {
         file_id: "doc-1",
@@ -124,7 +144,10 @@ test("normalizeTelegramUpdate maps text input and unsupported media deterministi
   assert.deepEqual(documentEvent, {
     kind: "user_text",
     chatId: "99",
+    chatType: "private",
     messageId: "7",
+    senderUserId: "5",
+    senderUsername: "cbruegg",
     timestamp: "2023-11-14T22:13:50.000Z",
     text: "Use this input file.",
     rawText: "Use this input file.",
@@ -140,6 +163,7 @@ test("normalizeTelegramUpdate maps text input and unsupported media deterministi
 test("TelegramBotApiAdapter keeps handling later updates after a handler error", async () => {
   const fakeBot = new FakeTelegramBot();
   const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
     token: "test-token",
     botFactory: () => fakeBot,
   });
@@ -159,6 +183,7 @@ test("TelegramBotApiAdapter keeps handling later updates after a handler error",
       message_id: 1,
       date: 1_700_000_000,
       chat: { id: 7, type: "private" },
+      from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
       text: "hello",
     },
   } as Update);
@@ -169,6 +194,7 @@ test("TelegramBotApiAdapter keeps handling later updates after a handler error",
       message_id: 2,
       date: 1_700_000_010,
       chat: { id: 7, type: "private" },
+      from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
       text: "still there?",
     },
   } as Update);
@@ -182,6 +208,7 @@ test("TelegramBotApiAdapter keeps handling later updates after a handler error",
 test("TelegramBotApiAdapter acknowledges callback queries", async () => {
   const fakeBot = new FakeTelegramBot();
   const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
     token: "test-token",
     botFactory: () => fakeBot,
   });
@@ -197,6 +224,7 @@ test("TelegramBotApiAdapter acknowledges callback queries", async () => {
         id: 5,
         is_bot: false,
         first_name: "User",
+        username: "cbruegg",
       },
       chat_instance: "instance-2",
       message: {
@@ -216,6 +244,7 @@ test("TelegramBotApiAdapter transcribes voice messages into normal text events",
   const fakeBot = new FakeTelegramBot();
   const handlerEvents: unknown[] = [];
   const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
     token: "test-token",
     botFactory: () => fakeBot,
     fileDownloader: async () => new Uint8Array([1, 2, 3]).buffer,
@@ -236,6 +265,7 @@ test("TelegramBotApiAdapter transcribes voice messages into normal text events",
       message_id: 8,
       date: 1_700_000_040,
       chat: { id: 99, type: "private" },
+      from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
       voice: {
         file_id: "voice-2",
         file_unique_id: "voice-u2",
@@ -250,7 +280,10 @@ test("TelegramBotApiAdapter transcribes voice messages into normal text events",
   assert.deepEqual(handlerEvents, [{
     kind: "user_text",
     chatId: "99",
+    chatType: "private",
     messageId: "8",
+    senderUserId: "5",
+    senderUsername: "cbruegg",
     timestamp: "2023-11-14T22:14:00.000Z",
     text: "inspect the system",
     rawText: "inspect the system",
@@ -262,6 +295,7 @@ test("TelegramBotApiAdapter keeps transcribed voice command text as plain user t
   const fakeBot = new FakeTelegramBot();
   const handlerEvents: unknown[] = [];
   const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
     token: "test-token",
     botFactory: () => fakeBot,
     fileDownloader: async () => new Uint8Array([1, 2, 3]).buffer,
@@ -282,6 +316,7 @@ test("TelegramBotApiAdapter keeps transcribed voice command text as plain user t
       message_id: 9,
       date: 1_700_000_050,
       chat: { id: 99, type: "private" },
+      from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
       voice: {
         file_id: "voice-3",
         file_unique_id: "voice-u3",
@@ -295,7 +330,10 @@ test("TelegramBotApiAdapter keeps transcribed voice command text as plain user t
   assert.deepEqual(handlerEvents, [{
     kind: "user_text",
     chatId: "99",
+    chatType: "private",
     messageId: "9",
+    senderUserId: "5",
+    senderUsername: "cbruegg",
     timestamp: "2023-11-14T22:14:10.000Z",
     text: "/cancel",
     rawText: "/cancel",
@@ -306,6 +344,7 @@ test("TelegramBotApiAdapter keeps transcribed voice command text as plain user t
 test("TelegramBotApiAdapter reports voice messages as disabled without STT configuration", async () => {
   const fakeBot = new FakeTelegramBot();
   const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
     token: "test-token",
     botFactory: () => fakeBot,
   });
@@ -321,6 +360,7 @@ test("TelegramBotApiAdapter reports voice messages as disabled without STT confi
       message_id: 10,
       date: 1_700_000_060,
       chat: { id: 99, type: "private" },
+      from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
       voice: {
         file_id: "voice-4",
         file_unique_id: "voice-u4",
@@ -335,6 +375,203 @@ test("TelegramBotApiAdapter reports voice messages as disabled without STT confi
   assert.equal(fakeBot.sentMessages[0]?.text, "Voice messages are disabled. Configure STT in Sandy's config file to enable transcription.");
 });
 
+test("TelegramBotApiAdapter ignores unauthorized sender messages", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
+    token: "test-token",
+    botFactory: () => fakeBot,
+  });
+
+  let handlerCalls = 0;
+  await adapter.start(async () => {
+    handlerCalls += 1;
+  });
+
+  await fakeBot.dispatch({
+    update_id: 7,
+    message: {
+      message_id: 11,
+      date: 1_700_000_070,
+      chat: { id: 99, type: "private" },
+      from: { id: 77, is_bot: false, first_name: "Intruder", username: "intruder" },
+      text: "hello",
+    },
+  } as Update);
+
+  await adapter.stop();
+
+  assert.equal(handlerCalls, 0);
+  assert.equal(fakeBot.sentMessages.length, 0);
+});
+
+test("TelegramBotApiAdapter ignores unauthorized voice messages before normalization side effects", async () => {
+  const fakeBot = new FakeTelegramBot();
+  let fileDownloads = 0;
+  const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
+    token: "test-token",
+    botFactory: () => fakeBot,
+    fileDownloader: async () => {
+      fileDownloads += 1;
+      return new Uint8Array([1, 2, 3]).buffer;
+    },
+  });
+
+  let handlerCalls = 0;
+  await adapter.start(async () => {
+    handlerCalls += 1;
+  });
+
+  await fakeBot.dispatch({
+    update_id: 7_1,
+    message: {
+      message_id: 11_1,
+      date: 1_700_000_071,
+      chat: { id: 99, type: "private" },
+      from: { id: 77, is_bot: false, first_name: "Intruder", username: "intruder" },
+      voice: {
+        file_id: "voice-unauthorized",
+        file_unique_id: "voice-unauthorized-u1",
+        duration: 2,
+      },
+    },
+  } as Update);
+
+  await adapter.stop();
+
+  assert.equal(handlerCalls, 0);
+  assert.equal(fileDownloads, 0);
+  assert.equal(fakeBot.sentMessages.length, 0);
+});
+
+test("TelegramBotApiAdapter ignores owner messages outside private chats", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
+    token: "test-token",
+    botFactory: () => fakeBot,
+  });
+
+  let handlerCalls = 0;
+  await adapter.start(async () => {
+    handlerCalls += 1;
+  });
+
+  await fakeBot.dispatch({
+    update_id: 8,
+    message: {
+      message_id: 12,
+      date: 1_700_000_080,
+      chat: { id: -100, type: "group", title: "Team" },
+      from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
+      text: "hello",
+    },
+  } as Update);
+
+  await adapter.stop();
+
+  assert.equal(handlerCalls, 0);
+  assert.equal(fakeBot.sentMessages.length, 0);
+});
+
+test("TelegramBotApiAdapter ignores unauthorized callback queries", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
+    token: "test-token",
+    botFactory: () => fakeBot,
+  });
+
+  let handlerCalls = 0;
+  await adapter.start(async () => {
+    handlerCalls += 1;
+  });
+
+  await fakeBot.dispatch({
+    update_id: 9,
+    callback_query: {
+      id: "cb-unauthorized",
+      data: "cancel",
+      from: {
+        id: 77,
+        is_bot: false,
+        first_name: "Intruder",
+        username: "intruder",
+      },
+      chat_instance: "instance-unauthorized",
+      message: {
+        message_id: 13,
+        date: 1_700_000_090,
+        chat: { id: 42, type: "private" },
+      },
+    },
+  } as Update);
+
+  await adapter.stop();
+
+  assert.equal(handlerCalls, 0);
+  assert.equal(fakeBot.acknowledgedCallbackQueries, 0);
+});
+
+test("TelegramBotApiAdapter authorizes by username when configured", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const adapter = new TelegramBotApiAdapter({
+    allowedUser: "@cbruegg",
+    token: "test-token",
+    botFactory: () => fakeBot,
+  });
+
+  let handlerCalls = 0;
+  await adapter.start(async () => {
+    handlerCalls += 1;
+  });
+
+  await fakeBot.dispatch({
+    update_id: 10,
+    message: {
+      message_id: 14,
+      date: 1_700_000_100,
+      chat: { id: 99, type: "private" },
+      from: { id: 77, is_bot: false, first_name: "Owner", username: "cbruegg" },
+      text: "hello",
+    },
+  } as Update);
+
+  await adapter.stop();
+
+  assert.equal(handlerCalls, 1);
+});
+
+test("TelegramBotApiAdapter ignores messages when username does not match", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const adapter = new TelegramBotApiAdapter({
+    allowedUser: `@${OWNER_USERNAME}`,
+    token: "test-token",
+    botFactory: () => fakeBot,
+  });
+
+  let handlerCalls = 0;
+  await adapter.start(async () => {
+    handlerCalls += 1;
+  });
+
+  await fakeBot.dispatch({
+    update_id: 11,
+    message: {
+      message_id: 15,
+      date: 1_700_000_110,
+      chat: { id: 99, type: "private" },
+      from: { id: 5, is_bot: false, first_name: "Owner", username: "someoneelse" },
+      text: "hello",
+    },
+  } as Update);
+
+  await adapter.stop();
+
+  assert.equal(handlerCalls, 0);
+});
+
 test("sanitizeTelegramHtml preserves only the supported Telegram tags", () => {
   assert.equal(
     sanitizeTelegramHtml("Use <b>bold</b> and <script>alert(1)</script> plus <code>x < y</code>."),
@@ -345,6 +582,7 @@ test("sanitizeTelegramHtml preserves only the supported Telegram tags", () => {
 test("TelegramBotApiAdapter sends sanitized HTML with parse_mode", async () => {
   const fakeBot = new FakeTelegramBot();
   const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
     token: "test-token",
     botFactory: () => fakeBot,
   });
@@ -363,6 +601,7 @@ test("TelegramBotApiAdapter sends sanitized HTML with parse_mode", async () => {
 test("TelegramBotApiAdapter sends task updates with abort and mark-finished controls", async () => {
   const fakeBot = new FakeTelegramBot();
   const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
     token: "test-token",
     botFactory: () => fakeBot,
   });
@@ -392,6 +631,7 @@ test("TelegramBotApiAdapter sends task updates with abort and mark-finished cont
 test("TelegramBotApiAdapter sends local files as Telegram documents", async () => {
   const fakeBot = new FakeTelegramBot();
   const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
     token: "test-token",
     botFactory: () => fakeBot,
   });
