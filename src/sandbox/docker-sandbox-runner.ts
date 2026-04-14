@@ -159,15 +159,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     dockerArgs.push(
       "-v",
       `${sharePath}:${sharedWorkspaceMountPath}`,
-    );
-
-    const workerStartupScript = buildWorkerStartupScript(workerCodexHomeTempDir !== null);
-    dockerArgs.push(
-      "--entrypoint",
-      "/bin/sh",
       this.resolveWorkerImage(),
-      "-c",
-      workerStartupScript,
     );
 
     const child = this.spawnImpl("docker", dockerArgs, {
@@ -632,17 +624,4 @@ function isDockerPullStatusMessage(message: string): boolean {
 
     return /^(?:[^:\s]+: )?(Pulling fs layer|Waiting|Downloading|Verifying Checksum|Download complete|Extracting|Pull complete)$/.test(line);
   });
-}
-
-function buildWorkerStartupScript(hasCodexSeedMount: boolean): string {
-  const commands = [
-    "mkdir -p /root/.codex",
-  ];
-
-  if (hasCodexSeedMount) {
-    commands.push(`cp -R ${workerCodexSeedMountPath}/. /root/.codex`);
-  }
-
-  commands.push("exec bun dist/entrypoint-worker.js");
-  return commands.join(" && ");
 }

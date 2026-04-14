@@ -56,5 +56,7 @@ ENV BUN_INSTALL="/root/.bun"
 ENV PATH="${BUN_INSTALL}/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
 
 COPY --from=build /app/dist ./dist
+COPY scripts/worker-entrypoint.sh /usr/local/bin/sandy-worker-entrypoint
+RUN chmod 0755 /usr/local/bin/sandy-worker-entrypoint
 
-CMD ["bun", "dist/entrypoint-worker.js"]
+ENTRYPOINT ["/usr/local/bin/sandy-worker-entrypoint"]
