@@ -6,6 +6,7 @@ import {
   buildInitialTaskInputWithCapabilities,
   buildPrivilegeResolutionInput,
   buildTaskSummaryInput,
+  buildWorkerCodexConfig,
   parseWorkerToolCall,
   workerToolCallToSubAgentEvent,
 } from "./subagent/worker.js";
@@ -192,4 +193,21 @@ test("parseSubAgentEvent accepts task-summary events", () => {
     type: "task_summary",
     summary: "Outcome: completed",
   });
+});
+
+test("buildWorkerCodexConfig injects the live worker PATH into shell environment policy", () => {
+  assert.deepEqual(
+    buildWorkerCodexConfig({
+      PATH: "/root/.bun/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin",
+    }),
+    {
+      shell_environment_policy: {
+        set: {
+          PATH: "/root/.bun/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin",
+        },
+      },
+    },
+  );
+
+  assert.equal(buildWorkerCodexConfig({}), undefined);
 });

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, statSync } from "node:fs";
 import { chmod, mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
@@ -45,7 +45,7 @@ type EnsureManagedCodexOptions = {
 function isExecutableFile(path: string): boolean {
   try {
     accessSync(path, constants.X_OK);
-    return true;
+    return !statSync(path).isDirectory();
   } catch {
     return false;
   }
@@ -62,6 +62,12 @@ function resolveConfiguredCodexPath(env: NodeJS.ProcessEnv): string | null {
     throw new Error(`Configured ${SANDY_CODEX_PATH_ENV} path is not executable: ${resolvedPath}`);
   }
   return resolvedPath;
+}
+
+function normalizeChildProcessEnv(env: NodeJS.ProcessEnv | Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+  );
 }
 
 function isSupportedPlatform(value: NodeJS.Platform): value is SupportedPlatform {
@@ -211,12 +217,46 @@ async function extractCodexAsset(
     await rename(assetPath, finalBinaryPath);
   } else {
     await runCommand("tar", ["-xzf", assetPath, "-C", versionDirectory]);
-    await rename(join(versionDirectory, asset.extractedBinaryName), finalBinaryPath);
+    const extractedPath = join(versionDirectory, asset.extractedBinaryName);
+    const extractedBinaryPath = await resolveExtractedCodexBinaryPath(extractedPath, platform);
+    await rename(extractedBinaryPath, finalBinaryPath);
+    if (extractedBinaryPath !== extractedPath) {
+      await rm(extractedPath, { recursive: true, force: true });
+    }
   }
   if (process.platform !== "win32") {
     await chmod(finalBinaryPath, 0o755);
   }
   return finalBinaryPath;
+}
+
+export async function resolveExtractedCodexBinaryPath(path: string, platform: NodeJS.Platform): Promise<string> {
+  const stats = await stat(path);
+  if (!stats.isDirectory()) {
+    return path;
+  }
+
+  const binaryName = resolveCodexBinaryName(platform);
+  const nestedBinaryPath = join(path, binaryName);
+  if (isExecutableFile(nestedBinaryPath)) {
+    return nestedBinaryPath;
+  }
+
+  for (const entry of await readdir(path)) {
+    const nestedPath = join(path, entry);
+    const nestedStats = await stat(nestedPath);
+    if (!nestedStats.isDirectory() && entry === binaryName) {
+      return nestedPath;
+    }
+    if (nestedStats.isDirectory()) {
+      const candidate = join(nestedPath, binaryName);
+      if (isExecutableFile(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  throw new Error(`Extracted Codex archive did not contain executable ${binaryName} at ${path}.`);
 }
 
 async function runCommand(command: string, args: string[]): Promise<void> {
@@ -368,8 +408,10 @@ export async function ensureManagedCodexPath(options: EnsureManagedCodexOptions 
 
 export async function createCodexClient(options: Omit<CodexOptions, "codexPathOverride"> = {}): Promise<Codex> {
   const codexPathOverride = await ensureManagedCodexPath();
+  const env = options.env ? normalizeChildProcessEnv(options.env) : undefined;
   return new Codex({
     ...options,
+    env,
     codexPathOverride,
   });
 }

@@ -9,6 +9,7 @@ import {
   resolveCodexPathOverride,
   resolveCodexTargetTriple,
   resolveCodexVersion,
+  resolveExtractedCodexBinaryPath,
   resolveManagedCodexAsset,
 } from "./codex-client.js";
 
@@ -148,5 +149,22 @@ test("ensureManagedCodexPath isolates cross-platform worker caches by target tri
     assert.equal(resolved, workerBinaryPath);
   } finally {
     await rm(cacheRoot, { recursive: true, force: true });
+  }
+});
+
+test("resolveExtractedCodexBinaryPath handles nested binary directories from release archives", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sandy-codex-extract-"));
+  const extractedRoot = join(root, "codex-aarch64-unknown-linux-musl");
+  const nestedBinaryPath = join(extractedRoot, "codex", "codex");
+
+  try {
+    await mkdir(join(extractedRoot, "codex"), { recursive: true });
+    await writeFile(nestedBinaryPath, "#!/bin/sh\nexit 0\n");
+    await chmod(nestedBinaryPath, 0o755);
+
+    const resolved = await resolveExtractedCodexBinaryPath(extractedRoot, "linux");
+    assert.equal(resolved, nestedBinaryPath);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });

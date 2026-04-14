@@ -18,6 +18,7 @@ Sandy is a TypeScript project with the application code under `src/`.
 ## Build, Test, and Development Commands
 
 - `bun install`: install project dependencies and update `bun.lock`.
+- Agents may run `bun install` when dependencies are missing or `bun.lock` changes require it.
 - `bun run build`: run linting, explicit TypeScript type-checking, Bun bundling, and `knip`.
 - `bun start`: run the host application from `src/entrypoint-main.ts` with Bun.
 - `bun run test`: rebuild and run the Bun test suite.
@@ -28,6 +29,7 @@ Sandy is a TypeScript project with the application code under `src/`.
 - `./scripts/run-local-test-cli.sh ...`: helper CLI for the local-test channel. Prefer this over hand-writing inbox/outbox files so protocol details stay conformant.
 
 Run both `bun run build` and `bun run test` before committing changes that affect TypeScript or runtime logic. The explicit build step matters even when tests pass, because it verifies the full project still type-checks and bundles cleanly under Bun.
+Do not run `bun run build` and `bun run test` in parallel: `bun run test` already invokes `bun run build`, and running them concurrently can race on the shared `dist/` output.
 
 ## Autonomous Testing
 

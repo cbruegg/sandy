@@ -194,6 +194,23 @@ function normalizeSummaryText(chunks: string[]): string | null {
   return summary.length > 0 ? summary : null;
 }
 
+function buildWorkerCodexConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): { shell_environment_policy: { set: { PATH: string } } } | undefined {
+  const shellPath = env["PATH"]?.trim();
+  if (!shellPath) {
+    return undefined;
+  }
+
+  return {
+    shell_environment_policy: {
+      set: {
+        PATH: shellPath,
+      },
+    },
+  };
+}
+
 async function emitTaskSummary(thread: Thread): Promise<void> {
   const result = await streamTurn(thread, buildTaskSummaryInput(), "summary");
   if (result.sawPrivilegedToolCall || result.sawTerminalError || !result.summaryText) {
@@ -244,7 +261,10 @@ export async function main(): Promise<void> {
   const apiKey = getOptionalEnv("OPENAI_API_KEY");
   const channelFormatting = parseChannelFormatting(getOptionalEnv("SANDY_CHANNEL_FORMATTING"));
 
-  const codex = apiKey ? await createCodexClient({ apiKey }) : await createCodexClient();
+  const workerCodexConfig = buildWorkerCodexConfig();
+  const codex = apiKey
+    ? await createCodexClient({ apiKey, config: workerCodexConfig })
+    : await createCodexClient({ config: workerCodexConfig });
   const thread = codex.startThread({
     workingDirectory: sharedWorkspaceMountPath,
     skipGitRepoCheck: true,
@@ -359,3 +379,6 @@ export {
   buildPrivilegeResolutionInput,
   buildTaskSummaryInput,
 } from "./worker-prompt.js";
+export {
+  buildWorkerCodexConfig,
+};
