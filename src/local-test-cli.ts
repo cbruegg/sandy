@@ -26,7 +26,7 @@ export async function runLocalTestCli(args: string[], io: CliIo = {
   stdout: process.stdout,
   stderr: process.stderr,
 }): Promise<void> {
-  const command = args[0] as LocalTestCliCommand | undefined;
+  const command = parseCommand(args[0]);
   if (!command) {
     throw new Error("Missing local-test command.");
   }
@@ -106,6 +106,26 @@ export async function runLocalTestCli(args: string[], io: CliIo = {
     case "wait-for":
       await waitForEvent(spoolRoot, options, io.stdout);
       return;
+  }
+}
+
+function parseCommand(raw: string | undefined): LocalTestCliCommand | undefined {
+  switch (raw) {
+    case undefined:
+      return undefined;
+    case "send":
+    case "attach":
+    case "approve":
+    case "deny":
+    case "cancel":
+    case "mark-finished":
+    case "report-danger":
+    case "tail":
+    case "wait-for":
+    case "list-events":
+      return raw;
+    default:
+      throw new Error(`Unsupported local-test command: ${raw}`);
   }
 }
 

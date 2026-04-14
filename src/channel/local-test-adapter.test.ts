@@ -135,6 +135,57 @@ test("LocalTestChannelAdapter writes privilege requests and file sends to the ou
   }
 });
 
+test("LocalTestChannelAdapter quarantines failing inbox entries and continues processing later files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sandy-local-test-"));
+  const adapter = new LocalTestChannelAdapter({
+    spoolRoot: root,
+  });
+  const received: NormalizedChatEvent[] = [];
+
+  try {
+    await adapter.start(async (event) => {
+      if (event.kind === "user_text" && event.text === "break") {
+        throw new Error("synthetic handler failure");
+      }
+      received.push(event);
+    });
+
+    await writeFile(join(root, "inbox", "message-1.json"), `${JSON.stringify({
+      kind: "user_text",
+      messageId: "1",
+      timestamp: "2026-04-14T10:00:00.000Z",
+      text: "break",
+      attachments: [],
+    })}\n`, "utf8");
+
+    await writeFile(join(root, "inbox", "message-2.json"), `${JSON.stringify({
+      kind: "user_text",
+      messageId: "2",
+      timestamp: "2026-04-14T10:00:01.000Z",
+      text: "continue",
+      attachments: [],
+    })}\n`, "utf8");
+
+    await waitFor(
+      async () => received.map((event) => event.kind === "user_text" ? event.text : ""),
+      (texts) => texts.includes("continue"),
+    );
+
+    const failedFiles = await waitFor(
+      async () => (await import("node:fs/promises")).readdir(join(root, "inbox-failed")),
+      (files) => files.length === 1,
+    );
+    assert.equal(failedFiles.length, 1);
+    assert.ok(failedFiles[0]?.endsWith("message-1.json"));
+
+    const inboxFiles = await (await import("node:fs/promises")).readdir(join(root, "inbox"));
+    assert.equal(inboxFiles.length, 0);
+  } finally {
+    await adapter.stop();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function readdirJson(root: string): Promise<string[]> {
   const entries = (await import("node:fs/promises")).readdir;
   const files = await entries(root, { withFileTypes: true });

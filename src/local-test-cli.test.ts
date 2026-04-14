@@ -46,3 +46,15 @@ test("local-test CLI writes approval and denial events", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("local-test CLI rejects unknown commands", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sandy-local-cli-"));
+  try {
+    await assert.rejects(
+      runLocalTestCli(["typo", "--spool-root", root]),
+      /Unsupported local-test command: typo/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

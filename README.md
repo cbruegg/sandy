@@ -91,7 +91,7 @@ Telegram auth behavior:
 Local test channel behavior:
 
 - `channel.kind = "local_test"` uses a file-backed inbox/outbox transport for autonomous local testing.
-- `channel.local_test.spool_root` is the root directory that contains `inbox/`, `inbox-processed/`, and `outbox/`.
+- `channel.local_test.spool_root` is the root directory that contains `inbox/`, `inbox-processed/`, `inbox-failed/`, and `outbox/`.
 - The local-test channel supports exactly one implicit chat, so there is no chat-ID discovery step.
 - The poll interval is fixed in code and is not configurable.
 - The recommended way to interact with this channel is `./scripts/run-local-test-cli.sh ...`, not direct file editing.

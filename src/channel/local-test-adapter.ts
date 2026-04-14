@@ -24,6 +24,7 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
   private readonly spoolRoot: string;
   private readonly inboxRoot: string;
   private readonly inboxProcessedRoot: string;
+  private readonly inboxFailedRoot: string;
   private readonly outboxRoot: string;
   private readonly attachmentHostPaths = new Map<string, string>();
   private stopRequested = false;
@@ -33,6 +34,7 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
     this.spoolRoot = options.spoolRoot;
     this.inboxRoot = join(this.spoolRoot, "inbox");
     this.inboxProcessedRoot = join(this.spoolRoot, "inbox-processed");
+    this.inboxFailedRoot = join(this.spoolRoot, "inbox-failed");
     this.outboxRoot = join(this.spoolRoot, "outbox");
   }
 
@@ -48,6 +50,7 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
     await Promise.all([
       mkdir(this.inboxRoot, { recursive: true }),
       mkdir(this.inboxProcessedRoot, { recursive: true }),
+      mkdir(this.inboxFailedRoot, { recursive: true }),
       mkdir(this.outboxRoot, { recursive: true }),
     ]);
 
@@ -179,13 +182,26 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
       }
       const sourcePath = join(this.inboxRoot, entry.name);
       const processingPath = join(this.inboxProcessedRoot, entry.name);
-      const raw = await readFile(sourcePath, "utf8");
-      const { event, attachmentsById } = parseLocalTestInboundEvent(raw);
-      for (const [attachmentId, hostPath] of attachmentsById.entries()) {
-        this.attachmentHostPaths.set(attachmentId, hostPath);
+      try {
+        const raw = await readFile(sourcePath, "utf8");
+        const { event, attachmentsById } = parseLocalTestInboundEvent(raw);
+        for (const [attachmentId, hostPath] of attachmentsById.entries()) {
+          this.attachmentHostPaths.set(attachmentId, hostPath);
+        }
+        await handler(event);
+        await rename(sourcePath, processingPath);
+      } catch (error) {
+        const failedPath = join(
+          this.inboxFailedRoot,
+          `${Date.now()}-${createIdentifier("failed")}-${entry.name}`,
+        );
+        await rename(sourcePath, failedPath);
+        logger.error("local_test.inbox_entry_failed", {
+          sourcePath,
+          failedPath,
+          message: error instanceof Error ? error.message : "Unknown local-test inbox failure.",
+        });
       }
-      await handler(event);
-      await rename(sourcePath, processingPath);
     }
   }
 }
