@@ -487,7 +487,7 @@ test("DockerSandboxRunner mounts a writable worker Codex home from a temp path o
 
   const imageIndex = entrypointFlagIndex + 2;
   assert.equal(dockerRunInvocation.args[imageIndex], "sandy-subagent:latest");
-  assert.equal(dockerRunInvocation.args[imageIndex + 1], "-lc");
+  assert.equal(dockerRunInvocation.args[imageIndex + 1], "-c");
 
   const startupScript = dockerRunInvocation.args[imageIndex + 2];
   assert.ok(startupScript);
