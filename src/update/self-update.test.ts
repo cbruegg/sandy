@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { buildReleaseApiUrl, parseGitHubRelease, resolveExecutableAssets } from "./self-update.js";
+import { buildReleaseApiUrl, parseGitHubRelease, resolveExecutableAssets, waitWithSoftTimeout } from "./self-update.js";
 
 test("resolveExecutableAssets maps supported platforms to published asset names", () => {
   assert.deepEqual(resolveExecutableAssets("linux", "x64"), {
@@ -54,4 +54,36 @@ test("parseGitHubRelease rejects malformed payloads", () => {
       assets: [],
     });
   }, /target_commitish/);
+});
+
+test("waitWithSoftTimeout resolves after the timeout without waiting for the operation", async () => {
+  let timedOut = false;
+  const startedAt = Date.now();
+
+  await waitWithSoftTimeout(
+    () => new Promise(() => {}),
+    20,
+    () => {
+      timedOut = true;
+    },
+  );
+
+  const elapsedMs = Date.now() - startedAt;
+  assert.equal(timedOut, true);
+  assert(elapsedMs < 250, `expected timeout helper to return quickly, took ${elapsedMs}ms`);
+});
+
+test("waitWithSoftTimeout propagates operation failures before the timeout", async () => {
+  await assert.rejects(
+    waitWithSoftTimeout(
+      async () => {
+        throw new Error("boom");
+      },
+      1_000,
+      () => {
+        throw new Error("timeout callback should not run");
+      },
+    ),
+    /boom/,
+  );
 });
