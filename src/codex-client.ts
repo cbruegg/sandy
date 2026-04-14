@@ -6,8 +6,11 @@ import { isAbsolute, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { Codex, type CodexOptions } from "@openai/codex-sdk";
 import { embeddedCodexVersion } from "./codex-version.generated.js";
-import { resolveHomeDirectory } from "./home-directory.js";
+import { resolveCodexCacheRoot } from "./cache-paths.js";
+import { buildGitHubHeaders, isGitHubUrl } from "./github-http.js";
 import { logger } from "./logger.js";
+
+export { resolveCodexCacheRoot } from "./cache-paths.js";
 
 const SANDY_CODEX_PATH_ENV = "SANDY_CODEX_PATH";
 const CODEX_RELEASE_REPOSITORY = "openai/codex";
@@ -112,15 +115,6 @@ export function resolveCodexVersion(): string {
   return version;
 }
 
-export function resolveCodexCacheRoot(env: NodeJS.ProcessEnv = process.env): string {
-  const localAppData = env["LOCALAPPDATA"]?.trim();
-  if (process.platform === "win32" && localAppData) {
-    return join(localAppData, "Sandy", "codex");
-  }
-  const homeDirectory = env["HOME"]?.trim() || resolveHomeDirectory();
-  return join(homeDirectory, ".local", "share", "sandy", "codex");
-}
-
 function resolveCodexBinaryName(platform: NodeJS.Platform): string {
   return platform === "win32" ? "codex.exe" : "codex";
 }
@@ -179,7 +173,12 @@ async function downloadVerifiedAsset(
   asset: GitHubReleaseAsset,
   targetPath: string,
 ): Promise<void> {
-  const response = await fetchFn(asset.browserDownloadUrl);
+  const response = await fetchFn(
+    asset.browserDownloadUrl,
+    isGitHubUrl(asset.browserDownloadUrl)
+      ? { headers: buildGitHubHeaders() }
+      : undefined,
+  );
   if (!response.ok) {
     throw new Error(`Codex asset download failed with status ${response.status}.`);
   }
@@ -259,9 +258,9 @@ async function fetchCodexReleaseAsset(
   fetchFn: typeof fetch,
 ): Promise<GitHubReleaseAsset> {
   const response = await fetchFn(buildReleaseApiUrl(CODEX_RELEASE_REPOSITORY, `${CODEX_RELEASE_TAG_PREFIX}${version}`), {
-    headers: {
+    headers: buildGitHubHeaders({
       accept: "application/vnd.github+json",
-    },
+    }),
   });
   if (!response.ok) {
     throw new Error(`Codex release metadata request failed with status ${response.status}.`);

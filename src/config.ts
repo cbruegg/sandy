@@ -13,7 +13,9 @@ const DEFAULT_SHARE_ROOT = "/tmp/sandy-shares";
 const DEFAULT_STT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_STT_MODEL = "gpt-4o-mini-transcribe";
 const updateModeSchema = z.enum(["disabled", "relaunch", "exit"]);
+const workerPreinstallRefreshSchema = z.enum(["weekly", "manual"]);
 const DEFAULT_UPDATE_MODE: z.infer<typeof updateModeSchema> = "disabled";
+const DEFAULT_WORKER_PREINSTALL_REFRESH: z.infer<typeof workerPreinstallRefreshSchema> = "weekly";
 
 function defaultConfigPath(): string {
   return join(resolveHomeDirectory(), ".config", "sandy", "config.toml");
@@ -42,9 +44,20 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
     worker: z.object({
       image: z.string().min(1).default(defaultImages.workerImage),
       share_root: z.string().min(1).default(DEFAULT_SHARE_ROOT),
+      preinstall: z.object({
+        commands: z.array(z.string().trim().min(1)).default([]),
+        refresh: workerPreinstallRefreshSchema.default(DEFAULT_WORKER_PREINSTALL_REFRESH),
+      }).default({
+        commands: [],
+        refresh: DEFAULT_WORKER_PREINSTALL_REFRESH,
+      }),
     }).default({
       image: defaultImages.workerImage,
       share_root: DEFAULT_SHARE_ROOT,
+      preinstall: {
+        commands: [],
+        refresh: DEFAULT_WORKER_PREINSTALL_REFRESH,
+      },
     }),
     stt: z.object({
       api_key: z.string().min(1).nullable().optional(),
@@ -93,6 +106,7 @@ export type McpServerConfig = {
 };
 
 export type SandyUpdateMode = z.infer<typeof updateModeSchema>;
+type WorkerPreinstallRefreshMode = z.infer<typeof workerPreinstallRefreshSchema>;
 
 type SandyAuthMode =
   | { mode: "api_key"; openAiApiKey: string }
@@ -107,6 +121,10 @@ type SandyConfig = {
   workerImage: string;
   mcpSidecarImage: string;
   shareRoot: string;
+  workerPreinstall: {
+    commands: string[];
+    refresh: WorkerPreinstallRefreshMode;
+  };
   sttApiKey: string | null;
   sttBaseUrl: string;
   sttModel: string;
@@ -201,6 +219,10 @@ export function parseConfigToml(
     workerImage: parsed.worker.image,
     mcpSidecarImage: parsed.mcp.sidecar_image,
     shareRoot: parsed.worker.share_root,
+    workerPreinstall: {
+      commands: parsed.worker.preinstall.commands,
+      refresh: parsed.worker.preinstall.refresh,
+    },
     sttApiKey: parsed.stt.api_key ?? null,
     sttBaseUrl: parsed.stt.base_url,
     sttModel: parsed.stt.model,

@@ -24,6 +24,10 @@ codex_auth_file = "/tmp/codex-auth.json"
   assert.equal(config.sttBaseUrl, "https://api.openai.com/v1");
   assert.equal(config.sttModel, "gpt-4o-mini-transcribe");
   assert.equal(config.updateMode, "disabled");
+  assert.deepEqual(config.workerPreinstall, {
+    commands: [],
+    refresh: "weekly",
+  });
 });
 
 test("parseConfigToml enables STT from the config file", () => {
@@ -154,6 +158,37 @@ sidecar_image = "custom-sidecar:dev"
   assert.equal(config.updateMode, "disabled");
   assert.equal(config.workerImage, "custom-worker:dev");
   assert.equal(config.mcpSidecarImage, "custom-sidecar:dev");
+});
+
+test("parseConfigToml parses worker preinstall config", () => {
+  const config = parseConfigToml(`
+[telegram]
+bot_token = "telegram-token"
+
+[worker.preinstall]
+commands = ["zypper --non-interactive install jq", "brew install gh"]
+refresh = "manual"
+`);
+
+  assert.deepEqual(config.workerPreinstall, {
+    commands: [
+      "zypper --non-interactive install jq",
+      "brew install gh",
+    ],
+    refresh: "manual",
+  });
+});
+
+test("parseConfigToml rejects blank worker preinstall commands", () => {
+  assert.throws(() => {
+    parseConfigToml(`
+[telegram]
+bot_token = "telegram-token"
+
+[worker.preinstall]
+commands = ["   "]
+`);
+  }, /Invalid input|Too small/);
 });
 
 test("loadConfig reads the path from SANDY_CONFIG_FILE", async () => {

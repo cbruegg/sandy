@@ -12,6 +12,7 @@ import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 
 type DockerSandboxRunnerOptions = {
   workerImage: string;
+  resolveWorkerImage?: () => string;
   shareRoot: string;
   openAiApiKey: string | null;
   codexAuthFile: string | null;
@@ -103,7 +104,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       taskId: request.taskId,
       taskName: request.taskName,
       sharePath,
-      workerImage: this.options.workerImage,
+      workerImage: this.resolveWorkerImage(),
     });
 
     const dockerArgs = [
@@ -156,7 +157,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     dockerArgs.push(
       "-v",
       `${sharePath}:${sharedWorkspaceMountPath}`,
-      this.options.workerImage,
+      this.resolveWorkerImage(),
     );
 
     const child = this.spawnImpl("docker", dockerArgs, {
@@ -390,6 +391,10 @@ export class DockerSandboxRunner implements SandboxRunner {
         await this.sendDockerKill(containerName);
       },
     };
+  }
+
+  private resolveWorkerImage(): string {
+    return this.options.resolveWorkerImage?.() ?? this.options.workerImage;
   }
 
   async shutdown(): Promise<void> {

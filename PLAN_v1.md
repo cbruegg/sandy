@@ -19,6 +19,8 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - Codex sub-agents run with Docker as the outer sandbox boundary; nested Codex bubblewrap sandboxing is disabled in-container.
   - The sub-agent's initial Codex input explicitly tells it that `/workspace/share` is the shared workspace for host-visible handoff files.
   - Deterministic auth selection that prefers local Codex ChatGPT auth over `OPENAI_API_KEY` when both are available.
+  - Operator-configured worker preinstall overlays built as cached derived Docker images on top of the Sandy-managed worker base image.
+  - Eager worker-overlay reconciliation during Sandy startup, with persisted weekly refresh timing stored in Sandy's cache directory.
   - Quarantining of sub-agent output until the user either reports it as dangerous or continues the conversation.
   - Deterministic cancellation and privilege-request routing.
   - Telegram file uploads staged directly into the per-task shared workspace on task launch and during active tasks.

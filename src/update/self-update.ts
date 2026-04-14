@@ -3,6 +3,7 @@ import { chmod, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
+import { buildGitHubHeaders, isGitHubUrl } from "../github-http.js";
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
 import type { SandyUpdateSource } from "../build-metadata.js";
@@ -169,13 +170,13 @@ export class SelfUpdateCoordinator {
 
     const releaseApiUrl = buildReleaseApiUrl(updateSource.githubRepository, updateSource.releaseTag);
     const response = await fetch(releaseApiUrl, {
-      headers: {
+      headers: buildGitHubHeaders({
         accept: "application/vnd.github+json",
         "x-github-api-version": GITHUB_API_VERSION,
         ...(this.releaseApiEtag ? {
           "if-none-match": this.releaseApiEtag,
         } : {}),
-      },
+      }),
     });
 
     if (response.status === 304) {
@@ -372,7 +373,12 @@ async function downloadVerifiedAsset(
   expectedSha256: string,
   expectedSize: number,
 ): Promise<void> {
-  const response = await fetch(assetUrl);
+  const response = await fetch(
+    assetUrl,
+    isGitHubUrl(assetUrl)
+      ? { headers: buildGitHubHeaders() }
+      : undefined,
+  );
   if (!response.ok) {
     throw new Error(`Asset download failed with status ${response.status}.`);
   }

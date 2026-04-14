@@ -43,6 +43,13 @@ bot_token = "123456:telegram-token"
 # image = "sandy-subagent:latest" # explicit override; otherwise Sandy uses a baked GHCR sha tag when present, or this local default
 # share_root = "/tmp/sandy-shares"
 
+[worker.preinstall]
+# commands = [
+#   "zypper --non-interactive install jq",
+#   "brew install gh"
+# ]
+# refresh = "weekly" # one of: "weekly", "manual"
+
 # Optional STT config for voice message support.
 # If `stt.api_key` is not set, voice messages are not supported and will be rejected with an error message.
 [stt]
@@ -82,6 +89,15 @@ Update behavior:
 - `updates.mode = "exit"` replaces the on-disk Sandy executable first and then exits the running process so an external supervisor can restart it.
 - If you use `updates.mode = "exit"` under systemd, configure the unit with `Restart=always`. In this mode Sandy does not relaunch itself after updating.
 - If you explicitly pin `worker.image` or `mcp.sidecar_image`, you must also set `[updates].mode = "disabled"`. Sandy refuses to start with pinned Docker images while automatic updates remain enabled in either `"relaunch"` or `"exit"` mode.
+
+Worker preinstall behavior:
+
+- `worker.preinstall.commands` is an ordered list of Docker build-time shell commands used to create a local derived worker image on top of `worker.image`.
+- If `worker.preinstall.commands` is empty, Sandy launches workers from `worker.image` directly.
+- If `worker.preinstall.commands` is configured, Sandy reconciles the derived worker image during startup before it begins serving chats.
+- `worker.preinstall.refresh = "weekly"` keeps the derived image on a persisted 7-day cadence from the last successful rebuild, even across Sandy restarts.
+- `worker.preinstall.refresh = "manual"` disables scheduled refreshes; Sandy still rebuilds when the configured commands change, the cached overlay is missing, or the base `worker.image` resolves to a different image ID.
+- The derived worker image is local cache state. It does not count as an explicit `worker.image` override, so the existing `updates.mode` rules still apply only to the configured base image.
 
 ### Build and run
 
@@ -239,7 +255,9 @@ boundary for v1, which avoids bubblewrap/user-namespace failures inside the cont
 Inside their sandbox, agents are free to install any dependencies or tools they need to execute the command.
 The default worker image is based on openSUSE Tumbleweed and also includes Homebrew. The worker tells Codex when
 `zypper` and `brew` are available so it can use `zypper` for system packages and `brew` for fast-moving CLI or
-developer tools during task execution.
+developer tools during task execution. Operators can also configure a cached derived worker image with
+`worker.preinstall.commands` so frequently needed tools are rebuilt ahead of time instead of being reinstalled by
+workers after they spawn.
 
 Sub-agents may request access to additional resources from the user, such as:
 - Certain host files to be copied in and out of the shared volume.

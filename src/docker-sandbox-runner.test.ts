@@ -111,12 +111,14 @@ async function launchRunnerWithChild(
     builtWorkerCodexConfigToml?: string | null;
     workerCodexBinaryPath?: string | null;
     workerNetworkName?: string | null;
+    resolveWorkerImage?: () => string;
   },
 ) {
   const timers = createTimerController();
   const harness = createSpawnHarness(taskChild);
   const runner = new DockerSandboxRunner({
     workerImage: "sandy-subagent:latest",
+    resolveWorkerImage: options?.resolveWorkerImage,
     shareRoot: options?.shareRoot ?? "/tmp/sandy-test-shares",
     openAiApiKey: null,
     codexAuthFile: null,
@@ -509,6 +511,17 @@ test("DockerSandboxRunner joins the configured worker network when provided", as
   assert.ok(dockerRunInvocation.args.includes("--network"));
   assert.ok(dockerRunInvocation.args.includes("sandy-mcp-net"));
   assert.ok(!dockerRunInvocation.args.includes("host.docker.internal:host-gateway"));
+});
+
+test("DockerSandboxRunner resolves the worker image at launch time", async () => {
+  const taskChild = new FakeChildProcess();
+  const { invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
+    resolveWorkerImage: () => "sandy-worker-overlay:test",
+  });
+
+  const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
+  assert.ok(dockerRunInvocation);
+  assert.equal(dockerRunInvocation.args.at(-1), "sandy-worker-overlay:test");
 });
 
 test("DockerSandboxRunner rejects share inspection outside the configured share root", async () => {

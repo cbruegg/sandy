@@ -2,6 +2,7 @@ import { CodexMainAgentController } from "./agent/main-agent-controller.js";
 import { TelegramBotApiAdapter } from "./channel/telegram-adapter.js";
 import { loadConfig } from "./config.js";
 import { createCodexClient, ensureManagedCodexPath } from "./codex-client.js";
+import { resolveSandyCacheRoot } from "./cache-paths.js";
 import { configureLogger, logger } from "./logger.js";
 import { SandyMcpProxyAccess } from "./mcp/proxy-access.js";
 import { McpSidecarManager } from "./mcp/sidecar-manager.js";
@@ -15,6 +16,7 @@ import { InMemorySessionStore } from "./session/in-memory-session-store.js";
 import { OpenAiTranscriptionProvider } from "./transcription/openai-transcription-provider.js";
 import { resolvePublishedUpdateSource } from "./build-metadata.js";
 import { SelfUpdateCoordinator } from "./update/self-update.js";
+import { WorkerImageManager } from "./worker-image-manager.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -29,6 +31,8 @@ export async function startApp(): Promise<void> {
     shareRoot: config.shareRoot,
     authMode: config.authMode.mode,
     sttEnabled: config.sttApiKey !== null,
+    workerPreinstallCommandCount: config.workerPreinstall.commands.length,
+    workerPreinstallRefresh: config.workerPreinstall.refresh,
   });
 
   const transcriptionProvider = config.sttApiKey
@@ -44,8 +48,14 @@ export async function startApp(): Promise<void> {
     transcriptionProvider: transcriptionProvider ?? undefined,
   });
 
+  const workerImageManager = new WorkerImageManager({
+    baseImage: config.workerImage,
+    preinstall: config.workerPreinstall,
+    cacheRoot: resolveSandyCacheRoot(),
+  });
+
   // Pre-resolve the worker Codex binary so each container can reuse the cache instead of re-downloading it.
-  const [codex, workerCodexBinaryPath] = await Promise.all([
+  const [codex, workerCodexBinaryPath, initialWorkerImage] = await Promise.all([
     config.authMode.mode === "api_key"
       ? createCodexClient({
           apiKey: config.authMode.openAiApiKey,
@@ -55,7 +65,13 @@ export async function startApp(): Promise<void> {
       platform: "linux",
       arch: process.arch,
     }),
+    workerImageManager.start(),
   ]);
+
+  logger.info("worker_image.ready", {
+    baseImage: config.workerImage,
+    launchImage: initialWorkerImage,
+  });
 
   const mainAgent = new CodexMainAgentController(codex);
 
@@ -72,6 +88,7 @@ export async function startApp(): Promise<void> {
   const sandboxRunner = new DockerSandboxRunner(
     {
       workerImage: config.workerImage,
+      resolveWorkerImage: () => workerImageManager.getLaunchImage(),
       shareRoot: config.shareRoot,
       openAiApiKey: config.authMode.mode === "api_key" ? config.authMode.openAiApiKey : null,
       codexAuthFile: config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthFile : null,
@@ -105,6 +122,7 @@ export async function startApp(): Promise<void> {
   const shutdown = async () => {
     updateCoordinator.stop();
     await channel.stop();
+    await workerImageManager.stop();
     await sandboxRunner.shutdown?.();
     await sidecarManager?.stop();
   };
