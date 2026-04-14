@@ -7,6 +7,7 @@
   "packageManager": "bun@1.3.12",
   "scripts": {
     "sync:codex-version": "bun ./scripts/sync-codex-version.mjs",
+    "check:codex-version": "bun ./scripts/check-codex-version.mjs",
     "knip": "knip",
     "lint": "eslint src --max-warnings 0",
     "typecheck": "tsc --noEmit -p tsconfig.json",
