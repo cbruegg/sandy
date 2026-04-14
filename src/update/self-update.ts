@@ -265,6 +265,10 @@ export class SelfUpdateCoordinator {
 
   private async replaceExecutableThenExit(stagedUpdate: StagedUpdate): Promise<void> {
     this.stop();
+    logger.info("update.restart_preparation_started", {
+      mode: this.options.mode,
+      gitRevision: stagedUpdate.gitRevision,
+    });
     await runUpdaterProcess(
       stagedUpdate.updaterPath,
       buildReplaceOnlyPlan({
@@ -284,11 +288,19 @@ export class SelfUpdateCoordinator {
         });
       },
     );
+    logger.info("update.restart_preparation_finished", {
+      mode: this.options.mode,
+      gitRevision: stagedUpdate.gitRevision,
+    });
     this.exitProcess(0);
   }
 
   private async relaunchWithUpdater(stagedUpdate: StagedUpdate): Promise<void> {
     this.stop();
+    logger.info("update.restart_preparation_started", {
+      mode: this.options.mode,
+      gitRevision: stagedUpdate.gitRevision,
+    });
     await waitWithSoftTimeout(
       () => this.options.prepareForRestart(),
       this.restartPreparationTimeoutMs,
@@ -300,6 +312,10 @@ export class SelfUpdateCoordinator {
         });
       },
     );
+    logger.info("update.restart_preparation_finished", {
+      mode: this.options.mode,
+      gitRevision: stagedUpdate.gitRevision,
+    });
 
     const child = spawn(stagedUpdate.updaterPath, [], {
       detached: true,
