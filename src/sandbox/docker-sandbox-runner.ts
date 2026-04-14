@@ -10,6 +10,8 @@ import type {HostCommand, PrivilegeResolutionResult, SubAgentEvent} from "../typ
 import {parseSubAgentEvent, serializeHostCommand} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 
+const workerCodexSeedMountPath = "/run/sandy-codex-seed";
+
 type DockerSandboxRunnerOptions = {
   workerImage: string;
   resolveWorkerImage?: () => string;
@@ -136,7 +138,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     if (workerCodexHomeTempDir) {
       dockerArgs.push(
         "-v",
-        `${workerCodexHomeTempDir}:/root/.codex`,
+        `${workerCodexHomeTempDir}:${workerCodexSeedMountPath}:ro`,
       );
     }
 
@@ -157,7 +159,15 @@ export class DockerSandboxRunner implements SandboxRunner {
     dockerArgs.push(
       "-v",
       `${sharePath}:${sharedWorkspaceMountPath}`,
+    );
+
+    const workerStartupScript = buildWorkerStartupScript(workerCodexHomeTempDir !== null);
+    dockerArgs.push(
+      "--entrypoint",
+      "/bin/sh",
       this.resolveWorkerImage(),
+      "-lc",
+      workerStartupScript,
     );
 
     const child = this.spawnImpl("docker", dockerArgs, {
@@ -622,4 +632,17 @@ function isDockerPullStatusMessage(message: string): boolean {
 
     return /^(?:[^:\s]+: )?(Pulling fs layer|Waiting|Downloading|Verifying Checksum|Download complete|Extracting|Pull complete)$/.test(line);
   });
+}
+
+function buildWorkerStartupScript(hasCodexSeedMount: boolean): string {
+  const commands = [
+    "mkdir -p /root/.codex",
+  ];
+
+  if (hasCodexSeedMount) {
+    commands.push(`cp -R ${workerCodexSeedMountPath}/. /root/.codex`);
+  }
+
+  commands.push("exec bun dist/entrypoint-worker.js");
+  return commands.join(" && ");
 }
