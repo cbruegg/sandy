@@ -166,7 +166,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       "--entrypoint",
       "/bin/sh",
       this.resolveWorkerImage(),
-      "-lc",
+      "-c",
       workerStartupScript,
     );
 

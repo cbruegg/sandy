@@ -501,6 +501,24 @@ test("DockerSandboxRunner mounts a writable worker Codex home from a temp path o
   await rm(shareRoot, { recursive: true, force: true });
 });
 
+test("DockerSandboxRunner runs the worker container as the host user when available", async () => {
+  if (typeof process.getuid !== "function" || typeof process.getgid !== "function") {
+    return;
+  }
+
+  const taskChild = new FakeChildProcess();
+  const { invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
+    builtWorkerCodexConfigToml: "model = \"gpt-5\"\n",
+  });
+
+  const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
+  assert.ok(dockerRunInvocation);
+
+  const userFlagIndex = dockerRunInvocation.args.indexOf("--user");
+  assert.notEqual(userFlagIndex, -1);
+  assert.equal(dockerRunInvocation.args[userFlagIndex + 1], `${process.getuid()}:${process.getgid()}`);
+});
+
 test("DockerSandboxRunner mounts the host-managed worker Codex binary read-only", async () => {
   const taskChild = new FakeChildProcess();
   const workerCodexBinaryPath = "/tmp/sandy-codex/linux/codex";
