@@ -24,6 +24,7 @@ Sandy is a TypeScript project with the application code under `src/`.
 - `bun run build:exe`: build the host single-file executable.
 - `docker build --target worker-runtime -t sandy-subagent:latest .`: build the worker container image used by sub-agents.
 - `docker build --target mcp-proxy-runtime -t sandy-mcp-proxy:latest .`: build the MCP proxy container image.
+- `./scripts/run-local-dev.sh`: build both local runtime images and start Sandy with `SANDY_CONFIG_FILE=config/config.toml`. Agents can use this to reproduce local-mode behavior consistently.
 
 Run both `bun run build` and `bun run test` before committing changes that affect TypeScript or runtime logic. The explicit build step matters even when tests pass, because it verifies the full project still type-checks and bundles cleanly under Bun.
 
