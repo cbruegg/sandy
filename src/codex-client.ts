@@ -217,46 +217,12 @@ async function extractCodexAsset(
     await rename(assetPath, finalBinaryPath);
   } else {
     await runCommand("tar", ["-xzf", assetPath, "-C", versionDirectory]);
-    const extractedPath = join(versionDirectory, asset.extractedBinaryName);
-    const extractedBinaryPath = await resolveExtractedCodexBinaryPath(extractedPath, platform);
-    await rename(extractedBinaryPath, finalBinaryPath);
-    if (extractedBinaryPath !== extractedPath) {
-      await rm(extractedPath, { recursive: true, force: true });
-    }
+    await rename(join(versionDirectory, asset.extractedBinaryName), finalBinaryPath);
   }
   if (process.platform !== "win32") {
     await chmod(finalBinaryPath, 0o755);
   }
   return finalBinaryPath;
-}
-
-export async function resolveExtractedCodexBinaryPath(path: string, platform: NodeJS.Platform): Promise<string> {
-  const stats = await stat(path);
-  if (!stats.isDirectory()) {
-    return path;
-  }
-
-  const binaryName = resolveCodexBinaryName(platform);
-  const nestedBinaryPath = join(path, binaryName);
-  if (isExecutableFile(nestedBinaryPath)) {
-    return nestedBinaryPath;
-  }
-
-  for (const entry of await readdir(path)) {
-    const nestedPath = join(path, entry);
-    const nestedStats = await stat(nestedPath);
-    if (!nestedStats.isDirectory() && entry === binaryName) {
-      return nestedPath;
-    }
-    if (nestedStats.isDirectory()) {
-      const candidate = join(nestedPath, binaryName);
-      if (isExecutableFile(candidate)) {
-        return candidate;
-      }
-    }
-  }
-
-  throw new Error(`Extracted Codex archive did not contain executable ${binaryName} at ${path}.`);
 }
 
 async function runCommand(command: string, args: string[]): Promise<void> {
