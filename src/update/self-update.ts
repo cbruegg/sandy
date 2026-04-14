@@ -402,7 +402,7 @@ export async function waitWithSoftTimeout(
         }
         settled = true;
         clearTimeout(timeoutHandle);
-        reject(error);
+        reject(error instanceof Error ? error : new Error(String(error)));
       },
     );
   });
