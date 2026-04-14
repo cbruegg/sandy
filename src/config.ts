@@ -29,6 +29,19 @@ function normalizeTelegramAllowedUser(value: string | number): string {
   return String(value).trim();
 }
 
+const sandyChannelKindSchema = z.enum(["telegram", "local_test"]);
+
+const localTestChannelSchema = z.object({
+  spool_root: z.string().min(1),
+});
+
+const telegramChannelSchema = z.object({
+  bot_token: z.string().min(1),
+  allowed_user: z.union([z.string(), z.number().int()])
+    .transform(normalizeTelegramAllowedUser)
+    .pipe(z.string().min(1)),
+});
+
 function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages: SandyImageDefaults) {
   return z.object({
     logging: z.object({
@@ -36,11 +49,27 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
     }).default({
       level: DEFAULT_LOG_LEVEL,
     }),
-    telegram: z.object({
-      bot_token: z.string().min(1),
-      allowed_user: z.union([z.string(), z.number().int()])
-        .transform(normalizeTelegramAllowedUser)
-        .pipe(z.string().min(1)),
+    channel: z.object({
+      kind: sandyChannelKindSchema.default("telegram"),
+      telegram: telegramChannelSchema.optional(),
+      local_test: localTestChannelSchema.optional(),
+    }).superRefine((value, ctx) => {
+      if (value.kind === "telegram" && !value.telegram) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["telegram"],
+          message: "channel.telegram is required when channel.kind is \"telegram\".",
+        });
+      }
+      if (value.kind === "local_test" && !value.local_test) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["local_test"],
+          message: "channel.local_test is required when channel.kind is \"local_test\".",
+        });
+      }
+    }).default({
+      kind: "telegram",
     }),
     auth: z.object({
       openai_api_key: z.string().min(1).nullable().optional(),
@@ -120,12 +149,24 @@ type SandyAuthMode =
   | { mode: "codex_auth_file"; codexAuthFile: string }
   | { mode: "ambient_codex_auth" };
 
-type SandyConfig = {
+export type SandyConfig = {
   configFilePath: string;
   configDirectory: string;
   logLevel: z.infer<typeof logLevelSchema>;
-  telegramBotToken: string;
-  telegramAllowedUser: string;
+  channel:
+    | {
+      kind: "telegram";
+      telegram: {
+          botToken: string;
+          allowedUser: string;
+        };
+      }
+    | {
+      kind: "local_test";
+      localTest: {
+          spoolRoot: string;
+        };
+      };
   workerImage: string;
   mcpSidecarImage: string;
   shareRoot: string;
@@ -223,8 +264,7 @@ export function parseConfigToml(
     configFilePath,
     configDirectory: dirname(configFilePath),
     logLevel: parsed.logging.level,
-    telegramBotToken: parsed.telegram.bot_token,
-    telegramAllowedUser: parsed.telegram.allowed_user,
+    channel: buildChannelConfig(parsed.channel),
     workerImage: parsed.worker.image,
     mcpSidecarImage: parsed.mcp.sidecar_image,
     shareRoot: parsed.worker.share_root,
@@ -326,6 +366,26 @@ function removeNulls(value: unknown): unknown {
       .filter(([, entry]) => entry !== null)
       .map(([key, entry]) => [key, removeNulls(entry)]),
   );
+}
+
+function buildChannelConfig(channel: SandyConfigFile["channel"]): SandyConfig["channel"] {
+  switch (channel.kind) {
+    case "telegram":
+      return {
+        kind: "telegram",
+        telegram: {
+          botToken: channel.telegram!.bot_token,
+          allowedUser: channel.telegram!.allowed_user,
+        },
+      };
+    case "local_test":
+      return {
+        kind: "local_test",
+        localTest: {
+          spoolRoot: channel.local_test!.spool_root,
+        },
+      };
+  }
 }
 
 function normalizeParsedToml(value: unknown): unknown {

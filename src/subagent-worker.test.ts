@@ -14,7 +14,7 @@ import { parseSubAgentEvent } from "./types.js";
 
 test("buildInitialTaskInput tells the sub-agent where the shared workspace is", () => {
   const formatting: ChannelFormatting = {
-    channel: "telegram",
+    channelId: "telegram",
     markup: "telegram_html",
     allowedTags: ["b", "i", "code", "pre"],
     instructions: "Use simple Telegram HTML.",

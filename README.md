@@ -31,11 +31,16 @@ Commented entries below show built-in defaults. Uncommented values are required 
 ```toml
 [logging]
 # level = "info"
-# debug = false
 
-[telegram]
+[channel]
+kind = "telegram" # or "local_test"
+
+[channel.telegram]
 bot_token = "123456:telegram-token"
 allowed_user = "123456789" # or "@cbruegg"
+
+[channel.local_test]
+# spool_root = "/tmp/sandy-local-test"
 
 [auth]
 # codex_auth_file = "~/.codex/auth.json"
@@ -78,10 +83,18 @@ url = "https://todoist.example/mcp"
 
 Telegram auth behavior:
 
-- `telegram.allowed_user` is required. Set it to either a numeric Telegram user ID or a username like `@cbruegg`.
+- `channel.kind = "telegram"` requires `channel.telegram.allowed_user`. Set it to either a numeric Telegram user ID or a username like `@cbruegg`.
 - Username values are matched case-insensitively after removing a leading `@`.
-- Sandy ignores every Telegram update whose sender does not match `telegram.allowed_user`.
+- Sandy ignores every Telegram update whose sender does not match `channel.telegram.allowed_user`.
 - Sandy also ignores all non-private Telegram chats, even when the sender matches the configured user.
+
+Local test channel behavior:
+
+- `channel.kind = "local_test"` uses a file-backed inbox/outbox transport for autonomous local testing.
+- `channel.local_test.spool_root` is the root directory that contains `inbox/`, `inbox-processed/`, `inbox-failed/`, and `outbox/`.
+- The local-test channel supports exactly one implicit chat, so there is no chat-ID discovery step.
+- The poll interval is fixed in code and is not configurable.
+- The recommended way to interact with this channel is `./scripts/run-local-test-cli.sh ...`, not direct file editing.
 
 Codex auth behavior:
 
@@ -159,6 +172,20 @@ Start Sandy:
 bun start
 ```
 
+Start Sandy in local autonomous test mode:
+
+```bash
+./scripts/run-local-dev.sh
+```
+
+Send and inspect local-test channel events with the helper CLI:
+
+```bash
+./scripts/run-local-test-cli.sh send --spool-root /tmp/sandy-local-test-XXXXXX/spool --text "inspect the repo"
+./scripts/run-local-test-cli.sh wait-for --spool-root /tmp/sandy-local-test-XXXXXX/spool --type send_task_update
+./scripts/run-local-test-cli.sh list-events --spool-root /tmp/sandy-local-test-XXXXXX/spool
+```
+
 Manage MCP server auth:
 
 ```bash
@@ -197,7 +224,7 @@ Over time, it might make sense to use the [Pi agent](https://github.com/badlogic
 providing a more flexible API that is not tied to a specific LLM provider.
 
 Sandy receives messages from the user through a channel abstraction.
-Initially, the only implementation of the channel will be a Telegram bot.
+This repository includes both a Telegram adapter and a file-backed `local_test` adapter for autonomous local testing.
 Each channel also defines its own formatting contract for user-visible agent output.
 
 Allowed message types are text messages, file uploads (with images receiving dedicated handling) and voice messages.

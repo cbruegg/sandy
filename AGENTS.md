@@ -24,9 +24,32 @@ Sandy is a TypeScript project with the application code under `src/`.
 - `bun run build:exe`: build the host single-file executable.
 - `docker build --target worker-runtime -t sandy-subagent:latest .`: build the worker container image used by sub-agents.
 - `docker build --target mcp-proxy-runtime -t sandy-mcp-proxy:latest .`: build the MCP proxy container image.
-- `./scripts/run-local-dev.sh`: build both local runtime images and start Sandy with `SANDY_CONFIG_FILE=config/config.toml`. Agents can use this to reproduce local-mode behavior consistently.
+- `./scripts/run-local-dev.sh`: build both local runtime images and start Sandy. By default it derives a temporary local-test config from `config/config.toml`, overrides the channel to `local_test`, and prints the derived config plus inbox/outbox paths. Pass `--channel telegram` to use `config/config.toml` directly.
+- `./scripts/run-local-test-cli.sh ...`: helper CLI for the local-test channel. Prefer this over hand-writing inbox/outbox files so protocol details stay conformant.
 
 Run both `bun run build` and `bun run test` before committing changes that affect TypeScript or runtime logic. The explicit build step matters even when tests pass, because it verifies the full project still type-checks and bundles cleanly under Bun.
+
+## Autonomous Testing
+
+For autonomous interaction testing, do not use Telegram unless the task explicitly requires Telegram behavior. Start Sandy with `./scripts/run-local-dev.sh`, let it boot into the derived `local_test` channel, and use the printed spool paths only as references.
+
+Use the helper CLI for as much as possible:
+
+- `./scripts/run-local-test-cli.sh send --spool-root <spool-root> --text "..."` to send user text
+- `./scripts/run-local-test-cli.sh attach --spool-root <spool-root> --file /abs/path/to/file --text "..."` to send attachments
+- `./scripts/run-local-test-cli.sh approve|deny --spool-root <spool-root> --request-id <id> ...` for approval responses
+- `./scripts/run-local-test-cli.sh cancel|mark-finished|report-danger --spool-root <spool-root> ...` for control actions
+- `./scripts/run-local-test-cli.sh wait-for|tail|list-events --spool-root <spool-root> ...` to inspect Sandy output
+
+The local-test channel supports exactly one implicit chat, so agents do not need to discover or pass a chat ID. Prefer the helper CLI over raw spool file edits so message IDs, timestamps, event shapes, and approval payloads remain valid. Raw `inbox/` and `outbox/` manipulation is only for debugging the local-test channel implementation itself.
+
+Typical flow:
+
+- Run `./scripts/run-local-dev.sh`
+- Use the printed helper CLI command shape to send a `user_text` event
+- Wait for `send_privilege_request` or `send_task_update` via `./scripts/run-local-test-cli.sh wait-for ...`
+- Reply with `./scripts/run-local-test-cli.sh approve ...` or `deny ...`
+- Verify the final `send_text` or `send_file` event through `wait-for`, `tail`, or `list-events`
 
 ## Coding Style & Naming Conventions
 

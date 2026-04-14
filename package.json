@@ -12,13 +12,14 @@
     "lint": "eslint src --max-warnings 0",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "clean": "rm -rf dist bin",
-    "build:bundle": "bun run sync:codex-version && mkdir -p dist && bun build ./src/entrypoint-main.ts ./src/entrypoint-updater.ts ./src/entrypoint-worker.ts ./src/entrypoint-mcp-proxy.ts --outdir dist --target bun --sourcemap",
+    "build:bundle": "bun run sync:codex-version && mkdir -p dist && bun build ./src/entrypoint-main.ts ./src/entrypoint-local-test.ts ./src/entrypoint-updater.ts ./src/entrypoint-worker.ts ./src/entrypoint-mcp-proxy.ts --outdir dist --target bun --sourcemap",
     "build:exe": "bun run sync:codex-version && mkdir -p bin && bun build --compile --outfile bin/sandy --sourcemap ./src/entrypoint-main.ts",
     "build:exe:updater": "bun run sync:codex-version && mkdir -p bin && bun build --compile --outfile bin/sandy-updater --sourcemap ./src/entrypoint-updater.ts",
     "build:exe:worker": "bun run sync:codex-version && mkdir -p bin && bun build --compile --outfile bin/sandy-worker --sourcemap ./src/entrypoint-worker.ts",
     "build:exe:mcp": "bun run sync:codex-version && mkdir -p bin && bun build --compile --outfile bin/sandy-mcp-sidecar --sourcemap ./src/entrypoint-mcp-proxy.ts",
     "build": "bun run clean && bun run lint && bun run typecheck && bun run build:bundle && bun run knip",
     "start": "bun run sync:codex-version && bun run src/entrypoint-main.ts",
+    "start:local-test": "bun run sync:codex-version && bun run src/entrypoint-local-test.ts",
     "test": "bun run build && bun test"
   },
   "dependencies": {

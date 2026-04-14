@@ -1,5 +1,5 @@
 import { CodexMainAgentController } from "./agent/main-agent-controller.js";
-import { TelegramBotApiAdapter } from "./channel/telegram-adapter.js";
+import { createChannelAdapter } from "./channel/create-channel.js";
 import { loadConfig } from "./config.js";
 import { createCodexClient, ensureManagedCodexPath } from "./codex-client.js";
 import { resolveSandyCacheRoot } from "./cache-paths.js";
@@ -26,6 +26,7 @@ export async function startApp(): Promise<void> {
 
   logger.info("app.starting", {
     configFilePath: config.configFilePath,
+    channelKind: config.channel.kind,
     workerImage: config.workerImage,
     mcpSidecarImage: config.mcpSidecarImage,
     shareRoot: config.shareRoot,
@@ -43,11 +44,7 @@ export async function startApp(): Promise<void> {
       })
     : null;
 
-  const channel = new TelegramBotApiAdapter({
-    token: config.telegramBotToken,
-    allowedUser: config.telegramAllowedUser,
-    transcriptionProvider: transcriptionProvider ?? undefined,
-  });
+  const channel = createChannelAdapter(config, transcriptionProvider);
 
   const workerImageManager = new WorkerImageManager({
     baseImage: config.workerImage,
