@@ -11,6 +11,7 @@ import type { SandyUpdateMode } from "../config.js";
 
 const UPDATE_CHECK_INTERVAL_MS = 60_000;
 const GITHUB_API_VERSION = "2026-03-10";
+const DEFAULT_RESTART_PREPARATION_TIMEOUT_MS = 15_000;
 
 type SupportedPlatform = "linux" | "darwin" | "win32";
 type SupportedArch = "x64" | "arm64";
@@ -60,12 +61,14 @@ type SelfUpdateCoordinatorOptions = {
   canInstallUpdate: () => boolean;
   notifyChats: (message: string) => Promise<void>;
   prepareForRestart: () => Promise<void>;
+  restartPreparationTimeoutMs?: number;
   exitProcess?: (code: number) => never | void;
 };
 
 export class SelfUpdateCoordinator {
   private readonly exitProcess: (code: number) => never | void;
   private readonly targetAssets: ResolvedExecutableAssets | null;
+  private readonly restartPreparationTimeoutMs: number;
   private intervalHandle: Timer | null = null;
   private releaseApiEtag: string | null = null;
   private checkInFlight = false;
@@ -74,6 +77,7 @@ export class SelfUpdateCoordinator {
 
   constructor(private readonly options: SelfUpdateCoordinatorOptions) {
     this.exitProcess = options.exitProcess ?? ((code) => process.exit(code));
+    this.restartPreparationTimeoutMs = options.restartPreparationTimeoutMs ?? DEFAULT_RESTART_PREPARATION_TIMEOUT_MS;
     this.targetAssets = resolveExecutableAssets(process.platform, process.arch);
   }
 
@@ -269,13 +273,33 @@ export class SelfUpdateCoordinator {
         stageDirectory: stagedUpdate.stageDirectory,
       }),
     );
-    await this.options.prepareForRestart();
+    await waitWithSoftTimeout(
+      () => this.options.prepareForRestart(),
+      this.restartPreparationTimeoutMs,
+      () => {
+        logger.warn("update.restart_preparation_timed_out", {
+          timeoutMs: this.restartPreparationTimeoutMs,
+          mode: this.options.mode,
+          gitRevision: stagedUpdate.gitRevision,
+        });
+      },
+    );
     this.exitProcess(0);
   }
 
   private async relaunchWithUpdater(stagedUpdate: StagedUpdate): Promise<void> {
     this.stop();
-    await this.options.prepareForRestart();
+    await waitWithSoftTimeout(
+      () => this.options.prepareForRestart(),
+      this.restartPreparationTimeoutMs,
+      () => {
+        logger.warn("update.restart_preparation_timed_out", {
+          timeoutMs: this.restartPreparationTimeoutMs,
+          mode: this.options.mode,
+          gitRevision: stagedUpdate.gitRevision,
+        });
+      },
+    );
 
     const child = spawn(stagedUpdate.updaterPath, [], {
       detached: true,
@@ -345,6 +369,43 @@ function buildReplaceOnlyPlan(input: {
     backupExecutablePath: join(dirname(input.currentExecutablePath), backupExecutableName(input.currentExecutablePath)),
     stageDirectory: input.stageDirectory,
   };
+}
+
+export async function waitWithSoftTimeout(
+  operation: () => Promise<void>,
+  timeoutMs: number,
+  onTimeout: () => void,
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const timeoutHandle = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      onTimeout();
+      resolve();
+    }, timeoutMs);
+
+    void operation().then(
+      () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeoutHandle);
+        resolve();
+      },
+      (error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        clearTimeout(timeoutHandle);
+        reject(error);
+      },
+    );
+  });
 }
 
 async function runUpdaterProcess(updaterPath: string, plan: ReplaceOnlyUpdaterPlan): Promise<void> {
