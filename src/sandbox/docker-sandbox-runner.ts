@@ -121,6 +121,11 @@ export class DockerSandboxRunner implements SandboxRunner {
       `SANDY_CHANNEL_FORMATTING=${JSON.stringify(request.channelFormatting)}`,
     ];
 
+    const workerUser = resolveDockerWorkerUser();
+    if (workerUser) {
+      dockerArgs.push("--user", workerUser);
+    }
+
     if (this.options.openAiApiKey) {
       dockerArgs.push("-e", `OPENAI_API_KEY=${this.options.openAiApiKey}`);
     }
@@ -622,4 +627,12 @@ function isDockerPullStatusMessage(message: string): boolean {
 
     return /^(?:[^:\s]+: )?(Pulling fs layer|Waiting|Downloading|Verifying Checksum|Download complete|Extracting|Pull complete)$/.test(line);
   });
+}
+
+function resolveDockerWorkerUser(): string | null {
+  if (typeof process.getuid !== "function" || typeof process.getgid !== "function") {
+    return null;
+  }
+
+  return `${process.getuid()}:${process.getgid()}`;
 }
