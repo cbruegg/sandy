@@ -118,11 +118,44 @@ export async function startApp(): Promise<void> {
   await sidecarManager?.start();
 
   const shutdown = async () => {
+    logger.info("app.shutdown_started");
     updateCoordinator.stop();
+    logger.info("app.shutdown_step_started", {
+      step: "channel.stop",
+    });
     await channel.stop();
+    logger.info("app.shutdown_step_completed", {
+      step: "channel.stop",
+    });
+
+    logger.info("app.shutdown_step_started", {
+      step: "workerImageManager.stop",
+    });
     await workerImageManager.stop();
-    await sandboxRunner.shutdown?.();
-    await sidecarManager?.stop();
+    logger.info("app.shutdown_step_completed", {
+      step: "workerImageManager.stop",
+    });
+
+    if (sandboxRunner.shutdown) {
+      logger.info("app.shutdown_step_started", {
+        step: "sandboxRunner.shutdown",
+      });
+      await sandboxRunner.shutdown();
+      logger.info("app.shutdown_step_completed", {
+        step: "sandboxRunner.shutdown",
+      });
+    }
+
+    if (sidecarManager) {
+      logger.info("app.shutdown_step_started", {
+        step: "sidecarManager.stop",
+      });
+      await sidecarManager.stop();
+      logger.info("app.shutdown_step_completed", {
+        step: "sidecarManager.stop",
+      });
+    }
+    logger.info("app.shutdown_completed");
   };
 
   const updateCoordinator = new SelfUpdateCoordinator({
