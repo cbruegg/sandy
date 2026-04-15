@@ -290,15 +290,12 @@ test("DockerSandboxRunner terminates the container if event delivery rejects", a
   taskChild.stderr.write("background warning\n");
   await flushEvents();
 
-  assert.deepEqual(events, [
-    { type: "worker_connected" },
-    { type: "progress", message: "background warning" },
-  ]);
-  assert.deepEqual(taskChild.killSignals, ["SIGTERM"]);
-  assert.ok(invocations.some((invocation) => invocation.args[0] === "rm"));
+  assert.deepEqual(events, [{ type: "worker_connected" }]);
+  assert.deepEqual(taskChild.killSignals, []);
+  assert.ok(!invocations.some((invocation) => invocation.args[0] === "rm"));
 });
 
-test("DockerSandboxRunner suppresses noisy Docker pull stderr and emits one startup progress update", async () => {
+test("DockerSandboxRunner does not forward Docker pull stderr as progress", async () => {
   const taskChild = new FakeChildProcess();
   const events: SubAgentEvent[] = [];
 
@@ -312,13 +309,10 @@ test("DockerSandboxRunner suppresses noisy Docker pull stderr and emits one star
   taskChild.stderr.write("f429832b271f: Verifying Checksum\nf429832b271f: Download complete\n");
   await flushEvents();
 
-  assert.deepEqual(events, [{
-    type: "progress",
-    message: "Preparing worker container. The worker image may need to be downloaded before the task can start.",
-  }]);
+  assert.deepEqual(events, []);
 });
 
-test("DockerSandboxRunner still forwards non-Docker stderr as progress", async () => {
+test("DockerSandboxRunner does not forward non-Docker stderr as progress", async () => {
   const taskChild = new FakeChildProcess();
   const events: SubAgentEvent[] = [];
 
@@ -329,10 +323,7 @@ test("DockerSandboxRunner still forwards non-Docker stderr as progress", async (
   taskChild.stderr.write("background warning\n");
   await flushEvents();
 
-  assert.deepEqual(events, [{
-    type: "progress",
-    message: "background warning",
-  }]);
+  assert.deepEqual(events, []);
 });
 
 test("DockerSandboxRunner cancellation does not emit a spurious disconnect", async () => {
