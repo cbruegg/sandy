@@ -1,5 +1,5 @@
 import * as toml from "@iarna/toml";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 // The worker image composes PATH in Dockerfile. Patch that exact runtime PATH
@@ -73,5 +73,6 @@ export async function applyWorkerCodexConfigPatch(
     },
   };
 
+  await mkdir(codexHomePath, { recursive: true });
   await writeFile(configPath, toml.stringify(mergedConfig), "utf8");
 }

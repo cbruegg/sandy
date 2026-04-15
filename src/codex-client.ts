@@ -113,6 +113,18 @@ export function resolveManagedCodexAsset(platform: NodeJS.Platform, arch: string
   };
 }
 
+export function resolveManagedCodexCacheRoot(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch,
+): string {
+  const targetTriple = resolveCodexTargetTriple(platform, arch);
+  if (!targetTriple) {
+    throw new Error(`Unsupported Codex platform: ${platform} (${arch})`);
+  }
+  return join(resolveCodexCacheRoot(env, platform), targetTriple);
+}
+
 export function resolveCodexVersion(): string {
   const version = embeddedCodexVersion;
   if (typeof version !== "string" || !version.trim()) {
@@ -239,15 +251,11 @@ async function runCommand(command: string, args: string[]): Promise<void> {
   });
 }
 
-function isCodexVersionDirectoryName(name: string): boolean {
-  return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(name);
-}
-
 async function pruneCodexCache(cacheRoot: string, keepVersion: string): Promise<void> {
   const entries = await readdir(cacheRoot, { withFileTypes: true }).catch(() => []);
   const removedVersions: string[] = [];
   await Promise.all(entries.map(async (entry) => {
-    if (!entry.isDirectory() || entry.name === keepVersion || !isCodexVersionDirectoryName(entry.name)) {
+    if (!entry.isDirectory() || entry.name === keepVersion) {
       return;
     }
     await rm(join(cacheRoot, entry.name), { recursive: true, force: true });
@@ -304,10 +312,7 @@ export async function ensureManagedCodexPath(options: EnsureManagedCodexOptions 
     throw new Error(`Unsupported Codex platform: ${platform} (${arch})`);
   }
 
-  const cacheRoot = options.cacheRoot
-    ?? (platform === process.platform && arch === process.arch
-      ? resolveCodexCacheRoot(env)
-      : join(resolveCodexCacheRoot(env), targetTriple));
+  const cacheRoot = options.cacheRoot ?? resolveManagedCodexCacheRoot(env, platform, arch);
   const versionDirectory = join(cacheRoot, version);
   const binaryPath = join(versionDirectory, resolveCodexBinaryName(platform));
   logger.info("codex.resolve_started", {

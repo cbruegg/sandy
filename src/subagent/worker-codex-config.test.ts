@@ -80,3 +80,23 @@ test("applyWorkerCodexConfigPatch preserves seeded MCP config while adding shell
     },
   });
 });
+
+test("applyWorkerCodexConfigPatch creates the worker Codex home when no seed was mounted", async () => {
+  const rootHome = await mkdtemp(join(tmpdir(), "sandy-worker-home-"));
+  const codexHome = join(rootHome, ".codex");
+  const configPath = join(codexHome, "config.toml");
+
+  await applyWorkerCodexConfigPatch({
+    PATH: "/root/.bun/bin:/usr/bin:/bin",
+  }, codexHome);
+
+  const parsed = toml.parse(await readFile(configPath, "utf8")) as {
+    shell_environment_policy: { set: { PATH: string } };
+  };
+
+  assert.deepEqual(parsed.shell_environment_policy, {
+    set: {
+      PATH: "/root/.bun/bin:/usr/bin:/bin",
+    },
+  });
+});

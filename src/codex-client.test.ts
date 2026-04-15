@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   ensureManagedCodexPath,
   resolveCodexCacheRoot,
+  resolveManagedCodexCacheRoot,
   resolveCodexPathOverride,
   resolveCodexTargetTriple,
   resolveCodexVersion,
@@ -73,6 +74,13 @@ test("resolveCodexCacheRoot uses the Sandy data directory", () => {
     HOME: "/home/tester",
   });
   assert.equal(root, "/home/tester/.local/share/sandy/codex");
+});
+
+test("resolveManagedCodexCacheRoot stores each managed Codex binary under its target triple", () => {
+  const root = resolveManagedCodexCacheRoot({
+    HOME: "/home/tester",
+  }, "darwin", "arm64");
+  assert.equal(root, "/home/tester/.local/share/sandy/codex/aarch64-apple-darwin");
 });
 
 test("ensureManagedCodexPath returns SANDY_CODEX_PATH without touching the cache", async () => {
@@ -146,34 +154,6 @@ test("ensureManagedCodexPath isolates cross-platform worker caches by target tri
     });
 
     assert.equal(resolved, workerBinaryPath);
-  } finally {
-    await rm(cacheRoot, { recursive: true, force: true });
-  }
-});
-
-test("ensureManagedCodexPath does not prune sibling target-triple caches from the host cache root", async () => {
-  const cacheRoot = await mkdtemp(join(tmpdir(), "sandy-codex-cache-"));
-  const currentVersion = resolveCodexVersion();
-  const currentVersionDir = join(cacheRoot, currentVersion);
-  const currentBinaryPath = join(currentVersionDir, process.platform === "win32" ? "codex.exe" : "codex");
-  const linuxTriple = "aarch64-unknown-linux-musl";
-  const workerCacheDir = join(cacheRoot, linuxTriple, currentVersion);
-  const oldVersionDir = join(cacheRoot, "0.0.1");
-
-  try {
-    await mkdir(currentVersionDir, { recursive: true });
-    await writeFile(currentBinaryPath, "#!/bin/sh\nexit 0\n");
-    await chmod(currentBinaryPath, 0o755);
-    await mkdir(workerCacheDir, { recursive: true });
-    await mkdir(oldVersionDir, { recursive: true });
-
-    const resolved = await ensureManagedCodexPath({
-      cacheRoot,
-    });
-
-    assert.equal(resolved, currentBinaryPath);
-    const entries = (await readdir(cacheRoot)).sort();
-    assert.deepEqual(entries, [currentVersion, linuxTriple]);
   } finally {
     await rm(cacheRoot, { recursive: true, force: true });
   }
