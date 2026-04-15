@@ -2,6 +2,7 @@ import {createInterface} from "node:readline";
 import {pathToFileURL} from "node:url";
 import {type Thread, type ThreadEvent, type TodoListItem,} from "@openai/codex-sdk";
 import { createCodexClient } from "../codex-client.js";
+import { configureLogger } from "../logger.js";
 import {channelFormattingSchema, type ChannelFormatting, type HostCommand, type SubAgentEvent,} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {workerToolDefinitions} from "./worker-tools.js";
@@ -257,6 +258,12 @@ function classifyToolEventDisposition(
 }
 
 export async function main(): Promise<void> {
+  // Reserve stdout for structured host protocol events; send worker logs to stderr
+  // so they cannot be misparsed as channel-facing progress updates.
+  configureLogger({
+    outputMode: "stderr",
+  });
+
   const taskBrief = getRequiredEnv("SANDY_TASK_BRIEF");
   const apiKey = getOptionalEnv("OPENAI_API_KEY");
   const channelFormatting = parseChannelFormatting(getOptionalEnv("SANDY_CHANNEL_FORMATTING"));

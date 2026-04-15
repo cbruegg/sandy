@@ -9,11 +9,15 @@ const levelPriority: Record<LogLevel, number> = {
 
 type LoggerConfig = {
   minLevel: LogLevel;
+  // "split" keeps info/debug on stdout and warn/error on stderr for normal app logs.
+  // "stderr" forces all logs to stderr for processes that reserve stdout for protocols.
+  outputMode: "split" | "stderr";
 };
 
 class SandyLogger {
   private config: LoggerConfig = {
     minLevel: "info",
+    outputMode: "split",
   };
 
   configure(config: Partial<LoggerConfig>): void {
@@ -59,7 +63,7 @@ class SandyLogger {
     };
 
     const line = JSON.stringify(payload);
-    if (level === "error" || level === "warn") {
+    if (this.config.outputMode === "stderr" || level === "error" || level === "warn") {
       console.error(line);
       return;
     }
