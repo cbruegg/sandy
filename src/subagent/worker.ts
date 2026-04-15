@@ -1,12 +1,13 @@
-import * as toml from "@iarna/toml";
-import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
 import {createInterface} from "node:readline";
 import {pathToFileURL} from "node:url";
 import {type Thread, type ThreadEvent, type TodoListItem,} from "@openai/codex-sdk";
 import { createCodexClient } from "../codex-client.js";
 import {channelFormattingSchema, type ChannelFormatting, type HostCommand, type SubAgentEvent,} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
+import {
+  applyWorkerCodexConfigPatch,
+  buildWorkerCodexEnvironment,
+} from "./worker-codex-config.js";
 import {workerToolDefinitions} from "./worker-tools.js";
 import {parseWorkerToolCall, workerToolCallToSubAgentEvent,} from "./worker-protocol.js";
 import {buildInitialTaskInput, buildPrivilegeResolutionInput, buildTaskSummaryInput,} from "./worker-prompt.js";
@@ -197,71 +198,6 @@ function normalizeSummaryText(chunks: string[]): string | null {
   return summary.length > 0 ? summary : null;
 }
 
-function buildWorkerCodexConfigPatch(
-  env: NodeJS.ProcessEnv = process.env,
-): { shell_environment_policy: { set: { PATH: string } } } | undefined {
-  const shellPath = env["PATH"]?.trim();
-  if (!shellPath) {
-    return undefined;
-  }
-
-  return {
-    shell_environment_policy: {
-      set: {
-        PATH: shellPath,
-      },
-    },
-  };
-}
-
-function buildWorkerCodexEnvironment(
-  env: NodeJS.ProcessEnv = process.env,
-): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
-  );
-}
-
-async function applyWorkerCodexConfigPatch(
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<void> {
-  const patch = buildWorkerCodexConfigPatch(env);
-  if (!patch) {
-    return;
-  }
-
-  const codexHome = env["CODEX_HOME"]?.trim() || join(env["HOME"]?.trim() || "/root", ".codex");
-  const configPath = join(codexHome, "config.toml");
-
-  let existingConfig: Record<string, unknown> = {};
-  try {
-    const existingRaw = await readFile(configPath, "utf8");
-    existingConfig = toml.parse(existingRaw) as Record<string, unknown>;
-  } catch (error) {
-    if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") {
-      throw error;
-    }
-  }
-
-  const mergedConfig = {
-    ...existingConfig,
-    shell_environment_policy: {
-      ...((typeof existingConfig["shell_environment_policy"] === "object" && existingConfig["shell_environment_policy"] !== null)
-        ? existingConfig["shell_environment_policy"] as Record<string, unknown>
-        : {}),
-      set: {
-        ...((typeof (existingConfig["shell_environment_policy"] as { set?: unknown } | undefined)?.set === "object"
-          && (existingConfig["shell_environment_policy"] as { set?: unknown }).set !== null)
-          ? (existingConfig["shell_environment_policy"] as { set: Record<string, unknown> }).set
-          : {}),
-        PATH: patch.shell_environment_policy.set.PATH,
-      },
-    },
-  };
-
-  await writeFile(configPath, toml.stringify(mergedConfig), "utf8");
-}
-
 async function emitTaskSummary(thread: Thread): Promise<void> {
   const result = await streamTurn(thread, buildTaskSummaryInput(), "summary");
   if (result.sawPrivilegedToolCall || result.sawTerminalError || !result.summaryText) {
@@ -431,8 +367,3 @@ export {
   buildPrivilegeResolutionInput,
   buildTaskSummaryInput,
 } from "./worker-prompt.js";
-export {
-  applyWorkerCodexConfigPatch,
-  buildWorkerCodexEnvironment,
-  buildWorkerCodexConfigPatch,
-};

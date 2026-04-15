@@ -1,23 +1,16 @@
-import * as toml from "@iarna/toml";
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { messages } from "./messages.js";
+import { messages } from "../messages.js";
 import {
-  applyWorkerCodexConfigPatch,
   buildInitialTaskInput,
   buildInitialTaskInputWithCapabilities,
   buildPrivilegeResolutionInput,
   buildTaskSummaryInput,
-  buildWorkerCodexConfigPatch,
-  buildWorkerCodexEnvironment,
   parseWorkerToolCall,
   workerToolCallToSubAgentEvent,
-} from "./subagent/worker.js";
-import type { ChannelFormatting, PrivilegeResolutionResult } from "./types.js";
-import { parseSubAgentEvent } from "./types.js";
+} from "./worker.js";
+import type { ChannelFormatting, PrivilegeResolutionResult } from "../types.js";
+import { parseSubAgentEvent } from "../types.js";
 
 test("buildInitialTaskInput tells the sub-agent where the shared workspace is", () => {
   const formatting: ChannelFormatting = {
@@ -168,7 +161,7 @@ test("workerToolCallToSubAgentEvent converts privileged tools into tool-call eve
 });
 
 test("workerToolCallToSubAgentEvent converts explicit completion signals into task_done events", () => {
-  const call = parseWorkerToolCall('SANDY_COMPLETE_TASK {}');
+  const call = parseWorkerToolCall("SANDY_COMPLETE_TASK {}");
 
   const event = workerToolCallToSubAgentEvent(call!);
 
@@ -198,73 +191,5 @@ test("parseSubAgentEvent accepts task-summary events", () => {
   assert.deepEqual(event, {
     type: "task_summary",
     summary: "Outcome: completed",
-  });
-});
-
-test("buildWorkerCodexEnvironment preserves the live worker PATH and string env vars", () => {
-  assert.deepEqual(
-    buildWorkerCodexEnvironment({
-      PATH: "/root/.bun/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin",
-      HOME: "/root",
-      EMPTY: "",
-      IGNORED: undefined,
-    }),
-    {
-      PATH: "/root/.bun/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin",
-      HOME: "/root",
-      EMPTY: "",
-    },
-  );
-});
-
-test("buildWorkerCodexConfigPatch maps the live worker PATH into shell environment policy", () => {
-  assert.deepEqual(
-    buildWorkerCodexConfigPatch({
-      PATH: "/root/.bun/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin",
-    }),
-    {
-      shell_environment_policy: {
-        set: {
-          PATH: "/root/.bun/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin",
-        },
-      },
-    },
-  );
-
-  assert.equal(buildWorkerCodexConfigPatch({}), undefined);
-});
-
-test("applyWorkerCodexConfigPatch preserves seeded MCP config while adding shell environment policy", async () => {
-  const codexHome = await mkdtemp(join(tmpdir(), "sandy-worker-codex-home-"));
-  const configPath = join(codexHome, "config.toml");
-  await writeFile(configPath, toml.stringify({
-    mcp_servers: {
-      todoist: {
-        url: "http://sandy-mcp-proxy:8080/mcp/tasks/task-1/servers/todoist",
-        bearer_token_env_var: "SANDY_MCP_PROXY_TOKEN",
-      },
-    },
-  }), "utf8");
-
-  await applyWorkerCodexConfigPatch({
-    CODEX_HOME: codexHome,
-    PATH: "/root/.bun/bin:/usr/bin:/bin",
-  });
-
-  const parsed = toml.parse(await readFile(configPath, "utf8")) as {
-    mcp_servers: Record<string, { url: string; bearer_token_env_var: string }>;
-    shell_environment_policy: { set: { PATH: string } };
-  };
-
-  assert.deepEqual(parsed.mcp_servers, {
-    todoist: {
-      url: "http://sandy-mcp-proxy:8080/mcp/tasks/task-1/servers/todoist",
-      bearer_token_env_var: "SANDY_MCP_PROXY_TOKEN",
-    },
-  });
-  assert.deepEqual(parsed.shell_environment_policy, {
-    set: {
-      PATH: "/root/.bun/bin:/usr/bin:/bin",
-    },
   });
 });
