@@ -16,6 +16,7 @@ const SANDY_CODEX_PATH_ENV = "SANDY_CODEX_PATH";
 const CODEX_RELEASE_REPOSITORY = "openai/codex";
 const CODEX_RELEASE_TAG_PREFIX = "rust-v";
 const CODEX_NPM_NAME = "@openai/codex";
+const managedCodexPathResolutions = new Map<string, Promise<string>>();
 
 type SupportedPlatform = "linux" | "darwin" | "win32";
 type SupportedArch = "x64" | "arm64";
@@ -41,6 +42,15 @@ type EnsureManagedCodexOptions = {
   platform?: NodeJS.Platform;
   arch?: string;
 };
+
+function buildManagedCodexResolutionKey(
+  cacheRoot: string,
+  version: string,
+  platform: NodeJS.Platform,
+  arch: string,
+): string {
+  return `${cacheRoot}:${version}:${platform}:${arch}`;
+}
 
 function isExecutableFile(path: string): boolean {
   try {
@@ -315,69 +325,93 @@ export async function ensureManagedCodexPath(options: EnsureManagedCodexOptions 
   const cacheRoot = options.cacheRoot ?? resolveManagedCodexCacheRoot(env, platform, arch);
   const versionDirectory = join(cacheRoot, version);
   const binaryPath = join(versionDirectory, resolveCodexBinaryName(platform));
-  logger.info("codex.resolve_started", {
-    version,
-    cacheRoot,
-    assetName: asset.assetName,
-    platform,
-    arch,
-  });
-  if (isExecutableFile(binaryPath)) {
-    logger.info("codex.cache_hit", {
-      version,
-      binaryPath,
-    });
-    await pruneCodexCache(cacheRoot, version);
-    return binaryPath;
-  }
-
-  const fetchFn = options.fetchFn ?? fetch;
-  await mkdir(cacheRoot, { recursive: true });
-  const stagingDirectory = await mkdtemp(join(tmpdir(), "sandy-codex-"));
-  logger.info("codex.download_started", {
-    version,
-    assetName: asset.assetName,
-    cacheRoot,
-    stagingDirectory,
-  });
-
-  try {
-    logger.debug("codex.release_metadata_fetching", {
-      version,
-      releaseTag: `${CODEX_RELEASE_TAG_PREFIX}${version}`,
-    });
-    const releaseAsset = await fetchCodexReleaseAsset(version, asset.assetName, fetchFn);
-    const downloadedAssetPath = join(stagingDirectory, asset.assetName);
-    logger.info("codex.asset_downloading", {
-      version,
-      assetName: releaseAsset.name,
-      size: releaseAsset.size,
-      url: releaseAsset.browserDownloadUrl,
-    });
-    await downloadVerifiedAsset(fetchFn, releaseAsset, downloadedAssetPath);
-    await mkdir(versionDirectory, { recursive: true });
-    logger.info("codex.asset_extracting", {
-      version,
-      assetName: releaseAsset.name,
-      versionDirectory,
-    });
-    await extractCodexAsset(downloadedAssetPath, asset, versionDirectory, platform);
-    await pruneCodexCache(cacheRoot, version);
-    logger.info("codex.download_ready", {
-      version,
-      binaryPath,
-    });
-    return binaryPath;
-  } catch (error) {
-    logger.error("codex.download_failed", {
+  const resolutionKey = buildManagedCodexResolutionKey(cacheRoot, version, platform, arch);
+  const inFlightResolution = managedCodexPathResolutions.get(resolutionKey);
+  if (inFlightResolution) {
+    logger.info("codex.resolve_joined", {
       version,
       cacheRoot,
-      message: error instanceof Error ? error.message : "Unknown Codex download failure.",
+      assetName: asset.assetName,
+      platform,
+      arch,
     });
-    await rm(versionDirectory, { recursive: true, force: true }).catch(() => {});
-    throw error;
+    return inFlightResolution;
+  }
+
+  const resolutionPromise = (async () => {
+    logger.info("codex.resolve_started", {
+      version,
+      cacheRoot,
+      assetName: asset.assetName,
+      platform,
+      arch,
+    });
+    if (isExecutableFile(binaryPath)) {
+      logger.info("codex.cache_hit", {
+        version,
+        binaryPath,
+      });
+      await pruneCodexCache(cacheRoot, version);
+      return binaryPath;
+    }
+
+    const fetchFn = options.fetchFn ?? fetch;
+    await mkdir(cacheRoot, { recursive: true });
+    const stagingDirectory = await mkdtemp(join(tmpdir(), "sandy-codex-"));
+    logger.info("codex.download_started", {
+      version,
+      assetName: asset.assetName,
+      cacheRoot,
+      stagingDirectory,
+    });
+
+    try {
+      logger.debug("codex.release_metadata_fetching", {
+        version,
+        releaseTag: `${CODEX_RELEASE_TAG_PREFIX}${version}`,
+      });
+      const releaseAsset = await fetchCodexReleaseAsset(version, asset.assetName, fetchFn);
+      const downloadedAssetPath = join(stagingDirectory, asset.assetName);
+      logger.info("codex.asset_downloading", {
+        version,
+        assetName: releaseAsset.name,
+        size: releaseAsset.size,
+        url: releaseAsset.browserDownloadUrl,
+      });
+      await downloadVerifiedAsset(fetchFn, releaseAsset, downloadedAssetPath);
+      await mkdir(versionDirectory, { recursive: true });
+      logger.info("codex.asset_extracting", {
+        version,
+        assetName: releaseAsset.name,
+        versionDirectory,
+      });
+      await extractCodexAsset(downloadedAssetPath, asset, versionDirectory, platform);
+      await pruneCodexCache(cacheRoot, version);
+      logger.info("codex.download_ready", {
+        version,
+        binaryPath,
+      });
+      return binaryPath;
+    } catch (error) {
+      logger.error("codex.download_failed", {
+        version,
+        cacheRoot,
+        message: error instanceof Error ? error.message : "Unknown Codex download failure.",
+      });
+      await rm(versionDirectory, { recursive: true, force: true }).catch(() => {});
+      throw error;
+    } finally {
+      await rm(stagingDirectory, { recursive: true, force: true }).catch(() => {});
+    }
+  })();
+  managedCodexPathResolutions.set(resolutionKey, resolutionPromise);
+
+  try {
+    return await resolutionPromise;
   } finally {
-    await rm(stagingDirectory, { recursive: true, force: true }).catch(() => {});
+    if (managedCodexPathResolutions.get(resolutionKey) === resolutionPromise) {
+      managedCodexPathResolutions.delete(resolutionKey);
+    }
   }
 }
 
