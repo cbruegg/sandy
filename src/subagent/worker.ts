@@ -5,6 +5,10 @@ import { createCodexClient } from "../codex-client.js";
 import { configureLogger } from "../logger.js";
 import {channelFormattingSchema, type ChannelFormatting, type HostCommand, type SubAgentEvent,} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
+import {
+  applyWorkerCodexConfigPatch,
+  buildWorkerCodexEnvironment,
+} from "./worker-codex-config.js";
 import {workerToolDefinitions} from "./worker-tools.js";
 import {parseWorkerToolCall, workerToolCallToSubAgentEvent,} from "./worker-protocol.js";
 import {buildInitialTaskInput, buildPrivilegeResolutionInput, buildTaskSummaryInput,} from "./worker-prompt.js";
@@ -195,23 +199,6 @@ function normalizeSummaryText(chunks: string[]): string | null {
   return summary.length > 0 ? summary : null;
 }
 
-function buildWorkerCodexConfig(
-  env: NodeJS.ProcessEnv = process.env,
-): { shell_environment_policy: { set: { PATH: string } } } | undefined {
-  const shellPath = env["PATH"]?.trim();
-  if (!shellPath) {
-    return undefined;
-  }
-
-  return {
-    shell_environment_policy: {
-      set: {
-        PATH: shellPath,
-      },
-    },
-  };
-}
-
 async function emitTaskSummary(thread: Thread): Promise<void> {
   const result = await streamTurn(thread, buildTaskSummaryInput(), "summary");
   if (result.sawPrivilegedToolCall || result.sawTerminalError || !result.summaryText) {
@@ -268,10 +255,11 @@ export async function main(): Promise<void> {
   const apiKey = getOptionalEnv("OPENAI_API_KEY");
   const channelFormatting = parseChannelFormatting(getOptionalEnv("SANDY_CHANNEL_FORMATTING"));
 
-  const workerCodexConfig = buildWorkerCodexConfig();
+  await applyWorkerCodexConfigPatch();
+  const workerCodexEnvironment = buildWorkerCodexEnvironment();
   const codex = apiKey
-    ? await createCodexClient({ apiKey, config: workerCodexConfig })
-    : await createCodexClient({ config: workerCodexConfig });
+    ? await createCodexClient({ apiKey, env: workerCodexEnvironment })
+    : await createCodexClient({ env: workerCodexEnvironment });
   const thread = codex.startThread({
     workingDirectory: sharedWorkspaceMountPath,
     skipGitRepoCheck: true,
@@ -386,6 +374,3 @@ export {
   buildPrivilegeResolutionInput,
   buildTaskSummaryInput,
 } from "./worker-prompt.js";
-export {
-  buildWorkerCodexConfig,
-};

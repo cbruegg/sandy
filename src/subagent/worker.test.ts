@@ -1,17 +1,16 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { messages } from "./messages.js";
+import { messages } from "../messages.js";
 import {
   buildInitialTaskInput,
   buildInitialTaskInputWithCapabilities,
   buildPrivilegeResolutionInput,
   buildTaskSummaryInput,
-  buildWorkerCodexConfig,
   parseWorkerToolCall,
   workerToolCallToSubAgentEvent,
-} from "./subagent/worker.js";
-import type { ChannelFormatting, PrivilegeResolutionResult } from "./types.js";
-import { parseSubAgentEvent } from "./types.js";
+} from "./worker.js";
+import type { ChannelFormatting, PrivilegeResolutionResult } from "../types.js";
+import { parseSubAgentEvent } from "../types.js";
 
 test("buildInitialTaskInput tells the sub-agent where the shared workspace is", () => {
   const formatting: ChannelFormatting = {
@@ -162,7 +161,7 @@ test("workerToolCallToSubAgentEvent converts privileged tools into tool-call eve
 });
 
 test("workerToolCallToSubAgentEvent converts explicit completion signals into task_done events", () => {
-  const call = parseWorkerToolCall('SANDY_COMPLETE_TASK {}');
+  const call = parseWorkerToolCall("SANDY_COMPLETE_TASK {}");
 
   const event = workerToolCallToSubAgentEvent(call!);
 
@@ -193,21 +192,4 @@ test("parseSubAgentEvent accepts task-summary events", () => {
     type: "task_summary",
     summary: "Outcome: completed",
   });
-});
-
-test("buildWorkerCodexConfig injects the live worker PATH into shell environment policy", () => {
-  assert.deepEqual(
-    buildWorkerCodexConfig({
-      PATH: "/root/.bun/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin",
-    }),
-    {
-      shell_environment_policy: {
-        set: {
-          PATH: "/root/.bun/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin",
-        },
-      },
-    },
-  );
-
-  assert.equal(buildWorkerCodexConfig({}), undefined);
 });

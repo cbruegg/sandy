@@ -2,6 +2,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { McpServerConfig } from "../config.js";
+import { logger } from "../logger.js";
 import { SandyOAuthClientProvider } from "./oauth-provider.js";
 import { join } from "node:path";
 
@@ -33,6 +34,9 @@ export class McpServerRegistryImpl implements McpServerRegistry {
   async getClient(serverId: string): Promise<Client> {
     const existing = this.clients.get(serverId);
     if (existing) {
+      logger.debug("mcp.registry.client_reused", {
+        serverId,
+      });
       return existing.client;
     }
 
@@ -46,10 +50,19 @@ export class McpServerRegistryImpl implements McpServerRegistry {
       version: "1.0.0",
     });
     const transport = this.createTransport(serverId, config);
+    logger.debug("mcp.registry.client_connecting", {
+      serverId,
+      url: config.url,
+      oauthStatePath: join(this.oauthStateDirectory, `${serverId}.json`),
+    });
     await client.connect(transport);
     this.clients.set(serverId, {
       client,
       transport,
+    });
+    logger.debug("mcp.registry.client_connected", {
+      serverId,
+      url: config.url,
     });
     return client;
   }

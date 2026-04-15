@@ -42,24 +42,6 @@ export const workerToolDefinitions = {
       reason: z.string(),
     }).strict(),
   },
-  enable_mcp: {
-    description: "Ask the host to enable an MCP integration identified by name.",
-    requiresPrivilegeEscalation: true,
-    schema: z.object({
-      type: z.literal("enable_mcp"),
-      identifier: z.string(),
-      reason: z.string(),
-    }).strict(),
-  },
-  enable_onecli: {
-    description: "Ask the host to enable a OneCLI integration identified by name.",
-    requiresPrivilegeEscalation: true,
-    schema: z.object({
-      type: z.literal("enable_onecli"),
-      identifier: z.string(),
-      reason: z.string(),
-    }).strict(),
-  },
   send_file_to_channel: {
     description: "Send a file that already exists in the shared workspace back to the user through the channel adapter.",
     requiresPrivilegeEscalation: false,

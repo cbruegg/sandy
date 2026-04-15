@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   ensureManagedCodexPath,
   resolveCodexCacheRoot,
+  resolveManagedCodexCacheRoot,
   resolveCodexPathOverride,
   resolveCodexTargetTriple,
   resolveCodexVersion,
@@ -73,6 +74,13 @@ test("resolveCodexCacheRoot uses the Sandy data directory", () => {
     HOME: "/home/tester",
   });
   assert.equal(root, "/home/tester/.local/share/sandy/codex");
+});
+
+test("resolveManagedCodexCacheRoot stores each managed Codex binary under its target triple", () => {
+  const root = resolveManagedCodexCacheRoot({
+    HOME: "/home/tester",
+  }, "darwin", "arm64");
+  assert.equal(root, "/home/tester/.local/share/sandy/codex/aarch64-apple-darwin");
 });
 
 test("ensureManagedCodexPath returns SANDY_CODEX_PATH without touching the cache", async () => {
