@@ -239,11 +239,15 @@ async function runCommand(command: string, args: string[]): Promise<void> {
   });
 }
 
+function isCodexVersionDirectoryName(name: string): boolean {
+  return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(name);
+}
+
 async function pruneCodexCache(cacheRoot: string, keepVersion: string): Promise<void> {
   const entries = await readdir(cacheRoot, { withFileTypes: true }).catch(() => []);
   const removedVersions: string[] = [];
   await Promise.all(entries.map(async (entry) => {
-    if (!entry.isDirectory() || entry.name === keepVersion) {
+    if (!entry.isDirectory() || entry.name === keepVersion || !isCodexVersionDirectoryName(entry.name)) {
       return;
     }
     await rm(join(cacheRoot, entry.name), { recursive: true, force: true });

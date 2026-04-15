@@ -12,6 +12,7 @@ import {
   ReadResourceRequestSchema,
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
+import { logger } from "../logger.js";
 import { SandyMcpProxyAccess } from "./proxy-access.js";
 import { parseMcpProxyPath, type McpProxyRoute } from "./proxy-route.js";
 import type { McpServerRegistry } from "./server-registry.js";
@@ -88,8 +89,23 @@ export class SandyMcpProxy {
       return;
     }
 
+    logger.debug("mcp.proxy.request_received", {
+      method: req.method ?? "UNKNOWN",
+      taskId: route.taskId,
+      serverId: route.serverId,
+      sessionId: typeof req.headers["mcp-session-id"] === "string"
+        ? req.headers["mcp-session-id"]
+        : Array.isArray(req.headers["mcp-session-id"])
+          ? req.headers["mcp-session-id"][0] ?? null
+          : null,
+    });
+
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith("Bearer ")) {
+      logger.debug("mcp.proxy.request_rejected_missing_bearer", {
+        taskId: route.taskId,
+        serverId: route.serverId,
+      });
       res.statusCode = 401;
       res.end("Missing bearer token.");
       return;
@@ -100,6 +116,12 @@ export class SandyMcpProxy {
       bearerToken: authHeader.slice("Bearer ".length),
     });
     if (!validation.ok) {
+      logger.debug("mcp.proxy.request_rejected_invalid_grant", {
+        taskId: route.taskId,
+        serverId: route.serverId,
+        code: validation.code,
+        message: validation.message,
+      });
       res.statusCode = validation.code === "invalid_token" ? 401 : 403;
       res.end(validation.message);
       return;
@@ -110,18 +132,45 @@ export class SandyMcpProxy {
 
     let session = sessionId ? this.sessions.get(sessionId) ?? null : null;
     if (session && !sameRoute(session.route, route)) {
+      logger.debug("mcp.proxy.request_rejected_session_route_mismatch", {
+        sessionId,
+        taskId: route.taskId,
+        serverId: route.serverId,
+      });
       res.statusCode = 404;
       res.end("Unknown MCP session for this task or server.");
       return;
     }
 
     if (!session) {
+      logger.debug("mcp.proxy.session_creating", {
+        taskId: route.taskId,
+        serverId: route.serverId,
+      });
       session = await this.createSession(route);
+    } else {
+      logger.debug("mcp.proxy.session_reused", {
+        sessionId,
+        taskId: route.taskId,
+        serverId: route.serverId,
+      });
     }
 
     try {
       await session.transport.handleRequest(req, res);
+      logger.debug("mcp.proxy.request_handled", {
+        taskId: route.taskId,
+        serverId: route.serverId,
+        sessionId: sessionId ?? null,
+        statusCode: res.statusCode,
+      });
     } catch (error) {
+      logger.warn("mcp.proxy.request_failed", {
+        taskId: route.taskId,
+        serverId: route.serverId,
+        sessionId: sessionId ?? null,
+        message: error instanceof Error ? error.message : "Internal MCP proxy error.",
+      });
       if (!res.headersSent) {
         res.statusCode = 500;
         res.end(error instanceof Error ? error.message : "Internal MCP proxy error.");
@@ -193,11 +242,21 @@ export class SandyMcpProxy {
           server,
           transport,
         });
+        logger.debug("mcp.proxy.session_initialized", {
+          sessionId: createdSessionId,
+          taskId: route.taskId,
+          serverId: route.serverId,
+        });
       },
     });
     transport.onclose = () => {
       if (sessionId) {
         this.sessions.delete(sessionId);
+        logger.debug("mcp.proxy.session_closed", {
+          sessionId,
+          taskId: route.taskId,
+          serverId: route.serverId,
+        });
       }
     };
     await server.connect(transport);

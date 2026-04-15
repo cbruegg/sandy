@@ -27,10 +27,12 @@ fi
 
 RUNTIME_ROOT="$(mktemp -d /tmp/sandy-local-test-XXXXXX)"
 SPOOL_ROOT="${RUNTIME_ROOT}/spool"
+RUNTIME_CONFIG_PATH="${RUNTIME_ROOT}/config.toml"
 DERIVED_CONFIG_PATH="${RUNTIME_ROOT}/config.local-test.toml"
 
+cp -R config/. "${RUNTIME_ROOT}/"
 mkdir -p "${SPOOL_ROOT}/inbox" "${SPOOL_ROOT}/inbox-processed" "${SPOOL_ROOT}/outbox"
-bun ./scripts/render-local-test-config.mjs config/config.toml "${DERIVED_CONFIG_PATH}" "${SPOOL_ROOT}"
+bun ./scripts/render-local-test-config.mjs "${RUNTIME_CONFIG_PATH}" "${DERIVED_CONFIG_PATH}" "${SPOOL_ROOT}"
 
 echo "Sandy local-test runtime root: ${RUNTIME_ROOT}"
 echo "Derived config: ${DERIVED_CONFIG_PATH}"
