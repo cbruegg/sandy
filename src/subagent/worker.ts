@@ -1,3 +1,6 @@
+import * as toml from "@iarna/toml";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {createInterface} from "node:readline";
 import {pathToFileURL} from "node:url";
 import {type Thread, type ThreadEvent, type TodoListItem,} from "@openai/codex-sdk";
@@ -194,7 +197,7 @@ function normalizeSummaryText(chunks: string[]): string | null {
   return summary.length > 0 ? summary : null;
 }
 
-function buildWorkerCodexConfig(
+function buildWorkerCodexConfigPatch(
   env: NodeJS.ProcessEnv = process.env,
 ): { shell_environment_policy: { set: { PATH: string } } } | undefined {
   const shellPath = env["PATH"]?.trim();
@@ -209,6 +212,54 @@ function buildWorkerCodexConfig(
       },
     },
   };
+}
+
+function buildWorkerCodexEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
+  );
+}
+
+async function applyWorkerCodexConfigPatch(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<void> {
+  const patch = buildWorkerCodexConfigPatch(env);
+  if (!patch) {
+    return;
+  }
+
+  const codexHome = env["CODEX_HOME"]?.trim() || join(env["HOME"]?.trim() || "/root", ".codex");
+  const configPath = join(codexHome, "config.toml");
+
+  let existingConfig: Record<string, unknown> = {};
+  try {
+    const existingRaw = await readFile(configPath, "utf8");
+    existingConfig = toml.parse(existingRaw) as Record<string, unknown>;
+  } catch (error) {
+    if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") {
+      throw error;
+    }
+  }
+
+  const mergedConfig = {
+    ...existingConfig,
+    shell_environment_policy: {
+      ...((typeof existingConfig["shell_environment_policy"] === "object" && existingConfig["shell_environment_policy"] !== null)
+        ? existingConfig["shell_environment_policy"] as Record<string, unknown>
+        : {}),
+      set: {
+        ...((typeof (existingConfig["shell_environment_policy"] as { set?: unknown } | undefined)?.set === "object"
+          && (existingConfig["shell_environment_policy"] as { set?: unknown }).set !== null)
+          ? (existingConfig["shell_environment_policy"] as { set: Record<string, unknown> }).set
+          : {}),
+        PATH: patch.shell_environment_policy.set.PATH,
+      },
+    },
+  };
+
+  await writeFile(configPath, toml.stringify(mergedConfig), "utf8");
 }
 
 async function emitTaskSummary(thread: Thread): Promise<void> {
@@ -261,10 +312,11 @@ export async function main(): Promise<void> {
   const apiKey = getOptionalEnv("OPENAI_API_KEY");
   const channelFormatting = parseChannelFormatting(getOptionalEnv("SANDY_CHANNEL_FORMATTING"));
 
-  const workerCodexConfig = buildWorkerCodexConfig();
+  await applyWorkerCodexConfigPatch();
+  const workerCodexEnvironment = buildWorkerCodexEnvironment();
   const codex = apiKey
-    ? await createCodexClient({ apiKey, config: workerCodexConfig })
-    : await createCodexClient({ config: workerCodexConfig });
+    ? await createCodexClient({ apiKey, env: workerCodexEnvironment })
+    : await createCodexClient({ env: workerCodexEnvironment });
   const thread = codex.startThread({
     workingDirectory: sharedWorkspaceMountPath,
     skipGitRepoCheck: true,
@@ -380,5 +432,7 @@ export {
   buildTaskSummaryInput,
 } from "./worker-prompt.js";
 export {
-  buildWorkerCodexConfig,
+  applyWorkerCodexConfigPatch,
+  buildWorkerCodexEnvironment,
+  buildWorkerCodexConfigPatch,
 };

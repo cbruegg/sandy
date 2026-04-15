@@ -1,12 +1,18 @@
+import * as toml from "@iarna/toml";
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { messages } from "./messages.js";
 import {
+  applyWorkerCodexConfigPatch,
   buildInitialTaskInput,
   buildInitialTaskInputWithCapabilities,
   buildPrivilegeResolutionInput,
   buildTaskSummaryInput,
-  buildWorkerCodexConfig,
+  buildWorkerCodexConfigPatch,
+  buildWorkerCodexEnvironment,
   parseWorkerToolCall,
   workerToolCallToSubAgentEvent,
 } from "./subagent/worker.js";
@@ -195,9 +201,25 @@ test("parseSubAgentEvent accepts task-summary events", () => {
   });
 });
 
-test("buildWorkerCodexConfig injects the live worker PATH into shell environment policy", () => {
+test("buildWorkerCodexEnvironment preserves the live worker PATH and string env vars", () => {
   assert.deepEqual(
-    buildWorkerCodexConfig({
+    buildWorkerCodexEnvironment({
+      PATH: "/root/.bun/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin",
+      HOME: "/root",
+      EMPTY: "",
+      IGNORED: undefined,
+    }),
+    {
+      PATH: "/root/.bun/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin",
+      HOME: "/root",
+      EMPTY: "",
+    },
+  );
+});
+
+test("buildWorkerCodexConfigPatch maps the live worker PATH into shell environment policy", () => {
+  assert.deepEqual(
+    buildWorkerCodexConfigPatch({
       PATH: "/root/.bun/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin",
     }),
     {
@@ -209,5 +231,40 @@ test("buildWorkerCodexConfig injects the live worker PATH into shell environment
     },
   );
 
-  assert.equal(buildWorkerCodexConfig({}), undefined);
+  assert.equal(buildWorkerCodexConfigPatch({}), undefined);
+});
+
+test("applyWorkerCodexConfigPatch preserves seeded MCP config while adding shell environment policy", async () => {
+  const codexHome = await mkdtemp(join(tmpdir(), "sandy-worker-codex-home-"));
+  const configPath = join(codexHome, "config.toml");
+  await writeFile(configPath, toml.stringify({
+    mcp_servers: {
+      todoist: {
+        url: "http://sandy-mcp-proxy:8080/mcp/tasks/task-1/servers/todoist",
+        bearer_token_env_var: "SANDY_MCP_PROXY_TOKEN",
+      },
+    },
+  }), "utf8");
+
+  await applyWorkerCodexConfigPatch({
+    CODEX_HOME: codexHome,
+    PATH: "/root/.bun/bin:/usr/bin:/bin",
+  });
+
+  const parsed = toml.parse(await readFile(configPath, "utf8")) as {
+    mcp_servers: Record<string, { url: string; bearer_token_env_var: string }>;
+    shell_environment_policy: { set: { PATH: string } };
+  };
+
+  assert.deepEqual(parsed.mcp_servers, {
+    todoist: {
+      url: "http://sandy-mcp-proxy:8080/mcp/tasks/task-1/servers/todoist",
+      bearer_token_env_var: "SANDY_MCP_PROXY_TOKEN",
+    },
+  });
+  assert.deepEqual(parsed.shell_environment_policy, {
+    set: {
+      PATH: "/root/.bun/bin:/usr/bin:/bin",
+    },
+  });
 });

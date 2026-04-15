@@ -211,7 +211,6 @@ export class SandyOrchestrator {
       case "copy_out_of_share":
       case "mount_ro":
       case "mount_rw":
-      case "enable_mcp":
       case "enable_onecli":
         await this.presentPrivilegeRequestToUser(chatId, session, {
           kind: "host_operation",

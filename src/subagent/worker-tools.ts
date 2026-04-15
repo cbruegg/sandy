@@ -42,15 +42,6 @@ export const workerToolDefinitions = {
       reason: z.string(),
     }).strict(),
   },
-  enable_mcp: {
-    description: "Ask the host to enable an MCP integration identified by name.",
-    requiresPrivilegeEscalation: true,
-    schema: z.object({
-      type: z.literal("enable_mcp"),
-      identifier: z.string(),
-      reason: z.string(),
-    }).strict(),
-  },
   enable_onecli: {
     description: "Ask the host to enable a OneCLI integration identified by name.",
     requiresPrivilegeEscalation: true,

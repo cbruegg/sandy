@@ -444,7 +444,7 @@ test("orchestrator applies supported privilege requests deterministically and ou
   assert.equal(channel.sentTexts.at(-1)?.text, messages.privilegeApproved(requestId, "Applied copy_into_share."));
 });
 
-test("orchestrator rejects unsupported privilege requests without prompting the user", async () => {
+test("orchestrator rejects unsupported host privilege requests without prompting the user", async () => {
   const channel = new RecordingChannel();
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
@@ -473,9 +473,9 @@ test("orchestrator rejects unsupported privilege requests without prompting the 
   await runner.emit({
     type: "tool_call",
     call: {
-      type: "enable_mcp",
-      identifier: "github-readonly",
-      reason: "Need repository metadata.",
+      type: "enable_onecli",
+      identifier: "todoist",
+      reason: "Need OneCLI access.",
     },
   });
 
@@ -483,13 +483,13 @@ test("orchestrator rejects unsupported privilege requests without prompting the 
   assert.deepEqual(runner.handle.privilegeResults.at(-1), {
     requestId: runner.handle.privilegeResults.at(-1)?.requestId,
     outcome: "rejected",
-    message: 'Privilege request type "enable_mcp" is not supported by this runtime.',
+    message: 'Privilege request type "enable_onecli" is not supported by this runtime.',
   });
   assert.equal(
     channel.sentTexts.at(-1)?.text,
     messages.privilegeRejected(
       runner.handle.privilegeResults.at(-1)!.requestId,
-      'Privilege request type "enable_mcp" is not supported by this runtime.',
+      'Privilege request type "enable_onecli" is not supported by this runtime.',
     ),
   );
 });
