@@ -118,8 +118,6 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
     case "mount_ro":
     case "mount_rw":
       return `${request.payload.type}: ${request.payload.hostPath} -> ${request.payload.targetPath}\nReason: ${request.payload.reason}`;
-    case "enable_onecli":
-      return `${request.payload.type}: ${request.payload.identifier}\nReason: ${request.payload.reason}`;
   }
 }
 

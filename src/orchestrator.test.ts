@@ -444,56 +444,6 @@ test("orchestrator applies supported privilege requests deterministically and ou
   assert.equal(channel.sentTexts.at(-1)?.text, messages.privilegeApproved(requestId, "Applied copy_into_share."));
 });
 
-test("orchestrator rejects unsupported host privilege requests without prompting the user", async () => {
-  const channel = new RecordingChannel();
-  const runner = new FakeSandboxRunner();
-  const store = new InMemorySessionStore();
-  const orchestrator = new SandyOrchestrator({
-    channel,
-    mainAgent: new StubMainAgent({
-      action: "launch_task",
-      taskBrief: "Check an MCP resource.",
-      taskName: "mcp-check",
-    }),
-    sandboxRunner: runner,
-    sessionStore: store,
-    privilegeBroker: new FakePrivilegeBroker(),
-  });
-
-  await orchestrator.handleChatEvent({
-    kind: "user_text",
-    chatId: "chat-unsupported",
-    messageId: "1",
-    timestamp: "2026-04-01T00:00:00.000Z",
-    text: "Check an MCP resource",
-    rawText: "Check an MCP resource",
-    attachments: [],
-  });
-
-  await runner.emit({
-    type: "tool_call",
-    call: {
-      type: "enable_onecli",
-      identifier: "todoist",
-      reason: "Need OneCLI access.",
-    },
-  });
-
-  assert.equal(channel.privilegeRequests.length, 0);
-  assert.deepEqual(runner.handle.privilegeResults.at(-1), {
-    requestId: runner.handle.privilegeResults.at(-1)?.requestId,
-    outcome: "rejected",
-    message: 'Privilege request type "enable_onecli" is not supported by this runtime.',
-  });
-  assert.equal(
-    channel.sentTexts.at(-1)?.text,
-    messages.privilegeRejected(
-      runner.handle.privilegeResults.at(-1)!.requestId,
-      'Privilege request type "enable_onecli" is not supported by this runtime.',
-    ),
-  );
-});
-
 test("orchestrator terminates the task when the user reports a pending privilege request as dangerous", async () => {
   const channel = new RecordingChannel();
   const runner = new FakeSandboxRunner();
