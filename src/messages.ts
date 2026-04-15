@@ -43,8 +43,6 @@ export const messages = {
     "A shared workspace deletion decision is pending. Reply with approve or deny before sending more input.",
   taskStarted: (taskName: string): string =>
       `Started task "${taskName}". You will receive progress updates here.`,
-  preparingWorkerContainer: (): string =>
-    "Preparing worker container. The worker image may need to be downloaded before the task can start.",
   privilegeApproved: (requestId: string, detail: string): string => `Approved privilege request ${requestId}.\n${detail}`,
   privilegeDenied: (requestId: string): string => `Denied privilege request ${requestId}.`,
   privilegeRejected: (requestId: string, detail: string): string => `Rejected privilege request ${requestId}.\n${detail}`,
