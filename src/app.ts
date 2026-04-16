@@ -168,7 +168,6 @@ export async function startApp(): Promise<void> {
       const sessions = sessionStore.listSessions();
       const blockingSessions = sessions.filter((session) =>
         session.activeTask !== null
-        || session.pendingTaskSummary !== null
         || session.pendingShareDeletion !== null);
       if (blockingSessions.length > 0) {
         logger.debug("update.blocked_by_sessions", {
