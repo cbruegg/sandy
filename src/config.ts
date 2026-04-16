@@ -133,7 +133,7 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
 }
 
 type SandyConfigFile = z.infer<ReturnType<typeof buildSandyConfigSchema>>;
-export type SandyConfigFileData = SandyConfigFile;
+type SandyConfigFileData = SandyConfigFile;
 
 export type McpServerConfig = {
   transport: "streamable_http";
@@ -306,11 +306,7 @@ export function loadConfig(env: EnvSource = process.env): SandyConfig {
   }
 }
 
-export function renderConfigToml(value: SandyConfigFile): string {
-  return toml.stringify(removeNulls(value) as toml.JsonMap);
-}
-
-export function parseConfigTomlFile(
+function parseConfigTomlFile(
   raw: string,
   buildMetadata?: SandyBuildMetadata,
 ): {
@@ -352,22 +348,6 @@ function hasOwnString(value: unknown, path: string[]): boolean {
   return typeof current === "string";
 }
 
-function removeNulls(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map((entry) => removeNulls(entry));
-  }
-
-  if (!value || typeof value !== "object") {
-    return value;
-  }
-
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([, entry]) => entry !== null)
-      .map(([key, entry]) => [key, removeNulls(entry)]),
-  );
-}
-
 function buildChannelConfig(channel: SandyConfigFile["channel"]): SandyConfig["channel"] {
   switch (channel.kind) {
     case "telegram":
@@ -388,7 +368,7 @@ function buildChannelConfig(channel: SandyConfigFile["channel"]): SandyConfig["c
   }
 }
 
-function normalizeParsedToml(value: unknown): unknown {
+export function normalizeParsedToml(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map((entry) => normalizeParsedToml(entry));
   }

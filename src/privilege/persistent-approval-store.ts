@@ -1,11 +1,21 @@
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { parseConfigTomlFile, renderConfigToml, type SandyConfigFileData } from "../config.js";
+import * as toml from "@iarna/toml";
+import { normalizeParsedToml } from "../config.js";
 
 export interface PersistentApprovalStore {
   isAlwaysAllowed(serverId: string, toolName: string): boolean;
   allowTool(serverId: string, toolName: string): Promise<void>;
 }
+
+// Type for the raw approvals structure we modify
+type RawApprovalsConfig = {
+  approvals?: {
+    mcp?: Record<string, {
+      always_allow_tools?: string[];
+    }>;
+  };
+};
 
 export class TomlPersistentApprovalStore implements PersistentApprovalStore {
   private readonly approvals = new Map<string, Set<string>>();
@@ -26,11 +36,9 @@ export class TomlPersistentApprovalStore implements PersistentApprovalStore {
     }
 
     const raw = await readFile(this.configFilePath, "utf8");
-    const parsed = parseConfigTomlFile(raw).data;
-    const next = applyPersistentApproval(parsed, serverId, toolName);
-    const rendered = renderConfigToml(next);
+    const next = applyPersistentApprovalToRawToml(raw, serverId, toolName);
     const tempFilePath = join(dirname(this.configFilePath), `.tmp-${process.pid}-${Date.now()}-config.toml`);
-    await writeFile(tempFilePath, rendered, "utf8");
+    await writeFile(tempFilePath, next, "utf8");
     await rename(tempFilePath, this.configFilePath);
 
     const tools = this.approvals.get(serverId) ?? new Set<string>();
@@ -39,24 +47,29 @@ export class TomlPersistentApprovalStore implements PersistentApprovalStore {
   }
 }
 
-function applyPersistentApproval(
-  config: SandyConfigFileData,
+function applyPersistentApprovalToRawToml(
+  rawToml: string,
   serverId: string,
   toolName: string,
-): SandyConfigFileData {
-  const existingTools = config.approvals.mcp[serverId]?.always_allow_tools ?? [];
-  const nextTools = Array.from(new Set([...existingTools, toolName])).sort();
+): string {
+  // Parse without Zod schema to preserve original structure (no defaults filled in)
+  const parsed = normalizeParsedToml(toml.parse(rawToml)) as RawApprovalsConfig;
 
-  return {
-    ...config,
-    approvals: {
-      ...config.approvals,
-      mcp: {
-        ...config.approvals.mcp,
-        [serverId]: {
-          always_allow_tools: nextTools,
-        },
-      },
-    },
-  };
+  // Ensure the approvals.mcp structure exists
+  if (!parsed.approvals) {
+    parsed.approvals = {};
+  }
+  if (!parsed.approvals.mcp) {
+    parsed.approvals.mcp = {};
+  }
+  if (!parsed.approvals.mcp[serverId]) {
+    parsed.approvals.mcp[serverId] = {};
+  }
+
+  // Add the tool to always_allow_tools (sorted, unique)
+  const existingTools = parsed.approvals.mcp[serverId].always_allow_tools ?? [];
+  const nextTools = Array.from(new Set([...existingTools, toolName])).sort();
+  parsed.approvals.mcp[serverId].always_allow_tools = nextTools;
+
+  return toml.stringify(parsed as toml.JsonMap);
 }
