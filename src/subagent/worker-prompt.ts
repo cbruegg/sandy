@@ -19,6 +19,7 @@ export function buildInitialTaskInputWithCapabilities(
     `User-attached files are copied into ${sharedWorkspaceMountPath} before you are told about them.`,
     "Inside this container you may use the filesystem, network, and installed tools freely.",
     `If you need the host to copy files into or out of ${sharedWorkspaceMountPath}, do not ask the user directly.`,
+    "Always reply in the language of the user's prompt.",
     ...buildWorkerProtocolInstructions(),
   ];
 
