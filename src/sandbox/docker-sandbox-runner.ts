@@ -179,7 +179,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       void reportDisconnect("Sub-agent worker did not complete startup handshake in time.");
       shutdownRequested = true;
       child.kill("SIGTERM");
-      void this.sendDockerKill(containerName);
+      void this.cleanupContainer(containerName);
     }, this.handshakeTimeoutMs);
 
     const clearHandshakeTimer = () => {
@@ -211,7 +211,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       shutdownRequested = true;
       clearHandshakeTimer();
       child.kill("SIGTERM");
-      await this.sendDockerKill(containerName);
+      await this.cleanupContainer(containerName);
     };
 
     const emitEventSafely = (event: SubAgentEvent): void => {
@@ -346,9 +346,9 @@ export class DockerSandboxRunner implements SandboxRunner {
           await reportDisconnect(this.describeWriteFailure(error));
         }
       },
-      close: () => {
+      close: async () => {
         if (finished || shutdownRequested) {
-          return Promise.resolve();
+          return;
         }
         finished = true;
         shutdownRequested = true;
@@ -357,7 +357,8 @@ export class DockerSandboxRunner implements SandboxRunner {
           taskId: request.taskId,
         });
         child.stdin.end();
-        return Promise.resolve();
+        child.kill("SIGTERM");
+        await this.cleanupContainer(containerName);
       },
       cancel: async (reason: string) => {
         finished = true;
@@ -372,7 +373,7 @@ export class DockerSandboxRunner implements SandboxRunner {
           reason,
         });
         child.kill("SIGTERM");
-        await this.sendDockerKill(containerName);
+        await this.cleanupContainer(containerName);
       },
     };
   }
@@ -395,7 +396,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       activeContainer.child.kill("SIGTERM");
       await Promise.all([
         activeContainer.cleanupWorkerCodexConfig(),
-        this.sendDockerKill(containerName),
+        this.cleanupContainer(containerName),
       ]);
       this.activeContainers.delete(containerName);
     })).then(() => {
@@ -520,7 +521,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     }
   }
 
-  private async sendDockerKill(containerName: string): Promise<void> {
+  private async cleanupContainer(containerName: string): Promise<void> {
     await new Promise<void>((resolve) => {
       logger.debug("sandbox.force_remove", {
         containerName,
