@@ -353,6 +353,7 @@ export class SandyOrchestrator {
         const taskId = randomUUID();
         const now = new Date().toISOString();
         const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskId);
+        const taskBrief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
         logger.info("task.launching", {
           chatId: event.chatId,
           taskId,
@@ -361,7 +362,7 @@ export class SandyOrchestrator {
         session.activeTask = {
           taskId,
           taskName: decision.taskName,
-          taskBrief: buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments),
+          taskBrief: taskBrief,
           status: "running",
           startedAt: now,
           lastActivityAt: now,
@@ -377,7 +378,7 @@ export class SandyOrchestrator {
             chatId: event.chatId,
             taskId,
             taskName: decision.taskName,
-            taskBrief: buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments),
+            taskBrief: taskBrief,
             channelFormatting: this.channelFormatting,
           },
           async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
@@ -389,6 +390,11 @@ export class SandyOrchestrator {
           chatId: event.chatId,
           taskId,
           taskName: decision.taskName,
+        });
+        logger.debug("task.task_brief", {
+          chatId: event.chatId,
+          taskId,
+          taskBrief: taskBrief,
         });
 
         await this.deps.channel.sendText(event.chatId, messages.taskStarted(decision.taskName));
