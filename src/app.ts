@@ -164,10 +164,27 @@ export async function startApp(): Promise<void> {
     currentArgs: process.argv.slice(1),
     currentWorkingDirectory: process.cwd(),
     updateSource: resolvePublishedUpdateSource(),
-    canInstallUpdate: () => sessionStore.listSessions().every((session) =>
-      session.activeTask === null
-      && session.pendingTaskSummary === null
-      && session.pendingShareDeletion === null),
+    canInstallUpdate: () => {
+      const sessions = sessionStore.listSessions();
+      const blockingSessions = sessions.filter((session) =>
+        session.activeTask !== null
+        || session.pendingTaskSummary !== null
+        || session.pendingShareDeletion !== null);
+      if (blockingSessions.length > 0) {
+        logger.debug("update.blocked_by_sessions", {
+          blockingCount: blockingSessions.length,
+          totalCount: sessions.length,
+          blockingSessions: blockingSessions.map((session) => ({
+            chatId: session.chatId,
+            hasActiveTask: session.activeTask !== null,
+            hasPendingTaskSummary: session.pendingTaskSummary !== null,
+            hasPendingShareDeletion: session.pendingShareDeletion !== null,
+          })),
+        });
+        return false;
+      }
+      return true;
+    },
     notifyChats: async (message) => {
       const chatIds = Array.from(new Set(sessionStore.listSessions().map((session) => session.chatId)));
       await Promise.all(chatIds.map(async (chatId) => {

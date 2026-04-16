@@ -138,6 +138,11 @@ export class SelfUpdateCoordinator {
       if (this.stagedUpdate) {
         if (this.options.canInstallUpdate()) {
           await this.installStagedUpdate(this.stagedUpdate);
+        } else {
+          logger.debug("update.staged_awaits_clearance", {
+            gitRevision: this.stagedUpdate.gitRevision,
+            stageDirectory: this.stagedUpdate.stageDirectory,
+          });
         }
         return;
       }
@@ -155,6 +160,11 @@ export class SelfUpdateCoordinator {
 
       if (this.options.canInstallUpdate()) {
         await this.installStagedUpdate(this.stagedUpdate);
+      } else {
+        logger.info("update.deferred", {
+          gitRevision: update.gitRevision,
+          reason: "sessions_active_or_pending_approvals",
+        });
       }
     } catch (error) {
       logger.warn("update.check_failed", {
