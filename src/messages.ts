@@ -1,4 +1,4 @@
-import type {PrivilegeRequest} from "./types.js";
+import type {ChannelFormatting, PrivilegeRequest} from "./types.js";
 
 export const buttonLabels = {
   reportDangerousOutput: "Report dangerous output",
@@ -20,9 +20,12 @@ export const messages = {
   updateInstalling: (revision: string): string =>
     `A Sandy update is ready. Restarting now to install ${revision}.`,
   nextPlannedStep: (step: string): string => `Next planned step: ${step}`,
-  commandProgress: (status: string, command: string): string => `Command ${status}: ${command}`,
+  commandProgress: (status: string, command: string, channelFormatting: ChannelFormatting | null): string => {
+    const formattedCommand = channelFormatting?.markup === "telegram_html" ? `<code>${command}</code>` : command;
+    return `Command ${status}: ${formattedCommand}`;
+  },
   taskSummaryReady: (taskName: string, summary: string): string =>
-    `Task "${taskName}" completed.\n\nSummary:\n${summary}`,
+    `Task "${taskName}" completed.\n\n${summary}`,
   taskFailed: (message: string): string => `Task failed: ${message}`,
   handlerFailed: (message: string): string => `Something went wrong: ${message}`,
   noActiveTaskToCancel: (): string => "There is no active task to cancel.",
@@ -41,11 +44,8 @@ export const messages = {
     "A privilege request is pending. Resolve it before sending more task input.",
   shareDeletionStillPending: (): string =>
     "A shared workspace deletion decision is pending. Reply with approve or deny before sending more input.",
-  taskStarted: (taskName: string): string =>
-      `Started task "${taskName}". You will receive progress updates here.`,
-  privilegeApproved: (requestId: string, detail: string): string => `Approved privilege request ${requestId}.\n${detail}`,
+  taskStarted: (taskName: string): string => `Started task "${taskName}".`,
   privilegeDenied: (requestId: string): string => `Denied privilege request ${requestId}.`,
-  privilegeRejected: (requestId: string, detail: string): string => `Rejected privilege request ${requestId}.\n${detail}`,
   privilegeFailed: (requestId: string, detail: string): string => `Privilege request ${requestId} failed.\n${detail}`,
   userDeniedPrivilegeRequest: (requestId: string): string => `The user denied privilege request ${requestId}.`,
   unsupportedPrivilegeRequestType: (requestType: string): string =>
@@ -55,8 +55,12 @@ export const messages = {
     `Task "${taskName}" left files in its shared workspace.\n\n${summary}\n\nApprove to delete this workspace, or deny to keep it.`,
   shareDeleted: (taskName: string): string => `Deleted the shared workspace for task "${taskName}".`,
   sharePreserved: (taskName: string): string => `Kept the shared workspace for task "${taskName}".`,
-  privilegeRequestPrompt: (request: PrivilegeRequest): string =>
-    `Privilege request:\n${describePrivilegeRequest(request)}\n\n${describePrivilegeActions(request)}`,
+  privilegeRequestPrompt: (request: PrivilegeRequest): string => {
+    const actions = describePrivilegeActions(request);
+    return actions
+      ? `Privilege request:\n${describePrivilegeRequest(request)}\n\n${actions}`
+      : `Privilege request:\n${describePrivilegeRequest(request)}`;
+  },
   taskEndedBeforePrivilegeRequestResolved: (taskId: string, requestId: string): string =>
     `Task ${taskId} ended before privilege request ${requestId} could be resolved.`,
   taskNotActive: (taskId: string): string => `Task ${taskId} is not active.`,
@@ -119,9 +123,10 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
   }
 }
 
-function describePrivilegeActions(request: PrivilegeRequest): string {
+function describePrivilegeActions(request: PrivilegeRequest): string | null {
   if (request.kind === "mcp_tool_call") {
-    return "Choose approve once, allow in this task, always allow, or deny.";
+    // In this case, it's pretty clear to the user that approve/deny will approve/deny the tool call
+    return null;
   }
   return "Approve or deny this request.";
 }

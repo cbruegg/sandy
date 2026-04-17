@@ -21,7 +21,7 @@ export type PrivilegeRequest = HostOperationPrivilegeRequest | McpToolCallPrivil
 
 export const privilegeResolutionResultSchema = z.object({
   requestId: z.string().min(1),
-  outcome: z.enum(["approved", "denied", "rejected", "failed"]),
+  outcome: z.enum(["approved", "denied", "failed"]),
   message: z.string(),
   scope: privilegeApprovalScopeSchema.optional(),
 });

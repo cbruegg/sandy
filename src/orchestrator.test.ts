@@ -441,7 +441,6 @@ test("orchestrator applies supported privilege requests deterministically and ou
     message: "Applied copy_into_share.",
   }]);
   assert.ok(requestId);
-  assert.equal(channel.sentTexts.at(-1)?.text, messages.privilegeApproved(requestId, "Applied copy_into_share."));
 });
 
 test("orchestrator terminates the task when the user reports a pending privilege request as dangerous", async () => {
@@ -528,7 +527,6 @@ test("orchestrator keeps completed-task summary pending until the user sends ano
   await runner.emit({
     type: "task_summary",
     summary: [
-      "Outcome: completed",
       "Summary: Inspected the environment and found 8 CPUs.",
       "Artifacts: none",
       "Open questions: none",
@@ -544,7 +542,6 @@ test("orchestrator keeps completed-task summary pending until the user sends ano
   assert.deepEqual(session.pendingTaskSummary, {
     taskName: "env-inspection",
     summary: [
-      "Outcome: completed",
       "Summary: Inspected the environment and found 8 CPUs.",
       "Artifacts: none",
       "Open questions: none",
@@ -666,7 +663,6 @@ test("orchestrator asks the worker to finalize when the user marks the task as f
   await runner.emit({
     type: "task_summary",
     summary: [
-      "Outcome: completed",
       "Summary: Finished based on the visible progress.",
       "Artifacts: none",
       "Open questions: none",
@@ -682,7 +678,6 @@ test("orchestrator asks the worker to finalize when the user marks the task as f
   assert.deepEqual(session.pendingTaskSummary, {
     taskName: "env-inspection",
     summary: [
-      "Outcome: completed",
       "Summary: Finished based on the visible progress.",
       "Artifacts: none",
       "Open questions: none",
@@ -725,8 +720,7 @@ test("orchestrator uses the task name in task_done completion messages", async (
     messages.taskSummaryReady(
       "env-inspection",
       [
-        "Outcome: completed",
-        'Summary: The task ended without a worker-provided handoff summary. Task name: env-inspection. Brief: Inspect the environment.',
+        'The task ended without a worker-provided handoff summary. Task name: env-inspection. Brief: Inspect the environment.',
         "Artifacts: unknown",
         "Open questions: Review the visible task updates above if more detail is needed.",
       ].join("\n"),
@@ -775,7 +769,6 @@ test("orchestrator releases completed-task output only when the user continues n
   await runner.emit({
     type: "task_summary",
     summary: [
-      "Outcome: completed",
       "Summary: Inspected the environment and found 8 CPUs.",
       "Artifacts: none",
       "Open questions: none",
@@ -800,7 +793,6 @@ test("orchestrator releases completed-task output only when the user continues n
   assert.equal(session.pendingTaskSummary, null);
   const followUpContext = expectDefined(mainAgent.contexts[1], "Expected follow-up context.");
   assert.equal(contextTexts(followUpContext).at(-1), "thanks");
-  assert.match(contextTexts(followUpContext)[0] ?? "", /Outcome: completed/);
   assert.match(contextTexts(followUpContext)[0] ?? "", /found 8 CPUs/);
 });
 
@@ -838,7 +830,6 @@ test("orchestrator discards completed-task output when the user sends a danger r
   await runner.emit({
     type: "task_summary",
     summary: [
-      "Outcome: completed",
       "Summary: Inspected the filesystem.",
       "Artifacts: none",
       "Open questions: none",
@@ -905,7 +896,6 @@ test("orchestrator keeps final_result output pending until the user continues no
   assert.deepEqual(session.pendingTaskSummary, {
     taskName: "env-inspection",
     summary: [
-      "Outcome: completed",
       "Summary: The environment has 8 CPUs.",
       "Artifacts: none",
       "Open questions: none",
@@ -916,7 +906,6 @@ test("orchestrator keeps final_result output pending until the user continues no
     messages.taskSummaryReady(
       "env-inspection",
       [
-        "Outcome: completed",
         "Summary: The environment has 8 CPUs.",
         "Artifacts: none",
         "Open questions: none",
@@ -938,7 +927,6 @@ test("orchestrator keeps final_result output pending until the user continues no
   assert.equal(session.pendingTaskSummary, null);
   const followUpContext = expectDefined(mainAgent.contexts[1], "Expected follow-up context.");
   assert.equal(contextTexts(followUpContext).at(-1), "thanks");
-  assert.match(contextTexts(followUpContext)[0] ?? "", /Outcome: completed/);
   assert.match(contextTexts(followUpContext)[0] ?? "", /The environment has 8 CPUs/);
 });
 

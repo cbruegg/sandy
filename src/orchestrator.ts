@@ -142,11 +142,17 @@ export class SandyOrchestrator {
         case "worker_disconnected":
           await this.failTaskAfterWorkerDisconnect(session, event.message);
           break;
-        case "progress":
-          if (event.message.trim()) {
-            await this.deps.channel.sendTaskUpdate(chatId, event.message);
+        case "progress": {
+          const message = event.message.trim();
+          if (!message) break;
+          // MCP completed messages don't need task-control buttons.
+          if (event.isCompletion) {
+            await this.deps.channel.sendText(chatId, message);
+          } else {
+            await this.deps.channel.sendTaskUpdate(chatId, message);
           }
           break;
+        }
         case "assistant_output":
           session.activeTask.hasReportableOutput = true;
           await this.deps.channel.sendTaskUpdate(chatId, event.text);
@@ -160,7 +166,6 @@ export class SandyOrchestrator {
         case "final_result":
           session.activeTask.hasReportableOutput = true;
           this.recordTaskSummary(session, [
-            "Outcome: completed",
             `Summary: ${event.text}`,
             "Artifacts: none",
             "Open questions: none",
@@ -546,7 +551,7 @@ export class SandyOrchestrator {
   private buildUnsupportedPrivilegeResult(request: PrivilegeRequest): PrivilegeResolutionResult {
     return {
       requestId: request.requestId,
-      outcome: "rejected",
+      outcome: "failed",
       message: request.kind === "host_operation"
         ? messages.unsupportedPrivilegeRequestType(request.payload.type)
         : messages.unsupportedMcpPrivilegeRequest(request.serverId, request.toolName),
@@ -567,13 +572,10 @@ export class SandyOrchestrator {
 
     switch (result.outcome) {
       case "approved":
-        await this.deps.channel.sendText(chatId, messages.privilegeApproved(result.requestId, result.message));
+        // No confirmation message needed; the user already knows they approved it.
         return;
       case "denied":
         await this.deps.channel.sendText(chatId, messages.privilegeDenied(result.requestId));
-        return;
-      case "rejected":
-        await this.deps.channel.sendText(chatId, messages.privilegeRejected(result.requestId, result.message));
         return;
       case "failed":
         await this.deps.channel.sendText(chatId, messages.privilegeFailed(result.requestId, result.message));
@@ -677,8 +679,7 @@ export class SandyOrchestrator {
 
   private buildCompletedTaskFallbackSummary(task: NonNullable<SessionState["activeTask"]>): string {
     return [
-      "Outcome: completed",
-      `Summary: The task ended without a worker-provided handoff summary. Task name: ${task.taskName}. Brief: ${task.taskBrief}`,
+      `The task ended without a worker-provided handoff summary. Task name: ${task.taskName}. Brief: ${task.taskBrief}`,
       "Artifacts: unknown",
       "Open questions: Review the visible task updates above if more detail is needed.",
     ].join("\n");
@@ -751,7 +752,7 @@ export class SandyOrchestrator {
     if (!chatId) {
       return {
         requestId: randomUUID(),
-        outcome: "rejected",
+        outcome: "failed",
         message: messages.taskNotActive(input.taskId),
       };
     }
@@ -761,7 +762,7 @@ export class SandyOrchestrator {
     if (!activeTask || activeTask.taskId !== input.taskId) {
       return {
         requestId: randomUUID(),
-        outcome: "rejected",
+        outcome: "failed",
         message: messages.taskNotActive(input.taskId),
       };
     }

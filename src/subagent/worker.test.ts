@@ -76,7 +76,6 @@ test("buildTaskSummaryInput requests a host-facing handoff summary", () => {
 
   assert.match(input, /host-facing handoff summary/);
   assert.match(input, /Do not emit any Sandy tool calls/);
-  assert.match(input, /Outcome: <completed\|partial\|failed>/);
   assert.match(input, /Artifacts:/);
 });
 
@@ -89,7 +88,7 @@ test("mcpToolProgress includes payloads for completed MCP calls", () => {
 
 test("commandProgress formats command execution updates", () => {
   assert.equal(
-    messages.commandProgress("completed", "npm test"),
+    messages.commandProgress("completed", "npm test", null),
     "Command completed: npm test",
   );
 });
@@ -186,10 +185,10 @@ test("parseSubAgentEvent accepts tool-call events", () => {
 });
 
 test("parseSubAgentEvent accepts task-summary events", () => {
-  const event = parseSubAgentEvent('{"type":"task_summary","summary":"Outcome: completed"}');
+  const event = parseSubAgentEvent('{"type":"task_summary","summary":"Task completed successfully"}');
 
   assert.deepEqual(event, {
     type: "task_summary",
-    summary: "Outcome: completed",
+    summary: "Task completed successfully",
   });
 });
