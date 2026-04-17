@@ -70,7 +70,7 @@ function progressFromTodoList(item: TodoListItem): string | null {
   return messages.nextPlannedStep(next.text);
 }
 
-async function streamTurn(thread: Thread, input: string, mode: TurnMode = "task"): Promise<StreamTurnResult> {
+async function streamTurn(thread: Thread, input: string, channelFormatting: ChannelFormatting | null, mode: TurnMode = "task"): Promise<StreamTurnResult> {
   let sawPrivilegedToolCall = false;
   let sawSendFileToChannel = false;
   let sawTaskDone = false;
@@ -81,7 +81,7 @@ async function streamTurn(thread: Thread, input: string, mode: TurnMode = "task"
   for await (const event of events) {
     const disposition = mode === "summary"
       ? handleSummaryTurnEvent(event, summaryChunks)
-      : handleTaskTurnEvent(event);
+      : handleTaskTurnEvent(event, channelFormatting);
     if (disposition === "privileged_tool_call" && sawPrivilegedToolCall) {
       throw new Error("Only one privileged tool call is allowed per turn.");
     }
@@ -105,7 +105,7 @@ async function streamTurn(thread: Thread, input: string, mode: TurnMode = "task"
   };
 }
 
-function handleTaskTurnEvent(event: ThreadEvent): ThreadEventDisposition {
+function handleTaskTurnEvent(event: ThreadEvent, channelFormatting: ChannelFormatting | null): ThreadEventDisposition {
   switch (event.type) {
     case "item.completed":
     case "item.updated":
@@ -130,7 +130,7 @@ function handleTaskTurnEvent(event: ThreadEvent): ThreadEventDisposition {
       if (event.item.type === "command_execution") {
         send({
           type: "progress",
-          message: messages.commandProgress(event.item.status, event.item.command),
+          message: messages.commandProgress(event.item.status, event.item.command, channelFormatting),
         });
       }
       if (event.item.type === "todo_list") {
@@ -199,8 +199,8 @@ function normalizeSummaryText(chunks: string[]): string | null {
   return summary.length > 0 ? summary : null;
 }
 
-async function emitTaskSummary(thread: Thread): Promise<void> {
-  const result = await streamTurn(thread, buildTaskSummaryInput(), "summary");
+async function emitTaskSummary(thread: Thread, channelFormatting: ChannelFormatting | null): Promise<void> {
+  const result = await streamTurn(thread, buildTaskSummaryInput(), channelFormatting, "summary");
   if (result.sawPrivilegedToolCall || result.sawTerminalError || !result.summaryText) {
     return;
   }
@@ -275,9 +275,9 @@ export async function main(): Promise<void> {
     queue = queue.then(async () => {
       currentAbort = new AbortController();
       try {
-        const result = await streamTurn(thread, input);
+        const result = await streamTurn(thread, input, channelFormatting);
         if (result.sawTaskDone && !result.sawTerminalError) {
-          await emitTaskSummary(thread);
+          await emitTaskSummary(thread, channelFormatting);
           send({ type: "task_done" });
         }
       } finally {
@@ -295,7 +295,7 @@ export async function main(): Promise<void> {
     queue = queue.then(async () => {
       currentAbort = new AbortController();
       try {
-        await emitTaskSummary(thread);
+        await emitTaskSummary(thread, channelFormatting);
         send({ type: "task_done" });
       } finally {
         currentAbort = null;

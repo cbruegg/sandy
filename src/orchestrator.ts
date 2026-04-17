@@ -142,11 +142,18 @@ export class SandyOrchestrator {
         case "worker_disconnected":
           await this.failTaskAfterWorkerDisconnect(session, event.message);
           break;
-        case "progress":
-          if (event.message.trim()) {
-            await this.deps.channel.sendTaskUpdate(chatId, event.message);
+        case "progress": {
+          const message = event.message.trim();
+          if (!message) break;
+          // MCP completed messages don't need task-control buttons.
+          // TODO: Don't use parsing here, use a more structured approach
+          if (message.startsWith("MCP completed:")) {
+            await this.deps.channel.sendText(chatId, message);
+          } else {
+            await this.deps.channel.sendTaskUpdate(chatId, message);
           }
           break;
+        }
         case "assistant_output":
           session.activeTask.hasReportableOutput = true;
           await this.deps.channel.sendTaskUpdate(chatId, event.text);
@@ -160,7 +167,6 @@ export class SandyOrchestrator {
         case "final_result":
           session.activeTask.hasReportableOutput = true;
           this.recordTaskSummary(session, [
-            "Outcome: completed",
             `Summary: ${event.text}`,
             "Artifacts: none",
             "Open questions: none",
@@ -567,12 +573,12 @@ export class SandyOrchestrator {
 
     switch (result.outcome) {
       case "approved":
-        await this.deps.channel.sendText(chatId, messages.privilegeApproved(result.requestId, result.message));
+        // No confirmation message needed; the user already knows they approved it.
         return;
       case "denied":
         await this.deps.channel.sendText(chatId, messages.privilegeDenied(result.requestId));
         return;
-      case "rejected":
+      case "rejected": // TODO: When can this happen?
         await this.deps.channel.sendText(chatId, messages.privilegeRejected(result.requestId, result.message));
         return;
       case "failed":
@@ -677,8 +683,7 @@ export class SandyOrchestrator {
 
   private buildCompletedTaskFallbackSummary(task: NonNullable<SessionState["activeTask"]>): string {
     return [
-      "Outcome: completed",
-      `Summary: The task ended without a worker-provided handoff summary. Task name: ${task.taskName}. Brief: ${task.taskBrief}`,
+      `The task ended without a worker-provided handoff summary. Task name: ${task.taskName}. Brief: ${task.taskBrief}`,
       "Artifacts: unknown",
       "Open questions: Review the visible task updates above if more detail is needed.",
     ].join("\n");

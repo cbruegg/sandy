@@ -53,7 +53,6 @@ export function buildTaskSummaryInput(): string {
     "Do not address the user directly.",
     "Do not emit any Sandy tool calls.",
     "Use this exact structure:",
-    "Outcome: <completed|partial|failed>",
     "Summary: <what you accomplished and the current state>",
     "Artifacts: <files created or updated in /workspace/share, or \"none\">",
     "Open questions: <remaining blockers, follow-ups, or \"none\">",
