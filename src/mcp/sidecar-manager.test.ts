@@ -6,7 +6,7 @@ import { setImmediate as setImmediateCallback } from "node:timers";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { McpSidecarManager } from "./sidecar-manager.js";
 import { SandyMcpProxyAccess } from "./proxy-access.js";
-import { createMcpWorkerNetworkName } from "./worker-network-name.js";
+import { createMcpWorkerNetworkName, mcpWorkerNetworkNamePrefix } from "./worker-network-name.js";
 
 class FakeChildProcess extends EventEmitter {
   public readonly stdin = new PassThrough();
@@ -30,6 +30,13 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
   const spawnImpl = ((_command: string, args: readonly string[]) => {
     invocations.push([...args]);
     const child = new FakeChildProcess();
+    if (args[0] === "network" && args[1] === "ls") {
+      queueMicrotask(() => {
+        child.stdout.write(`${mcpWorkerNetworkNamePrefix}stale-one\nbridge\n`);
+        child.emit("exit", 0, null);
+      });
+      return child as unknown as ChildProcessWithoutNullStreams;
+    }
     if (args[0] === "run") {
       sidecarChild.stdout.write('{"type":"ready"}\n');
       return sidecarChild as unknown as ChildProcessWithoutNullStreams;
@@ -65,10 +72,14 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
   await manager.stop();
 
   const firstInvocation = invocations[0];
-  assert.ok(firstInvocation);
-  assert.equal(firstInvocation[0], "network");
-  assert.equal(firstInvocation[1], "create");
-  assert.equal(firstInvocation[2], workerNetworkName);
+  assert.deepEqual(firstInvocation, ["network", "ls", "--format", "{{.Name}}"]);
+  const pruneInvocation = invocations[1];
+  assert.deepEqual(pruneInvocation, ["network", "rm", `${mcpWorkerNetworkNamePrefix}stale-one`]);
+  const createInvocation = invocations[2];
+  assert.ok(createInvocation);
+  assert.equal(createInvocation[0], "network");
+  assert.equal(createInvocation[1], "create");
+  assert.equal(createInvocation[2], workerNetworkName);
   assert.ok(invocations.some((invocation) => invocation[0] === "run" && invocation.includes("--network-alias")));
   assert.ok(invocations.some((invocation) => invocation[0] === "network" && invocation[1] === "rm"));
   assert.match(stdinContent, /"type":"bootstrap"/);
@@ -84,6 +95,12 @@ test("McpSidecarManager returns a failed authorization result when authorization
 
   const spawnImpl = ((_command: string, args: readonly string[]) => {
     const child = new FakeChildProcess();
+    if (args[0] === "network" && args[1] === "ls") {
+      queueMicrotask(() => {
+        child.emit("exit", 0, null);
+      });
+      return child as unknown as ChildProcessWithoutNullStreams;
+    }
     if (args[0] === "run") {
       sidecarChild.stdout.write('{"type":"ready"}\n');
       return sidecarChild as unknown as ChildProcessWithoutNullStreams;

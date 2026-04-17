@@ -8,6 +8,7 @@ import type { PrivilegeResolutionResult } from "../types.js";
 import { SandyMcpProxyAccess } from "./proxy-access.js";
 import { buildHostOauthStateDirectory, sidecarOauthMountPath } from "./oauth-paths.js";
 import { mcpProxyContainerAlias } from "./proxy-route.js";
+import { mcpWorkerNetworkNamePrefix } from "./worker-network-name.js";
 import {
   parseMcpSidecarToHostMessage,
   type McpSidecarAuthorizationRequestMessage,
@@ -58,6 +59,7 @@ export class McpSidecarManager {
     this.started = true;
     const oauthStateDirectory = buildHostOauthStateDirectory(this.options.configDirectory);
     await mkdir(oauthStateDirectory, { recursive: true });
+    await this.pruneStaleNetworks();
     await this.runDockerCommand(["network", "create", this.options.workerNetworkName]);
 
     const child = this.spawnImpl("docker", [
@@ -245,20 +247,40 @@ export class McpSidecarManager {
     this.child.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
+  private async pruneStaleNetworks(): Promise<void> {
+    const existingNetworkNames = await this.runDockerCommandCapture(["network", "ls", "--format", "{{.Name}}"]);
+    const staleNetworkNames = existingNetworkNames
+      .split("\n")
+      .map((name) => name.trim())
+      .filter((name) => name.startsWith(mcpWorkerNetworkNamePrefix) && name !== this.options.workerNetworkName);
+
+    for (const networkName of staleNetworkNames) {
+      await this.runDockerCommand(["network", "rm", networkName], true);
+    }
+  }
+
   private async runDockerCommand(args: string[], ignoreFailure = false): Promise<void> {
+    await this.runDockerCommandCapture(args, ignoreFailure);
+  }
+
+  private async runDockerCommandCapture(args: string[], ignoreFailure = false): Promise<string> {
     const child = this.spawnImpl("docker", args, {
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    await new Promise<void>((resolve, reject) => {
+    return await new Promise<string>((resolve, reject) => {
+      let stdout = "";
       let stderr = "";
+      child.stdout.on("data", (chunk) => {
+        stdout += String(chunk);
+      });
       child.stderr.on("data", (chunk) => {
         stderr += String(chunk);
       });
       child.once("error", reject);
       child.once("exit", (code) => {
         if (code === 0 || ignoreFailure) {
-          resolve();
+          resolve(stdout);
           return;
         }
         reject(new Error(stderr.trim() || `docker ${args.join(" ")} exited with code ${code}`));
