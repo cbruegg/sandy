@@ -552,7 +552,7 @@ export class SandyOrchestrator {
   private buildUnsupportedPrivilegeResult(request: PrivilegeRequest): PrivilegeResolutionResult {
     return {
       requestId: request.requestId,
-      outcome: "rejected",
+      outcome: "failed",
       message: request.kind === "host_operation"
         ? messages.unsupportedPrivilegeRequestType(request.payload.type)
         : messages.unsupportedMcpPrivilegeRequest(request.serverId, request.toolName),
@@ -577,9 +577,6 @@ export class SandyOrchestrator {
         return;
       case "denied":
         await this.deps.channel.sendText(chatId, messages.privilegeDenied(result.requestId));
-        return;
-      case "rejected": // TODO: When can this happen?
-        await this.deps.channel.sendText(chatId, messages.privilegeRejected(result.requestId, result.message));
         return;
       case "failed":
         await this.deps.channel.sendText(chatId, messages.privilegeFailed(result.requestId, result.message));
@@ -756,7 +753,7 @@ export class SandyOrchestrator {
     if (!chatId) {
       return {
         requestId: randomUUID(),
-        outcome: "rejected",
+        outcome: "failed",
         message: messages.taskNotActive(input.taskId),
       };
     }
@@ -766,7 +763,7 @@ export class SandyOrchestrator {
     if (!activeTask || activeTask.taskId !== input.taskId) {
       return {
         requestId: randomUUID(),
-        outcome: "rejected",
+        outcome: "failed",
         message: messages.taskNotActive(input.taskId),
       };
     }
