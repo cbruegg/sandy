@@ -11,7 +11,7 @@ import type { SandyUpdateMode } from "../config.js";
 
 const UPDATE_CHECK_INTERVAL_MS = 60_000;
 const GITHUB_API_VERSION = "2026-03-10";
-const DEFAULT_RESTART_PREPARATION_TIMEOUT_MS = 15_000;
+const DEFAULT_RESTART_PREPARATION_TIMEOUT_MS = 30_000;
 
 type SupportedPlatform = "linux" | "darwin" | "win32";
 type SupportedArch = "x64" | "arm64";
