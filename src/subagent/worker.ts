@@ -146,6 +146,7 @@ function handleTaskTurnEvent(event: ThreadEvent, channelFormatting: ChannelForma
         send({
           type: "progress",
           message: messages.mcpToolProgress(event.item.status, event.item.server, event.item.tool, event.item.arguments),
+          isCompletion: event.item.status === "completed",
         });
       }
       return "none";

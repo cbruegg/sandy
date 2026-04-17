@@ -146,8 +146,7 @@ export class SandyOrchestrator {
           const message = event.message.trim();
           if (!message) break;
           // MCP completed messages don't need task-control buttons.
-          // TODO: Don't use parsing here, use a more structured approach
-          if (message.startsWith("MCP completed:")) {
+          if (event.isCompletion) {
             await this.deps.channel.sendText(chatId, message);
           } else {
             await this.deps.channel.sendTaskUpdate(chatId, message);
