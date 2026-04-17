@@ -5,6 +5,7 @@ import type { ThreadOptions } from "@openai/codex-sdk";
 import { ZodError } from "zod";
 import { logger } from "../logger.js";
 import type { DecideContext, MainAgentDecision } from "../types.js";
+import type { SkillMetadata } from "../skills.js";
 import {
   formatMainAgentDecisionValidationError,
   mainAgentDecisionPromptSchema,
@@ -30,11 +31,13 @@ const MAX_DECISION_VALIDATION_ATTEMPTS = 3;
 
 export class CodexMainAgentController implements MainAgentController {
   private readonly codex: CodexClient;
+  private readonly skills: SkillMetadata[];
   private readonly threads = new Map<string, MainAgentThread>();
   private readonly threadDirectories = new Map<string, string>();
 
-  constructor(codex: CodexClient) {
+  constructor(codex: CodexClient, skills: SkillMetadata[] = []) {
     this.codex = codex;
+    this.skills = skills;
   }
 
   async decide(context: DecideContext): Promise<MainAgentDecision> {
@@ -50,6 +53,7 @@ export class CodexMainAgentController implements MainAgentController {
       channelFormatting: context.channelFormatting,
       newVisibleEntries: context.newVisibleEntries,
       isInitialTurn,
+      skills: this.skills,
     });
     const decision = await this.runValidatedDecision(thread, prompt, context.chatId);
     logger.info("main_agent.decision_received", {
@@ -148,6 +152,7 @@ export function buildMainAgentPrompt(input: {
   activeTask: DecideContext["activeTask"];
   channelFormatting: DecideContext["channelFormatting"];
   isInitialTurn: boolean;
+  skills: SkillMetadata[];
 }): string {
   const intro = input.isInitialTurn
     ? [
@@ -164,8 +169,25 @@ export function buildMainAgentPrompt(input: {
         "Return exactly one JSON object that matches the provided schema.",
       ];
 
+  const configuredSkillsSection = input.isInitialTurn && input.skills.length > 0
+    ? [
+        "",
+        "Configured skills available to sub-agents:",
+        ...input.skills.map((skill) => `- ${skill.name}: ${skill.description}`),
+      ]
+    : [];
+
+  const skillDecisionRules = input.isInitialTurn && input.skills.length > 0
+    ? [
+        "- You know configured skills only by the name and description listed above. Do not assume any other skill content.",
+        "- If the user's request requires one of the configured skills, you must launch a sub-agent instead of replying directly.",
+        "- When launching a task for a configured skill, mention the relevant skill name in the task brief when useful.",
+      ]
+    : [];
+
   return [
     ...intro,
+    ...configuredSkillsSection,
     "",
     "Required JSON schema:",
     JSON.stringify(mainAgentDecisionPromptSchema, null, 2),
@@ -187,5 +209,6 @@ export function buildMainAgentPrompt(input: {
     "- Task briefs must contain only the minimum instructions needed by the sub-agent.",
     "- Task briefs must be self-contained: include relevant context such as URLs, file paths, or specific values the user provided. The sub-agent does not see the conversation history.",
     "- Any replyText you produce is user-visible. Follow the provided channel formatting instructions exactly.",
+    ...skillDecisionRules,
   ].join("\n");
 }

@@ -25,6 +25,10 @@ The only environment variable still used for configuration is:
 
 - `SANDY_CONFIG_FILE`: optional override for the Sandy config file path.
 
+If the config directory contains a sibling `skills/` folder, Sandy loads
+[skills](https://developers.openai.com/codex/skills) from there at startup.
+For the default config path, that means `~/.config/sandy/skills/`.
+
 Example config:
 Commented entries below show built-in defaults. Uncommented values are required or example overrides.
 
@@ -120,6 +124,13 @@ Worker preinstall behavior:
 - `worker.preinstall.refresh = "weekly"` keeps the derived image on a persisted 7-day cadence from the last successful rebuild, even across Sandy restarts.
 - `worker.preinstall.refresh = "manual"` disables scheduled refreshes; Sandy still rebuilds when the configured commands change, the cached overlay is missing, or the base `worker.image` resolves to a different image ID.
 - The derived worker image is local cache state. It does not count as an explicit `worker.image` override, so the existing `updates.mode` rules still apply only to the configured base image.
+
+Skills behavior:
+
+- Sandy looks for skills only in a `skills/` directory next to the active `config.toml`.
+- Sandy parses only the skill `name` and `description` from the leading frontmatter block in `SKILL.md`.
+- The main agent receives only that metadata and is instructed to delegate requests that require one of those skills to a sub-agent.
+- Skills are loaded only during Sandy startup. If you add, remove, or edit a skill, restart Sandy before the change will take effect.
 
 ### Build and run
 
@@ -276,6 +287,7 @@ Sub-agents are launched in isolated containers, initially using Docker.
 Allowed interfaces are internet access, a per-sub-agent shared volume for file exchange and the container control
 channel to the host runtime.
 - The host mounts a cached Linux Codex binary into each worker container read-only so workers do not re-download it.
+- If configured, the host also mounts the Sandy `skills/` directory read-only into each worker at `$HOME/.agents/skills`.
 
 User file uploads are a normal channel capability rather than a privileged host operation. Sandy downloads uploaded
 files directly into the target sub-agent's shared workspace before launch, and can also stage additional uploads into
@@ -336,7 +348,6 @@ non-deterministic components such as the LLM and TTS providers should be mocked 
 - Add support for more TTS providers, such as Google Cloud Speech-to-Text, AWS
 - Add support for scheduled tasks, allowing sub-agents to schedule tasks for later execution, 
   and notify the user when they are executed.
-- Add support for skills.
 - Add support for memory.
 - Add tools for audio and video transcription
 - Add support for sandboxed headless browser use

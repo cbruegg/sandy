@@ -6,6 +6,7 @@ import {
   buildMainAgentThreadOptions,
   CodexMainAgentController,
 } from "./agent/main-agent-controller.js";
+import type { SkillMetadata } from "./skills.js";
 import type { ChannelFormatting, DecideContext } from "./types.js";
 
 const testFormatting: ChannelFormatting = {
@@ -14,6 +15,11 @@ const testFormatting: ChannelFormatting = {
   allowedTags: ["b", "i", "code", "pre"],
   instructions: "Use simple Telegram HTML.",
 };
+
+const testSkills: SkillMetadata[] = [{
+  name: "Adding task to Todoist",
+  description: "When the user asks you to add a task to their Todoist, use this skill.",
+}];
 
 function expectDefined<T>(value: T | null | undefined, message: string): NonNullable<T> {
   assert.notEqual(value, undefined, message);
@@ -87,12 +93,14 @@ test("buildMainAgentPrompt includes only the new visible entries for incremental
     activeTask: null,
     channelFormatting: testFormatting,
     isInitialTurn: true,
+    skills: [],
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["follow-up"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
     isInitialTurn: false,
+    skills: [],
   });
 
   assert.match(initialPrompt, /Visible chat entries for this first decision:/);
@@ -125,6 +133,7 @@ test("buildMainAgentPrompt includes the precise decision schema", () => {
     activeTask: null,
     channelFormatting: testFormatting,
     isInitialTurn: true,
+    skills: [],
   });
 
   assert.match(prompt, /Required JSON schema:/);
@@ -174,4 +183,39 @@ test("CodexMainAgentController gives up after repeated validation failures", asy
     /Main agent failed to return a valid decision after 3 attempts/,
   );
   assert.equal(expectDefined(codex.threads[0], "Expected thread.").inputs.length, 3);
+});
+
+test("buildMainAgentPrompt includes configured skill metadata only on the initial turn", () => {
+  const initialPrompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["add milk to my shopping list"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    isInitialTurn: true,
+    skills: testSkills,
+  });
+  const deltaPrompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["another request"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    isInitialTurn: false,
+    skills: testSkills,
+  });
+
+  assert.match(initialPrompt, /Configured skills available to sub-agents:/);
+  assert.match(initialPrompt, /Adding task to Todoist/);
+  assert.match(initialPrompt, /must launch a sub-agent instead of replying directly/);
+  assert.doesNotMatch(deltaPrompt, /Configured skills available to sub-agents:/);
+});
+
+test("buildMainAgentPrompt does not include skill body text below the frontmatter", () => {
+  const prompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["add bread"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    isInitialTurn: true,
+    skills: testSkills,
+  });
+
+  assert.doesNotMatch(prompt, /Use the Todoist MCP/);
+  assert.doesNotMatch(prompt, /Alexa Shopping List/);
 });

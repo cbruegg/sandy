@@ -4,6 +4,7 @@ import * as toml from "@iarna/toml";
 import {z} from "zod";
 import { resolveDefaultImageReferences, type SandyBuildMetadata, type SandyImageDefaults } from "./build-metadata.js";
 import {resolveHomeDirectory} from "./home-directory.js";
+import {discoverSkills, type SkillMetadata} from "./skills.js";
 
 const logLevelSchema = z.enum(["debug", "info", "warn", "error"]);
 const mcpTransportSchema = z.literal("streamable_http");
@@ -152,6 +153,8 @@ type SandyAuthMode =
 export type SandyConfig = {
   configFilePath: string;
   configDirectory: string;
+  skillsDirectory: string | null;
+  skills: SkillMetadata[];
   logLevel: z.infer<typeof logLevelSchema>;
   channel:
     | {
@@ -241,6 +244,8 @@ export function parseConfigToml(
 ): SandyConfig {
   const parsedFile = parseConfigTomlFile(raw, buildMetadata);
   const parsed = parsedFile.data;
+  const configDirectory = dirname(configFilePath);
+  const discoveredSkills = discoverSkills(configDirectory);
   const codexAuthFile = resolveCodexAuthFile(parsed.auth.codex_auth_file);
   const rawApiKey = parsed.auth.openai_api_key ?? null;
   const authMode: SandyAuthMode = codexAuthFile
@@ -262,7 +267,9 @@ export function parseConfigToml(
 
   return {
     configFilePath,
-    configDirectory: dirname(configFilePath),
+    configDirectory,
+    skillsDirectory: discoveredSkills.skillsDirectory,
+    skills: discoveredSkills.skills,
     logLevel: parsed.logging.level,
     channel: buildChannelConfig(parsed.channel),
     workerImage: parsed.worker.image,

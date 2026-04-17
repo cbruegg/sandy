@@ -34,6 +34,7 @@ export async function startApp(): Promise<void> {
     sttEnabled: config.sttApiKey !== null,
     workerPreinstallCommandCount: config.workerPreinstall.commands.length,
     workerPreinstallRefresh: config.workerPreinstall.refresh,
+    configuredSkillCount: config.skills.length,
   });
 
   const transcriptionProvider = config.sttApiKey
@@ -71,7 +72,7 @@ export async function startApp(): Promise<void> {
     launchImage: initialWorkerImage,
   });
 
-  const mainAgent = new CodexMainAgentController(codex);
+  const mainAgent = new CodexMainAgentController(codex, config.skills);
 
   const mcpProxyAccess = new SandyMcpProxyAccess();
   const mcpEnabled = Object.keys(config.mcpServers).length > 0;
@@ -90,6 +91,7 @@ export async function startApp(): Promise<void> {
       shareRoot: config.shareRoot,
       openAiApiKey: config.authMode.mode === "api_key" ? config.authMode.openAiApiKey : null,
       codexAuthFile: config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthFile : null,
+      skillsDirectory: config.skillsDirectory,
       workerCodexBinaryPath,
       workerCodexConfigBuilder: (taskId) => mcpWorkerLaunchConfigBuilder.build(taskId),
       workerNetworkName,

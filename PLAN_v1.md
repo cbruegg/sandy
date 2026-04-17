@@ -13,8 +13,10 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - A narrow main-agent controller that decides whether to reply directly or launch a sub-agent.
   - Main-agent Codex threads are locked down with `approvalPolicy: "never"`, `sandboxMode: "read-only"`, and a fresh temp working directory per chat thread.
   - Main-agent Codex threads persist per chat and receive only the newly visible entries for each decision, preserving context caching without maintaining a full host-side transcript.
+  - Startup-time discovery of config-driven skills from `<config directory>/skills`, with only each skill's `name` and `description` exposed to the main agent.
   - Single active sub-agent per chat.
   - Per-sub-agent Docker container plus per-sub-agent shared volume.
+  - Read-only worker mounts for configured skills at `$HOME/.agents/skills`.
   - Structured stdio control channel between host and sub-agent worker, including an explicit worker startup handshake.
   - Codex sub-agents run with Docker as the outer sandbox boundary; nested Codex bubblewrap sandboxing is disabled in-container.
   - The sub-agent's initial Codex input explicitly tells it that `/workspace/share` is the shared workspace for host-visible handoff files.
@@ -201,6 +203,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
 - V1 is Telegram-only, text-first, single-process, and single-active-task-per-chat.
 - Runtime state is in memory only; restart recovery is out of scope.
 - The main agent is a narrow controller and does not see hidden sub-agent output.
+- Skills are loaded only at Sandy startup and require a Sandy restart before skill file changes take effect.
 - Voice and image inputs are part of the interface design but not fully implemented in v1.
 - Each sub-agent gets its own shared volume; copy operations are scoped to that sub-agent’s share.
 - User-uploaded files are copied into the task share by the channel adapter and do not require privilege escalation.

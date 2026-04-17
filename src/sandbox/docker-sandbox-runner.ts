@@ -8,6 +8,7 @@ import type {LaunchTaskRequest, SandboxHandle, SandboxRunner, ShareInspection} f
 import type {HostCommand, PrivilegeResolutionResult, SubAgentEvent} from "../types.js";
 import {parseSubAgentEvent, serializeHostCommand} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
+import {workerSkillsPath} from "../subagent/worker-codex-config.js";
 
 const workerCodexSeedMountPath = "/run/sandy-codex-seed";
 
@@ -17,6 +18,7 @@ type DockerSandboxRunnerOptions = {
   shareRoot: string;
   openAiApiKey: string | null;
   codexAuthFile: string | null;
+  skillsDirectory: string | null;
   workerCodexBinaryPath?: string | null;
   workerNetworkName?: string | null;
   workerCodexConfigBuilder: (taskId: string) => {
@@ -144,6 +146,13 @@ export class DockerSandboxRunner implements SandboxRunner {
       dockerArgs.push(
         "-v",
         `${this.options.workerCodexBinaryPath}:/usr/local/bin/codex:ro`,
+      );
+    }
+
+    if (this.options.skillsDirectory) {
+      dockerArgs.push(
+        "-v",
+        `${this.options.skillsDirectory}:${workerSkillsPath}:ro`,
       );
     }
 

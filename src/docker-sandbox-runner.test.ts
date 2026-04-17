@@ -109,6 +109,7 @@ async function launchRunnerWithChild(
     handshakeTimeoutMs?: number;
     shareRoot?: string;
     builtWorkerCodexConfigToml?: string | null;
+    skillsDirectory?: string | null;
     workerCodexBinaryPath?: string | null;
     workerNetworkName?: string | null;
     resolveWorkerImage?: () => string;
@@ -122,6 +123,7 @@ async function launchRunnerWithChild(
     shareRoot: options?.shareRoot ?? "/tmp/sandy-test-shares",
     openAiApiKey: null,
     codexAuthFile: null,
+    skillsDirectory: options?.skillsDirectory ?? null,
     workerCodexBinaryPath: options?.workerCodexBinaryPath,
     workerCodexConfigBuilder: () => ({
       codexConfigToml: options?.builtWorkerCodexConfigToml ?? null,
@@ -387,6 +389,7 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
     shareRoot: "/tmp/sandy-test-shares",
     openAiApiKey: null,
     codexAuthFile: null,
+    skillsDirectory: null,
     workerCodexBinaryPath: null,
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
@@ -426,6 +429,7 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
     shareRoot,
     openAiApiKey: null,
     codexAuthFile: null,
+    skillsDirectory: null,
     workerCodexBinaryPath: null,
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
@@ -480,6 +484,31 @@ test("DockerSandboxRunner mounts a writable worker Codex home from a temp path o
   await rm(shareRoot, { recursive: true, force: true });
 });
 
+test("DockerSandboxRunner mounts configured skills read-only into the worker", async () => {
+  const taskChild = new FakeChildProcess();
+  const skillsDirectory = "/tmp/sandy-config/skills";
+
+  const { invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
+    skillsDirectory,
+  });
+
+  const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
+  assert.ok(dockerRunInvocation);
+  assert.ok(dockerRunInvocation.args.includes(`${skillsDirectory}:/root/.agents/skills:ro`));
+});
+
+test("DockerSandboxRunner does not mount skills when no skills directory is configured", async () => {
+  const taskChild = new FakeChildProcess();
+
+  const { invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
+    skillsDirectory: null,
+  });
+
+  const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
+  assert.ok(dockerRunInvocation);
+  assert.ok(!dockerRunInvocation.args.includes("/root/.agents/skills:ro"));
+});
+
 test("DockerSandboxRunner mounts the host-managed worker Codex binary read-only", async () => {
   const taskChild = new FakeChildProcess();
   const workerCodexBinaryPath = "/tmp/sandy-codex/linux/codex";
@@ -527,6 +556,7 @@ test("DockerSandboxRunner rejects share inspection outside the configured share 
     shareRoot,
     openAiApiKey: null,
     codexAuthFile: null,
+    skillsDirectory: null,
     workerCodexBinaryPath: null,
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
@@ -556,6 +586,7 @@ test("DockerSandboxRunner rejects share deletion outside the configured share ro
     shareRoot,
     openAiApiKey: null,
     codexAuthFile: null,
+    skillsDirectory: null,
     workerCodexBinaryPath: null,
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,

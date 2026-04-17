@@ -9,6 +9,8 @@ function baseConfig(): Omit<SandyConfig, "channel"> {
   return {
     configFilePath: "/tmp/config.toml",
     configDirectory: "/tmp",
+    skillsDirectory: null,
+    skills: [],
     logLevel: "info",
     workerImage: "sandy-subagent:latest",
     mcpSidecarImage: "sandy-mcp-proxy:latest",
