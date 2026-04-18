@@ -110,6 +110,8 @@ Codex auth behavior:
 MCP OAuth behavior:
 
 - `mcp.servers.<name>.oauth_scopes` optionally sets OAuth scopes to request during `sandy mcp login <name>`.
+- Sandy runs upstream MCP connections from an MCP sidecar container, not from the host process directly.
+- If an MCP server runs on the same host as Sandy, use `http://host.docker.internal:<port>/...` when configuring `mcp.servers.<name>.url`.
 
 Update behavior:
 

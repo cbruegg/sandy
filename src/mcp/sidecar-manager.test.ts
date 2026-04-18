@@ -81,6 +81,10 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
   assert.equal(createInvocation[1], "create");
   assert.equal(createInvocation[2], workerNetworkName);
   assert.ok(invocations.some((invocation) => invocation[0] === "run" && invocation.includes("--network-alias")));
+  assert.ok(invocations.some((invocation) =>
+    invocation[0] === "run"
+    && invocation.includes("--add-host")
+    && invocation.includes("host.docker.internal:host-gateway")));
   assert.ok(invocations.some((invocation) => invocation[0] === "network" && invocation[1] === "rm"));
   assert.match(stdinContent, /"type":"bootstrap"/);
   assert.match(stdinContent, /"workerProxyTokenSecret":"shared-secret"/);

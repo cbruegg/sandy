@@ -34,6 +34,7 @@ type McpSidecarManagerOptions = {
 
 export class McpSidecarManager {
   private readonly containerName = `sandy-mcp-proxy-${randomUUID()}`;
+  private readonly hostGatewayAlias = "host.docker.internal:host-gateway";
   private readonly startupTimeoutMs: number;
   private readonly spawnImpl: typeof spawn;
   private readonly setTimeoutImpl: typeof setTimeout;
@@ -73,6 +74,8 @@ export class McpSidecarManager {
       this.options.workerNetworkName,
       "--network-alias",
       mcpProxyContainerAlias,
+      "--add-host",
+      this.hostGatewayAlias,
       "-v",
       `${oauthStateDirectory}:${sidecarOauthMountPath}`,
       this.options.sidecarImage,
