@@ -89,6 +89,28 @@ export const mcpAdminMessages = {
     `MCP server ${serverId} does not support OAuth login because it is not streamable_http.`,
   oauthAuthorizationUrlMissing: (serverId: string): string =>
     `OAuth login for ${serverId} did not provide an authorization URL.`,
+  oauthDiscoveryInvalidMetadata: (
+    serverId: string,
+    serverUrl: string,
+    issues: string[],
+    rawResponse?: { url: string; status: number; body: string },
+  ): string => {
+    const lines = [
+      `OAuth login for ${serverId} failed because ${serverUrl} returned invalid authorization metadata.`,
+      "The MCP server or its authorization server is not exposing RFC-compliant OAuth discovery data.",
+      "Validation errors:",
+      ...issues.map((issue) => `- ${issue}`),
+    ];
+
+    if (rawResponse) {
+      lines.push("Raw response:");
+      lines.push(`- URL: ${rawResponse.url}`);
+      lines.push(`- Status: ${rawResponse.status}`);
+      lines.push(rawResponse.body);
+    }
+
+    return lines.join("\n");
+  },
   unknownServer: (serverId: string): string =>
     `Unknown MCP server "${serverId}".`,
   oauthCallbackReturnedError: (error: string): string =>

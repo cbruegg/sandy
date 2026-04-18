@@ -1,0 +1,36 @@
+import { test } from "bun:test";
+import assert from "node:assert/strict";
+import { z } from "zod";
+import { normalizeOAuthLoginError } from "./admin-service.js";
+
+test("normalizeOAuthLoginError rewrites Zod discovery errors into a targeted message", () => {
+  const result = z.object({
+    issuer: z.string(),
+    authorization_endpoint: z.string().url(),
+  }).safeParse({
+    authorization_endpoint: "not-a-url",
+  });
+
+  assert.equal(result.success, false);
+  if (result.success) {
+    return;
+  }
+
+  const error = normalizeOAuthLoginError("homeassistant", "http://raspinas:8123/api/mcp", result.error, {
+    url: "http://raspinas:8123/.well-known/oauth-authorization-server",
+    status: 200,
+    body: "{\"authorization_endpoint\":\"/auth/authorize\"}",
+  });
+  assert.match(error.message, /OAuth login for homeassistant failed/);
+  assert.match(error.message, /http:\/\/raspinas:8123\/api\/mcp/);
+  assert.match(error.message, /issuer: Invalid input/);
+  assert.match(error.message, /authorization_endpoint: Invalid URL/);
+  assert.match(error.message, /Raw response:/);
+  assert.match(error.message, /Status: 200/);
+  assert.match(error.message, /"authorization_endpoint":"\/auth\/authorize"/);
+});
+
+test("normalizeOAuthLoginError preserves non-Zod errors", () => {
+  const original = new Error("boom");
+  assert.equal(normalizeOAuthLoginError("homeassistant", "http://raspinas:8123/api/mcp", original), original);
+});

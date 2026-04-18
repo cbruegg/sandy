@@ -1,6 +1,8 @@
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
+import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
+import { ZodError } from "zod";
 import type { McpServerConfig } from "../config.js";
 import { mcpAdminMessages } from "../messages.js";
 import { SandyOAuthClientProvider } from "./oauth-provider.js";
@@ -11,6 +13,12 @@ type McpServerStatus = {
   transport: McpServerConfig["transport"];
   url: string;
   oauthConfigured: boolean;
+};
+
+type RecordedOAuthResponse = {
+  url: string;
+  status: number;
+  body: string;
 };
 
 export class SandyMcpAdminService {
@@ -54,10 +62,18 @@ export class SandyMcpAdminService {
       authorizationUrl = url;
     });
     const scope = config.oauthScopes.length > 0 ? config.oauthScopes.join(" ") : undefined;
-    const result = await auth(provider, {
-      serverUrl: config.url,
-      scope,
-    });
+    const oauthResponseRecorder = createOAuthResponseRecorder();
+    let result: Awaited<ReturnType<typeof auth>>;
+    try {
+      result = await auth(provider, {
+        serverUrl: config.url,
+        scope,
+        fetchFn: oauthResponseRecorder.fetchFn,
+      });
+    } catch (error) {
+      await callback.close();
+      throw normalizeOAuthLoginError(serverId, config.url, error, oauthResponseRecorder.lastResponse);
+    }
 
     if (result === "AUTHORIZED") {
       await callback.close();
@@ -73,11 +89,16 @@ export class SandyMcpAdminService {
     console.log(String(authorizationUrl));
     const authorizationCode = await callback.waitForCode();
     await callback.close();
-    await auth(provider, {
-      serverUrl: config.url,
-      scope,
-      authorizationCode,
-    });
+    try {
+      await auth(provider, {
+        serverUrl: config.url,
+        scope,
+        authorizationCode,
+        fetchFn: oauthResponseRecorder.fetchFn,
+      });
+    } catch (error) {
+      throw normalizeOAuthLoginError(serverId, config.url, error, oauthResponseRecorder.lastResponse);
+    }
   }
 
   async logout(serverId: string): Promise<void> {
@@ -106,6 +127,65 @@ export class SandyMcpAdminService {
       interactive,
     });
   }
+}
+
+export function normalizeOAuthLoginError(
+  serverId: string,
+  serverUrl: string,
+  error: unknown,
+  rawResponse?: RecordedOAuthResponse,
+): Error {
+  if (error instanceof ZodError) {
+    const issues = error.issues.map((issue) => {
+      const path = issue.path.length > 0 ? issue.path.join(".") : "<root>";
+      return `${path}: ${issue.message}`;
+    });
+    return new Error(mcpAdminMessages.oauthDiscoveryInvalidMetadata(serverId, serverUrl, issues, rawResponse));
+  }
+
+  return error instanceof Error ? error : new Error(String(error));
+}
+
+function createOAuthResponseRecorder(): {
+  fetchFn: FetchLike;
+  lastResponse?: RecordedOAuthResponse;
+} {
+  const state: {
+    fetchFn: FetchLike;
+    lastResponse?: RecordedOAuthResponse;
+  } = {
+    fetchFn: async (input, init) => {
+      const response = await fetch(input, init);
+      const url = typeof input === "string" ? input : String(input);
+      if (shouldRecordOAuthResponse(url, response)) {
+        const body = truncateResponseBody(await response.clone().text());
+        state.lastResponse = {
+          url,
+          status: response.status,
+          body,
+        };
+      }
+      return response;
+    },
+  };
+  return state;
+}
+
+function shouldRecordOAuthResponse(url: string, response: Response): boolean {
+  if (url.includes("/.well-known/")) {
+    return true;
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  return contentType.includes("json");
+}
+
+function truncateResponseBody(body: string, limit = 4000): string {
+  if (body.length <= limit) {
+    return body;
+  }
+
+  return `${body.slice(0, limit)}\n... [truncated]`;
 }
 
 async function startLoopbackCallbackServer(): Promise<{
