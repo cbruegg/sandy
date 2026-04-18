@@ -1,24 +1,23 @@
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
-import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { ZodError } from "zod";
 import type { McpServerConfig } from "../config.js";
 import { mcpAdminMessages } from "../messages.js";
 import { SandyOAuthClientProvider } from "./oauth-provider.js";
 import { buildHostOauthStateDirectory } from "./oauth-paths.js";
+import {
+  buildRedirectOriginClientId,
+  createOAuthCompatibilityFetch,
+  type RecordedOAuthResponse,
+  shouldUseIndieAuthFallbackClientId,
+} from "./oauth-compatibility.js";
 
 type McpServerStatus = {
   serverId: string;
   transport: McpServerConfig["transport"];
   url: string;
   oauthConfigured: boolean;
-};
-
-type RecordedOAuthResponse = {
-  url: string;
-  status: number;
-  body: string;
 };
 
 export class SandyMcpAdminService {
@@ -58,21 +57,46 @@ export class SandyMcpAdminService {
 
     const callback = await startLoopbackCallbackServer();
     let authorizationUrl: URL | null = null;
-    const provider = this.createProvider(serverId, true, callback.redirectUrl, (url) => {
+    const oauthCompatibility = createOAuthCompatibilityFetch();
+    let provider = this.createProvider(serverId, true, callback.redirectUrl, (url) => {
       authorizationUrl = url;
     });
     const scope = config.oauthScopes.length > 0 ? config.oauthScopes.join(" ") : undefined;
-    const oauthResponseRecorder = createOAuthResponseRecorder();
     let result: Awaited<ReturnType<typeof auth>>;
     try {
       result = await auth(provider, {
         serverUrl: config.url,
         scope,
-        fetchFn: oauthResponseRecorder.fetchFn,
+        fetchFn: oauthCompatibility.fetchFn,
       });
     } catch (error) {
+      if (shouldUseIndieAuthFallbackClientId(error)) {
+        // Retry with a client ID derived from the loopback redirect origin for
+        // servers that do not support dynamic client registration and instead
+        // key the client identity off the redirect URL base.
+        provider = this.createProvider(
+          serverId,
+          true,
+          callback.redirectUrl,
+          (url) => {
+            authorizationUrl = url;
+          },
+          buildRedirectOriginClientId(callback.redirectUrl),
+        );
+        result = await auth(provider, {
+          serverUrl: config.url,
+          scope,
+          fetchFn: oauthCompatibility.fetchFn,
+        });
+      } else {
+        await callback.close();
+        throw normalizeOAuthLoginError(serverId, config.url, error, oauthCompatibility.lastResponse);
+      }
+    }
+
+    if (result === undefined) {
       await callback.close();
-      throw normalizeOAuthLoginError(serverId, config.url, error, oauthResponseRecorder.lastResponse);
+      throw new Error("OAuth login did not produce a result.");
     }
 
     if (result === "AUTHORIZED") {
@@ -94,10 +118,10 @@ export class SandyMcpAdminService {
         serverUrl: config.url,
         scope,
         authorizationCode,
-        fetchFn: oauthResponseRecorder.fetchFn,
+        fetchFn: oauthCompatibility.fetchFn,
       });
     } catch (error) {
-      throw normalizeOAuthLoginError(serverId, config.url, error, oauthResponseRecorder.lastResponse);
+      throw normalizeOAuthLoginError(serverId, config.url, error, oauthCompatibility.lastResponse);
     }
   }
 
@@ -119,12 +143,14 @@ export class SandyMcpAdminService {
     interactive: boolean,
     redirectUrl?: string,
     onRedirect?: (url: URL) => void,
+    clientId?: string,
   ): SandyOAuthClientProvider {
     return new SandyOAuthClientProvider({
       stateFilePath: join(buildHostOauthStateDirectory(this.configDirectory), `${serverId}.json`),
       redirectUrl,
       onRedirect,
       interactive,
+      clientId,
     });
   }
 }
@@ -145,49 +171,6 @@ export function normalizeOAuthLoginError(
 
   return error instanceof Error ? error : new Error(String(error));
 }
-
-function createOAuthResponseRecorder(): {
-  fetchFn: FetchLike;
-  lastResponse?: RecordedOAuthResponse;
-} {
-  const state: {
-    fetchFn: FetchLike;
-    lastResponse?: RecordedOAuthResponse;
-  } = {
-    fetchFn: async (input, init) => {
-      const response = await fetch(input, init);
-      const url = typeof input === "string" ? input : String(input);
-      if (shouldRecordOAuthResponse(url, response)) {
-        const body = truncateResponseBody(await response.clone().text());
-        state.lastResponse = {
-          url,
-          status: response.status,
-          body,
-        };
-      }
-      return response;
-    },
-  };
-  return state;
-}
-
-function shouldRecordOAuthResponse(url: string, response: Response): boolean {
-  if (url.includes("/.well-known/")) {
-    return true;
-  }
-
-  const contentType = response.headers.get("content-type") ?? "";
-  return contentType.includes("json");
-}
-
-function truncateResponseBody(body: string, limit = 4000): string {
-  if (body.length <= limit) {
-    return body;
-  }
-
-  return `${body.slice(0, limit)}\n... [truncated]`;
-}
-
 async function startLoopbackCallbackServer(): Promise<{
   redirectUrl: string;
   waitForCode: () => Promise<string>;

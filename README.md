@@ -107,6 +107,10 @@ Codex auth behavior:
 - If both are present, Sandy prefers the Codex ChatGPT auth file and does not pass the API key.
 - OAuth for upstream MCP servers is handled on the host through the Sandy CLI, not inside Telegram chats.
 
+MCP OAuth behavior:
+
+- `mcp.servers.<name>.oauth_scopes` optionally sets OAuth scopes to request during `sandy mcp login <name>`.
+
 Update behavior:
 
 - `updates.mode` defaults to `"disabled"`.

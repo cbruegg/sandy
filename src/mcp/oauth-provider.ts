@@ -22,6 +22,7 @@ type SandyOAuthClientProviderOptions = {
   redirectUrl?: string | URL;
   onRedirect?: (authorizationUrl: URL) => void | Promise<void>;
   interactive: boolean;
+  clientId?: string;
 };
 
 export class SandyOAuthClientProvider implements OAuthClientProvider {
@@ -48,7 +49,25 @@ export class SandyOAuthClientProvider implements OAuthClientProvider {
   }
 
   async clientInformation(): Promise<OAuthClientInformationMixed | undefined> {
-    return (await this.loadState()).clientInformation;
+    const state = await this.loadState();
+    const clientId = this.options.clientId;
+    if (!clientId) {
+      return state.clientInformation;
+    }
+
+    // When Sandy derives a per-login client ID from the callback origin, treat
+    // it as the authoritative public client identity for this state file
+    // instead of attempting dynamic registration first.
+    if (state.clientInformation?.client_id === clientId) {
+      return state.clientInformation;
+    }
+
+    const clientInformation: OAuthClientInformationMixed = {
+      client_id: clientId,
+    };
+    state.clientInformation = clientInformation;
+    await this.saveState(state);
+    return clientInformation;
   }
 
   async saveClientInformation(clientInformation: OAuthClientInformationMixed): Promise<void> {
