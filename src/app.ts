@@ -72,7 +72,7 @@ export async function startApp(): Promise<void> {
     launchImage: initialWorkerImage,
   });
 
-  const mainAgent = new CodexMainAgentController(codex, config.skills);
+  const mainAgent = new CodexMainAgentController(codex, config.skills, Object.keys(config.mcpServers));
 
   const mcpProxyAccess = new SandyMcpProxyAccess();
   const mcpEnabled = Object.keys(config.mcpServers).length > 0;
