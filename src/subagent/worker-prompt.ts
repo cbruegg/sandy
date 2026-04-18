@@ -17,7 +17,7 @@ export function buildInitialTaskInputWithCapabilities(
     `Your shared workspace is mounted at ${sharedWorkspaceMountPath}.`,
     `Use ${sharedWorkspaceMountPath} for files that should remain available to the host after your task finishes.`,
     `User-attached files are copied into ${sharedWorkspaceMountPath} before you are told about them.`,
-    "Inside this container you may use the filesystem and installed tools freely.",
+    "Inside this container you may use the filesystem, internet, and installed tools freely.",
     `If you need the host to copy files into or out of ${sharedWorkspaceMountPath}, do not ask the user directly.`,
     "Always reply in the language of the user's prompt.",
     ...buildWorkerProtocolInstructions(),
