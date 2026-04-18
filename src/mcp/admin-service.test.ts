@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
-import { normalizeOAuthLoginError, parseAuthorizationCodeInput } from "./admin-service.js";
+import { normalizeOAuthLoginError, parseAuthorizationCodeInput, resolveLoginServerUrl } from "./admin-service.js";
 
 test("normalizeOAuthLoginError rewrites Zod discovery errors into a targeted message", () => {
   const result = z.object({
@@ -61,5 +61,16 @@ test("parseAuthorizationCodeInput surfaces OAuth callback errors", () => {
   assert.throws(
     () => parseAuthorizationCodeInput("http://127.0.0.1:45221/callback?error=access_denied"),
     /OAuth callback returned error: access_denied/,
+  );
+});
+
+test("resolveLoginServerUrl rewrites host.docker.internal for host-side login", () => {
+  assert.equal(
+    resolveLoginServerUrl("http://host.docker.internal:8123/api/mcp"),
+    "http://localhost:8123/api/mcp",
+  );
+  assert.equal(
+    resolveLoginServerUrl("https://example.com/api/mcp"),
+    "https://example.com/api/mcp",
   );
 });

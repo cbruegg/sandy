@@ -9,8 +9,10 @@ import {
   type OAuthClientProvider,
   type OAuthDiscoveryState,
 } from "@modelcontextprotocol/sdk/client/auth.js";
+import { rewriteUrlOrigin } from "./oauth-compatibility.js";
 
 type SandyOAuthState = {
+  configuredServerUrl?: string;
   clientInformation?: OAuthClientInformationMixed;
   tokens?: OAuthTokens;
   codeVerifier?: string;
@@ -43,6 +45,16 @@ type SandyOAuthClientProviderOptions = {
    * client identity off a pre-derived value instead of dynamic registration.
    */
   clientId?: string;
+  /**
+   * Canonical MCP server URL from config.toml. Persisted OAuth state is bound
+   * to this URL and is considered stale if the configured URL changes.
+   */
+  configuredServerUrl: string;
+  /**
+   * Optional host-local URL used only during `sandy mcp login` when the
+   * canonical configured URL is not directly resolvable from the host.
+   */
+  loginServerUrl?: string;
 };
 
 export class SandyOAuthClientProvider implements OAuthClientProvider {
@@ -129,7 +141,7 @@ export class SandyOAuthClientProvider implements OAuthClientProvider {
 
   async saveDiscoveryState(discoveryState: OAuthDiscoveryState): Promise<void> {
     const state = await this.loadState();
-    state.discoveryState = discoveryState;
+    state.discoveryState = this.normalizeDiscoveryState(discoveryState);
     await this.saveState(state);
   }
 
@@ -190,9 +202,16 @@ export class SandyOAuthClientProvider implements OAuthClientProvider {
     try {
       const raw = await readFile(this.options.stateFilePath, "utf8");
       this.cache = JSON.parse(raw) as SandyOAuthState;
+      if (this.cache.configuredServerUrl !== this.options.configuredServerUrl) {
+        this.cache = {
+          configuredServerUrl: this.options.configuredServerUrl,
+        };
+      }
     } catch (error) {
       if (isMissingPathError(error)) {
-        this.cache = {};
+        this.cache = {
+          configuredServerUrl: this.options.configuredServerUrl,
+        };
       } else {
         throw error;
       }
@@ -206,9 +225,63 @@ export class SandyOAuthClientProvider implements OAuthClientProvider {
   }
 
   private async saveState(state: SandyOAuthState): Promise<void> {
-    this.cache = state;
+    this.cache = {
+      ...state,
+      configuredServerUrl: this.options.configuredServerUrl,
+    };
     await mkdir(dirname(this.options.stateFilePath), { recursive: true });
-    await writeFile(this.options.stateFilePath, JSON.stringify(state, null, 2), "utf8");
+    await writeFile(this.options.stateFilePath, JSON.stringify(this.cache, null, 2), "utf8");
+  }
+
+  private normalizeDiscoveryState(discoveryState: OAuthDiscoveryState): OAuthDiscoveryState {
+    const loginServerUrl = this.options.loginServerUrl;
+    if (!loginServerUrl || loginServerUrl === this.options.configuredServerUrl) {
+      return discoveryState;
+    }
+
+    const normalized = structuredClone(discoveryState) as OAuthDiscoveryState & {
+      resourceMetadata?: {
+        resource?: string;
+      };
+      authorizationServerMetadata?: Record<string, unknown>;
+    };
+
+    normalized.authorizationServerUrl = rewriteUrlOrigin(
+      normalized.authorizationServerUrl,
+      loginServerUrl,
+      this.options.configuredServerUrl,
+    );
+    if (normalized.resourceMetadataUrl) {
+      normalized.resourceMetadataUrl = rewriteUrlOrigin(
+        normalized.resourceMetadataUrl,
+        loginServerUrl,
+        this.options.configuredServerUrl,
+      );
+    }
+    if (normalized.resourceMetadata?.resource) {
+      normalized.resourceMetadata.resource = rewriteUrlOrigin(
+        normalized.resourceMetadata.resource,
+        loginServerUrl,
+        this.options.configuredServerUrl,
+      );
+    }
+    if (normalized.authorizationServerMetadata) {
+      for (const [key, value] of Object.entries(normalized.authorizationServerMetadata)) {
+        if (typeof value !== "string") {
+          continue;
+        }
+        if (!URL.canParse(value)) {
+          continue;
+        }
+        normalized.authorizationServerMetadata[key] = rewriteUrlOrigin(
+          value,
+          loginServerUrl,
+          this.options.configuredServerUrl,
+        );
+      }
+    }
+
+    return normalized;
   }
 }
 

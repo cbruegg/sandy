@@ -95,6 +95,18 @@ export function buildRedirectOriginClientId(redirectUrl: string | URL): string {
   return new URL(redirectUrl).origin;
 }
 
+export function rewriteUrlOrigin(url: string, fromServerUrl: string | URL, toServerUrl: string | URL): string {
+  const parsedUrl = new URL(url);
+  const fromOrigin = new URL(fromServerUrl).origin;
+  if (parsedUrl.origin !== fromOrigin) {
+    return url;
+  }
+
+  const toOrigin = new URL(toServerUrl).origin;
+  const rewritten = new URL(parsedUrl.pathname + parsedUrl.search + parsedUrl.hash, toOrigin);
+  return rewritten.href;
+}
+
 function shouldRecordOAuthResponse(url: string, response: Response): boolean {
   if (url.includes("/.well-known/")) {
     return true;

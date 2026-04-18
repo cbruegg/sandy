@@ -55,18 +55,19 @@ export class SandyMcpAdminService {
     if (config.transport !== "streamable_http") {
       throw new Error(mcpAdminMessages.oauthLoginUnsupported(serverId));
     }
+    const loginServerUrl = resolveLoginServerUrl(config.url);
 
     const callback = await startLoopbackCallbackServer();
     let authorizationUrl: URL | null = null;
     const oauthCompatibility = createOAuthCompatibilityFetch();
     let provider = this.createProvider(serverId, true, callback.redirectUrl, (url) => {
       authorizationUrl = url;
-    });
+    }, undefined, config.url, loginServerUrl);
     const scope = config.oauthScopes.length > 0 ? config.oauthScopes.join(" ") : undefined;
     let result: Awaited<ReturnType<typeof auth>>;
     try {
       result = await auth(provider, {
-        serverUrl: config.url,
+        serverUrl: loginServerUrl,
         scope,
         fetchFn: oauthCompatibility.fetchFn,
       });
@@ -83,9 +84,11 @@ export class SandyMcpAdminService {
             authorizationUrl = url;
           },
           buildRedirectOriginClientId(callback.redirectUrl),
+          config.url,
+          loginServerUrl,
         );
         result = await auth(provider, {
-          serverUrl: config.url,
+          serverUrl: loginServerUrl,
           scope,
           fetchFn: oauthCompatibility.fetchFn,
         });
@@ -129,7 +132,7 @@ export class SandyMcpAdminService {
     }
     try {
       await auth(provider, {
-        serverUrl: config.url,
+        serverUrl: loginServerUrl,
         scope,
         authorizationCode,
         fetchFn: oauthCompatibility.fetchFn,
@@ -158,6 +161,8 @@ export class SandyMcpAdminService {
     redirectUrl?: string,
     onRedirect?: (url: URL) => void,
     clientId?: string,
+    configuredServerUrl?: string,
+    loginServerUrl?: string,
   ): SandyOAuthClientProvider {
     return new SandyOAuthClientProvider({
       stateFilePath: join(buildHostOauthStateDirectory(this.configDirectory), `${serverId}.json`),
@@ -165,8 +170,20 @@ export class SandyMcpAdminService {
       onRedirect,
       interactive,
       clientId,
+      configuredServerUrl: configuredServerUrl ?? this.requireServer(serverId).url,
+      loginServerUrl,
     });
   }
+}
+
+export function resolveLoginServerUrl(configuredServerUrl: string): string {
+  const parsed = new URL(configuredServerUrl);
+  if (parsed.hostname !== "host.docker.internal") {
+    return configuredServerUrl;
+  }
+
+  parsed.hostname = "localhost";
+  return parsed.href;
 }
 
 export function normalizeOAuthLoginError(

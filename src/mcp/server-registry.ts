@@ -71,6 +71,7 @@ export class McpServerRegistryImpl implements McpServerRegistry {
     const provider = new SandyOAuthClientProvider({
       stateFilePath: join(this.oauthStateDirectory, `${serverId}.json`),
       interactive: false,
+      configuredServerUrl: config.url,
     });
     return new StreamableHTTPClientTransport(new URL(config.url), {
       authProvider: provider,
