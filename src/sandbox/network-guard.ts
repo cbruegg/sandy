@@ -23,6 +23,15 @@ type LaunchNetworkGuardOptions = {
   cleanupContainer: (containerName: string) => Promise<void>;
 };
 
+/**
+ * Starts a per-task network guard that owns the worker's network namespace.
+ *
+ * The guard installs egress rules that still allow normal internet access but
+ * block connections to local/private network ranges unless Sandy explicitly
+ * allowlists them. The worker then joins this container's namespace instead of
+ * owning its own network stack, which prevents a rogue root worker from
+ * reconfiguring networking and reaching other devices on the local network.
+ */
 export async function launchNetworkGuardContainer(
   options: LaunchNetworkGuardOptions,
 ): Promise<StartedNetworkGuard | null> {

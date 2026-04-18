@@ -181,6 +181,8 @@ export class DockerSandboxRunner implements SandboxRunner {
     }
 
     if (networkGuard) {
+      // Share the guard's namespace so the worker gets internet access through
+      // the guard's firewall, but cannot talk to the local network directly.
       dockerArgs.push(
         "--network",
         `container:${networkGuard.containerName}`,
