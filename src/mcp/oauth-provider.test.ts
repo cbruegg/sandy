@@ -118,7 +118,7 @@ test("SandyOAuthClientProvider invalidates saved state when the configured serve
   );
 });
 
-test("SandyOAuthClientProvider rewrites saved discovery URLs back to the configured server URL", async () => {
+test("SandyOAuthClientProvider keeps interactive discovery URLs host-local until login completes", async () => {
   const stateFilePath = join(await mkdtemp(join(tmpdir(), "sandy-oauth-provider-")), "homeassistant.json");
   const provider = new SandyOAuthClientProvider({
     stateFilePath,
@@ -138,6 +138,46 @@ test("SandyOAuthClientProvider rewrites saved discovery URLs back to the configu
       revocation_endpoint: "http://localhost:8123/auth/revoke",
     },
   });
+
+  const persistedState = JSON.parse(await readFile(stateFilePath, "utf8")) as {
+    discoveryState: {
+      authorizationServerUrl: string;
+      authorizationServerMetadata: {
+        issuer: string;
+        token_endpoint: string;
+      };
+    };
+  };
+  assert.equal(persistedState.discoveryState.authorizationServerUrl, "http://localhost:8123/");
+  assert.equal(persistedState.discoveryState.authorizationServerMetadata.issuer, "http://localhost:8123/");
+  assert.equal(
+    persistedState.discoveryState.authorizationServerMetadata.token_endpoint,
+    "http://localhost:8123/auth/token",
+  );
+});
+
+test("SandyOAuthClientProvider canonicalizes saved discovery URLs for runtime use after login", async () => {
+  const stateFilePath = join(await mkdtemp(join(tmpdir(), "sandy-oauth-provider-")), "homeassistant.json");
+  const provider = new SandyOAuthClientProvider({
+    stateFilePath,
+    interactive: true,
+    redirectUrl: "http://127.0.0.1:60399/callback",
+    configuredServerUrl: "http://host.docker.internal:8123/api/mcp",
+    loginServerUrl: "http://localhost:8123/api/mcp",
+  });
+
+  await provider.saveDiscoveryState({
+    authorizationServerUrl: "http://localhost:8123/",
+    authorizationServerMetadata: {
+      issuer: "http://localhost:8123/",
+      authorization_endpoint: "http://localhost:8123/auth/authorize",
+      token_endpoint: "http://localhost:8123/auth/token",
+      response_types_supported: ["code"],
+      revocation_endpoint: "http://localhost:8123/auth/revoke",
+    },
+  });
+
+  await provider.canonicalizeForConfiguredServer();
 
   const persistedState = JSON.parse(await readFile(stateFilePath, "utf8")) as {
     discoveryState: {

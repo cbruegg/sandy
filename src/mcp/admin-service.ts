@@ -55,6 +55,11 @@ export class SandyMcpAdminService {
     if (config.transport !== "streamable_http") {
       throw new Error(mcpAdminMessages.oauthLoginUnsupported(serverId));
     }
+    // `config.url` is the canonical runtime URL, but host-side login may need
+    // a different hostname to reach the same server. The classic case is a
+    // host-local service configured as `host.docker.internal` for the sidecar:
+    // that name works in Docker, but not when `sandy mcp login` runs on the
+    // host itself.
     const loginServerUrl = resolveLoginServerUrl(config.url);
 
     const callback = await startLoopbackCallbackServer();
@@ -137,6 +142,10 @@ export class SandyMcpAdminService {
         authorizationCode,
         fetchFn: oauthCompatibility.fetchFn,
       });
+      // Only after the full host-side OAuth flow succeeds do we rewrite the
+      // persisted discovery metadata back to the canonical configured URL used
+      // by the runtime sidecar.
+      await provider.canonicalizeForConfiguredServer();
     } catch (error) {
       throw normalizeOAuthLoginError(serverId, config.url, error, oauthCompatibility.lastResponse);
     }
@@ -182,6 +191,9 @@ export function resolveLoginServerUrl(configuredServerUrl: string): string {
     return configuredServerUrl;
   }
 
+  // `host.docker.internal` is a runtime/container-facing hostname. When the
+  // host CLI performs OAuth login against the same logical server, prefer the
+  // equivalent host-local address instead.
   parsed.hostname = "localhost";
   return parsed.href;
 }

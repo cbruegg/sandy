@@ -96,6 +96,14 @@ export function buildRedirectOriginClientId(redirectUrl: string | URL): string {
 }
 
 export function rewriteUrlOrigin(url: string, fromServerUrl: string | URL, toServerUrl: string | URL): string {
+  // Discovery metadata is often rooted at the same origin as the configured
+  // MCP server URL. Sandy uses this helper to swap between two equivalent
+  // views of the same server, for example:
+  // - host-side login:   http://localhost:8123/...
+  // - sidecar runtime:   http://host.docker.internal:8123/...
+  //
+  // Only URLs that exactly match the source origin are rewritten; anything on
+  // a different origin is left untouched.
   const parsedUrl = new URL(url);
   const fromOrigin = new URL(fromServerUrl).origin;
   if (parsedUrl.origin !== fromOrigin) {

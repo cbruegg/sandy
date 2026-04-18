@@ -12,6 +12,14 @@ import {
 import { rewriteUrlOrigin } from "./oauth-compatibility.js";
 
 type SandyOAuthState = {
+  /**
+   * Canonical URL from config.toml at the time the user last logged in.
+   *
+   * OAuth discovery and tokens are treated as bound to this exact configured
+   * server URL. If the config changes later, Sandy intentionally discards the
+   * cached state and requires a fresh login instead of trying to guess whether
+   * the old discovery metadata and refresh endpoints are still valid.
+   */
   configuredServerUrl?: string;
   clientInformation?: OAuthClientInformationMixed;
   tokens?: OAuthTokens;
@@ -141,7 +149,11 @@ export class SandyOAuthClientProvider implements OAuthClientProvider {
 
   async saveDiscoveryState(discoveryState: OAuthDiscoveryState): Promise<void> {
     const state = await this.loadState();
-    state.discoveryState = this.normalizeDiscoveryState(discoveryState);
+    // During `sandy mcp login`, discovery must remain usable from the host for
+    // the full OAuth flow, including the final authorization-code exchange.
+    // That means we persist the host-local view here as-is and only rewrite it
+    // to the canonical configured URL after login succeeds.
+    state.discoveryState = discoveryState;
     await this.saveState(state);
   }
 
@@ -194,6 +206,21 @@ export class SandyOAuthClientProvider implements OAuthClientProvider {
     await rm(this.options.stateFilePath, { force: true });
   }
 
+  async canonicalizeForConfiguredServer(): Promise<void> {
+    const state = await this.loadState();
+    if (!state.discoveryState) {
+      return;
+    }
+
+    // Login may have used a host-only alias such as `localhost` for a server
+    // that is configured canonically as `host.docker.internal` for runtime use
+    // inside the MCP sidecar. Once interactive login is complete, rewrite all
+    // saved discovery endpoints back to the configured URL so later runtime
+    // refresh/token requests use the sidecar-reachable hostname.
+    state.discoveryState = this.normalizeDiscoveryState(state.discoveryState);
+    await this.saveState(state);
+  }
+
   private async loadState(): Promise<SandyOAuthState> {
     if (this.cache) {
       return this.cache;
@@ -203,6 +230,9 @@ export class SandyOAuthClientProvider implements OAuthClientProvider {
       const raw = await readFile(this.options.stateFilePath, "utf8");
       this.cache = JSON.parse(raw) as SandyOAuthState;
       if (this.cache.configuredServerUrl !== this.options.configuredServerUrl) {
+        // A URL change is treated as a different server identity/reachability
+        // context. This avoids brittle partial rewrites of old OAuth metadata
+        // and forces the user to run `sandy mcp login` again for the new URL.
         this.cache = {
           configuredServerUrl: this.options.configuredServerUrl,
         };
@@ -239,6 +269,17 @@ export class SandyOAuthClientProvider implements OAuthClientProvider {
       return discoveryState;
     }
 
+    // The provider stores one logical server identity:
+    // - `loginServerUrl`: only used from the host during `sandy mcp login`
+    // - `configuredServerUrl`: canonical runtime URL from config.toml
+    //
+    // For host-local services on Linux, these can differ:
+    // - login:    `http://localhost:8123/...`
+    // - runtime:  `http://host.docker.internal:8123/...`
+    //
+    // After login succeeds, we rewrite any discovered OAuth endpoints from the
+    // host-local origin back to the configured runtime origin so the sidecar
+    // can later refresh tokens and talk to the same logical server.
     const normalized = structuredClone(discoveryState) as OAuthDiscoveryState & {
       resourceMetadata?: {
         resource?: string;
