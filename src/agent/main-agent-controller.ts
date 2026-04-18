@@ -32,12 +32,14 @@ const MAX_DECISION_VALIDATION_ATTEMPTS = 3;
 export class CodexMainAgentController implements MainAgentController {
   private readonly codex: CodexClient;
   private readonly skills: SkillMetadata[];
+  private readonly workerMcpServerIds: string[];
   private readonly threads = new Map<string, MainAgentThread>();
   private readonly threadDirectories = new Map<string, string>();
 
-  constructor(codex: CodexClient, skills: SkillMetadata[] = []) {
+  constructor(codex: CodexClient, skills: SkillMetadata[] = [], workerMcpServerIds: string[] = []) {
     this.codex = codex;
     this.skills = skills;
+    this.workerMcpServerIds = [...workerMcpServerIds].sort();
   }
 
   async decide(context: DecideContext): Promise<MainAgentDecision> {
@@ -54,6 +56,7 @@ export class CodexMainAgentController implements MainAgentController {
       newVisibleEntries: context.newVisibleEntries,
       isInitialTurn,
       skills: this.skills,
+      workerMcpServerIds: this.workerMcpServerIds,
     });
     const decision = await this.runValidatedDecision(thread, prompt, context.chatId);
     logger.info("main_agent.decision_received", {
@@ -153,6 +156,7 @@ export function buildMainAgentPrompt(input: {
   channelFormatting: DecideContext["channelFormatting"];
   isInitialTurn: boolean;
   skills: SkillMetadata[];
+  workerMcpServerIds: string[];
 }): string {
   const intro = input.isInitialTurn
     ? [
@@ -177,6 +181,14 @@ export function buildMainAgentPrompt(input: {
       ]
     : [];
 
+  const workerMcpSection = input.isInitialTurn && input.workerMcpServerIds.length > 0
+    ? [
+        "",
+        "Configured MCP servers available to sub-agents:",
+        ...input.workerMcpServerIds.map((serverId) => `- ${serverId}`),
+      ]
+    : [];
+
   const skillDecisionRules = input.isInitialTurn && input.skills.length > 0
     ? [
         "- You know configured skills only by the name and description listed above. Do not assume any other skill content.",
@@ -188,6 +200,7 @@ export function buildMainAgentPrompt(input: {
   return [
     ...intro,
     ...configuredSkillsSection,
+    ...workerMcpSection,
     "",
     "Required JSON schema:",
     JSON.stringify(mainAgentDecisionPromptSchema, null, 2),

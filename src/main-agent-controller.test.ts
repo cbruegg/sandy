@@ -94,6 +94,7 @@ test("buildMainAgentPrompt includes only the new visible entries for incremental
     channelFormatting: testFormatting,
     isInitialTurn: true,
     skills: [],
+    workerMcpServerIds: [],
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["follow-up"]).newVisibleEntries,
@@ -101,6 +102,7 @@ test("buildMainAgentPrompt includes only the new visible entries for incremental
     channelFormatting: testFormatting,
     isInitialTurn: false,
     skills: [],
+    workerMcpServerIds: [],
   });
 
   assert.match(initialPrompt, /Visible chat entries for this first decision:/);
@@ -134,6 +136,7 @@ test("buildMainAgentPrompt includes the precise decision schema", () => {
     channelFormatting: testFormatting,
     isInitialTurn: true,
     skills: [],
+    workerMcpServerIds: [],
   });
 
   assert.match(prompt, /Required JSON schema:/);
@@ -192,6 +195,7 @@ test("buildMainAgentPrompt includes configured skill metadata only on the initia
     channelFormatting: testFormatting,
     isInitialTurn: true,
     skills: testSkills,
+    workerMcpServerIds: [],
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["another request"]).newVisibleEntries,
@@ -199,6 +203,7 @@ test("buildMainAgentPrompt includes configured skill metadata only on the initia
     channelFormatting: testFormatting,
     isInitialTurn: false,
     skills: testSkills,
+    workerMcpServerIds: [],
   });
 
   assert.match(initialPrompt, /Configured skills available to sub-agents:/);
@@ -214,8 +219,46 @@ test("buildMainAgentPrompt does not include skill body text below the frontmatte
     channelFormatting: testFormatting,
     isInitialTurn: true,
     skills: testSkills,
+    workerMcpServerIds: [],
   });
 
   assert.doesNotMatch(prompt, /Use the Todoist MCP/);
   assert.doesNotMatch(prompt, /Alexa Shopping List/);
+});
+
+test("buildMainAgentPrompt includes configured MCP server ids only on the initial turn", () => {
+  const initialPrompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["check my tasks"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    isInitialTurn: true,
+    skills: [],
+    workerMcpServerIds: ["github", "todoist"],
+  });
+  const deltaPrompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["follow up"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    isInitialTurn: false,
+    skills: [],
+    workerMcpServerIds: ["github", "todoist"],
+  });
+
+  assert.match(initialPrompt, /Configured MCP servers available to sub-agents:/);
+  assert.match(initialPrompt, /- github/);
+  assert.match(initialPrompt, /- todoist/);
+  assert.doesNotMatch(deltaPrompt, /Configured MCP servers available to sub-agents:/);
+});
+
+test("buildMainAgentPrompt omits the MCP section when no servers are configured", () => {
+  const prompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    isInitialTurn: true,
+    skills: [],
+    workerMcpServerIds: [],
+  });
+
+  assert.doesNotMatch(prompt, /Configured MCP servers available to sub-agents:/);
 });

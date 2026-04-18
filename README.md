@@ -112,8 +112,6 @@ MCP OAuth behavior:
 - `mcp.servers.<name>.oauth_scopes` optionally sets OAuth scopes to request during `sandy mcp login <name>`.
 - Sandy runs upstream MCP connections from an MCP sidecar container, not from the host process directly.
 - If an MCP server runs on the same host as Sandy, use `http://host.docker.internal:<port>/...` when configuring `mcp.servers.<name>.url`.
-  - Note that in this case when running `mcp login`, Sandy will say "Open this URL to authorize \<server\>: http://host.docker.internal[...]".
-    Replace `host.docker.internal` with the actual hostname in the URL before opening it in your browser, e.g. `localhost`.
 
 Update behavior:
 
