@@ -18,10 +18,30 @@ type SandyOAuthState = {
 };
 
 type SandyOAuthClientProviderOptions = {
+  /**
+   * JSON state file used to persist OAuth discovery, client registration, PKCE,
+   * and token data for one MCP server.
+   */
   stateFilePath: string;
+  /**
+   * Loopback redirect URL for interactive authorization-code logins. Leave
+   * unset for the non-interactive MCP proxy/runtime path.
+   */
   redirectUrl?: string | URL;
+  /**
+   * Callback invoked with the authorization URL during interactive login so the
+   * caller can present or open it for the user.
+   */
   onRedirect?: (authorizationUrl: URL) => void | Promise<void>;
+  /**
+   * Whether the provider is allowed to initiate an interactive OAuth login.
+   * Runtime MCP proxy usage sets this to false and relies on persisted state.
+   */
   interactive: boolean;
+  /**
+   * Optional fixed public client ID. This is used for servers that key the
+   * client identity off a pre-derived value instead of dynamic registration.
+   */
   clientId?: string;
 };
 
@@ -136,6 +156,27 @@ export class SandyOAuthClientProvider implements OAuthClientProvider {
     await this.saveState(state);
   }
 
+  async prepareTokenRequest(scope?: string): Promise<URLSearchParams | undefined> {
+    if (!this.usesNonInteractiveRuntimeRefresh()) {
+      return undefined;
+    }
+
+    const state = await this.loadState();
+    const refreshToken = state.tokens?.refresh_token?.trim();
+    if (!refreshToken) {
+      throw new Error(`Authorization is required for this MCP server. Run "sandy mcp login <serverId>" first.`);
+    }
+
+    const params = new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+    });
+    if (scope) {
+      params.set("scope", scope);
+    }
+    return params;
+  }
+
   async logout(): Promise<void> {
     this.cache = {};
     await rm(this.options.stateFilePath, { force: true });
@@ -158,6 +199,10 @@ export class SandyOAuthClientProvider implements OAuthClientProvider {
     }
 
     return this.cache;
+  }
+
+  private usesNonInteractiveRuntimeRefresh(): boolean {
+    return !this.options.interactive && this.options.redirectUrl === undefined;
   }
 
   private async saveState(state: SandyOAuthState): Promise<void> {
