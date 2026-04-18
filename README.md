@@ -143,8 +143,6 @@ Worker network behavior:
 - In `"public_internet_only"` mode, Sandy starts a per-task network-guard container and runs the worker in that guard's network namespace. This works on Docker Desktop as well as native Linux.
 - In `"public_internet_only"` mode, workers keep normal public internet access but cannot reach local/private network ranges unless they are explicitly allowlisted in `worker.network.allow_local_cidrs`.
 - `worker.network.allow_local_cidrs` accepts only literal IP addresses and CIDR blocks.
-- Sandy automatically keeps worker access to its MCP sidecar when MCP is enabled.
-- Sandy keeps `host.docker.internal` only on the MCP sidecar container. Workers do not get direct access to it in the default restricted mode.
 - Set `worker.network.mode = "unrestricted"` only if you intentionally want workers to be able to reach local/private network addresses directly.
 
 Skills behavior:
