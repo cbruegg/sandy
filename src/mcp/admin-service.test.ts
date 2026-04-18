@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
-import { normalizeOAuthLoginError } from "./admin-service.js";
+import { normalizeOAuthLoginError, parseAuthorizationCodeInput } from "./admin-service.js";
 
 test("normalizeOAuthLoginError rewrites Zod discovery errors into a targeted message", () => {
   const result = z.object({
@@ -33,4 +33,33 @@ test("normalizeOAuthLoginError rewrites Zod discovery errors into a targeted mes
 test("normalizeOAuthLoginError preserves non-Zod errors", () => {
   const original = new Error("boom");
   assert.equal(normalizeOAuthLoginError("homeassistant", "http://raspinas:8123/api/mcp", original), original);
+});
+
+test("parseAuthorizationCodeInput accepts a raw code", () => {
+  assert.equal(parseAuthorizationCodeInput("raw-code-123"), "raw-code-123");
+});
+
+test("parseAuthorizationCodeInput extracts the code from a full callback URL", () => {
+  assert.equal(
+    parseAuthorizationCodeInput("http://127.0.0.1:45221/callback?code=abc123&state=xyz"),
+    "abc123",
+  );
+});
+
+test("parseAuthorizationCodeInput extracts the code from a pasted callback path", () => {
+  assert.equal(
+    parseAuthorizationCodeInput("/callback?code=abc123&state=xyz"),
+    "abc123",
+  );
+});
+
+test("parseAuthorizationCodeInput rejects callback input without a code", () => {
+  assert.equal(parseAuthorizationCodeInput("http://127.0.0.1:45221/callback?state=xyz"), null);
+});
+
+test("parseAuthorizationCodeInput surfaces OAuth callback errors", () => {
+  assert.throws(
+    () => parseAuthorizationCodeInput("http://127.0.0.1:45221/callback?error=access_denied"),
+    /OAuth callback returned error: access_denied/,
+  );
 });

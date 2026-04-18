@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { join } from "node:path";
+import { createInterface } from "node:readline";
 import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
 import { ZodError } from "zod";
 import type { McpServerConfig } from "../config.js";
@@ -111,8 +112,21 @@ export class SandyMcpAdminService {
 
     console.log(mcpAdminMessages.oauthLoginOpenUrl(serverId));
     console.log(String(authorizationUrl));
-    const authorizationCode = await callback.waitForCode();
-    await callback.close();
+    if (supportsManualOAuthInput()) {
+      console.log(mcpAdminMessages.oauthLoginPastePrompt());
+    }
+
+    const manualCodeInput = createManualAuthorizationCodeInput();
+    let authorizationCode: string;
+    try {
+      authorizationCode = await Promise.race([
+        callback.waitForCode(),
+        manualCodeInput.waitForCode(),
+      ]);
+    } finally {
+      await callback.close();
+      manualCodeInput.close();
+    }
     try {
       await auth(provider, {
         serverUrl: config.url,
@@ -171,6 +185,7 @@ export function normalizeOAuthLoginError(
 
   return error instanceof Error ? error : new Error(String(error));
 }
+
 async function startLoopbackCallbackServer(): Promise<{
   redirectUrl: string;
   waitForCode: () => Promise<string>;
@@ -232,4 +247,100 @@ async function startLoopbackCallbackServer(): Promise<{
       });
     }),
   };
+}
+
+type ManualAuthorizationCodeInput = {
+  waitForCode: () => Promise<string>;
+  close: () => void;
+};
+
+function createManualAuthorizationCodeInput(): ManualAuthorizationCodeInput {
+  if (!supportsManualOAuthInput()) {
+    return {
+      waitForCode: () => new Promise<string>(() => {}),
+      close: () => undefined,
+    };
+  }
+
+  const readline = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  let settled = false;
+
+  const waitForCode = new Promise<string>((resolve, reject) => {
+    const ask = () => {
+      readline.question("", (answer) => {
+        if (settled) {
+          return;
+        }
+
+        try {
+          const parsed = parseAuthorizationCodeInput(answer);
+          if (!parsed) {
+            console.log(mcpAdminMessages.oauthPasteInvalid());
+            ask();
+            return;
+          }
+
+          settled = true;
+          resolve(parsed);
+        } catch (error) {
+          settled = true;
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+    };
+
+    readline.once("close", () => {
+      if (!settled) {
+        settled = true;
+        reject(new Error(mcpAdminMessages.oauthManualInputClosed()));
+      }
+    });
+
+    ask();
+  });
+
+  return {
+    waitForCode: () => waitForCode,
+    close: () => {
+      if (!settled) {
+        settled = true;
+      }
+      readline.close();
+    },
+  };
+}
+
+function supportsManualOAuthInput(): boolean {
+  return Boolean(process.stdin.isTTY && process.stdout.isTTY);
+}
+
+export function parseAuthorizationCodeInput(input: string): string | null {
+  const trimmed = input.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  if (!trimmed.includes("://") && (trimmed.includes("code=") || trimmed.includes("error="))) {
+    return extractAuthorizationCodeFromUrlLike(trimmed);
+  }
+
+  if (URL.canParse(trimmed)) {
+    return extractAuthorizationCodeFromUrlLike(trimmed);
+  }
+
+  return trimmed;
+}
+
+function extractAuthorizationCodeFromUrlLike(input: string): string | null {
+  const url = URL.canParse(input) ? new URL(input) : new URL(input, "http://127.0.0.1");
+  const error = url.searchParams.get("error");
+  if (error) {
+    throw new Error(mcpAdminMessages.oauthCallbackReturnedError(error));
+  }
+
+  const code = url.searchParams.get("code");
+  return code && code.length > 0 ? code : null;
 }

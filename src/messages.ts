@@ -125,6 +125,12 @@ export const mcpAdminMessages = {
     "Failed to start OAuth callback server.",
   oauthLoginOpenUrl: (serverId: string): string =>
     `Open this URL to authorize ${serverId}:`,
+  oauthLoginPastePrompt: (): string =>
+    "If the browser cannot reach Sandy on this machine, paste the final callback URL or the authorization code here and press Enter:",
+  oauthPasteInvalid: (): string =>
+    "That was not a valid callback URL or authorization code. Paste the full callback URL or just the code.",
+  oauthManualInputClosed: (): string =>
+    "OAuth login input was closed before an authorization code was received.",
 } as const;
 
 function describePrivilegeRequest(request: PrivilegeRequest): string {
