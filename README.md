@@ -145,7 +145,7 @@ Worker network behavior:
 - `worker.network.allow_local_cidrs` accepts only literal IP addresses and CIDR blocks.
 - Sandy automatically keeps worker access to its MCP sidecar when MCP is enabled.
 - Sandy keeps `host.docker.internal` only on the MCP sidecar container. Workers do not get direct access to it in the default restricted mode.
-- Set `worker.network.mode = "unrestricted"` only if you intentionally want the old behavior where workers may reach local/private network addresses directly.
+- Set `worker.network.mode = "unrestricted"` only if you intentionally want workers to be able to reach local/private network addresses directly.
 
 Skills behavior:
 

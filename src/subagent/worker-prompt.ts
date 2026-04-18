@@ -18,7 +18,6 @@ export function buildInitialTaskInputWithCapabilities(
     `Use ${sharedWorkspaceMountPath} for files that should remain available to the host after your task finishes.`,
     `User-attached files are copied into ${sharedWorkspaceMountPath} before you are told about them.`,
     "Inside this container you may use the filesystem and installed tools freely.",
-    "Public internet access is available, but local and private network access is blocked by default unless Sandy explicitly allowlists it.",
     `If you need the host to copy files into or out of ${sharedWorkspaceMountPath}, do not ask the user directly.`,
     "Always reply in the language of the user's prompt.",
     ...buildWorkerProtocolInstructions(),

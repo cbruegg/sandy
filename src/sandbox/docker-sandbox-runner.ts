@@ -5,16 +5,15 @@ import {join, relative, resolve} from "node:path";
 import {createInterface} from "node:readline";
 import type {WorkerNetworkConfig} from "../config.js";
 import {logger} from "../logger.js";
-import {mcpProxyContainerAlias} from "../mcp/proxy-route.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {workerSkillsPath} from "../subagent/worker-codex-config.js";
 import type {HostCommand, PrivilegeResolutionResult, SubAgentEvent} from "../types.js";
 import {parseSubAgentEvent, serializeHostCommand} from "../types.js";
+import {launchNetworkGuardContainer, type StartedNetworkGuard} from "./network-guard.js";
 import type {LaunchTaskRequest, SandboxHandle, SandboxRunner, ShareInspection} from "./sandbox-runner.js";
 
 const workerCodexSeedMountPath = "/run/sandy-codex-seed";
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 300_000;
-const DEFAULT_NETWORK_GUARD_IMAGE = "sandy-network-guard:latest";
 
 type DockerSandboxRunnerOptions = {
   workerImage: string;
@@ -35,11 +34,6 @@ type DockerSandboxRunnerOptions = {
   spawnImpl?: typeof spawn;
   setTimeoutImpl?: typeof setTimeout;
   clearTimeoutImpl?: typeof clearTimeout;
-};
-
-type StartedNetworkGuard = {
-  child: ChildProcessWithoutNullStreams;
-  containerName: string;
 };
 
 type ActiveTaskContainer = {
@@ -139,6 +133,8 @@ export class DockerSandboxRunner implements SandboxRunner {
       "-i",
       "--name",
       containerName,
+      // Drop network-manipulation capabilities so the worker cannot rewrite
+      // the guard's firewall rules and break out of network isolation.
       "--cap-drop",
       "NET_ADMIN",
       "--cap-drop",
@@ -597,108 +593,17 @@ export class DockerSandboxRunner implements SandboxRunner {
   }
 
   private async launchNetworkGuard(taskId: string): Promise<StartedNetworkGuard | null> {
-    if (this.options.workerNetwork.mode !== "public_internet_only") {
-      return null;
-    }
-
-    const containerName = `sandy-netguard-${taskId}`;
-    const dockerArgs = [
-      "run",
-      "--rm",
-      "-i",
-      "--name",
-      containerName,
-      "--cap-add",
-      "NET_ADMIN",
-      "--cap-drop",
-      "NET_RAW",
-      "-e",
-      `SANDY_NETWORK_GUARD_MODE=${this.options.workerNetwork.mode}`,
-      "-e",
-      `SANDY_NETWORK_GUARD_ALLOWED_LOCAL_CIDRS=${this.options.workerNetwork.allowLocalCidrs.join(",")}`,
-    ];
-
-    if (this.options.workerNetworkName) {
-      dockerArgs.push(
-        "--network",
-        this.options.workerNetworkName,
-        "-e",
-        `SANDY_NETWORK_GUARD_ALLOWED_HOSTS=${mcpProxyContainerAlias}`,
-      );
-    }
-
-    dockerArgs.push(this.options.networkGuardImage ?? DEFAULT_NETWORK_GUARD_IMAGE);
-
-    logger.info("sandbox.network_guard_launching", {
+    return await launchNetworkGuardContainer({
       taskId,
-      containerName,
-      workerNetworkName: this.options.workerNetworkName ?? "bridge",
+      workerNetwork: this.options.workerNetwork,
+      networkGuardImage: this.options.networkGuardImage,
+      workerNetworkName: this.options.workerNetworkName,
+      handshakeTimeoutMs: this.handshakeTimeoutMs,
+      spawnImpl: this.spawnImpl,
+      setTimeoutImpl: this.setTimeoutImpl,
+      clearTimeoutImpl: this.clearTimeoutImpl,
+      cleanupContainer: async (containerName) => this.cleanupContainer(containerName),
     });
-
-    const child = this.spawnImpl("docker", dockerArgs, {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    child.stdin.end();
-
-    child.stderr.on("data", (chunk) => {
-      const message = String(chunk).trim();
-      if (message) {
-        logger.warn("sandbox.network_guard_stderr", {
-          taskId,
-          message,
-        });
-      }
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      const stdout = createInterface({
-        input: child.stdout,
-        crlfDelay: Infinity,
-      });
-      const timer = this.setTimeoutImpl(() => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        child.kill("SIGTERM");
-        void this.cleanupContainer(containerName);
-        reject(new Error(`Task network guard did not become ready in time for ${taskId}.`));
-      }, this.handshakeTimeoutMs);
-
-      const finish = (fn: () => void) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        this.clearTimeoutImpl(timer);
-        stdout.close();
-        fn();
-      };
-
-      stdout.on("line", (line) => {
-        if (line.trim() === "ready") {
-          finish(resolve);
-        }
-      });
-
-      child.once("error", (error) => {
-        finish(() => reject(error));
-      });
-      child.once("exit", (code, signal) => {
-        finish(() => reject(new Error(`Task network guard exited before ready (code=${code}, signal=${signal}).`)));
-      });
-    });
-
-    logger.info("sandbox.network_guard_started", {
-      taskId,
-      containerName,
-    });
-
-    return {
-      child,
-      containerName,
-    };
   }
 
   private async cleanupTaskContainers(containerName: string, guardContainerName: string | null): Promise<void> {

@@ -51,6 +51,9 @@ function normalizeWorkerNetworkAllowLocalEntry(value: string): string {
   if (rawPrefix === undefined) {
     return normalized;
   }
+  if (rawPrefix === "") {
+    throw new Error(`worker.network.allow_local_cidrs entry "${normalized}" must not end with an empty prefix.`);
+  }
 
   const prefix = Number(rawPrefix);
   const maxPrefix = family === 4 ? 32 : 128;

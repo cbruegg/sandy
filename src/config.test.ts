@@ -278,6 +278,22 @@ allow_local_cidrs = ["raspinas"]
   }, /must be an IP or CIDR literal/);
 });
 
+test("parseConfigToml rejects empty worker network CIDR prefixes", () => {
+  assert.throws(() => {
+    parseConfigToml(`
+[channel]
+kind = "telegram"
+
+[channel.telegram]
+bot_token = "telegram-token"
+allowed_user = "123456"
+
+[worker.network]
+allow_local_cidrs = ["10.0.0.5/"]
+`);
+  }, /must not end with an empty prefix/);
+});
+
 test("parseConfigToml rejects blank worker preinstall commands", () => {
   assert.throws(() => {
     parseConfigToml(`
