@@ -147,3 +147,86 @@ test("McpSidecarManager returns a failed authorization result when authorization
   assert.match(stdinContent, /"outcome":"failed"/);
   assert.match(stdinContent, /approval service unavailable/);
 });
+
+test("McpSidecarManager forwards structured sidecar logs through the host logger", async () => {
+  const sidecarChild = new FakeChildProcess();
+  const spawnImpl = ((_command: string, args: readonly string[]) => {
+    const child = new FakeChildProcess();
+    if (args[0] === "network" && args[1] === "ls") {
+      queueMicrotask(() => {
+        child.emit("exit", 0, null);
+      });
+      return child as unknown as ChildProcessWithoutNullStreams;
+    }
+    if (args[0] === "run") {
+      sidecarChild.stdout.write('{"type":"ready"}\n');
+      return sidecarChild as unknown as ChildProcessWithoutNullStreams;
+    }
+    queueMicrotask(() => {
+      child.emit("exit", 0, null);
+    });
+    return child as unknown as ChildProcessWithoutNullStreams;
+  }) as typeof import("node:child_process").spawn;
+
+  const forwardedLogs: Array<{ event: string; data?: Record<string, unknown> }> = [];
+  const originalConsoleLog = console.log;
+  console.log = (value?: unknown, ...rest: unknown[]) => {
+    if (typeof value === "string") {
+      const parsed = JSON.parse(value) as {
+        event?: string;
+        data?: Record<string, unknown>;
+      };
+      if (parsed.event === "mcp.proxy.request_handled") {
+        forwardedLogs.push({
+          event: parsed.event,
+          data: parsed.data,
+        });
+      }
+    }
+    return originalConsoleLog.call(console, value, ...rest);
+  };
+
+  const manager = new McpSidecarManager({
+    configDirectory: "/tmp/sandy-config",
+    mcpServers: {
+      todoist: {
+        transport: "streamable_http",
+        url: "https://todoist.example/mcp",
+        oauthScopes: [],
+      },
+    },
+    workerNetworkName: createMcpWorkerNetworkName(),
+    sidecarImage: "sandy-mcp-proxy:latest",
+    spawnImpl,
+    authorizeToolCall: async () => ({
+      requestId: "approval-1",
+      outcome: "approved",
+      message: "approved",
+    }),
+  }, new SandyMcpProxyAccess("shared-secret"));
+
+  await manager.start();
+  sidecarChild.stdout.write(
+    JSON.stringify({
+      type: "log",
+      timestamp: "2026-04-18T20:00:00.000Z",
+      level: "info",
+      event: "mcp.proxy.request_handled",
+      data: {
+        taskId: "task-1",
+        serverId: "homeassistant",
+      },
+    }) + "\n",
+  );
+  await new Promise<void>((resolve) => setImmediateCallback(resolve));
+  await manager.stop();
+  console.log = originalConsoleLog;
+
+  assert.deepEqual(forwardedLogs, [{
+    event: "mcp.proxy.request_handled",
+    data: {
+      taskId: "task-1",
+      serverId: "homeassistant",
+    },
+  }]);
+});

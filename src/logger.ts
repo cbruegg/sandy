@@ -1,5 +1,12 @@
 type LogLevel = "debug" | "info" | "warn" | "error";
 
+type LogPayload = {
+  timestamp: string;
+  level: LogLevel;
+  event: string;
+  data?: Record<string, unknown>;
+};
+
 const levelPriority: Record<LogLevel, number> = {
   debug: 10,
   info: 20,
@@ -12,6 +19,7 @@ type LoggerConfig = {
   // "split" keeps info/debug on stdout and warn/error on stderr for normal app logs.
   // "stderr" forces all logs to stderr for processes that reserve stdout for protocols.
   outputMode: "split" | "stderr";
+  forwardLog?: (payload: LogPayload) => void;
 };
 
 class SandyLogger {
@@ -51,16 +59,21 @@ class SandyLogger {
   }
 
   private write(level: LogLevel, event: string, data?: Record<string, unknown>): void {
-    if (levelPriority[level] < levelPriority[this.config.minLevel]) {
-      return;
-    }
-
-    const payload = {
+    const payload: LogPayload = {
       timestamp: new Date().toISOString(),
       level,
       event,
       ...(data ? { data } : {}),
     };
+
+    if (this.config.forwardLog) {
+      this.config.forwardLog(payload);
+      return;
+    }
+
+    if (levelPriority[level] < levelPriority[this.config.minLevel]) {
+      return;
+    }
 
     const line = JSON.stringify(payload);
     if (this.config.outputMode === "stderr" || level === "error" || level === "warn") {

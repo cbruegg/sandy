@@ -39,6 +39,14 @@ const fatalErrorMessageSchema = z.object({
   message: z.string().min(1),
 });
 
+const logMessageSchema = z.object({
+  type: z.literal("log"),
+  timestamp: z.string().min(1),
+  level: z.enum(["debug", "info", "warn", "error"]),
+  event: z.string().min(1),
+  data: z.record(z.string(), z.unknown()).optional(),
+});
+
 const shutdownMessageSchema = z.object({
   type: z.literal("shutdown"),
 });
@@ -50,6 +58,7 @@ export type McpSidecarAuthorizationRequestMessage = z.infer<typeof authorization
 type McpSidecarAuthorizationResultMessage = z.infer<typeof authorizationResultMessageSchema>;
 type McpSidecarReadyMessage = z.infer<typeof readyMessageSchema>;
 type McpSidecarFatalErrorMessage = z.infer<typeof fatalErrorMessageSchema>;
+export type McpSidecarLogMessage = z.infer<typeof logMessageSchema>;
 type McpSidecarShutdownMessage = z.infer<typeof shutdownMessageSchema>;
 
 type HostToMcpSidecarMessage =
@@ -60,7 +69,8 @@ type HostToMcpSidecarMessage =
 type McpSidecarToHostMessage =
   | McpSidecarReadyMessage
   | McpSidecarAuthorizationRequestMessage
-  | McpSidecarFatalErrorMessage;
+  | McpSidecarFatalErrorMessage
+  | McpSidecarLogMessage;
 
 export function parseMcpSidecarToHostMessage(raw: string): McpSidecarToHostMessage {
   const parsed = JSON.parse(raw) as unknown;
@@ -75,6 +85,8 @@ export function parseMcpSidecarToHostMessage(raw: string): McpSidecarToHostMessa
       return authorizationRequestMessageSchema.parse(parsed);
     case "fatal_error":
       return fatalErrorMessageSchema.parse(parsed);
+    case "log":
+      return logMessageSchema.parse(parsed);
     default:
       throw new Error(`Unsupported sidecar control message type ${(parsed as { type: string }).type}.`);
   }

@@ -12,6 +12,7 @@ import { mcpWorkerNetworkNamePrefix } from "./worker-network-name.js";
 import {
   parseMcpSidecarToHostMessage,
   type McpSidecarAuthorizationRequestMessage,
+  type McpSidecarLogMessage,
 } from "./sidecar-protocol.js";
 
 type McpSidecarManagerOptions = {
@@ -126,6 +127,10 @@ export class McpSidecarManager {
             this.dispatchAuthorizationRequest(message);
             return;
           }
+          if (message.type === "log") {
+            this.forwardSidecarLog(message);
+            return;
+          }
         } catch (error) {
           logger.warn("mcp.sidecar.stdout_invalid", {
             message: error instanceof Error ? error.message : "Invalid sidecar output.",
@@ -238,6 +243,23 @@ export class McpSidecarManager {
       requestId: message.requestId,
       result,
     });
+  }
+
+  private forwardSidecarLog(message: McpSidecarLogMessage): void {
+    switch (message.level) {
+      case "debug":
+        logger.debug(message.event, message.data);
+        return;
+      case "info":
+        logger.info(message.event, message.data);
+        return;
+      case "warn":
+        logger.warn(message.event, message.data);
+        return;
+      case "error":
+        logger.error(message.event, message.data);
+        return;
+    }
   }
 
   private sendToSidecar(message: object): void {

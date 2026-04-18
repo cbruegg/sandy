@@ -1,5 +1,6 @@
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
+import { configureLogger } from "../logger.js";
 import { SandyMcpProxy } from "./proxy.js";
 import { SandyMcpProxyAccess } from "./proxy-access.js";
 import { McpServerRegistryImpl } from "./server-registry.js";
@@ -11,6 +12,15 @@ function send(message: object): void {
 }
 
 export async function main(): Promise<void> {
+  configureLogger({
+    forwardLog: (payload) => {
+      send({
+        type: "log",
+        ...payload,
+      });
+    },
+  });
+
   const input = createInterface({
     input: process.stdin,
     crlfDelay: Infinity,
