@@ -14,10 +14,15 @@ function baseConfig(): Omit<SandyConfig, "channel"> {
     logLevel: "info",
     workerImage: "sandy-subagent:latest",
     mcpSidecarImage: "sandy-mcp-proxy:latest",
+    networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-shares",
     workerPreinstall: {
       commands: [],
       refresh: "weekly",
+    },
+    workerNetwork: {
+      mode: "public_internet_only",
+      allowLocalCidrs: [],
     },
     sttApiKey: null,
     sttBaseUrl: "https://api.openai.com/v1",

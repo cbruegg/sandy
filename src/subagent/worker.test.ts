@@ -33,6 +33,8 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
   assert.match(input, /SANDY_COMPLETE_TASK/);
   assert.match(input, /Telegram HTML/);
   assert.match(input, /<code>/);
+  assert.match(input, /Public internet access is available/);
+  assert.doesNotMatch(input, /network, and installed tools freely/);
   assert.match(input, /leave a summary file\./);
 });
 

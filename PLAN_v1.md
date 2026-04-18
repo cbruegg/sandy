@@ -36,6 +36,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - Channel-owned formatting metadata, with Telegram output sanitized and sent as simple HTML.
   - Automatic deletion of empty per-sub-agent shared workspaces, with explicit user confirmation before deleting non-empty workspaces.
   - Host-side MCP proxying for configured upstream MCP servers, with per-task JWT authentication for workers.
+  - Default-deny worker access to local/private network ranges through a per-task network-guard container, while preserving public internet access and MCP sidecar connectivity on both Linux and Docker Desktop.
   - Host-admin MCP OAuth login flow through `sandy mcp <list|status|login|logout>`.
   - MCP privilege approval scopes `once`, `worker_session`, and `always allow`, with `always allow` persisted automatically to the Sandy TOML config.
 - Not fully implemented yet:

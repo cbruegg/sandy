@@ -54,6 +54,10 @@ allowed_user = "123456789" # or "@cbruegg"
 # image = "sandy-subagent:latest" # explicit override; otherwise Sandy uses a baked GHCR sha tag when present, or this local default
 # share_root = "/tmp/sandy-shares"
 
+[worker.network]
+# mode = "public_internet_only" # one of: "public_internet_only", "unrestricted"
+# allow_local_cidrs = ["192.168.1.0/24"]
+
 [worker.preinstall]
 # commands = [
 #   "zypper --non-interactive install jq",
@@ -133,6 +137,16 @@ Worker preinstall behavior:
 - `worker.preinstall.refresh = "manual"` disables scheduled refreshes; Sandy still rebuilds when the configured commands change, the cached overlay is missing, or the base `worker.image` resolves to a different image ID.
 - The derived worker image is local cache state. It does not count as an explicit `worker.image` override, so the existing `updates.mode` rules still apply only to the configured base image.
 
+Worker network behavior:
+
+- `worker.network.mode` defaults to `"public_internet_only"`.
+- In `"public_internet_only"` mode, Sandy starts a per-task network-guard container and runs the worker in that guard's network namespace. This works on Docker Desktop as well as native Linux.
+- In `"public_internet_only"` mode, workers keep normal public internet access but cannot reach local/private network ranges unless they are explicitly allowlisted in `worker.network.allow_local_cidrs`.
+- `worker.network.allow_local_cidrs` accepts only literal IP addresses and CIDR blocks.
+- Sandy automatically keeps worker access to its MCP sidecar when MCP is enabled.
+- Sandy keeps `host.docker.internal` only on the MCP sidecar container. Workers do not get direct access to it in the default restricted mode.
+- Set `worker.network.mode = "unrestricted"` only if you intentionally want the old behavior where workers may reach local/private network addresses directly.
+
 Skills behavior:
 
 - Sandy looks for skills only in a `skills/` directory next to the active `config.toml`.
@@ -160,12 +174,19 @@ Build the MCP sidecar image:
 docker build --target mcp-proxy-runtime -t sandy-mcp-proxy:latest .
 ```
 
+Build the network-guard image:
+
+```bash
+docker build --target network-guard-runtime -t sandy-network-guard:latest .
+```
+
 The host runtime is intentionally not containerized, because it is designed to mediate host-system access directly.
 
 Published Sandy executables built in GitHub Actions are baked with the matching `github.sha` and default to
-`ghcr.io/<owner>/sandy-subagent:sha-<git revision>` and `ghcr.io/<owner>/sandy-mcp-proxy:sha-<git revision>`.
+`ghcr.io/<owner>/sandy-subagent:sha-<git revision>`, `ghcr.io/<owner>/sandy-mcp-proxy:sha-<git revision>`, and
+`ghcr.io/<owner>/sandy-network-guard:sha-<git revision>`.
 Local `bun start` runs and locally built executables fall back to `sandy-subagent:latest` and
-`sandy-mcp-proxy:latest` unless the config file overrides them.
+`sandy-mcp-proxy:latest` for the worker-side images unless the config file overrides them.
 
 Build the Bun bundles and verify linting, TypeScript type-checking, and dependency hygiene:
 

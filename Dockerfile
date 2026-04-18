@@ -16,6 +16,22 @@ COPY --from=build /app/dist ./dist
 FROM runtime-base AS mcp-proxy-runtime
 CMD ["bun", "dist/entrypoint-mcp-proxy.js"]
 
+FROM opensuse/tumbleweed:latest AS network-guard-runtime
+WORKDIR /app
+
+RUN zypper --non-interactive refresh \
+  && zypper --non-interactive install --no-recommends \
+    gawk \
+    grep \
+    iproute2 \
+    iptables \
+  && zypper clean --all
+
+COPY scripts/network-guard-entrypoint.sh /usr/local/bin/sandy-network-guard
+RUN chmod 0755 /usr/local/bin/sandy-network-guard
+
+ENTRYPOINT ["/usr/local/bin/sandy-network-guard"]
+
 FROM opensuse/tumbleweed:latest AS worker-runtime
 WORKDIR /workspace
 
