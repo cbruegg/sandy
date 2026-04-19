@@ -344,6 +344,195 @@ test("MatrixChannelAdapter ignores unauthorized senders and routes poll answers 
   }
 });
 
+test("MatrixChannelAdapter catches handler failures and continues processing later events", async () => {
+  const fakeClient = new FakeMatrixClient();
+  fakeClient.joinedRooms.add(ROOM_ID);
+  fakeClient.roomMembers.set(ROOM_ID, [BOT_ID, OWNER_ID]);
+  fakeClient.encryptedRooms.add(ROOM_ID);
+
+  const received: NormalizedChatEvent[] = [];
+  let shouldThrow = true;
+  const adapter = new MatrixChannelAdapter({
+    homeserverUrl: "https://matrix.example",
+    accessToken: "token",
+    allowedUserId: OWNER_ID,
+    stateRoot: "/tmp/sandy-matrix-test",
+    clientFactory: () => fakeClient,
+  });
+
+  try {
+    await adapter.start(async (event) => {
+      if (shouldThrow) {
+        throw new Error("synthetic handler failure");
+      }
+      received.push(event);
+    });
+
+    await fakeClient.dispatch("room.message", ROOM_ID, {
+      type: "m.room.message",
+      event_id: "$first",
+      sender: OWNER_ID,
+      origin_server_ts: 1_700_000_000_000,
+      content: {
+        msgtype: "m.text",
+        body: "first",
+      },
+    });
+
+    shouldThrow = false;
+    await fakeClient.dispatch("room.message", ROOM_ID, {
+      type: "m.room.message",
+      event_id: "$second",
+      sender: OWNER_ID,
+      origin_server_ts: 1_700_000_001_000,
+      content: {
+        msgtype: "m.text",
+        body: "second",
+      },
+    });
+
+    assert.deepEqual(received, [{
+      kind: "user_text",
+      chatId: ROOM_ID,
+      messageId: "$second",
+      senderUserId: OWNER_ID,
+      timestamp: "2023-11-14T22:13:21.000Z",
+      text: "second",
+      rawText: "second",
+      attachments: [],
+    }]);
+  } finally {
+    await adapter.stop();
+  }
+});
+
+test("MatrixChannelAdapter evicts stale room polls after task completion and caps poll growth", async () => {
+  const fakeClient = new FakeMatrixClient();
+  fakeClient.joinedRooms.add(ROOM_ID);
+  fakeClient.roomMembers.set(ROOM_ID, [BOT_ID, OWNER_ID]);
+  fakeClient.encryptedRooms.add(ROOM_ID);
+
+  const received: NormalizedChatEvent[] = [];
+  const adapter = new MatrixChannelAdapter({
+    homeserverUrl: "https://matrix.example",
+    accessToken: "token",
+    allowedUserId: OWNER_ID,
+    stateRoot: "/tmp/sandy-matrix-test",
+    clientFactory: () => fakeClient,
+  });
+
+  try {
+    await adapter.start(async (event) => {
+      received.push(event);
+    });
+
+    for (let index = 0; index < 17; index += 1) {
+      await adapter.sendTaskUpdate(ROOM_ID, `Still working ${index}`);
+    }
+
+    const pollEvents = fakeClient.sentEvents.filter((event) => event.eventType === "org.matrix.msc3381.poll.start");
+    const firstTaskPollId = expectDefined(pollEvents[0], "Expected the first task poll.").eventId;
+    const lastTaskPollId = expectDefined(pollEvents.at(-1), "Expected the last task poll.").eventId;
+
+    await fakeClient.dispatch("room.event", ROOM_ID, {
+      type: "org.matrix.msc3381.poll.response",
+      event_id: "$stale-capped",
+      sender: OWNER_ID,
+      origin_server_ts: 1_700_000_050_000,
+      content: {
+        "org.matrix.msc3381.poll.response": {
+          answers: ["cancel"],
+        },
+        "m.relates_to": {
+          rel_type: "m.reference",
+          event_id: firstTaskPollId,
+        },
+      },
+    });
+
+    await fakeClient.dispatch("room.event", ROOM_ID, {
+      type: "org.matrix.msc3381.poll.response",
+      event_id: "$fresh",
+      sender: OWNER_ID,
+      origin_server_ts: 1_700_000_051_000,
+      content: {
+        "org.matrix.msc3381.poll.response": {
+          answers: ["cancel"],
+        },
+        "m.relates_to": {
+          rel_type: "m.reference",
+          event_id: lastTaskPollId,
+        },
+      },
+    });
+
+    assert.deepEqual(received, [{
+      kind: "cancel_request",
+      chatId: ROOM_ID,
+      messageId: "$fresh",
+      senderUserId: OWNER_ID,
+      timestamp: "2023-11-14T22:14:11.000Z",
+    }]);
+
+    await adapter.sendReportableText(ROOM_ID, "Task complete.");
+    const finalPollId = expectDefined(
+      fakeClient.sentEvents.filter((event) => event.eventType === "org.matrix.msc3381.poll.start").at(-1),
+      "Expected a final report poll.",
+    ).eventId;
+
+    await fakeClient.dispatch("room.event", ROOM_ID, {
+      type: "org.matrix.msc3381.poll.response",
+      event_id: "$stale-after-summary",
+      sender: OWNER_ID,
+      origin_server_ts: 1_700_000_052_000,
+      content: {
+        "org.matrix.msc3381.poll.response": {
+          answers: ["cancel"],
+        },
+        "m.relates_to": {
+          rel_type: "m.reference",
+          event_id: lastTaskPollId,
+        },
+      },
+    });
+
+    await fakeClient.dispatch("room.event", ROOM_ID, {
+      type: "org.matrix.msc3381.poll.response",
+      event_id: "$report",
+      sender: OWNER_ID,
+      origin_server_ts: 1_700_000_053_000,
+      content: {
+        "org.matrix.msc3381.poll.response": {
+          answers: ["report"],
+        },
+        "m.relates_to": {
+          rel_type: "m.reference",
+          event_id: finalPollId,
+        },
+      },
+    });
+
+    assert.deepEqual(received, [
+      {
+        kind: "cancel_request",
+        chatId: ROOM_ID,
+        messageId: "$fresh",
+        senderUserId: OWNER_ID,
+        timestamp: "2023-11-14T22:14:11.000Z",
+      },
+      {
+        kind: "danger_report",
+        chatId: ROOM_ID,
+        messageId: "$report",
+        senderUserId: OWNER_ID,
+        timestamp: "2023-11-14T22:14:13.000Z",
+      },
+    ]);
+  } finally {
+    await adapter.stop();
+  }
+});
+
 test("MatrixChannelAdapter saves encrypted attachments and sends encrypted files in encrypted rooms", async () => {
   const fakeClient = new FakeMatrixClient();
   fakeClient.joinedRooms.add(ROOM_ID);

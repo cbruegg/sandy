@@ -112,6 +112,7 @@ const MATRIX_POLL_START_EVENT_TYPE = "org.matrix.msc3381.poll.start";
 const MATRIX_POLL_RESPONSE_EVENT_TYPE = "org.matrix.msc3381.poll.response";
 const MATRIX_POLL_DISCLOSED_KIND = "org.matrix.msc3381.poll.disclosed";
 const MATRIX_REFERENCE_RELATION = "m.reference";
+const MAX_ACTIVE_POLLS_PER_ROOM = 16;
 
 async function defaultMatrixClientFactory(options: {
   homeserverUrl: string;
@@ -299,6 +300,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       chatId,
       textPreview: previewText(text),
     });
+    this.discardRoomPolls(chatId);
     await this.sendNotice(chatId, text);
     await this.sendPoll(chatId, "Output controls", [{
       answerId: "report",
@@ -415,6 +417,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       roomId,
       actionsByAnswerId: new Map(options.map((option) => [option.answerId, { event: option.event }])),
     });
+    this.pruneRoomPolls(roomId);
   }
 
   private requireClient(): MatrixClientLike {
@@ -463,7 +466,15 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       kind: normalized.kind,
       eventId: normalized.messageId,
     });
-    await handler(normalized);
+    try {
+      await handler(normalized);
+    } catch (error) {
+      logger.error("matrix.handler_error", {
+        kind: normalized.kind,
+        chatId: normalized.chatId,
+        message: error instanceof Error ? error.message : "Unknown handler error.",
+      });
+    }
   }
 
   private async handleRoomEvent(roomId: string, event: Record<string, unknown>, handler: MessageHandler): Promise<void> {
@@ -487,7 +498,15 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       kind: normalized.kind,
       eventId: normalized.messageId,
     });
-    await handler(normalized);
+    try {
+      await handler(normalized);
+    } catch (error) {
+      logger.error("matrix.handler_error", {
+        kind: normalized.kind,
+        chatId: normalized.chatId,
+        message: error instanceof Error ? error.message : "Unknown handler error.",
+      });
+    }
   }
 
   private async shouldHandleInboundEvent(roomId: string, event: Record<string, unknown>): Promise<boolean> {
@@ -561,15 +580,32 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   }
 
   private discardRoomState(roomId: string): void {
+    this.discardRoomPolls(roomId);
+    for (const [attachmentId, ref] of this.attachmentRefs.entries()) {
+      if (ref.roomId === roomId) {
+        this.attachmentRefs.delete(attachmentId);
+      }
+    }
+  }
+
+  private discardRoomPolls(roomId: string): void {
     for (const [eventId, record] of this.activePolls.entries()) {
       if (record.roomId === roomId) {
         this.activePolls.delete(eventId);
       }
     }
-    for (const [attachmentId, ref] of this.attachmentRefs.entries()) {
-      if (ref.roomId === roomId) {
-        this.attachmentRefs.delete(attachmentId);
-      }
+  }
+
+  private pruneRoomPolls(roomId: string): void {
+    const roomPollIds = [...this.activePolls.entries()]
+      .filter(([, record]) => record.roomId === roomId)
+      .map(([eventId]) => eventId);
+    const excessCount = roomPollIds.length - MAX_ACTIVE_POLLS_PER_ROOM;
+    if (excessCount <= 0) {
+      return;
+    }
+    for (const eventId of roomPollIds.slice(0, excessCount)) {
+      this.activePolls.delete(eventId);
     }
   }
 }
