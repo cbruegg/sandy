@@ -18,7 +18,6 @@ import { OpenAiTranscriptionProvider } from "./transcription/openai-transcriptio
 import { resolvePublishedUpdateSource } from "./build-metadata.js";
 import { SelfUpdateCoordinator } from "./update/self-update.js";
 import { WorkerImageManager } from "./worker-image-manager.js";
-import {loadMatrixBotSdk} from "./channel/matrix-bot-sdk-loader.ts";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -26,7 +25,7 @@ export async function startApp(): Promise<void> {
     minLevel: config.logLevel,
   });
   // This is just for testing. Agents, please do not remove, I'll do that manually.
-  await loadMatrixBotSdk();
+  await import("matrix-bot-sdk");
   logger.info("LOADED BOT SDK!")
   await validateOAuthStateFilesForStartup(config.configDirectory, config.mcpServers);
 

@@ -3,11 +3,6 @@ import { basename, join } from "node:path";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { buttonLabels, messages } from "../messages.js";
-import {
-  loadMatrixBotSdk,
-  type EncryptedFile,
-  type MatrixClientLike,
-} from "./matrix-bot-sdk-loader.js";
 import { matrixHtmlAllowedTags, sanitizeMatrixHtml } from "./matrix-html.js";
 import { describeMatrixStartupError } from "./matrix-startup-error.js";
 import type {
@@ -18,6 +13,73 @@ import type {
   SavedAttachment,
 } from "../types.js";
 import type { TranscriptionProvider } from "../transcription/transcription-provider.js";
+
+type EncryptedFile = {
+  url: string;
+  key: {
+    kty: "oct";
+    key_ops: string[];
+    alg: "A256CTR";
+    k: string;
+    ext: true;
+  };
+  iv: string;
+  hashes: {
+    sha256: string;
+  };
+  v: "v2";
+};
+
+type MatrixCryptoLike = {
+  isRoomEncrypted(roomId: string): Promise<boolean>;
+  encryptMedia(file: Buffer): Promise<{
+    buffer: Buffer;
+    file: Omit<EncryptedFile, "url">;
+  }>;
+  decryptMedia(file: EncryptedFile): Promise<Buffer>;
+};
+
+type MatrixWhoAmI = {
+  user_id: string;
+  device_id?: string;
+};
+
+type MatrixMediaInfo = {
+  data: Buffer;
+  contentType: string;
+};
+
+type MatrixClientLike = {
+  on(event: string, handler: (roomId: string, event: Record<string, unknown>) => void | Promise<void>): unknown;
+  start(filter?: unknown): Promise<unknown>;
+  stop(): void;
+  getWhoAmI(): Promise<MatrixWhoAmI>;
+  getJoinedRooms(): Promise<string[]>;
+  getJoinedRoomMembers(roomId: string): Promise<string[]>;
+  joinRoom(roomId: string, viaServers?: string[]): Promise<string>;
+  leaveRoom(roomId: string, reason?: string): Promise<unknown>;
+  getRoomStateEvent(roomId: string, type: string, stateKey: string): Promise<unknown>;
+  sendHtmlNotice(roomId: string, html: string): Promise<string>;
+  sendEvent(roomId: string, eventType: string, content: Record<string, unknown>): Promise<string>;
+  uploadContent(data: Buffer, contentType?: string, filename?: string): Promise<string>;
+  downloadContent(mxcUrl: string, allowRemote?: boolean): Promise<MatrixMediaInfo>;
+  crypto?: MatrixCryptoLike;
+};
+
+type MatrixClientConstructor = new (
+  homeserverUrl: string,
+  accessToken: string,
+  storage: unknown,
+  cryptoStorage: unknown,
+) => MatrixClientLike;
+
+type StorageProviderConstructor = new (path: string) => unknown;
+
+type LoadedMatrixBotSdk = {
+  MatrixClient: MatrixClientConstructor;
+  RustSdkCryptoStorageProvider: StorageProviderConstructor;
+  SimpleFsStorageProvider: StorageProviderConstructor;
+};
 
 type MatrixMessageContent = {
   body?: string;
@@ -102,7 +164,7 @@ async function defaultMatrixClientFactory(options: {
     MatrixClient,
     RustSdkCryptoStorageProvider,
     SimpleFsStorageProvider,
-  } = await loadMatrixBotSdk();
+  } = coerceMatrixBotSdkModule(await import("matrix-bot-sdk"));
   const storage = new SimpleFsStorageProvider(join(options.stateRoot, "client.json"));
   const cryptoStorage = new RustSdkCryptoStorageProvider(join(options.stateRoot, "crypto"));
   return new MatrixClient(options.homeserverUrl, options.accessToken, storage, cryptoStorage);
@@ -883,6 +945,27 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function coerceMatrixBotSdkModule(value: unknown): LoadedMatrixBotSdk {
+  const record = asRecord(value);
+  const MatrixClient = record["MatrixClient"];
+  const RustSdkCryptoStorageProvider = record["RustSdkCryptoStorageProvider"];
+  const SimpleFsStorageProvider = record["SimpleFsStorageProvider"];
+
+  if (
+    typeof MatrixClient !== "function"
+    || typeof RustSdkCryptoStorageProvider !== "function"
+    || typeof SimpleFsStorageProvider !== "function"
+  ) {
+    throw new Error("matrix-bot-sdk did not expose the expected client and storage constructors.");
+  }
+
+  return {
+    MatrixClient: MatrixClient as MatrixClientConstructor,
+    RustSdkCryptoStorageProvider: RustSdkCryptoStorageProvider as StorageProviderConstructor,
+    SimpleFsStorageProvider: SimpleFsStorageProvider as StorageProviderConstructor,
+  };
 }
 
 function previewText(text: string): string {
