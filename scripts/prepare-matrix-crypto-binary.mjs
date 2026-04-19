@@ -12,7 +12,7 @@ import {
 
 const require = createRequire(import.meta.url);
 
-const DOWNLOADS_BASE_URL = "https://github.com/matrix-org/matrix-rust-sdk/releases/download";
+const DOWNLOADS_BASE_URL = "https://github.com/matrix-org/matrix-rust-sdk-crypto-nodejs/releases/download";
 
 function parseArgs(argv) {
   const args = {
@@ -42,7 +42,7 @@ async function main() {
   const packageJsonPath = require.resolve("@matrix-org/matrix-sdk-crypto-nodejs/package.json");
   const packageRoot = dirname(packageJsonPath);
   const packageJson = require("@matrix-org/matrix-sdk-crypto-nodejs/package.json");
-  const releaseTag = `matrix-sdk-crypto-nodejs-v${packageJson.version}`;
+  const releaseTag = `v${packageJson.version}`;
 
   const binaryNames = args.allTargets
     ? listMatrixCryptoBinaryNamesForCompile()
