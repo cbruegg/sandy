@@ -9,7 +9,7 @@ import {
   normalizeMatrixPollResponse,
   normalizeMatrixRoomMessage,
 } from "./matrix-adapter.js";
-import { resolveMatrixCryptoBinaryName } from "./matrix-bot-sdk-loader.js";
+import { resolveMatrixCryptoBinaryName } from "./matrix-crypto-targets.js";
 import { sanitizeMatrixHtml } from "./matrix-html.js";
 import type { NormalizedChatEvent } from "../types.js";
 import type { TranscriptionProvider } from "../transcription/transcription-provider.js";

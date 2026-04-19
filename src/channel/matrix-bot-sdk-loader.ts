@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { logger } from "../logger.js";
+import { resolveMatrixCryptoBinaryName } from "./matrix-crypto-targets.js";
 
 const require = createRequire(import.meta.url);
 
@@ -79,7 +80,8 @@ export async function loadMatrixBotSdk(): Promise<LoadedMatrixBotSdk> {
 
 async function requireMatrixBotSdkWithCryptoRepair(): Promise<LoadedMatrixBotSdk> {
   try {
-    return coerceMatrixBotSdkModule(require("matrix-bot-sdk") as unknown);
+    preloadMatrixCryptoNativeModule();
+    return coerceMatrixBotSdkModule(await import("matrix-bot-sdk"));
   } catch (error) {
     if (!isMissingMatrixCryptoBindingError(error)) {
       throw error;
@@ -150,6 +152,42 @@ function clearMatrixBotSdkCaches(): void {
   }
 }
 
+function preloadMatrixCryptoNativeModule(): void {
+  try {
+    switch (process.platform) {
+      case "darwin":
+        if (process.arch === "arm64") {
+          require("@matrix-org/matrix-sdk-crypto-nodejs/matrix-sdk-crypto.darwin-arm64.node");
+        } else if (process.arch === "x64") {
+          require("@matrix-org/matrix-sdk-crypto-nodejs/matrix-sdk-crypto.darwin-x64.node");
+        }
+        return;
+      case "linux":
+        if (process.arch === "arm64") {
+          require("@matrix-org/matrix-sdk-crypto-nodejs/matrix-sdk-crypto.linux-arm64-gnu.node");
+        } else if (process.arch === "x64") {
+          require("@matrix-org/matrix-sdk-crypto-nodejs/matrix-sdk-crypto.linux-x64-gnu.node");
+        } else if (process.arch === "arm") {
+          require("@matrix-org/matrix-sdk-crypto-nodejs/matrix-sdk-crypto.linux-arm-gnueabihf.node");
+        }
+        return;
+      case "win32":
+        if (process.arch === "arm64") {
+          require("@matrix-org/matrix-sdk-crypto-nodejs/matrix-sdk-crypto.win32-arm64-msvc.node");
+        } else if (process.arch === "x64") {
+          require("@matrix-org/matrix-sdk-crypto-nodejs/matrix-sdk-crypto.win32-x64-msvc.node");
+        } else if (process.arch === "ia32") {
+          require("@matrix-org/matrix-sdk-crypto-nodejs/matrix-sdk-crypto.win32-ia32-msvc.node");
+        }
+        return;
+      default:
+        return;
+    }
+  } catch {
+    // Ignore here. The normal matrix-bot-sdk load path and repair fallback handle missing files.
+  }
+}
+
 function coerceMatrixBotSdkModule(value: unknown): LoadedMatrixBotSdk {
   const record = asRecord(value);
   const MatrixClient = record["MatrixClient"];
@@ -173,43 +211,6 @@ function coerceMatrixBotSdkModule(value: unknown): LoadedMatrixBotSdk {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
-}
-
-export function resolveMatrixCryptoBinaryName(platform: NodeJS.Platform, arch: string): string {
-  switch (platform) {
-    case "darwin":
-      if (arch === "arm64") {
-        return "matrix-sdk-crypto.darwin-arm64.node";
-      }
-      if (arch === "x64") {
-        return "matrix-sdk-crypto.darwin-x64.node";
-      }
-      break;
-    case "linux":
-      if (arch === "x64") {
-        return "matrix-sdk-crypto.linux-x64-gnu.node";
-      }
-      if (arch === "arm64") {
-        return "matrix-sdk-crypto.linux-arm64-gnu.node";
-      }
-      if (arch === "arm") {
-        return "matrix-sdk-crypto.linux-arm-gnueabihf.node";
-      }
-      break;
-    case "win32":
-      if (arch === "x64") {
-        return "matrix-sdk-crypto.win32-x64-msvc.node";
-      }
-      if (arch === "ia32") {
-        return "matrix-sdk-crypto.win32-ia32-msvc.node";
-      }
-      if (arch === "arm64") {
-        return "matrix-sdk-crypto.win32-arm64-msvc.node";
-      }
-      break;
-  }
-
-  throw new Error(`Unsupported platform for Matrix crypto binding download: ${platform}/${arch}`);
 }
 
 function resolveMatrixCryptoDownloadRuntime(): string {
