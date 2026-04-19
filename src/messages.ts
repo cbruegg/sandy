@@ -135,6 +135,25 @@ export const mcpAdminMessages = {
     `OAuth state for ${serverId} exists at ${stateFilePath} but is missing tokens. Run "sandy mcp login ${serverId}" before starting Sandy.`,
 } as const;
 
+export const matrixAdminMessages = {
+  noMatrixConfig: (): string =>
+    "Matrix channel is not configured. Set channel.kind = \"matrix\" and configure channel.matrix in your config file.",
+  passwordPrompt: (): string =>
+    "Enter Matrix password: ",
+  passwordRequired: (): string =>
+    "Matrix password is required.",
+  loginFailed: (error: string): string =>
+    `Matrix login failed: ${error}`,
+  loginInvalidResponse: (): string =>
+    "Matrix login response did not contain required fields (user_id, device_id, access_token).",
+  loginUserIdMismatch: (received: string, expected: string): string =>
+    `Matrix login returned user ID "${received}" but config expects "${expected}".`,
+  authStateMissing: (): string =>
+    'Matrix auth state file is missing. Run "sandy matrix login" first.',
+  authStateInvalid: (reason: string): string =>
+    `Matrix auth state is invalid: ${reason} Run "sandy matrix login" to re-authenticate.`,
+} as const;
+
 function describePrivilegeRequest(request: PrivilegeRequest): string {
   if (request.kind === "mcp_tool_call") {
     return [

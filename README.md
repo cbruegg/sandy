@@ -46,7 +46,7 @@ allowed_user = "123456789" # or "@cbruegg"
 
 [channel.matrix]
 homeserver_url = "https://matrix.org"
-access_token = "matrix-access-token"
+bot_user_id = "@sandy:matrix.org"
 allowed_user_id = "@cbruegg:matrix.org"
 
 [channel.local_test]
@@ -104,24 +104,37 @@ Telegram auth behavior:
 
 Matrix channel behavior:
 
-- `channel.kind = "matrix"` requires `channel.matrix.homeserver_url`, `channel.matrix.access_token`, and `channel.matrix.allowed_user_id`.
-- `channel.matrix.allowed_user_id` must be a full Matrix user ID such as `@cbruegg:matrix.org`.
+- `channel.kind = "matrix"` requires `channel.matrix.homeserver_url`, `channel.matrix.bot_user_id`, and `channel.matrix.allowed_user_id`.
+- Both `channel.matrix.bot_user_id` and `channel.matrix.allowed_user_id` must be full Matrix user IDs such as `@user:matrix.org`.
 - Sandy auto-joins invites from the configured Matrix user and leaves rooms that are unencrypted, multi-user, or otherwise fail that qualification.
 - Matrix task controls and approvals are exposed through Matrix polls only. Use a client with poll support such as Element or FluffyChat.
-- Sandy must use a dedicated Matrix device session for encryption. Do not copy `channel.matrix.access_token` from an Element session or any other client you plan to keep using.
+- Sandy must use a dedicated Matrix device session for encryption. The access token is managed separately from the config file.
 
-To create a Matrix bot account and obtain its access token:
+To set up Matrix authentication:
 
 1. Create a dedicated account for the bot on your Matrix homeserver.
-2. Log in for Sandy as a separate Matrix device. The easiest way is the helper script:
+2. Configure `channel.matrix.homeserver_url`, `channel.matrix.bot_user_id`, and `channel.matrix.allowed_user_id` in your config file.
+3. Run the login command to authenticate and store the access token:
 
 ```bash
-MATRIX_PASSWORD='your-bot-password' \
-  bun run matrix:login --homeserver https://matrix.org --user @og_sandy:matrix.org --device-name Sandy
+sandy matrix login
 ```
 
-3. Copy the returned `access_token` into `channel.matrix.access_token`.
-4. Keep the returned `device_id` for reference. It should represent a Sandy-specific device, not an Element session.
+Or with a specific device name:
+
+```bash
+sandy matrix login "My Sandy Bot"
+```
+
+You can also provide the password via environment variable:
+
+```bash
+MATRIX_PASSWORD='your-bot-password' sandy matrix login
+```
+
+4. Check the login status with `sandy matrix status`.
+
+The access token is stored in a state file (not the config file) and is bound to the configured homeserver URL and bot user ID. If you change either in the config, you must run `sandy matrix login` again.
 
 Local test channel behavior:
 

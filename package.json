@@ -8,7 +8,6 @@
   "scripts": {
     "sync:codex-version": "bun ./scripts/sync-codex-version.mjs",
     "check:codex-version": "bun ./scripts/check-codex-version.mjs",
-    "matrix:login": "bun ./scripts/matrix-login.mjs",
     "prepare:matrix-crypto": "bun ./scripts/prepare-matrix-crypto-binary.mjs",
     "knip": "knip",
     "lint": "eslint src --max-warnings 0",

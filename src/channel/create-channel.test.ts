@@ -51,7 +51,7 @@ test("createChannelAdapter returns the Telegram adapter for telegram configs", (
         allowedUser: "@test",
       },
     },
-  }, null);
+  }, null, null);
 
   assert.ok(adapter instanceof TelegramBotApiAdapter);
 });
@@ -65,7 +65,7 @@ test("createChannelAdapter returns the local-test adapter for local_test configs
         spoolRoot: "/tmp/sandy-local-test",
       },
     },
-  }, null);
+  }, null, null);
 
   assert.ok(adapter instanceof LocalTestChannelAdapter);
 });
@@ -77,11 +77,11 @@ test("createChannelAdapter returns the Matrix adapter for matrix configs", () =>
       kind: "matrix",
       matrix: {
         homeserverUrl: "https://matrix.example",
-        accessToken: "matrix-token",
+        botUserId: "@sandy:example.org",
         allowedUserId: "@owner:example.org",
       },
     },
-  }, null);
+  }, null, "matrix-token");
 
   assert.ok(adapter instanceof MatrixChannelAdapter);
 });

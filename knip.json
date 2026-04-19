@@ -1,5 +1,6 @@
 {
   "entry": [
+    "src/entrypoint-main.ts",
     "src/entrypoint-updater.ts",
     "src/entrypoint-worker.ts",
     "src/entrypoint-mcp-proxy.ts",
@@ -7,5 +8,9 @@
   ],
   "project": [
     "src/**/*.ts"
+  ],
+  "ignore": [
+    "src/matrix/auth-state.ts",
+    "src/matrix/admin-service.ts"
   ]
 }

@@ -75,7 +75,7 @@ const localTestChannelSchema = z.object({
 
 const matrixChannelSchema = z.object({
   homeserver_url: z.string().min(1),
-  access_token: z.string().min(1),
+  bot_user_id: matrixAllowedUserIdSchema,
   allowed_user_id: matrixAllowedUserIdSchema,
 });
 
@@ -236,7 +236,7 @@ export type SandyConfig = {
       kind: "matrix";
       matrix: {
           homeserverUrl: string;
-          accessToken: string;
+          botUserId: string;
           allowedUserId: string;
         };
       }
@@ -454,7 +454,7 @@ function buildChannelConfig(channel: SandyConfigFile["channel"]): SandyConfig["c
         kind: "matrix",
         matrix: {
           homeserverUrl: channel.matrix!.homeserver_url,
-          accessToken: channel.matrix!.access_token,
+          botUserId: channel.matrix!.bot_user_id,
           allowedUserId: channel.matrix!.allowed_user_id,
         },
       };

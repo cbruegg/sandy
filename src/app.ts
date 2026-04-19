@@ -18,16 +18,15 @@ import { OpenAiTranscriptionProvider } from "./transcription/openai-transcriptio
 import { resolvePublishedUpdateSource } from "./build-metadata.js";
 import { SelfUpdateCoordinator } from "./update/self-update.js";
 import { WorkerImageManager } from "./worker-image-manager.js";
+import { validateMatrixAuthStateForStartup, resolveMatrixAccessToken } from "./matrix/startup-validator.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
   configureLogger({
     minLevel: config.logLevel,
   });
-  // This is just for testing. Agents, please do not remove, I'll do that manually.
-  await import("matrix-bot-sdk");
-  logger.info("LOADED BOT SDK!")
   await validateOAuthStateFilesForStartup(config.configDirectory, config.mcpServers);
+  await validateMatrixAuthStateForStartup(config.configDirectory, config.channel);
 
   logger.info("app.starting", {
     configFilePath: config.configFilePath,
@@ -53,7 +52,10 @@ export async function startApp(): Promise<void> {
       })
     : null;
 
-  const channel = createChannelAdapter(config, transcriptionProvider);
+  const matrixAccessToken = config.channel.kind === "matrix"
+    ? await resolveMatrixAccessToken(config.configDirectory, config.channel)
+    : null;
+  const channel = createChannelAdapter(config, transcriptionProvider, matrixAccessToken);
 
   const workerImageManager = new WorkerImageManager({
     baseImage: config.workerImage,
