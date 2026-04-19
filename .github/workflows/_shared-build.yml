@@ -118,6 +118,16 @@ jobs:
             platform: linux/arm64
             platform_slug: arm64
             runner: ubuntu-24.04-arm
+          - target: network-guard-runtime
+            image: sandy-network-guard
+            platform: linux/amd64
+            platform_slug: amd64
+            runner: ubuntu-24.04
+          - target: network-guard-runtime
+            image: sandy-network-guard
+            platform: linux/arm64
+            platform_slug: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -178,6 +188,7 @@ jobs:
         include:
           - image: sandy-subagent
           - image: sandy-mcp-proxy
+          - image: sandy-network-guard
     steps:
       - name: Download image digests
         uses: actions/download-artifact@v8
