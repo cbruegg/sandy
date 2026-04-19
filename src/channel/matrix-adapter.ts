@@ -112,7 +112,6 @@ const MATRIX_POLL_START_EVENT_TYPE = "org.matrix.msc3381.poll.start";
 const MATRIX_POLL_RESPONSE_EVENT_TYPE = "org.matrix.msc3381.poll.response";
 const MATRIX_POLL_DISCLOSED_KIND = "org.matrix.msc3381.poll.disclosed";
 const MATRIX_REFERENCE_RELATION = "m.reference";
-const MAX_ACTIVE_POLLS_PER_ROOM = 16;
 
 async function defaultMatrixClientFactory(options: {
   homeserverUrl: string;
@@ -417,7 +416,6 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       roomId,
       actionsByAnswerId: new Map(options.map((option) => [option.answerId, { event: option.event }])),
     });
-    this.pruneRoomPolls(roomId);
   }
 
   private requireClient(): MatrixClientLike {
@@ -593,19 +591,6 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       if (record.roomId === roomId) {
         this.activePolls.delete(eventId);
       }
-    }
-  }
-
-  private pruneRoomPolls(roomId: string): void {
-    const roomPollIds = [...this.activePolls.entries()]
-      .filter(([, record]) => record.roomId === roomId)
-      .map(([eventId]) => eventId);
-    const excessCount = roomPollIds.length - MAX_ACTIVE_POLLS_PER_ROOM;
-    if (excessCount <= 0) {
-      return;
-    }
-    for (const eventId of roomPollIds.slice(0, excessCount)) {
-      this.activePolls.delete(eventId);
     }
   }
 }

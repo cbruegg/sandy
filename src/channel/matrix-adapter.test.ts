@@ -406,7 +406,7 @@ test("MatrixChannelAdapter catches handler failures and continues processing lat
   }
 });
 
-test("MatrixChannelAdapter evicts stale room polls after task completion and caps poll growth", async () => {
+test("MatrixChannelAdapter evicts stale room polls after task completion", async () => {
   const fakeClient = new FakeMatrixClient();
   fakeClient.joinedRooms.add(ROOM_ID);
   fakeClient.roomMembers.set(ROOM_ID, [BOT_ID, OWNER_ID]);
@@ -426,29 +426,11 @@ test("MatrixChannelAdapter evicts stale room polls after task completion and cap
       received.push(event);
     });
 
-    for (let index = 0; index < 17; index += 1) {
-      await adapter.sendTaskUpdate(ROOM_ID, `Still working ${index}`);
-    }
-
-    const pollEvents = fakeClient.sentEvents.filter((event) => event.eventType === "org.matrix.msc3381.poll.start");
-    const firstTaskPollId = expectDefined(pollEvents[0], "Expected the first task poll.").eventId;
-    const lastTaskPollId = expectDefined(pollEvents.at(-1), "Expected the last task poll.").eventId;
-
-    await fakeClient.dispatch("room.event", ROOM_ID, {
-      type: "org.matrix.msc3381.poll.response",
-      event_id: "$stale-capped",
-      sender: OWNER_ID,
-      origin_server_ts: 1_700_000_050_000,
-      content: {
-        "org.matrix.msc3381.poll.response": {
-          answers: ["cancel"],
-        },
-        "m.relates_to": {
-          rel_type: "m.reference",
-          event_id: firstTaskPollId,
-        },
-      },
-    });
+    await adapter.sendTaskUpdate(ROOM_ID, "Still working.");
+    const taskPollId = expectDefined(
+      fakeClient.sentEvents.find((event) => event.eventType === "org.matrix.msc3381.poll.start"),
+      "Expected a task poll.",
+    ).eventId;
 
     await fakeClient.dispatch("room.event", ROOM_ID, {
       type: "org.matrix.msc3381.poll.response",
@@ -461,7 +443,7 @@ test("MatrixChannelAdapter evicts stale room polls after task completion and cap
         },
         "m.relates_to": {
           rel_type: "m.reference",
-          event_id: lastTaskPollId,
+          event_id: taskPollId,
         },
       },
     });
@@ -491,7 +473,7 @@ test("MatrixChannelAdapter evicts stale room polls after task completion and cap
         },
         "m.relates_to": {
           rel_type: "m.reference",
-          event_id: lastTaskPollId,
+          event_id: taskPollId,
         },
       },
     });
