@@ -1,9 +1,4 @@
-import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import { logger } from "../logger.js";
-import { resolveMatrixCryptoBinaryName } from "./matrix-crypto-targets.js";
 
 const require = createRequire(import.meta.url);
 
@@ -75,81 +70,8 @@ type LoadedMatrixBotSdk = {
 };
 
 export async function loadMatrixBotSdk(): Promise<LoadedMatrixBotSdk> {
-  return await requireMatrixBotSdkWithCryptoRepair();
-}
-
-async function requireMatrixBotSdkWithCryptoRepair(): Promise<LoadedMatrixBotSdk> {
-  try {
-    preloadMatrixCryptoNativeModule();
-    return coerceMatrixBotSdkModule(await import("matrix-bot-sdk"));
-  } catch (error) {
-    if (!isMissingMatrixCryptoBindingError(error)) {
-      throw error;
-    }
-    await repairMatrixCryptoBinding();
-    clearMatrixBotSdkCaches();
-    return coerceMatrixBotSdkModule(require("matrix-bot-sdk") as unknown);
-  }
-}
-
-function isMissingMatrixCryptoBindingError(error: unknown): boolean {
-  const message = extractErrorMessage(error);
-  return message.includes("@matrix-org/matrix-sdk-crypto-nodejs-")
-    || message.includes("matrix-sdk-crypto.")
-    || message.includes("Cannot find module '@matrix-org/matrix-sdk-crypto-nodejs");
-}
-
-function extractErrorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  if (typeof error === "string") {
-    return error;
-  }
-  if (error && typeof error === "object" && "message" in error && typeof error.message === "string") {
-    return error.message;
-  }
-  return String(error);
-}
-
-async function repairMatrixCryptoBinding(): Promise<void> {
-  const packageJsonPath = require.resolve("@matrix-org/matrix-sdk-crypto-nodejs/package.json");
-  const packageRoot = dirname(packageJsonPath);
-  const downloadScriptPath = join(packageRoot, "download-lib.js");
-  const binaryName = resolveMatrixCryptoBinaryName(process.platform, process.arch);
-  const binaryPath = join(packageRoot, binaryName);
-
-  if (existsSync(binaryPath)) {
-    return;
-  }
-  if (!existsSync(downloadScriptPath)) {
-    throw new Error(`Matrix crypto download helper is missing at ${downloadScriptPath}.`);
-  }
-
-  logger.info("matrix.crypto_binding_download_started", {
-    binaryName,
-  });
-  const runtime = resolveMatrixCryptoDownloadRuntime();
-  await runMatrixCryptoDownload(runtime, downloadScriptPath, packageRoot);
-
-  if (!existsSync(binaryPath)) {
-    throw new Error(`Matrix crypto binding ${binaryName} is still missing after running the download helper.`);
-  }
-
-  logger.info("matrix.crypto_binding_downloaded", {
-    binaryName,
-  });
-}
-
-function clearMatrixBotSdkCaches(): void {
-  for (const specifier of ["matrix-bot-sdk", "@matrix-org/matrix-sdk-crypto-nodejs"]) {
-    try {
-      const resolved = require.resolve(specifier);
-      delete require.cache[resolved];
-    } catch {
-      // Ignore modules that were not cached or could not be resolved.
-    }
-  }
+  preloadMatrixCryptoNativeModule();
+  return coerceMatrixBotSdkModule(await import("matrix-bot-sdk"));
 }
 
 function preloadMatrixCryptoNativeModule(): void {
@@ -184,7 +106,7 @@ function preloadMatrixCryptoNativeModule(): void {
         return;
     }
   } catch {
-    // Ignore here. The normal matrix-bot-sdk load path and repair fallback handle missing files.
+    // Ignore here. This is only to make Bun bundle the native assets when present.
   }
 }
 
@@ -211,32 +133,4 @@ function coerceMatrixBotSdkModule(value: unknown): LoadedMatrixBotSdk {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? value as Record<string, unknown> : {};
-}
-
-function resolveMatrixCryptoDownloadRuntime(): string {
-  for (const candidate of ["node", "bun"]) {
-    const found = Bun.which(candidate);
-    if (found) {
-      return found;
-    }
-  }
-  throw new Error("Unable to locate `bun` or `node` to download the Matrix crypto binding.");
-}
-
-async function runMatrixCryptoDownload(runtime: string, scriptPath: string, cwd: string): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(runtime, [scriptPath], {
-      cwd,
-      stdio: "inherit",
-    });
-
-    child.on("error", reject);
-    child.on("exit", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      reject(new Error(`Matrix crypto download helper exited with status ${code ?? "unknown"}.`));
-    });
-  });
 }
