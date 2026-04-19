@@ -136,11 +136,6 @@ export class SandyMatrixAdminService {
   }
 
   private async promptForPassword(): Promise<string> {
-    const envPassword = process.env["MATRIX_PASSWORD"];
-    if (envPassword) {
-      return envPassword;
-    }
-
     return promptForPasswordHidden(matrixAdminMessages.passwordPrompt());
   }
 

@@ -126,12 +126,6 @@ Or with a specific device name:
 sandy matrix login "My Sandy Bot"
 ```
 
-You can also provide the password via environment variable:
-
-```bash
-MATRIX_PASSWORD='your-bot-password' sandy matrix login
-```
-
 4. Check the login status with `sandy matrix status`.
 
 The access token is stored in a state file (not the config file) and is bound to the configured homeserver URL and bot user ID. If you change either in the config, you must run `sandy matrix login` again.
