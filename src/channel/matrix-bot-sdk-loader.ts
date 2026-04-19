@@ -1,7 +1,3 @@
-import { createRequire } from "node:module";
-
-const require = createRequire(import.meta.url);
-
 export type MatrixWhoAmI = {
   user_id: string;
   device_id?: string;
@@ -70,46 +66,8 @@ type LoadedMatrixBotSdk = {
 };
 
 export async function loadMatrixBotSdk(): Promise<LoadedMatrixBotSdk> {
-  preloadMatrixCryptoNativeModule();
   return coerceMatrixBotSdkModule(await import("matrix-bot-sdk"));
 }
-
-function preloadMatrixCryptoNativeModule(): void {
-  try {
-    switch (process.platform) {
-      case "darwin":
-        if (process.arch === "arm64") {
-          require("@matrix-org/matrix-sdk-crypto-nodejs/matrix-sdk-crypto.darwin-arm64.node");
-        } else if (process.arch === "x64") {
-          require("@matrix-org/matrix-sdk-crypto-nodejs/matrix-sdk-crypto.darwin-x64.node");
-        }
-        return;
-      case "linux":
-        if (process.arch === "arm64") {
-          require("@matrix-org/matrix-sdk-crypto-nodejs/matrix-sdk-crypto.linux-arm64-gnu.node");
-        } else if (process.arch === "x64") {
-          require("@matrix-org/matrix-sdk-crypto-nodejs/matrix-sdk-crypto.linux-x64-gnu.node");
-        } else if (process.arch === "arm") {
-          require("@matrix-org/matrix-sdk-crypto-nodejs/matrix-sdk-crypto.linux-arm-gnueabihf.node");
-        }
-        return;
-      case "win32":
-        if (process.arch === "arm64") {
-          require("@matrix-org/matrix-sdk-crypto-nodejs/matrix-sdk-crypto.win32-arm64-msvc.node");
-        } else if (process.arch === "x64") {
-          require("@matrix-org/matrix-sdk-crypto-nodejs/matrix-sdk-crypto.win32-x64-msvc.node");
-        } else if (process.arch === "ia32") {
-          require("@matrix-org/matrix-sdk-crypto-nodejs/matrix-sdk-crypto.win32-ia32-msvc.node");
-        }
-        return;
-      default:
-        return;
-    }
-  } catch {
-    // Ignore here. This is only to make Bun bundle the native assets when present.
-  }
-}
-
 function coerceMatrixBotSdkModule(value: unknown): LoadedMatrixBotSdk {
   const record = asRecord(value);
   const MatrixClient = record["MatrixClient"];
