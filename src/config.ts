@@ -33,6 +33,9 @@ function normalizeTelegramAllowedUser(value: string | number): string {
   return String(value).trim();
 }
 
+const matrixAllowedUserIdSchema = z.string().trim().min(1).regex(/^@.+:.+$/, {
+  message: "Matrix allowed_user_id must be a full Matrix user ID like @user:example.org.",
+});
 function normalizeWorkerNetworkAllowLocalEntry(value: string): string {
   const normalized = value.trim();
   if (!normalized) {
@@ -64,10 +67,16 @@ function normalizeWorkerNetworkAllowLocalEntry(value: string): string {
   return `${address}/${prefix}`;
 }
 
-const sandyChannelKindSchema = z.enum(["telegram", "local_test"]);
+const sandyChannelKindSchema = z.enum(["telegram", "matrix", "local_test"]);
 
 const localTestChannelSchema = z.object({
   spool_root: z.string().min(1),
+});
+
+const matrixChannelSchema = z.object({
+  homeserver_url: z.string().min(1),
+  bot_user_id: matrixAllowedUserIdSchema,
+  allowed_user_id: matrixAllowedUserIdSchema,
 });
 
 const telegramChannelSchema = z.object({
@@ -87,6 +96,7 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
     channel: z.object({
       kind: sandyChannelKindSchema.default("telegram"),
       telegram: telegramChannelSchema.optional(),
+      matrix: matrixChannelSchema.optional(),
       local_test: localTestChannelSchema.optional(),
     }).superRefine((value, ctx) => {
       if (value.kind === "telegram" && !value.telegram) {
@@ -94,6 +104,13 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
           code: z.ZodIssueCode.custom,
           path: ["telegram"],
           message: "channel.telegram is required when channel.kind is \"telegram\".",
+        });
+      }
+      if (value.kind === "matrix" && !value.matrix) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["matrix"],
+          message: "channel.matrix is required when channel.kind is \"matrix\".",
         });
       }
       if (value.kind === "local_test" && !value.local_test) {
@@ -213,6 +230,14 @@ export type SandyConfig = {
       telegram: {
           botToken: string;
           allowedUser: string;
+        };
+      }
+    | {
+      kind: "matrix";
+      matrix: {
+          homeserverUrl: string;
+          botUserId: string;
+          allowedUserId: string;
         };
       }
     | {
@@ -422,6 +447,15 @@ function buildChannelConfig(channel: SandyConfigFile["channel"]): SandyConfig["c
         telegram: {
           botToken: channel.telegram!.bot_token,
           allowedUser: channel.telegram!.allowed_user,
+        },
+      };
+    case "matrix":
+      return {
+        kind: "matrix",
+        matrix: {
+          homeserverUrl: channel.matrix!.homeserver_url,
+          botUserId: channel.matrix!.bot_user_id,
+          allowedUserId: channel.matrix!.allowed_user_id,
         },
       };
     case "local_test":

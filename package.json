@@ -8,12 +8,13 @@
   "scripts": {
     "sync:codex-version": "bun ./scripts/sync-codex-version.mjs",
     "check:codex-version": "bun ./scripts/check-codex-version.mjs",
+    "prepare:matrix-crypto": "bun ./scripts/prepare-matrix-crypto-binary.mjs",
     "knip": "knip",
     "lint": "eslint src --max-warnings 0",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "clean": "rm -rf dist bin",
     "build:bundle": "bun run sync:codex-version && mkdir -p dist && bun build ./src/entrypoint-main.ts ./src/entrypoint-local-test.ts ./src/entrypoint-updater.ts ./src/entrypoint-worker.ts ./src/entrypoint-mcp-proxy.ts --outdir dist --target bun --sourcemap",
-    "build:exe": "bun run sync:codex-version && mkdir -p bin && bun build --compile --outfile bin/sandy --sourcemap ./src/entrypoint-main.ts",
+    "build:exe": "bun run prepare:matrix-crypto && bun run sync:codex-version && mkdir -p bin && bun build --compile --outfile bin/sandy --sourcemap ./src/entrypoint-main.ts",
     "build:exe:updater": "bun run sync:codex-version && mkdir -p bin && bun build --compile --outfile bin/sandy-updater --sourcemap ./src/entrypoint-updater.ts",
     "build:exe:worker": "bun run sync:codex-version && mkdir -p bin && bun build --compile --outfile bin/sandy-worker --sourcemap ./src/entrypoint-worker.ts",
     "build:exe:mcp": "bun run sync:codex-version && mkdir -p bin && bun build --compile --outfile bin/sandy-mcp-sidecar --sourcemap ./src/entrypoint-mcp-proxy.ts",
@@ -24,10 +25,12 @@
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
+    "@matrix-org/matrix-sdk-crypto-nodejs": "^0.4.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@openai/codex-sdk": "^0.120.0",
     "grammy": "^1.42.0",
     "jsonwebtoken": "^9.0.3",
+    "matrix-bot-sdk": "0.8.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
@@ -41,5 +44,8 @@
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.58.2"
   },
-  "private": true
+  "private": true,
+  "trustedDependencies": [
+    "@matrix-org/matrix-sdk-crypto-nodejs"
+  ]
 }

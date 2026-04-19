@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createChannelAdapter } from "./create-channel.js";
 import { TelegramBotApiAdapter } from "./telegram-adapter.js";
 import { LocalTestChannelAdapter } from "./local-test-adapter.js";
+import { MatrixChannelAdapter } from "./matrix-adapter.js";
 import type { SandyConfig } from "../config.js";
 
 function baseConfig(): Omit<SandyConfig, "channel"> {
@@ -50,7 +51,7 @@ test("createChannelAdapter returns the Telegram adapter for telegram configs", (
         allowedUser: "@test",
       },
     },
-  }, null);
+  }, null, null);
 
   assert.ok(adapter instanceof TelegramBotApiAdapter);
 });
@@ -64,7 +65,23 @@ test("createChannelAdapter returns the local-test adapter for local_test configs
         spoolRoot: "/tmp/sandy-local-test",
       },
     },
-  }, null);
+  }, null, null);
 
   assert.ok(adapter instanceof LocalTestChannelAdapter);
+});
+
+test("createChannelAdapter returns the Matrix adapter for matrix configs", () => {
+  const adapter = createChannelAdapter({
+    ...baseConfig(),
+    channel: {
+      kind: "matrix",
+      matrix: {
+        homeserverUrl: "https://matrix.example",
+        botUserId: "@sandy:example.org",
+        allowedUserId: "@owner:example.org",
+      },
+    },
+  }, null, "matrix-token");
+
+  assert.ok(adapter instanceof MatrixChannelAdapter);
 });

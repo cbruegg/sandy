@@ -1,15 +1,16 @@
 # Sandy V1 Plan
 
 ## Summary
-Build a safe MVP for Sandy as a Telegram-first orchestration service around Codex sub-agents running in Docker. V1 is text-first, single-process, and allows at most one active sub-agent per chat. The main agent acts only as a narrow controller for deciding whether to launch a task or reply directly; task execution, cancellation, privilege approval, and dangerous-output reporting are handled deterministically by the host runtime.
+Build a safe MVP for Sandy as a channel-driven orchestration service around Codex sub-agents running in Docker. V1 is text-first, single-process, and allows at most one active sub-agent per chat. The main agent acts only as a narrow controller for deciding whether to launch a task or reply directly; task execution, cancellation, privilege approval, and dangerous-output reporting are handled deterministically by the host runtime.
 
 ## Current Implementation Status
-- The current codebase implements a text-first MVP skeleton for Telegram plus Docker-hosted Codex sub-agents.
+- The current codebase implements a text-first MVP skeleton for Telegram, Matrix, and local-test channels plus Docker-hosted Codex sub-agents.
 - Implemented today:
   - Bun-based local runtime, package-manager, and test-runner workflow, with explicit `tsc --noEmit` type-checking kept in the build.
   - `bun build` support for both bundled JS outputs and single-file executable builds for the host entrypoints.
   - `grammY`-based Telegram transport with deterministic normalization into Sandy chat events.
-  - Recovery from transient Telegram polling or handler errors without crashing the host process.
+  - Matrix bot transport with encrypted 1:1 room qualification, poll-driven controls, and filesystem-backed crypto state.
+  - Recovery from transient channel polling or handler errors without crashing the host process.
   - A narrow main-agent controller that decides whether to reply directly or launch a sub-agent.
   - Main-agent Codex threads are locked down with `approvalPolicy: "never"`, `sandboxMode: "read-only"`, and a fresh temp working directory per chat thread.
   - Main-agent Codex threads persist per chat and receive only the newly visible entries for each decision, preserving context caching without maintaining a full host-side transcript.
@@ -25,15 +26,15 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - Eager worker-overlay reconciliation during Sandy startup, with persisted weekly refresh timing stored in Sandy's cache directory.
   - Quarantining of sub-agent output until the user either reports it as dangerous or continues the conversation.
   - Deterministic cancellation and privilege-request routing.
-  - Telegram file uploads staged directly into the per-task shared workspace on task launch and during active tasks.
+  - Channel file uploads staged directly into the per-task shared workspace on task launch and during active tasks.
   - Deterministic sub-agent requests to send files from `/workspace/share` back to the user through the channel without privilege escalation.
   - Host-mediated one-off file copy operations into and out of the per-sub-agent shared workspace.
   - File-backed Sandy runtime configuration in `~/.config/sandy/config.toml`, with `SANDY_CONFIG_FILE` as a path override.
-  - Telegram voice messages transcribed through a configurable OpenAI-compatible STT endpoint and then processed through the normal text-message path.
+  - Channel voice/audio messages transcribed through a configurable OpenAI-compatible STT endpoint and then processed through the normal text-message path.
   - Deterministic detection of worker disconnects, handshake timeouts, and control-channel write failures.
   - Structured host-side logging for significant lifecycle and failure events.
   - Centralized user-facing message definitions to prepare for future i18n.
-  - Channel-owned formatting metadata, with Telegram output sanitized and sent as simple HTML.
+  - Channel-owned formatting metadata, with rich-text channels sanitized and sent as simple HTML.
   - Automatic deletion of empty per-sub-agent shared workspaces, with explicit user confirmation before deleting non-empty workspaces.
   - Host-side MCP proxying for configured upstream MCP servers, with per-task JWT authentication for workers.
   - Default-deny worker access to local/private network ranges through a per-task network-guard container, while preserving public internet access and MCP sidecar connectivity on both Linux and Docker Desktop.
@@ -48,7 +49,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
 ## Key Changes
 ### Host runtime and orchestration
 - Replace the current Codex SDK smoke test with a host application that boots:
-  - a Telegram channel adapter,
+  - a channel adapter,
   - an in-memory session store,
   - a main-agent controller,
   - a Docker-based sub-agent runner using structured stdio for host/sub-agent communication.
@@ -65,7 +66,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - host-side task metadata for the active sub-agent if one exists,
   - the allowed action schema.
 - Define “normalized visible chat entries” as a deterministic representation of user/channel events, not an LLM summary. It should:
-  - convert Telegram-specific inputs into canonical event types such as `user_text`, `cancel_request`, `approval_response`, `danger_report`,
+  - convert channel-specific inputs into canonical event types such as `user_text`, `cancel_request`, `approval_response`, `danger_report`,
   - keep only semantically relevant text and minimal metadata,
   - exclude raw transport payloads and unsupported binary content.
 - Define “host-side task metadata” as lifecycle state only. It may include:
@@ -130,22 +131,22 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - `TranscriptionProvider`
 - Normalize inbound message types as `text`, `image`, `file`, `voice`, with `text` and file attachments implemented end to end in v1.
 - Expose channel formatting metadata to both the main agent and sub-agents so user-visible output can target the active channel safely.
-- For Telegram v1, support inline buttons and fixed commands/phrases for:
+- For channel-owned interaction controls, support deterministic actions for:
   - cancel
   - approve
   - deny
   - danger report
-- Send Telegram messages using sanitized HTML rather than plain Markdown text.
+- Send rich-text channel messages using sanitized HTML rather than plain Markdown text.
 - Keep voice/image handling scaffolded at the interface level, with explicit “not supported in v1” behavior where needed.
 
 ### Dependencies and configuration
 - Add dependencies for:
-  - Telegram bot runtime,
+  - channel runtimes,
   - runtime schema validation,
   - Docker lifecycle control,
   - Bun test runner and TypeScript type-checking.
 - Add Sandy TOML config for:
-  - Telegram bot token
+  - channel credentials
   - OpenAI/Codex auth selection
   - host log level and debug-content logging
   - Docker worker image/tag
@@ -178,7 +179,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - in-memory per-chat state including active task metadata, quarantined output pending later release, and any pending shared-workspace deletion confirmation
 
 ## Test Plan
-- Unit-test normalization of Telegram inputs into canonical chat events.
+- Unit-test normalization of channel inputs into canonical chat events.
 - Unit-test main-agent decision parsing and rejection of invalid structured output.
 - Unit-test active-task routing for normal text, cancellation, approval, denial, and danger reporting.
 - Unit-test quarantine behavior:
@@ -191,7 +192,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - copy-in and copy-out operations target only the requesting sub-agent’s share.
 - Unit-test unsupported voice/image inputs produce explicit deterministic responses.
 - Unit-test file upload staging into the task share and deterministic file send-back through the channel.
-- Integration-test happy-path task launch, progress relay, privilege approval, and completion using mocked Codex, mocked Docker, mocked Telegram, and mocked worker transport.
+- Integration-test happy-path task launch, progress relay, privilege approval, and completion using mocked Codex, mocked Docker, mocked channel transports, and mocked worker transport.
 - Integration-test failure cases:
   - container launch failure,
   - worker disconnect,
@@ -201,7 +202,7 @@ Build a safe MVP for Sandy as a Telegram-first orchestration service around Code
   - non-empty shared workspace requiring user confirmation before deletion.
 
 ## Assumptions and Defaults
-- V1 is Telegram-only, text-first, single-process, and single-active-task-per-chat.
+- V1 is text-first, single-process, and single-active-task-per-chat. Telegram, Matrix encrypted 1:1 rooms, and local-test are supported transport scopes.
 - Runtime state is in memory only; restart recovery is out of scope.
 - The main agent is a narrow controller and does not see hidden sub-agent output.
 - Skills are loaded only at Sandy startup and require a Sandy restart before skill file changes take effect.

@@ -17,7 +17,7 @@ if [[ "${MODE}" == "--channel" ]]; then
   MODE="${2:-local_test}"
 fi
 
-if [[ "${MODE}" == "telegram" ]]; then
+if [[ "${MODE}" == "telegram" || "${MODE}" == "matrix" ]]; then
   exec env SANDY_CONFIG_FILE=config/config.toml bun start
 fi
 

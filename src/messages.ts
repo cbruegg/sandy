@@ -21,7 +21,7 @@ export const messages = {
     `A Sandy update is ready. Restarting now to install ${revision}.`,
   nextPlannedStep: (step: string): string => `Next planned step: ${step}`,
   commandProgress: (status: string, command: string, channelFormatting: ChannelFormatting | null): string => {
-    const formattedCommand = channelFormatting?.markup === "telegram_html" ? `<code>${command}</code>` : command;
+    const formattedCommand = channelFormatting && channelFormatting.markup !== "plain_text" ? `<code>${command}</code>` : command;
     return `Command ${status}: ${formattedCommand}`;
   },
   taskSummaryReady: (taskName: string, summary: string): string =>
@@ -133,6 +133,23 @@ export const mcpAdminMessages = {
     "OAuth login input was closed before an authorization code was received.",
   oauthTokensMissingForStartup: (serverId: string, stateFilePath: string): string =>
     `OAuth state for ${serverId} exists at ${stateFilePath} but is missing tokens. Run "sandy mcp login ${serverId}" before starting Sandy.`,
+} as const;
+
+export const matrixAdminMessages = {
+  noMatrixConfig: (): string =>
+    "Matrix channel is not configured. Set channel.kind = \"matrix\" and configure channel.matrix in your config file.",
+  passwordPrompt: (): string =>
+    "Enter Matrix password: ",
+  passwordRequired: (): string =>
+    "Matrix password is required.",
+  loginFailed: (error: string): string =>
+    `Matrix login failed: ${error}`,
+  loginInvalidResponse: (): string =>
+    "Matrix login response did not contain required fields (user_id, device_id, access_token).",
+  authStateMissing: (): string =>
+    'Matrix auth state file is missing. Run "sandy matrix login" first.',
+  authStateInvalid: (reason: string): string =>
+    `Matrix auth state is invalid: ${reason} Run "sandy matrix login" to re-authenticate.`,
 } as const;
 
 function describePrivilegeRequest(request: PrivilegeRequest): string {

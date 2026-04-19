@@ -12,8 +12,9 @@ status, completed work, and known gaps relative to that target, see `PLAN_v1.md`
 
 - Bun 1.3 or newer.
 - Docker installed and available as `docker`.
-- A Telegram bot token.
-- The Telegram numeric user ID or username of the one person allowed to control Sandy.
+- Either:
+  - a Telegram bot token plus the Telegram numeric user ID or username of the one person allowed to control Sandy, or
+  - a Matrix homeserver URL, bot access token, and the full Matrix user ID of the one person allowed to control Sandy.
 - Either:
   - a local Codex ChatGPT login on the host machine, or
   - an OpenAI API key.
@@ -37,11 +38,16 @@ Commented entries below show built-in defaults. Uncommented values are required 
 # level = "info"
 
 [channel]
-kind = "telegram" # or "local_test"
+kind = "telegram" # or "matrix" or "local_test"
 
 [channel.telegram]
 bot_token = "123456:telegram-token"
 allowed_user = "123456789" # or "@cbruegg"
+
+[channel.matrix]
+homeserver_url = "https://matrix.org"
+bot_user_id = "@sandy:matrix.org"
+allowed_user_id = "@cbruegg:matrix.org"
 
 [channel.local_test]
 # spool_root = "/tmp/sandy-local-test"
@@ -96,6 +102,34 @@ Telegram auth behavior:
 - Sandy ignores every Telegram update whose sender does not match `channel.telegram.allowed_user`.
 - Sandy also ignores all non-private Telegram chats, even when the sender matches the configured user.
 
+Matrix channel behavior:
+
+- `channel.kind = "matrix"` requires `channel.matrix.homeserver_url`, `channel.matrix.bot_user_id`, and `channel.matrix.allowed_user_id`.
+- Both `channel.matrix.bot_user_id` and `channel.matrix.allowed_user_id` must be full Matrix user IDs such as `@user:matrix.org`.
+- Sandy auto-joins invites from the configured Matrix user and leaves rooms that are unencrypted, multi-user, or otherwise fail that qualification.
+- Matrix task controls and approvals are exposed through Matrix polls only. Use a client with poll support such as Element or FluffyChat.
+- Sandy must use a dedicated Matrix device session for encryption. The access token is managed separately from the config file.
+
+To set up Matrix authentication:
+
+1. Create a dedicated account for the bot on your Matrix homeserver.
+2. Configure `channel.matrix.homeserver_url`, `channel.matrix.bot_user_id`, and `channel.matrix.allowed_user_id` in your config file.
+3. Run the login command to authenticate and store the access token:
+
+```bash
+sandy matrix login
+```
+
+Or with a specific device name:
+
+```bash
+sandy matrix login "My Sandy Bot"
+```
+
+4. Check the login status with `sandy matrix status`.
+
+The access token is stored in a state file (not the config file) and is bound to the configured homeserver URL and bot user ID. If you change either in the config, you must run `sandy matrix login` again.
+
 Local test channel behavior:
 
 - `channel.kind = "local_test"` uses a file-backed inbox/outbox transport for autonomous local testing.
@@ -109,7 +143,7 @@ Codex auth behavior:
 - If the host already has Codex logged in with ChatGPT and `auth.codex_auth_file` exists, Sandy mounts that file into the sub-agent container automatically.
 - If `auth.openai_api_key` is set and no Codex auth file is available, Sandy passes the API key to the main agent and sub-agent worker.
 - If both are present, Sandy prefers the Codex ChatGPT auth file and does not pass the API key.
-- OAuth for upstream MCP servers is handled on the host through the Sandy CLI, not inside Telegram chats.
+- OAuth for upstream MCP servers is handled on the host through the Sandy CLI, not inside channel chats.
 
 MCP OAuth behavior:
 
@@ -231,7 +265,7 @@ bun start -- mcp login todoist
 bun start -- mcp logout todoist
 ```
 
-The host emits structured JSON logs to stdout/stderr for significant events such as startup, Telegram message handling,
+The host emits structured JSON logs to stdout/stderr for significant events such as startup, channel message handling,
 main-agent decisions, task lifecycle transitions, privilege requests, and sandbox/container failures.
 If `logging.debug=true`, those logs also include full user message content and model responses, which may contain sensitive
 data.
@@ -260,7 +294,7 @@ Over time, it might make sense to use the [Pi agent](https://github.com/badlogic
 providing a more flexible API that is not tied to a specific LLM provider.
 
 Sandy receives messages from the user through a channel abstraction.
-This repository includes both a Telegram adapter and a file-backed `local_test` adapter for autonomous local testing.
+This repository includes Telegram and Matrix adapters plus a file-backed `local_test` adapter for autonomous local testing.
 Each channel also defines its own formatting contract for user-visible agent output.
 
 Allowed message types are text messages, file uploads (with images receiving dedicated handling) and voice messages.
@@ -283,7 +317,7 @@ do with it:
       Instead, the sub-agent sends them to the host runtime over its container control channel, which then forwards them
       to the user.
     - When the user sees a dangerous response, they can report it to the main agent. Depending on the channel,
-      this can either be through a well-defined emoji reaction or a predefined phrase.
+      this can either be through channel-native controls such as Telegram buttons or Matrix polls.
       The main agent then immediately terminates the sub-agent, discards its responses and notifies the user of the
       termination.
     - If the user's message after a response is not a report, Sandy may expose that response to the main agent on a
@@ -354,9 +388,9 @@ Channel-native file transfer is separate from privilege evaluation. User uploads
 and sub-agent requests to send files back to the user through the channel do not require approval as long as the file
 path stays under `/workspace/share`.
 
-The user can then choose to approve or deny the request, and if they approve it using predefined phrases or emoji
-reactions, the host runtime deterministically performs the requested operation without the LLM of the main
-agent involved. It then notifies the sub-agent of the result so it can proceed with its execution.
+The user can then choose to approve or deny the request through channel-native controls, and the host runtime
+deterministically performs the requested operation without the LLM of the main agent involved. It then notifies the
+sub-agent of the result so it can proceed with its execution.
 
 Sandy's own host-mediated worker tools are not rewritten to MCP in v1. External MCP access and Sandy's native
 copy/file-send flows coexist for now.
