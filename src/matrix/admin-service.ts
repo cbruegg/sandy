@@ -1,12 +1,12 @@
-import { join } from "node:path";
-import { rm } from "node:fs/promises";
+import {join} from "node:path";
+import {rm} from "node:fs/promises";
 import {
   deleteMatrixAuthState,
   loadMatrixAuthState,
   saveMatrixAuthState,
   validateMatrixAuthStateForConfig,
 } from "./auth-state.js";
-import { matrixAdminMessages } from "../messages.js";
+import {matrixAdminMessages} from "../messages.js";
 
 type MatrixStatus = {
   homeserverUrl: string;
@@ -151,7 +151,7 @@ export async function promptForPasswordHidden(
   stdin.setEncoding("utf8");
 
   let password = "";
-  const result = await new Promise<string>((resolve, reject) => {
+  return await new Promise<string>((resolve, reject) => {
     const onData = (char: string) => {
       switch (char) {
         case "\n":
@@ -192,6 +192,4 @@ export async function promptForPasswordHidden(
 
     stdin.on("data", onData);
   });
-
-  return result;
 }
