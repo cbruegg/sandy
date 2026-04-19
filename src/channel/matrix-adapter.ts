@@ -5,6 +5,7 @@ import { logger } from "../logger.js";
 import { buttonLabels, messages } from "../messages.js";
 import { matrixHtmlAllowedTags, sanitizeMatrixHtml } from "./matrix-html.js";
 import { describeMatrixStartupError } from "./matrix-startup-error.js";
+import type { StoreType as MatrixCryptoStoreType } from "@matrix-org/matrix-sdk-crypto-nodejs";
 import type {
   ChannelFormatting,
   MessageAttachment,
@@ -64,21 +65,6 @@ type MatrixClientLike = {
   uploadContent(data: Buffer, contentType?: string, filename?: string): Promise<string>;
   downloadContent(mxcUrl: string, allowRemote?: boolean): Promise<MatrixMediaInfo>;
   crypto?: MatrixCryptoLike;
-};
-
-type MatrixClientConstructor = new (
-  homeserverUrl: string,
-  accessToken: string,
-  storage: unknown,
-  cryptoStorage: unknown,
-) => MatrixClientLike;
-
-type StorageProviderConstructor = new (path: string) => unknown;
-
-type LoadedMatrixBotSdk = {
-  MatrixClient: MatrixClientConstructor;
-  RustSdkCryptoStorageProvider: StorageProviderConstructor;
-  SimpleFsStorageProvider: StorageProviderConstructor;
 };
 
 type MatrixMessageContent = {
@@ -154,6 +140,7 @@ const MATRIX_POLL_START_EVENT_TYPE = "org.matrix.msc3381.poll.start";
 const MATRIX_POLL_RESPONSE_EVENT_TYPE = "org.matrix.msc3381.poll.response";
 const MATRIX_POLL_DISCLOSED_KIND = "org.matrix.msc3381.poll.disclosed";
 const MATRIX_REFERENCE_RELATION = "m.reference";
+const MATRIX_CRYPTO_STORE_SQLITE: MatrixCryptoStoreType = 0;
 
 async function defaultMatrixClientFactory(options: {
   homeserverUrl: string;
@@ -164,9 +151,9 @@ async function defaultMatrixClientFactory(options: {
     MatrixClient,
     RustSdkCryptoStorageProvider,
     SimpleFsStorageProvider,
-  } = coerceMatrixBotSdkModule(await import("matrix-bot-sdk"));
+  } = await import("matrix-bot-sdk");
   const storage = new SimpleFsStorageProvider(join(options.stateRoot, "client.json"));
-  const cryptoStorage = new RustSdkCryptoStorageProvider(join(options.stateRoot, "crypto"));
+  const cryptoStorage = new RustSdkCryptoStorageProvider(join(options.stateRoot, "crypto"), MATRIX_CRYPTO_STORE_SQLITE);
   return new MatrixClient(options.homeserverUrl, options.accessToken, storage, cryptoStorage);
 }
 
@@ -945,27 +932,6 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 function asOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function coerceMatrixBotSdkModule(value: unknown): LoadedMatrixBotSdk {
-  const record = asRecord(value);
-  const MatrixClient = record["MatrixClient"];
-  const RustSdkCryptoStorageProvider = record["RustSdkCryptoStorageProvider"];
-  const SimpleFsStorageProvider = record["SimpleFsStorageProvider"];
-
-  if (
-    typeof MatrixClient !== "function"
-    || typeof RustSdkCryptoStorageProvider !== "function"
-    || typeof SimpleFsStorageProvider !== "function"
-  ) {
-    throw new Error("matrix-bot-sdk did not expose the expected client and storage constructors.");
-  }
-
-  return {
-    MatrixClient: MatrixClient as MatrixClientConstructor,
-    RustSdkCryptoStorageProvider: RustSdkCryptoStorageProvider as StorageProviderConstructor,
-    SimpleFsStorageProvider: SimpleFsStorageProvider as StorageProviderConstructor,
-  };
 }
 
 function previewText(text: string): string {
