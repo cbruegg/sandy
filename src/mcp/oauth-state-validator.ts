@@ -14,11 +14,7 @@ export async function validateOAuthStateFilesForStartup(
 ): Promise<void> {
   const oauthStateDirectory = buildHostOauthStateDirectory(configDirectory);
 
-  for (const [serverId, serverConfig] of Object.entries(mcpServers)) {
-    if (serverConfig.oauthScopes.length === 0) {
-      continue;
-    }
-
+  for (const [serverId] of Object.entries(mcpServers)) {
     const stateFilePath = join(oauthStateDirectory, `${serverId}.json`);
     let raw: string;
     try {
