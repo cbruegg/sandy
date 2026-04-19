@@ -109,6 +109,18 @@ Matrix channel behavior:
 - Sandy auto-joins invites from the configured Matrix user and leaves rooms that are unencrypted, multi-user, or otherwise fail that qualification.
 - Matrix task controls and approvals are exposed through Matrix polls only. Use a client with poll support such as Element or FluffyChat.
 
+To create a Matrix bot account and obtain its access token:
+
+1. Create a dedicated account for the bot on your Matrix homeserver.
+2. Open Element in a private or incognito browser window.
+3. Log in as the account whose access token you want to use, typically the bot account.
+4. Click the account name in the top-left corner, then open `Settings`.
+5. Optionally set a display name and avatar for the bot account.
+6. Open the `Help & About` tab in the settings dialog.
+7. Scroll to the bottom and reveal the access token shown there.
+8. Copy that token into Sandy's config file under `channel.matrix.access_token`.
+9. Close the browser window without logging out. Logging out invalidates the token on the server, which would prevent the bot from connecting.
+
 Local test channel behavior:
 
 - `channel.kind = "local_test"` uses a file-backed inbox/outbox transport for autonomous local testing.
