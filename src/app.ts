@@ -6,6 +6,7 @@ import { resolveSandyCacheRoot } from "./cache-paths.js";
 import { configureLogger, logger } from "./logger.js";
 import { SandyMcpProxyAccess } from "./mcp/proxy-access.js";
 import { McpSidecarManager } from "./mcp/sidecar-manager.js";
+import { validateOAuthStateFilesForStartup } from "./mcp/oauth-state-validator.js";
 import { McpWorkerLaunchConfigBuilder } from "./mcp/worker-launch-config-builder.js";
 import { createMcpWorkerNetworkName } from "./mcp/worker-network-name.js";
 import { SandyOrchestrator } from "./orchestrator.js";
@@ -23,6 +24,7 @@ export async function startApp(): Promise<void> {
   configureLogger({
     minLevel: config.logLevel,
   });
+  await validateOAuthStateFilesForStartup(config.configDirectory, config.mcpServers);
 
   logger.info("app.starting", {
     configFilePath: config.configFilePath,

@@ -9,6 +9,7 @@ import {
   type OAuthClientProvider,
   type OAuthDiscoveryState,
 } from "@modelcontextprotocol/sdk/client/auth.js";
+import { logger } from "../logger.js";
 import { rewriteUrlOrigin } from "./oauth-compatibility.js";
 
 type SandyOAuthState = {
@@ -163,20 +164,31 @@ export class SandyOAuthClientProvider implements OAuthClientProvider {
 
   async invalidateCredentials(scope: "all" | "client" | "tokens" | "verifier" | "discovery"): Promise<void> {
     const state = await this.loadState();
+    const invalidated: string[] = [];
 
     if (scope === "all" || scope === "client") {
       delete state.clientInformation;
+      invalidated.push("clientInformation");
     }
     if (scope === "all" || scope === "tokens") {
       delete state.tokens;
+      invalidated.push("tokens");
     }
     if (scope === "all" || scope === "verifier") {
       delete state.codeVerifier;
+      invalidated.push("codeVerifier");
     }
     if (scope === "all" || scope === "discovery") {
       delete state.discoveryState;
+      invalidated.push("discoveryState");
     }
 
+    logger.warn("mcp.oauth.credentials_invalidated", {
+      scope,
+      stateFilePath: this.options.stateFilePath,
+      configuredServerUrl: this.options.configuredServerUrl,
+      invalidated,
+    });
     await this.saveState(state);
   }
 

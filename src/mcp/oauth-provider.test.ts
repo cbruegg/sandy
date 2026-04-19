@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { test } from "bun:test";
+import { configureLogger } from "../logger.js";
 import { SandyOAuthClientProvider } from "./oauth-provider.js";
 
 test("SandyOAuthClientProvider prepares a refresh-token request for non-interactive runtime use", async () => {
@@ -116,6 +117,56 @@ test("SandyOAuthClientProvider invalidates saved state when the configured serve
     () => provider.prepareTokenRequest(),
     /Run "sandy mcp login <serverId>" first/,
   );
+});
+
+test("SandyOAuthClientProvider logs a warning when credentials are invalidated", async () => {
+  const stateFilePath = join(await mkdtemp(join(tmpdir(), "sandy-oauth-provider-")), "todoist.json");
+  const forwardedLogs: Array<{ event: string; data?: Record<string, unknown> }> = [];
+  configureLogger({
+    minLevel: "warn",
+    outputMode: "stderr",
+    forwardLog: (payload) => {
+      forwardedLogs.push({
+        event: payload.event,
+        data: payload.data,
+      });
+    },
+  });
+
+  try {
+    await writeFile(stateFilePath, JSON.stringify({
+      configuredServerUrl: "https://todoist.example/mcp",
+      tokens: {
+        access_token: "stale-token",
+        token_type: "Bearer",
+        expires_in: 1800,
+      },
+    }), "utf8");
+
+    const provider = new SandyOAuthClientProvider({
+      stateFilePath,
+      interactive: false,
+      configuredServerUrl: "https://todoist.example/mcp",
+    });
+
+    await provider.invalidateCredentials("tokens");
+
+    assert.deepEqual(forwardedLogs, [{
+      event: "mcp.oauth.credentials_invalidated",
+      data: {
+        scope: "tokens",
+        stateFilePath,
+        configuredServerUrl: "https://todoist.example/mcp",
+        invalidated: ["tokens"],
+      },
+    }]);
+  } finally {
+    configureLogger({
+      minLevel: "info",
+      outputMode: "split",
+      forwardLog: undefined,
+    });
+  }
 });
 
 test("SandyOAuthClientProvider keeps interactive discovery URLs host-local until login completes", async () => {
