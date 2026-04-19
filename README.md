@@ -108,18 +108,23 @@ Matrix channel behavior:
 - `channel.matrix.allowed_user_id` must be a full Matrix user ID such as `@cbruegg:matrix.org`.
 - Sandy auto-joins invites from the configured Matrix user and leaves rooms that are unencrypted, multi-user, or otherwise fail that qualification.
 - Matrix task controls and approvals are exposed through Matrix polls only. Use a client with poll support such as Element or FluffyChat.
+- Sandy must use a dedicated Matrix device session for encryption. Do not copy `channel.matrix.access_token` from an Element session or any other client you plan to keep using.
 
 To create a Matrix bot account and obtain its access token:
 
 1. Create a dedicated account for the bot on your Matrix homeserver.
-2. Open Element in a private or incognito browser window.
-3. Log in as the account whose access token you want to use, typically the bot account.
-4. Click the account name in the top-left corner, then open `Settings`.
-5. Optionally set a display name and avatar for the bot account.
-6. Open the `Help & About` tab in the settings dialog.
-7. Scroll to the bottom and reveal the access token shown there.
-8. Copy that token into Sandy's config file under `channel.matrix.access_token`.
-9. Close the browser window without logging out. Logging out invalidates the token on the server, which would prevent the bot from connecting.
+2. Log in for Sandy as a separate Matrix device. The easiest way is the helper script:
+
+```bash
+MATRIX_PASSWORD='your-bot-password' \
+  bun run matrix:login --homeserver https://matrix.org --user @og_sandy:matrix.org --device-name Sandy
+```
+
+3. Copy the returned `access_token` into `channel.matrix.access_token`.
+4. Keep the returned `device_id` for reference. It should represent a Sandy-specific device, not an Element session.
+5. If you want to inspect the bot account in Element or another Matrix client, create a separate login there so it gets its own device ID.
+
+If you previously configured Sandy with an access token copied from Element and startup fails with a one-time-key conflict, create a fresh Sandy login/device, update `channel.matrix.access_token`, and delete `config/state/matrix` before restarting.
 
 Local test channel behavior:
 

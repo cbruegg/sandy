@@ -8,6 +8,7 @@
   "scripts": {
     "sync:codex-version": "bun ./scripts/sync-codex-version.mjs",
     "check:codex-version": "bun ./scripts/check-codex-version.mjs",
+    "matrix:login": "bun ./scripts/matrix-login.mjs",
     "knip": "knip",
     "lint": "eslint src --max-warnings 0",
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -24,6 +25,7 @@
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
+    "@matrix-org/matrix-sdk-crypto-nodejs": "0.1.0-beta.6",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@openai/codex-sdk": "^0.120.0",
     "grammy": "^1.42.0",

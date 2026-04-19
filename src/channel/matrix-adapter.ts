@@ -3,7 +3,13 @@ import { basename, join } from "node:path";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { buttonLabels, messages } from "../messages.js";
+import {
+  loadMatrixBotSdk,
+  type EncryptedFile,
+  type MatrixClientLike,
+} from "./matrix-bot-sdk-loader.js";
 import { matrixHtmlAllowedTags, sanitizeMatrixHtml } from "./matrix-html.js";
+import { describeMatrixStartupError } from "./matrix-startup-error.js";
 import type {
   ChannelFormatting,
   MessageAttachment,
@@ -12,41 +18,15 @@ import type {
   SavedAttachment,
 } from "../types.js";
 import type { TranscriptionProvider } from "../transcription/transcription-provider.js";
-import type {
-  AudioMessageEventContent,
-  EncryptedFile,
-  FileMessageEventContent,
-  MatrixClient as MatrixSdkClient,
-  TextualMessageEventContent,
-} from "matrix-bot-sdk";
 
-type MatrixWhoAmI = Awaited<ReturnType<MatrixSdkClient["getWhoAmI"]>>;
-type MatrixMediaInfo = Awaited<ReturnType<MatrixSdkClient["downloadContent"]>>;
-
-type MatrixCryptoLike = {
-  isRoomEncrypted(roomId: string): Promise<boolean>;
-  encryptMedia(file: Buffer): Promise<{
-    buffer: Buffer;
-    file: Omit<EncryptedFile, "url">;
-  }>;
-  decryptMedia(file: EncryptedFile): Promise<Buffer>;
-};
-
-type MatrixClientLike = {
-  on(event: string, handler: (roomId: string, event: Record<string, unknown>) => void | Promise<void>): unknown;
-  start(filter?: unknown): Promise<unknown>;
-  stop(): void;
-  getWhoAmI(): Promise<MatrixWhoAmI>;
-  getJoinedRooms(): Promise<string[]>;
-  getJoinedRoomMembers(roomId: string): Promise<string[]>;
-  joinRoom(roomId: string, viaServers?: string[]): Promise<string>;
-  leaveRoom(roomId: string, reason?: string): Promise<unknown>;
-  getRoomStateEvent(roomId: string, type: string, stateKey: string): Promise<unknown>;
-  sendHtmlNotice(roomId: string, html: string): Promise<string>;
-  sendEvent(roomId: string, eventType: string, content: Record<string, unknown>): Promise<string>;
-  uploadContent(data: Buffer, contentType?: string, filename?: string): Promise<string>;
-  downloadContent(mxcUrl: string, allowRemote?: boolean): Promise<MatrixMediaInfo>;
-  crypto?: MatrixCryptoLike;
+type MatrixMessageContent = {
+  body?: string;
+  msgtype?: string;
+  url?: string;
+  file?: unknown;
+  info?: {
+    mimetype?: string;
+  };
 };
 
 type MatrixClientFactory = (options: {
@@ -122,7 +102,7 @@ async function defaultMatrixClientFactory(options: {
     MatrixClient,
     RustSdkCryptoStorageProvider,
     SimpleFsStorageProvider,
-  } = await import("matrix-bot-sdk");
+  } = await loadMatrixBotSdk();
   const storage = new SimpleFsStorageProvider(join(options.stateRoot, "client.json"));
   const cryptoStorage = new RustSdkCryptoStorageProvider(join(options.stateRoot, "crypto"));
   return new MatrixClient(options.homeserverUrl, options.accessToken, storage, cryptoStorage);
@@ -138,6 +118,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   private client: MatrixClientLike | null = null;
   private startPromise: Promise<void> | null = null;
   private botUserId: string | null = null;
+  private botDeviceId: string | null = null;
   private readonly activePolls = new Map<string, MatrixPollRecord>();
   private readonly attachmentRefs = new Map<string, MatrixAttachmentRef>();
   private readonly qualifiedRooms = new Set<string>();
@@ -170,6 +151,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     const client = this.requireClient();
     const whoAmI = await client.getWhoAmI();
     this.botUserId = whoAmI.user_id;
+    this.botDeviceId = whoAmI.device_id ?? null;
 
     client.on("room.invite", async (roomId, event) => this.handleInvite(roomId, event));
     client.on("room.join", async (roomId, event) => this.handleJoin(roomId, event));
@@ -185,8 +167,17 @@ export class MatrixChannelAdapter implements ChannelAdapter {
         homeserverUrl: this.homeserverUrl,
         allowedUserId: this.allowedUserId,
         botUserId: this.botUserId,
+        botDeviceId: this.botDeviceId,
       });
-      await client.start();
+      try {
+        await client.start();
+      } catch (error) {
+        throw describeMatrixStartupError(error, {
+          botUserId: this.botUserId,
+          botDeviceId: this.botDeviceId,
+          stateRoot: this.stateRoot,
+        });
+      }
       const joinedRooms = await client.getJoinedRooms();
       for (const roomId of joinedRooms) {
         await this.ensureQualifiedRoom(roomId);
@@ -208,6 +199,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     this.startPromise = null;
     this.client = null;
     this.botUserId = null;
+    this.botDeviceId = null;
     this.activePolls.clear();
     this.attachmentRefs.clear();
     this.qualifiedRooms.clear();
@@ -609,7 +601,7 @@ export async function normalizeMatrixRoomMessage(
   const base = buildMatrixEventBase(roomId, event);
 
   if (msgtype === "m.text" || msgtype === "m.notice" || msgtype === "m.emote") {
-    const body = asOptionalString((content as Partial<TextualMessageEventContent>)["body"]) ?? "";
+    const body = asOptionalString((content as MatrixMessageContent)["body"]) ?? "";
     return {
       kind: "user_text",
       ...base,
@@ -620,12 +612,12 @@ export async function normalizeMatrixRoomMessage(
   }
 
   if (msgtype === "m.audio") {
-    return normalizeMatrixAudioMessage(base, content as Partial<AudioMessageEventContent>, deps);
+    return normalizeMatrixAudioMessage(base, content as MatrixMessageContent, deps);
   }
 
   if (msgtype === "m.file" || msgtype === "m.image" || msgtype === "m.video") {
     const attachmentId = `${base.messageId}:1`;
-    const messageContent = content as Partial<FileMessageEventContent>;
+    const messageContent = content as MatrixMessageContent;
     const fileName = sanitizeMatrixFileName(asOptionalString(messageContent["body"]) ?? "attachment");
     const attachmentRef = buildMatrixAttachmentRef(roomId, fileName, content);
     if (!attachmentRef) {
@@ -708,7 +700,7 @@ export function buildMatrixPollStartContent(
 
 async function normalizeMatrixAudioMessage(
   base: MatrixEventBase,
-  content: Partial<AudioMessageEventContent>,
+  content: MatrixMessageContent,
   deps: MatrixNormalizeDeps,
 ): Promise<NormalizedChatEvent | null> {
   if (!deps.transcriptionProvider) {
@@ -752,7 +744,7 @@ async function normalizeMatrixAudioMessage(
 function buildMatrixAttachmentRef(
   roomId: string,
   fileName: string,
-  content: Partial<FileMessageEventContent> | Record<string, unknown>,
+  content: MatrixMessageContent | Record<string, unknown>,
 ): MatrixAttachmentRef | null {
   const encryptedFile = parseEncryptedFile(content["file"]);
   const url = asOptionalString(content["url"]);

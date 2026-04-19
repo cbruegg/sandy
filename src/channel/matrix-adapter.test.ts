@@ -9,6 +9,7 @@ import {
   normalizeMatrixPollResponse,
   normalizeMatrixRoomMessage,
 } from "./matrix-adapter.js";
+import { resolveMatrixCryptoBinaryName } from "./matrix-bot-sdk-loader.js";
 import { sanitizeMatrixHtml } from "./matrix-html.js";
 import type { NormalizedChatEvent } from "../types.js";
 import type { TranscriptionProvider } from "../transcription/transcription-provider.js";
@@ -53,6 +54,13 @@ test("buildMatrixPollStartContent produces a disclosed unstable poll payload", (
       ],
     },
   });
+});
+
+test("resolveMatrixCryptoBinaryName maps supported platforms", () => {
+  assert.equal(resolveMatrixCryptoBinaryName("darwin", "arm64"), "matrix-sdk-crypto.darwin-arm64.node");
+  assert.equal(resolveMatrixCryptoBinaryName("darwin", "x64"), "matrix-sdk-crypto.darwin-x64.node");
+  assert.equal(resolveMatrixCryptoBinaryName("linux", "arm64"), "matrix-sdk-crypto.linux-arm64-gnu.node");
+  assert.equal(resolveMatrixCryptoBinaryName("win32", "arm64"), "matrix-sdk-crypto.win32-arm64-msvc.node");
 });
 
 test("normalizeMatrixRoomMessage maps text, encrypted file, and audio events", async () => {
