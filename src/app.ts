@@ -29,11 +29,14 @@ export async function startApp(): Promise<void> {
     channelKind: config.channel.kind,
     workerImage: config.workerImage,
     mcpSidecarImage: config.mcpSidecarImage,
+    networkGuardImage: config.networkGuardImage,
     shareRoot: config.shareRoot,
     authMode: config.authMode.mode,
     sttEnabled: config.sttApiKey !== null,
     workerPreinstallCommandCount: config.workerPreinstall.commands.length,
     workerPreinstallRefresh: config.workerPreinstall.refresh,
+    workerNetworkMode: config.workerNetwork.mode,
+    workerNetworkAllowLocalCidrs: config.workerNetwork.allowLocalCidrs,
     configuredSkillCount: config.skills.length,
   });
 
@@ -94,6 +97,8 @@ export async function startApp(): Promise<void> {
       skillsDirectory: config.skillsDirectory,
       workerCodexBinaryPath,
       workerCodexConfigBuilder: (taskId) => mcpWorkerLaunchConfigBuilder.build(taskId),
+      networkGuardImage: config.networkGuardImage,
+      workerNetwork: config.workerNetwork,
       workerNetworkName,
     },
   );

@@ -1,4 +1,5 @@
 import {existsSync, readFileSync} from "node:fs";
+import {isIP} from "node:net";
 import {dirname, join, resolve} from "node:path";
 import * as toml from "@iarna/toml";
 import {z} from "zod";
@@ -17,6 +18,8 @@ const updateModeSchema = z.enum(["disabled", "relaunch", "exit"]);
 const workerPreinstallRefreshSchema = z.enum(["weekly", "manual"]);
 const DEFAULT_UPDATE_MODE: z.infer<typeof updateModeSchema> = "disabled";
 const DEFAULT_WORKER_PREINSTALL_REFRESH: z.infer<typeof workerPreinstallRefreshSchema> = "weekly";
+const workerNetworkModeSchema = z.enum(["public_internet_only", "unrestricted"]);
+const DEFAULT_WORKER_NETWORK_MODE: z.infer<typeof workerNetworkModeSchema> = "public_internet_only";
 
 function defaultConfigPath(): string {
   return join(resolveHomeDirectory(), ".config", "sandy", "config.toml");
@@ -28,6 +31,37 @@ function defaultCodexAuthFilePath(): string {
 
 function normalizeTelegramAllowedUser(value: string | number): string {
   return String(value).trim();
+}
+
+function normalizeWorkerNetworkAllowLocalEntry(value: string): string {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new Error("worker.network.allow_local_cidrs entries must not be empty.");
+  }
+
+  const [rawAddress, rawPrefix, ...rest] = normalized.split("/");
+  const address = rawAddress ?? "";
+  const family = isIP(address);
+  if (family === 0) {
+    throw new Error(`worker.network.allow_local_cidrs entry "${normalized}" must be an IP or CIDR literal.`);
+  }
+  if (rest.length > 0) {
+    throw new Error(`worker.network.allow_local_cidrs entry "${normalized}" must contain at most one slash.`);
+  }
+  if (rawPrefix === undefined) {
+    return normalized;
+  }
+  if (rawPrefix === "") {
+    throw new Error(`worker.network.allow_local_cidrs entry "${normalized}" must not end with an empty prefix.`);
+  }
+
+  const prefix = Number(rawPrefix);
+  const maxPrefix = family === 4 ? 32 : 128;
+  if (!Number.isInteger(prefix) || prefix < 0 || prefix > maxPrefix) {
+    throw new Error(`worker.network.allow_local_cidrs entry "${normalized}" has an invalid prefix length.`);
+  }
+
+  return `${address}/${prefix}`;
 }
 
 const sandyChannelKindSchema = z.enum(["telegram", "local_test"]);
@@ -88,12 +122,24 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
         commands: [],
         refresh: DEFAULT_WORKER_PREINSTALL_REFRESH,
       }),
+      network: z.object({
+        mode: workerNetworkModeSchema.default(DEFAULT_WORKER_NETWORK_MODE),
+        allow_local_cidrs: z.array(z.string().transform(normalizeWorkerNetworkAllowLocalEntry))
+          .default([]),
+      }).default({
+        mode: DEFAULT_WORKER_NETWORK_MODE,
+        allow_local_cidrs: [],
+      }),
     }).default({
       image: defaultImages.workerImage,
       share_root: DEFAULT_SHARE_ROOT,
       preinstall: {
         commands: [],
         refresh: DEFAULT_WORKER_PREINSTALL_REFRESH,
+      },
+      network: {
+        mode: DEFAULT_WORKER_NETWORK_MODE,
+        allow_local_cidrs: [],
       },
     }),
     stt: z.object({
@@ -144,6 +190,11 @@ export type McpServerConfig = {
 
 export type SandyUpdateMode = z.infer<typeof updateModeSchema>;
 type WorkerPreinstallRefreshMode = z.infer<typeof workerPreinstallRefreshSchema>;
+export type WorkerNetworkMode = z.infer<typeof workerNetworkModeSchema>;
+export type WorkerNetworkConfig = {
+  mode: WorkerNetworkMode;
+  allowLocalCidrs: string[];
+};
 
 type SandyAuthMode =
   | { mode: "api_key"; openAiApiKey: string }
@@ -172,11 +223,13 @@ export type SandyConfig = {
       };
   workerImage: string;
   mcpSidecarImage: string;
+  networkGuardImage: string;
   shareRoot: string;
   workerPreinstall: {
     commands: string[];
     refresh: WorkerPreinstallRefreshMode;
   };
+  workerNetwork: WorkerNetworkConfig;
   sttApiKey: string | null;
   sttBaseUrl: string;
   sttModel: string;
@@ -244,6 +297,7 @@ export function parseConfigToml(
 ): SandyConfig {
   const parsedFile = parseConfigTomlFile(raw, buildMetadata);
   const parsed = parsedFile.data;
+  const defaultImages = resolveDefaultImageReferences(buildMetadata);
   const configDirectory = dirname(configFilePath);
   const discoveredSkills = discoverSkills(configDirectory);
   const codexAuthFile = resolveCodexAuthFile(parsed.auth.codex_auth_file);
@@ -274,10 +328,15 @@ export function parseConfigToml(
     channel: buildChannelConfig(parsed.channel),
     workerImage: parsed.worker.image,
     mcpSidecarImage: parsed.mcp.sidecar_image,
+    networkGuardImage: defaultImages.networkGuardImage,
     shareRoot: parsed.worker.share_root,
     workerPreinstall: {
       commands: parsed.worker.preinstall.commands,
       refresh: parsed.worker.preinstall.refresh,
+    },
+    workerNetwork: {
+      mode: parsed.worker.network.mode,
+      allowLocalCidrs: parsed.worker.network.allow_local_cidrs,
     },
     sttApiKey: parsed.stt.api_key ?? null,
     sttBaseUrl: parsed.stt.base_url,

@@ -11,6 +11,7 @@ cd "${REPO_ROOT}"
 # Worker images being rebuilt with preinstalled tools on every run, even if there were no changes to the Worker code.
 docker build --provenance=false --target worker-runtime -t sandy-subagent:latest .
 docker build --provenance=false --target mcp-proxy-runtime -t sandy-mcp-proxy:latest .
+docker build --provenance=false --target network-guard-runtime -t sandy-network-guard:latest .
 
 if [[ "${MODE}" == "--channel" ]]; then
   MODE="${2:-local_test}"

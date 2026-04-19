@@ -1,26 +1,31 @@
 import {copyFile, mkdir, mkdtemp, readdir, rm, writeFile} from "node:fs/promises";
-import {join, relative, resolve} from "node:path";
 import {type ChildProcessWithoutNullStreams, spawn} from "node:child_process";
-import {createInterface} from "node:readline";
 import {tmpdir} from "node:os";
+import {join, relative, resolve} from "node:path";
+import {createInterface} from "node:readline";
+import type {WorkerNetworkConfig} from "../config.js";
 import {logger} from "../logger.js";
-import type {LaunchTaskRequest, SandboxHandle, SandboxRunner, ShareInspection} from "./sandbox-runner.js";
-import type {HostCommand, PrivilegeResolutionResult, SubAgentEvent} from "../types.js";
-import {parseSubAgentEvent, serializeHostCommand} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {workerSkillsPath} from "../subagent/worker-codex-config.js";
+import type {HostCommand, PrivilegeResolutionResult, SubAgentEvent} from "../types.js";
+import {parseSubAgentEvent, serializeHostCommand} from "../types.js";
+import {launchNetworkGuardContainer, type StartedNetworkGuard} from "./network-guard.js";
+import type {LaunchTaskRequest, SandboxHandle, SandboxRunner, ShareInspection} from "./sandbox-runner.js";
 
 const workerCodexSeedMountPath = "/run/sandy-codex-seed";
+const DEFAULT_HANDSHAKE_TIMEOUT_MS = 300_000;
 
 type DockerSandboxRunnerOptions = {
   workerImage: string;
   resolveWorkerImage?: () => string;
+  networkGuardImage?: string;
   shareRoot: string;
   openAiApiKey: string | null;
   codexAuthFile: string | null;
   skillsDirectory: string | null;
   workerCodexBinaryPath?: string | null;
   workerNetworkName?: string | null;
+  workerNetwork: WorkerNetworkConfig;
   workerCodexConfigBuilder: (taskId: string) => {
     codexConfigToml: string | null;
     environment: Record<string, string>;
@@ -31,17 +36,19 @@ type DockerSandboxRunnerOptions = {
   clearTimeoutImpl?: typeof clearTimeout;
 };
 
-const DEFAULT_HANDSHAKE_TIMEOUT_MS = 300_000;
+type ActiveTaskContainer = {
+  child: ChildProcessWithoutNullStreams;
+  guardChild: ChildProcessWithoutNullStreams | null;
+  guardContainerName: string | null;
+  cleanupWorkerCodexConfig: () => Promise<void>;
+};
 
 export class DockerSandboxRunner implements SandboxRunner {
   private readonly handshakeTimeoutMs: number;
   private readonly spawnImpl: typeof spawn;
   private readonly setTimeoutImpl: typeof setTimeout;
   private readonly clearTimeoutImpl: typeof clearTimeout;
-  private readonly activeContainers = new Map<string, {
-    child: ChildProcessWithoutNullStreams;
-    cleanupWorkerCodexConfig: () => Promise<void>;
-  }>();
+  private readonly activeContainers = new Map<string, ActiveTaskContainer>();
   private shutdownPromise: Promise<void> | null = null;
   private shutdownRequested = false;
 
@@ -59,11 +66,13 @@ export class DockerSandboxRunner implements SandboxRunner {
     if (this.shutdownRequested) {
       throw new Error("Sandbox runner is shutting down and cannot launch new tasks.");
     }
+
     const sharePath = this.getTaskSharePath(request.taskId);
-    await mkdir(sharePath, { recursive: true });
+    await mkdir(sharePath, {recursive: true});
     const builtWorkerConfig = this.options.workerCodexConfigBuilder(request.taskId);
     const workerCodexConfig = builtWorkerConfig?.codexConfigToml ?? null;
     const workerEnvironment = builtWorkerConfig?.environment ?? {};
+    const workerImage = this.resolveWorkerImage();
     let workerCodexHomeTempDir: string | null = null;
     const needsWorkerCodexHome = Boolean(this.options.codexAuthFile || workerCodexConfig);
     if (needsWorkerCodexHome) {
@@ -72,7 +81,7 @@ export class DockerSandboxRunner implements SandboxRunner {
         try {
           await copyFile(this.options.codexAuthFile, join(workerCodexHomeTempDir, "auth.json"));
         } catch (error) {
-          await rm(workerCodexHomeTempDir, { recursive: true, force: true });
+          await rm(workerCodexHomeTempDir, {recursive: true, force: true});
           throw error;
         }
       }
@@ -80,7 +89,7 @@ export class DockerSandboxRunner implements SandboxRunner {
         try {
           await writeFile(join(workerCodexHomeTempDir, "config.toml"), workerCodexConfig, "utf8");
         } catch (error) {
-          await rm(workerCodexHomeTempDir, { recursive: true, force: true });
+          await rm(workerCodexHomeTempDir, {recursive: true, force: true});
           throw error;
         }
       }
@@ -92,7 +101,7 @@ export class DockerSandboxRunner implements SandboxRunner {
         return;
       }
       tempConfigCleanedUp = true;
-      await rm(workerCodexHomeTempDir, { recursive: true, force: true });
+      await rm(workerCodexHomeTempDir, {recursive: true, force: true});
     };
 
     const containerName = `sandy-${request.taskId}`;
@@ -106,8 +115,17 @@ export class DockerSandboxRunner implements SandboxRunner {
       taskId: request.taskId,
       taskName: request.taskName,
       sharePath,
-      workerImage: this.resolveWorkerImage(),
+      workerImage,
+      workerNetworkMode: this.options.workerNetwork.mode,
     });
+
+    let networkGuard: StartedNetworkGuard | null = null;
+    try {
+      networkGuard = await this.launchNetworkGuard(request.taskId);
+    } catch (error) {
+      await cleanupWorkerCodexConfig();
+      throw error;
+    }
 
     const dockerArgs = [
       "run",
@@ -115,6 +133,12 @@ export class DockerSandboxRunner implements SandboxRunner {
       "-i",
       "--name",
       containerName,
+      // Drop network-manipulation capabilities so the worker cannot rewrite
+      // the guard's firewall rules and break out of network isolation.
+      "--cap-drop",
+      "NET_ADMIN",
+      "--cap-drop",
+      "NET_RAW",
       "-e",
       `SANDY_TASK_ID=${request.taskId}`,
       "-e",
@@ -156,7 +180,14 @@ export class DockerSandboxRunner implements SandboxRunner {
       );
     }
 
-    if (this.options.workerNetworkName) {
+    if (networkGuard) {
+      // Share the guard's namespace so the worker gets internet access through
+      // the guard's firewall, but cannot talk to the local network directly.
+      dockerArgs.push(
+        "--network",
+        `container:${networkGuard.containerName}`,
+      );
+    } else if (this.options.workerNetworkName) {
       dockerArgs.push(
         "--network",
         this.options.workerNetworkName,
@@ -166,7 +197,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     dockerArgs.push(
       "-v",
       `${sharePath}:${sharedWorkspaceMountPath}`,
-      this.resolveWorkerImage(),
+      workerImage,
     );
 
     const child = this.spawnImpl("docker", dockerArgs, {
@@ -174,8 +205,14 @@ export class DockerSandboxRunner implements SandboxRunner {
     });
     this.activeContainers.set(containerName, {
       child,
+      guardChild: networkGuard?.child ?? null,
+      guardContainerName: networkGuard?.containerName ?? null,
       cleanupWorkerCodexConfig,
     });
+
+    const cleanupTaskContainers = async (): Promise<void> => {
+      await this.cleanupTaskContainers(containerName, networkGuard?.containerName ?? null);
+    };
 
     const handshakeTimer = this.setTimeoutImpl(() => {
       if (workerConnected || terminalEventSeen || shutdownRequested) {
@@ -188,7 +225,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       void reportDisconnect("Sub-agent worker did not complete startup handshake in time.");
       shutdownRequested = true;
       child.kill("SIGTERM");
-      void this.cleanupContainer(containerName);
+      void cleanupTaskContainers();
     }, this.handshakeTimeoutMs);
 
     const clearHandshakeTimer = () => {
@@ -220,7 +257,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       shutdownRequested = true;
       clearHandshakeTimer();
       child.kill("SIGTERM");
-      await this.cleanupContainer(containerName);
+      await cleanupTaskContainers();
     };
 
     const emitEventSafely = (event: SubAgentEvent): void => {
@@ -249,6 +286,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     logger.info("sandbox.started", {
       taskId: request.taskId,
       containerName,
+      guardContainerName: networkGuard?.containerName ?? null,
     });
 
     child.stderr.on("data", (chunk) => {
@@ -269,6 +307,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       finished = true;
       clearHandshakeTimer();
       void cleanupWorkerCodexConfig();
+      void cleanupTaskContainers();
       logger.error("sandbox.launch_failed", {
         taskId: request.taskId,
         message: error.message,
@@ -289,6 +328,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     child.on("exit", (code, signal) => {
       this.activeContainers.delete(containerName);
       void cleanupWorkerCodexConfig();
+      void cleanupTaskContainers();
       if (finished) {
         return;
       }
@@ -311,6 +351,29 @@ export class DockerSandboxRunner implements SandboxRunner {
         return;
       }
       void reportDisconnect(`Sub-agent container exited before task completion (code=${code}, signal=${signal}).`);
+    });
+
+    networkGuard?.child.on("error", (error) => {
+      logger.error("sandbox.network_guard_failed", {
+        taskId: request.taskId,
+        message: error.message,
+      });
+    });
+
+    networkGuard?.child.on("exit", (code, signal) => {
+      if (finished || shutdownRequested || terminalEventSeen) {
+        return;
+      }
+      logger.error("sandbox.network_guard_exited", {
+        taskId: request.taskId,
+        code,
+        signal,
+      });
+      void reportDisconnect(`Task network guard exited before task completion (code=${code}, signal=${signal}).`);
+      shutdownRequested = true;
+      clearHandshakeTimer();
+      child.kill("SIGTERM");
+      void cleanupTaskContainers();
     });
 
     return {
@@ -367,7 +430,7 @@ export class DockerSandboxRunner implements SandboxRunner {
         });
         child.stdin.end();
         child.kill("SIGTERM");
-        await this.cleanupContainer(containerName);
+        await cleanupTaskContainers();
       },
       cancel: async (reason: string) => {
         finished = true;
@@ -382,7 +445,7 @@ export class DockerSandboxRunner implements SandboxRunner {
           reason,
         });
         child.kill("SIGTERM");
-        await this.cleanupContainer(containerName);
+        await cleanupTaskContainers();
       },
     };
   }
@@ -403,9 +466,10 @@ export class DockerSandboxRunner implements SandboxRunner {
         containerName,
       });
       activeContainer.child.kill("SIGTERM");
+      activeContainer.guardChild?.kill("SIGTERM");
       await Promise.all([
         activeContainer.cleanupWorkerCodexConfig(),
-        this.cleanupContainer(containerName),
+        this.cleanupTaskContainers(containerName, activeContainer.guardContainerName),
       ]);
       this.activeContainers.delete(containerName);
     })).then(() => {
@@ -421,7 +485,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     const sharePath = this.getTaskSharePath(taskId);
     let entries;
     try {
-      entries = await readdir(sharePath, { withFileTypes: true });
+      entries = await readdir(sharePath, {withFileTypes: true});
     } catch (error) {
       if (isMissingPathError(error)) {
         return {
@@ -448,7 +512,7 @@ export class DockerSandboxRunner implements SandboxRunner {
 
   async deleteTaskShare(taskId: string): Promise<void> {
     const sharePath = this.getTaskSharePath(taskId);
-    await rm(sharePath, { recursive: true, force: true });
+    await rm(sharePath, {recursive: true, force: true});
     logger.info("sandbox.share_deleted", {
       taskId,
       sharePath,
@@ -530,6 +594,28 @@ export class DockerSandboxRunner implements SandboxRunner {
     }
   }
 
+  private async launchNetworkGuard(taskId: string): Promise<StartedNetworkGuard | null> {
+    return await launchNetworkGuardContainer({
+      taskId,
+      workerNetwork: this.options.workerNetwork,
+      networkGuardImage: this.options.networkGuardImage,
+      workerNetworkName: this.options.workerNetworkName,
+      handshakeTimeoutMs: this.handshakeTimeoutMs,
+      spawnImpl: this.spawnImpl,
+      setTimeoutImpl: this.setTimeoutImpl,
+      clearTimeoutImpl: this.clearTimeoutImpl,
+      cleanupContainer: async (containerName) => this.cleanupContainer(containerName),
+    });
+  }
+
+  private async cleanupTaskContainers(containerName: string, guardContainerName: string | null): Promise<void> {
+    const containerNames = [containerName];
+    if (guardContainerName) {
+      containerNames.push(guardContainerName);
+    }
+    await Promise.all(containerNames.map(async (name) => this.cleanupContainer(name)));
+  }
+
   private async cleanupContainer(containerName: string): Promise<void> {
     await new Promise<void>((resolve) => {
       logger.debug("sandbox.force_remove", {
@@ -560,7 +646,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       return [];
     }
 
-    const entries = await readdir(directoryPath, { withFileTypes: true });
+    const entries = await readdir(directoryPath, {withFileTypes: true});
     entries.sort((left, right) => left.name.localeCompare(right.name));
 
     const lines: string[] = [];

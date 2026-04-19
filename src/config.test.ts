@@ -34,6 +34,10 @@ codex_auth_file = "/tmp/codex-auth.json"
     commands: [],
     refresh: "weekly",
   });
+  assert.deepEqual(config.workerNetwork, {
+    mode: "public_internet_only",
+    allowLocalCidrs: [],
+  });
 });
 
 test("parseConfigToml accepts numeric telegram allowed_user values", () => {
@@ -84,6 +88,7 @@ allowed_user = "123456"
 
   assert.equal(config.workerImage, "sandy-subagent:latest");
   assert.equal(config.mcpSidecarImage, "sandy-mcp-proxy:latest");
+  assert.equal(config.networkGuardImage, "sandy-network-guard:latest");
 });
 
 test("parseConfigToml derives published Docker image defaults from release image metadata", () => {
@@ -101,6 +106,7 @@ allowed_user = "123456"
 
   assert.equal(config.workerImage, "ghcr.io/example/sandy-subagent:sha-abcdef0123456789");
   assert.equal(config.mcpSidecarImage, "ghcr.io/example/sandy-mcp-proxy:sha-abcdef0123456789");
+  assert.equal(config.networkGuardImage, "ghcr.io/example/sandy-network-guard:sha-abcdef0123456789");
 });
 
 test("parseConfigToml prefers explicit config image overrides over baked defaults", () => {
@@ -235,6 +241,57 @@ refresh = "manual"
     ],
     refresh: "manual",
   });
+});
+
+test("parseConfigToml parses worker network config", () => {
+  const config = parseConfigToml(`
+[channel]
+kind = "telegram"
+
+[channel.telegram]
+bot_token = "telegram-token"
+allowed_user = "123456"
+
+[worker.network]
+allow_local_cidrs = ["192.168.1.0/24", "10.0.0.15", "fd00::/8"]
+`);
+
+  assert.deepEqual(config.workerNetwork, {
+    mode: "public_internet_only",
+    allowLocalCidrs: ["192.168.1.0/24", "10.0.0.15", "fd00::/8"],
+  });
+});
+
+test("parseConfigToml rejects hostnames in worker network allow_local_cidrs", () => {
+  assert.throws(() => {
+    parseConfigToml(`
+[channel]
+kind = "telegram"
+
+[channel.telegram]
+bot_token = "telegram-token"
+allowed_user = "123456"
+
+[worker.network]
+allow_local_cidrs = ["raspinas"]
+`);
+  }, /must be an IP or CIDR literal/);
+});
+
+test("parseConfigToml rejects empty worker network CIDR prefixes", () => {
+  assert.throws(() => {
+    parseConfigToml(`
+[channel]
+kind = "telegram"
+
+[channel.telegram]
+bot_token = "telegram-token"
+allowed_user = "123456"
+
+[worker.network]
+allow_local_cidrs = ["10.0.0.5/"]
+`);
+  }, /must not end with an empty prefix/);
 });
 
 test("parseConfigToml rejects blank worker preinstall commands", () => {

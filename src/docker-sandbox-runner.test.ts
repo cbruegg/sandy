@@ -120,11 +120,16 @@ async function launchRunnerWithChild(
   const runner = new DockerSandboxRunner({
     workerImage: "sandy-subagent:latest",
     resolveWorkerImage: options?.resolveWorkerImage,
+    networkGuardImage: "sandy-network-guard:latest",
     shareRoot: options?.shareRoot ?? "/tmp/sandy-test-shares",
     openAiApiKey: null,
     codexAuthFile: null,
     skillsDirectory: options?.skillsDirectory ?? null,
     workerCodexBinaryPath: options?.workerCodexBinaryPath,
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
     workerCodexConfigBuilder: () => ({
       codexConfigToml: options?.builtWorkerCodexConfigToml ?? null,
       environment: {},
@@ -386,11 +391,16 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
 
   const runner = new DockerSandboxRunner({
     workerImage: "sandy-subagent:latest",
+    networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
     openAiApiKey: null,
     codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
@@ -426,11 +436,16 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
   const shareRoot = mkdtempSync(join(tmpdir(), "sandy-share-test-"));
   const runner = new DockerSandboxRunner({
     workerImage: "sandy-subagent:latest",
+    networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
     openAiApiKey: null,
     codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
@@ -536,6 +551,153 @@ test("DockerSandboxRunner joins the configured worker network when provided", as
   assert.ok(!dockerRunInvocation.args.includes("host.docker.internal:host-gateway"));
 });
 
+test("DockerSandboxRunner launches a network guard and shares its network namespace in restricted mode", async () => {
+  const guardChild = new FakeChildProcess();
+  const taskChild = new FakeChildProcess();
+  const invocations: Array<{ command: string; args: string[] }> = [];
+  let runCount = 0;
+
+  const spawnImpl = ((command: string, args: readonly string[]) => {
+    invocations.push({ command, args: [...args] });
+    if (args[0] === "run") {
+      runCount += 1;
+      if (runCount === 1) {
+        queueMicrotask(() => {
+          guardChild.stdout.write("ready\n");
+        });
+        return guardChild as unknown as ChildProcessWithoutNullStreams;
+      }
+      return taskChild as unknown as ChildProcessWithoutNullStreams;
+    }
+
+    const cleanupChild = new FakeChildProcess();
+    queueMicrotask(() => {
+      cleanupChild.emit("exit", 0, null);
+    });
+    return cleanupChild as unknown as ChildProcessWithoutNullStreams;
+  }) as typeof import("node:child_process").spawn;
+
+  const runner = new DockerSandboxRunner({
+    workerImage: "sandy-subagent:latest",
+    networkGuardImage: "sandy-network-guard:latest",
+    shareRoot: "/tmp/sandy-test-shares",
+    openAiApiKey: null,
+    codexAuthFile: null,
+    skillsDirectory: null,
+    workerCodexBinaryPath: null,
+    workerNetwork: {
+      mode: "public_internet_only",
+      allowLocalCidrs: ["192.168.178.0/24", "fd00::/8"],
+    },
+    workerCodexConfigBuilder: () => ({
+      codexConfigToml: null,
+      environment: {},
+    }),
+    workerNetworkName: "sandy-mcp-net",
+    spawnImpl,
+  });
+
+  await runner.launchTask({
+    chatId: "chat-1",
+    taskId: "task-1",
+    taskName: "test-task",
+    taskBrief: "Inspect the environment.",
+    channelFormatting: testFormatting,
+  }, async () => {});
+
+  const guardRunInvocation = invocations.find((invocation) =>
+    invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-network-guard:latest");
+  assert.ok(guardRunInvocation);
+  assert.ok(guardRunInvocation.args.includes("--cap-add"));
+  assert.ok(guardRunInvocation.args.includes("NET_ADMIN"));
+  assert.ok(guardRunInvocation.args.includes("--network"));
+  assert.ok(guardRunInvocation.args.includes("sandy-mcp-net"));
+  assert.ok(guardRunInvocation.args.includes("SANDY_NETWORK_GUARD_ALLOWED_LOCAL_CIDRS=192.168.178.0/24,fd00::/8"));
+  assert.ok(guardRunInvocation.args.includes(`SANDY_NETWORK_GUARD_ALLOWED_HOSTS=${"sandy-mcp-proxy"}`));
+
+  const workerRunInvocation = invocations.find((invocation) =>
+    invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-subagent:latest");
+  assert.ok(workerRunInvocation);
+  assert.ok(workerRunInvocation.args.includes("--network"));
+  assert.ok(workerRunInvocation.args.includes("container:sandy-netguard-task-1"));
+  assert.ok(workerRunInvocation.args.includes("--cap-drop"));
+  assert.ok(workerRunInvocation.args.includes("NET_RAW"));
+  assert.ok(!workerRunInvocation.args.includes("sandy-mcp-net"));
+});
+
+test("DockerSandboxRunner reports a disconnect when the network guard exits mid-task", async () => {
+  const guardChild = new FakeChildProcess();
+  const taskChild = new FakeChildProcess();
+  const events: SubAgentEvent[] = [];
+  const invocations: Array<{ command: string; args: string[] }> = [];
+  let runCount = 0;
+
+  const spawnImpl = ((command: string, args: readonly string[]) => {
+    invocations.push({ command, args: [...args] });
+    if (args[0] === "run") {
+      runCount += 1;
+      if (runCount === 1) {
+        queueMicrotask(() => {
+          guardChild.stdout.write("ready\n");
+        });
+        return guardChild as unknown as ChildProcessWithoutNullStreams;
+      }
+      return taskChild as unknown as ChildProcessWithoutNullStreams;
+    }
+
+    const cleanupChild = new FakeChildProcess();
+    queueMicrotask(() => {
+      cleanupChild.emit("exit", 0, null);
+    });
+    return cleanupChild as unknown as ChildProcessWithoutNullStreams;
+  }) as typeof import("node:child_process").spawn;
+
+  const runner = new DockerSandboxRunner({
+    workerImage: "sandy-subagent:latest",
+    networkGuardImage: "sandy-network-guard:latest",
+    shareRoot: "/tmp/sandy-test-shares",
+    openAiApiKey: null,
+    codexAuthFile: null,
+    skillsDirectory: null,
+    workerCodexBinaryPath: null,
+    workerNetwork: {
+      mode: "public_internet_only",
+      allowLocalCidrs: [],
+    },
+    workerCodexConfigBuilder: () => ({
+      codexConfigToml: null,
+      environment: {},
+    }),
+    spawnImpl,
+  });
+
+  await runner.launchTask({
+    chatId: "chat-1",
+    taskId: "task-1",
+    taskName: "test-task",
+    taskBrief: "Inspect the environment.",
+    channelFormatting: testFormatting,
+  }, async (event) => {
+    events.push(event);
+  });
+
+  taskChild.stdout.write('{"type":"worker_connected"}\n');
+  await flushEvents();
+
+  guardChild.emit("exit", 1, null);
+  await flushEvents();
+
+  assert.deepEqual(events, [
+    { type: "worker_connected" },
+    {
+      type: "worker_disconnected",
+      message: "Task network guard exited before task completion (code=1, signal=null).",
+    },
+  ]);
+  assert.deepEqual(taskChild.killSignals, ["SIGTERM"]);
+  assert.equal(invocations.filter((invocation) => invocation.args[0] === "rm").length, 2);
+});
+
 test("DockerSandboxRunner resolves the worker image at launch time", async () => {
   const taskChild = new FakeChildProcess();
   const { invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
@@ -553,11 +715,16 @@ test("DockerSandboxRunner rejects share inspection outside the configured share 
   const outsidePath = join(baseRoot, "outside");
   const runner = new DockerSandboxRunner({
     workerImage: "sandy-subagent:latest",
+    networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
     openAiApiKey: null,
     codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
@@ -583,11 +750,16 @@ test("DockerSandboxRunner rejects share deletion outside the configured share ro
   const outsidePath = join(baseRoot, "outside");
   const runner = new DockerSandboxRunner({
     workerImage: "sandy-subagent:latest",
+    networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
     openAiApiKey: null,
     codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},

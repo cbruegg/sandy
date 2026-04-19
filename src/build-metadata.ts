@@ -2,6 +2,7 @@ import { embeddedBuildMetadata } from "./build-metadata.generated.js";
 
 const LOCAL_DEFAULT_WORKER_IMAGE = "sandy-subagent:latest";
 const LOCAL_DEFAULT_SIDECAR_IMAGE = "sandy-mcp-proxy:latest";
+const LOCAL_DEFAULT_NETWORK_GUARD_IMAGE = "sandy-network-guard:latest";
 
 export type SandyBuildMetadata = {
   gitRevision?: string;
@@ -13,6 +14,7 @@ export type SandyBuildMetadata = {
 export type SandyImageDefaults = {
   workerImage: string;
   sidecarImage: string;
+  networkGuardImage: string;
 };
 
 function toPublishedImageTag(gitRevision: string): string {
@@ -32,6 +34,7 @@ export function resolveDefaultImageReferences(buildMetadata: SandyBuildMetadata 
     return {
       workerImage: LOCAL_DEFAULT_WORKER_IMAGE,
       sidecarImage: LOCAL_DEFAULT_SIDECAR_IMAGE,
+      networkGuardImage: LOCAL_DEFAULT_NETWORK_GUARD_IMAGE,
     };
   }
 
@@ -39,6 +42,7 @@ export function resolveDefaultImageReferences(buildMetadata: SandyBuildMetadata 
   return {
     workerImage: `${imageRegistry}/sandy-subagent:${imageTag}`,
     sidecarImage: `${imageRegistry}/sandy-mcp-proxy:${imageTag}`,
+    networkGuardImage: `${imageRegistry}/sandy-network-guard:${imageTag}`,
   };
 }
 
