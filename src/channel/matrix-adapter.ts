@@ -4,7 +4,7 @@ import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { buttonLabels, messages } from "../messages.js";
 import { matrixHtmlAllowedTags, sanitizeMatrixHtml } from "./matrix-html.js";
-import { describeMatrixStartupError } from "./matrix-startup-error.js";
+
 import type { StoreType as MatrixCryptoStoreType } from "@matrix-org/matrix-sdk-crypto-nodejs";
 import type {
   ChannelFormatting,
@@ -218,15 +218,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
         botUserId: this.botUserId,
         botDeviceId: this.botDeviceId,
       });
-      try {
-        await client.start();
-      } catch (error) {
-        throw describeMatrixStartupError(error, {
-          botUserId: this.botUserId,
-          botDeviceId: this.botDeviceId,
-          stateRoot: this.stateRoot,
-        });
-      }
+      await client.start();
       const joinedRooms = await client.getJoinedRooms();
       for (const roomId of joinedRooms) {
         await this.ensureQualifiedRoom(roomId);
