@@ -122,9 +122,6 @@ MATRIX_PASSWORD='your-bot-password' \
 
 3. Copy the returned `access_token` into `channel.matrix.access_token`.
 4. Keep the returned `device_id` for reference. It should represent a Sandy-specific device, not an Element session.
-5. If you want to inspect the bot account in Element or another Matrix client, create a separate login there so it gets its own device ID.
-
-If you previously configured Sandy with an access token copied from Element and startup fails with a one-time-key conflict, create a fresh Sandy login/device, update `channel.matrix.access_token`, and delete `config/state/matrix` before restarting.
 
 Local test channel behavior:
 
