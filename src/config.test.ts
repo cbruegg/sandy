@@ -72,6 +72,37 @@ allowed_user = "@cbruegg"
   assert.equal(config.channel.telegram.allowedUser, "@cbruegg");
 });
 
+test("parseConfigToml accepts matrix channel config", () => {
+  const config = parseConfigToml(`
+[channel]
+kind = "matrix"
+
+[channel.matrix]
+homeserver_url = "https://matrix.example"
+access_token = "matrix-token"
+allowed_user_id = "@cbruegg:example.org"
+`);
+
+  assert.equal(config.channel.kind, "matrix");
+  assert.equal(config.channel.matrix.homeserverUrl, "https://matrix.example");
+  assert.equal(config.channel.matrix.accessToken, "matrix-token");
+  assert.equal(config.channel.matrix.allowedUserId, "@cbruegg:example.org");
+});
+
+test("parseConfigToml rejects invalid matrix allowed_user_id values", () => {
+  assert.throws(() => {
+    parseConfigToml(`
+[channel]
+kind = "matrix"
+
+[channel.matrix]
+homeserver_url = "https://matrix.example"
+access_token = "matrix-token"
+allowed_user_id = "cbruegg"
+`);
+  }, /Matrix allowed_user_id/);
+});
+
 test("parseConfigToml falls back to local Docker image defaults when release image metadata is absent", () => {
   const config = parseConfigToml(`
 [channel]

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createChannelAdapter } from "./create-channel.js";
 import { TelegramBotApiAdapter } from "./telegram-adapter.js";
 import { LocalTestChannelAdapter } from "./local-test-adapter.js";
+import { MatrixChannelAdapter } from "./matrix-adapter.js";
 import type { SandyConfig } from "../config.js";
 
 function baseConfig(): Omit<SandyConfig, "channel"> {
@@ -62,4 +63,20 @@ test("createChannelAdapter returns the local-test adapter for local_test configs
   }, null);
 
   assert.ok(adapter instanceof LocalTestChannelAdapter);
+});
+
+test("createChannelAdapter returns the Matrix adapter for matrix configs", () => {
+  const adapter = createChannelAdapter({
+    ...baseConfig(),
+    channel: {
+      kind: "matrix",
+      matrix: {
+        homeserverUrl: "https://matrix.example",
+        accessToken: "matrix-token",
+        allowedUserId: "@owner:example.org",
+      },
+    },
+  }, null);
+
+  assert.ok(adapter instanceof MatrixChannelAdapter);
 });

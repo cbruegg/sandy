@@ -21,7 +21,7 @@ export const messages = {
     `A Sandy update is ready. Restarting now to install ${revision}.`,
   nextPlannedStep: (step: string): string => `Next planned step: ${step}`,
   commandProgress: (status: string, command: string, channelFormatting: ChannelFormatting | null): string => {
-    const formattedCommand = channelFormatting?.markup === "telegram_html" ? `<code>${command}</code>` : command;
+    const formattedCommand = channelFormatting && channelFormatting.markup !== "plain_text" ? `<code>${command}</code>` : command;
     return `Command ${status}: ${formattedCommand}`;
   },
   taskSummaryReady: (taskName: string, summary: string): string =>
