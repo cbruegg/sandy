@@ -146,8 +146,6 @@ export const matrixAdminMessages = {
     `Matrix login failed: ${error}`,
   loginInvalidResponse: (): string =>
     "Matrix login response did not contain required fields (user_id, device_id, access_token).",
-  loginUserIdMismatch: (received: string, expected: string): string =>
-    `Matrix login returned user ID "${received}" but config expects "${expected}".`,
   authStateMissing: (): string =>
     'Matrix auth state file is missing. Run "sandy matrix login" first.',
   authStateInvalid: (reason: string): string =>

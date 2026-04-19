@@ -57,12 +57,6 @@ export class SandyMatrixAdminService {
 
     const loginResponse = await this.performMatrixLogin(homeserverUrl, botUserId, password, deviceName);
 
-    if (loginResponse.userId !== botUserId) {
-      throw new Error(
-        matrixAdminMessages.loginUserIdMismatch(loginResponse.userId, botUserId),
-      );
-    }
-
     await this.clearMatrixState();
 
     await saveMatrixAuthState(this.configDirectory, {
