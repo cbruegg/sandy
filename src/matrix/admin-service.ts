@@ -8,7 +8,7 @@ import {
 } from "./auth-state.js";
 import { matrixAdminMessages } from "../messages.js";
 
-export type MatrixStatus = {
+type MatrixStatus = {
   homeserverUrl: string;
   botUserId: string;
   configured: boolean;
@@ -16,7 +16,7 @@ export type MatrixStatus = {
   matchesConfig: boolean;
 };
 
-export type MatrixLoginResult = {
+type MatrixLoginResult = {
   userId: string;
   deviceId: string;
 };

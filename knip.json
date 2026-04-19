@@ -8,9 +8,5 @@
   ],
   "project": [
     "src/**/*.ts"
-  ],
-  "ignore": [
-    "src/matrix/auth-state.ts",
-    "src/matrix/admin-service.ts"
   ]
 }

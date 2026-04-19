@@ -11,7 +11,7 @@ type MatrixAuthState = {
   accessToken: string;
 };
 
-export function buildMatrixAuthStatePath(configDirectory: string): string {
+function buildMatrixAuthStatePath(configDirectory: string): string {
   return join(configDirectory, "state", "matrix", "auth.json");
 }
 
