@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -54,9 +54,17 @@ async function main() {
 
   for (const binaryName of binaryNames) {
     const outputPath = join(packageRoot, binaryName);
-    if (existsSync(outputPath)) {
+    const versionPath = `${outputPath}.version`;
+    const hasMatchingVersion = await hasExpectedVersion(versionPath, releaseTag);
+
+    if (existsSync(outputPath) && hasMatchingVersion) {
       console.log(`Matrix crypto binary already present: ${binaryName}`);
       continue;
+    }
+
+    if (existsSync(outputPath) && !hasMatchingVersion) {
+      console.log(`Removing stale Matrix crypto binary ${binaryName} due to version mismatch`);
+      await rm(outputPath, { force: true });
     }
 
     const url = `${DOWNLOADS_BASE_URL}/${releaseTag}/${binaryName}`;
@@ -67,9 +75,19 @@ async function main() {
     }
     const bytes = await response.bytes();
     await Bun.write(outputPath, bytes);
+    await writeFile(versionPath, `${releaseTag}\n`);
   }
 
   await patchMatrixCryptoPackageIndex(packageRoot, binaryNames);
+}
+
+async function hasExpectedVersion(versionPath, releaseTag) {
+  if (!existsSync(versionPath)) {
+    return false;
+  }
+
+  const actual = (await readFile(versionPath, "utf8")).trim();
+  return actual === releaseTag;
 }
 
 await main();
