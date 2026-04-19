@@ -63,7 +63,7 @@ const telegramFormatting: ChannelFormatting = {
   channelId: "telegram",
   markup: "telegram_html",
   allowedTags: telegramHtmlAllowedTags,
-  instructions: "Format user-visible output as simple Telegram HTML using only <b>, <i>, <code>, and <pre>. Do not emit Markdown. Escape raw <, >, and & unless they are part of those exact tags. For line-breaks, use backslash n instead of <br/> br tags.",
+  instructions: "Format user-visible output as simple Telegram HTML using only <b>, <i>, <code>, and <pre>. Do not emit Markdown. Escape raw <, >, and & unless they are part of those exact tags. For line-breaks, use standard linebreaks (`\n`) instead of <br/> br tags.",
 };
 
 function defaultBotFactory(token: string): TelegramBotLike {
