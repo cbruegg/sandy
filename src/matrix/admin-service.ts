@@ -64,10 +64,7 @@ export class SandyMatrixAdminService {
       );
     }
 
-    const existingState = await loadMatrixAuthState(this.configDirectory);
-    if (existingState && existingState.deviceId !== loginResponse.deviceId) {
-      await this.clearCryptoState();
-    }
+    await this.clearMatrixState();
 
     await saveMatrixAuthState(this.configDirectory, {
       homeserverUrl,
@@ -84,7 +81,7 @@ export class SandyMatrixAdminService {
 
   async logout(): Promise<void> {
     await deleteMatrixAuthState(this.configDirectory);
-    await this.clearCryptoState();
+    await this.clearMatrixState();
   }
 
   private async performMatrixLogin(
@@ -163,8 +160,8 @@ export class SandyMatrixAdminService {
     });
   }
 
-  private async clearCryptoState(): Promise<void> {
-    const cryptoRoot = join(this.configDirectory, "state", "matrix", "crypto");
-    await rm(cryptoRoot, { recursive: true, force: true });
+  private async clearMatrixState(): Promise<void> {
+    const matrixRoot = join(this.configDirectory, "state", "matrix");
+    await rm(matrixRoot, { recursive: true, force: true });
   }
 }
