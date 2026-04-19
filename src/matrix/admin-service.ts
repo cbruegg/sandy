@@ -1,4 +1,3 @@
-import { createInterface } from "node:readline";
 import { join } from "node:path";
 import { rm } from "node:fs/promises";
 import {
@@ -142,26 +141,68 @@ export class SandyMatrixAdminService {
       return envPassword;
     }
 
-    const readline = createInterface({
-      input: process.stdin,
-      output: process.stdout,
-    });
-
-    return new Promise((resolve, reject) => {
-      readline.question(matrixAdminMessages.passwordPrompt(), (answer) => {
-        readline.close();
-        const trimmed = answer.trim();
-        if (!trimmed) {
-          reject(new Error(matrixAdminMessages.passwordRequired()));
-          return;
-        }
-        resolve(trimmed);
-      });
-    });
+    return promptForPasswordHidden(matrixAdminMessages.passwordPrompt());
   }
 
   private async clearMatrixState(): Promise<void> {
     const matrixRoot = join(this.configDirectory, "state", "matrix");
     await rm(matrixRoot, { recursive: true, force: true });
   }
+}
+
+export async function promptForPasswordHidden(
+  prompt: string,
+  stdin: NodeJS.ReadStream = process.stdin,
+  stdout: NodeJS.WriteStream = process.stdout,
+): Promise<string> {
+  stdout.write(prompt);
+
+  stdin.setRawMode(true);
+  stdin.resume();
+  stdin.setEncoding("utf8");
+
+  let password = "";
+  const result = await new Promise<string>((resolve, reject) => {
+    const onData = (char: string) => {
+      switch (char) {
+        case "\n":
+        case "\r":
+        case "\u0004": {
+          stdin.setRawMode(false);
+          stdin.pause();
+          stdin.off("data", onData);
+          stdout.write("\n");
+          const trimmed = password.trim();
+          if (!trimmed) {
+            reject(new Error(matrixAdminMessages.passwordRequired()));
+          } else {
+            resolve(trimmed);
+          }
+          break;
+        }
+        case "\u0003": {
+          stdin.setRawMode(false);
+          stdin.pause();
+          stdin.off("data", onData);
+          stdout.write("\n");
+          reject(new Error("Password input cancelled."));
+          break;
+        }
+        case "\u007f": {
+          if (password.length > 0) {
+            password = password.slice(0, -1);
+          }
+          break;
+        }
+        default: {
+          password += char;
+          break;
+        }
+      }
+    };
+
+    stdin.on("data", onData);
+  });
+
+  return result;
 }
