@@ -6,6 +6,7 @@ import { resolveSandyCacheRoot } from "./cache-paths.js";
 import { configureLogger, logger } from "./logger.js";
 import { SandyMcpProxyAccess } from "./mcp/proxy-access.js";
 import { McpSidecarManager } from "./mcp/sidecar-manager.js";
+import { validateOAuthStateFilesForStartup } from "./mcp/oauth-state-validator.js";
 import { McpWorkerLaunchConfigBuilder } from "./mcp/worker-launch-config-builder.js";
 import { createMcpWorkerNetworkName } from "./mcp/worker-network-name.js";
 import { SandyOrchestrator } from "./orchestrator.js";
@@ -23,17 +24,21 @@ export async function startApp(): Promise<void> {
   configureLogger({
     minLevel: config.logLevel,
   });
+  await validateOAuthStateFilesForStartup(config.configDirectory, config.mcpServers);
 
   logger.info("app.starting", {
     configFilePath: config.configFilePath,
     channelKind: config.channel.kind,
     workerImage: config.workerImage,
     mcpSidecarImage: config.mcpSidecarImage,
+    networkGuardImage: config.networkGuardImage,
     shareRoot: config.shareRoot,
     authMode: config.authMode.mode,
     sttEnabled: config.sttApiKey !== null,
     workerPreinstallCommandCount: config.workerPreinstall.commands.length,
     workerPreinstallRefresh: config.workerPreinstall.refresh,
+    workerNetworkMode: config.workerNetwork.mode,
+    workerNetworkAllowLocalCidrs: config.workerNetwork.allowLocalCidrs,
     configuredSkillCount: config.skills.length,
   });
 
@@ -72,7 +77,7 @@ export async function startApp(): Promise<void> {
     launchImage: initialWorkerImage,
   });
 
-  const mainAgent = new CodexMainAgentController(codex, config.skills);
+  const mainAgent = new CodexMainAgentController(codex, config.skills, Object.keys(config.mcpServers));
 
   const mcpProxyAccess = new SandyMcpProxyAccess();
   const mcpEnabled = Object.keys(config.mcpServers).length > 0;
@@ -94,6 +99,8 @@ export async function startApp(): Promise<void> {
       skillsDirectory: config.skillsDirectory,
       workerCodexBinaryPath,
       workerCodexConfigBuilder: (taskId) => mcpWorkerLaunchConfigBuilder.build(taskId),
+      networkGuardImage: config.networkGuardImage,
+      workerNetwork: config.workerNetwork,
       workerNetworkName,
     },
   );

@@ -131,6 +131,8 @@ export const mcpAdminMessages = {
     "That was not a valid callback URL or authorization code. Paste the full callback URL or just the code.",
   oauthManualInputClosed: (): string =>
     "OAuth login input was closed before an authorization code was received.",
+  oauthTokensMissingForStartup: (serverId: string, stateFilePath: string): string =>
+    `OAuth state for ${serverId} exists at ${stateFilePath} but is missing tokens. Run "sandy mcp login ${serverId}" before starting Sandy.`,
 } as const;
 
 function describePrivilegeRequest(request: PrivilegeRequest): string {

@@ -69,6 +69,7 @@ There is no formatter or linter configured yet, so keep style consistent with th
 
 Tests use Bun's test runner via `bun test`. Place tests next to the related code as `*.test.ts`. High test coverage is expected for orchestration behavior, normalization, privilege routing, and failure handling. Prefer small fakes over networked or Docker-backed integration in unit tests.
 
-## Documentation Maintenance
+## Maintenance
 
 Keep `README.md` aligned with the intended target architecture, setup steps, and configuration. Keep the active `PLAN*.md` document aligned with the current implementation status, completed work, and known gaps relative to that target.
+When adding a new build artifact, image, executable, or other release output, update the publication pipeline and release documentation in the same change so published builds do not reference artifacts that were never pushed.

@@ -1,3 +1,4 @@
+# Build the Bun bundles once so both runtime images can reuse them.
 FROM oven/bun:1 AS build
 WORKDIR /app
 
@@ -8,14 +9,34 @@ COPY scripts ./scripts
 COPY src ./src
 RUN bun run build
 
+# Shared Bun runtime layer for host-side TypeScript entrypoints.
 FROM oven/bun:1 AS runtime-base
 WORKDIR /app
 
 COPY --from=build /app/dist ./dist
 
+# Host-side MCP proxy sidecar runtime.
 FROM runtime-base AS mcp-proxy-runtime
 CMD ["bun", "dist/entrypoint-mcp-proxy.js"]
 
+# Dedicated network guard runtime that owns the worker's network namespace.
+FROM opensuse/tumbleweed:latest AS network-guard-runtime
+WORKDIR /app
+
+RUN zypper --non-interactive refresh \
+  && zypper --non-interactive install --no-recommends \
+    gawk \
+    grep \
+    iproute2 \
+    iptables \
+  && zypper clean --all
+
+COPY scripts/network-guard-entrypoint.sh /usr/local/bin/sandy-network-guard
+RUN chmod 0755 /usr/local/bin/sandy-network-guard
+
+ENTRYPOINT ["/usr/local/bin/sandy-network-guard"]
+
+# Rootful worker runtime used for Codex task execution.
 FROM opensuse/tumbleweed:latest AS worker-runtime
 WORKDIR /workspace
 
