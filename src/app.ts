@@ -16,6 +16,7 @@ import { DockerSandboxRunner } from "./sandbox/docker-sandbox-runner.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
 import { OpenAiTranscriptionProvider } from "./transcription/openai-transcription-provider.js";
 import { resolvePublishedUpdateSource } from "./build-metadata.js";
+import { createRetryingChannelAdapter } from "./channel/retrying-channel-adapter.js";
 import { SelfUpdateCoordinator } from "./update/self-update.js";
 import { WorkerImageManager } from "./worker-image-manager.js";
 import { validateMatrixAuthStateForStartup, resolveMatrixAccessToken } from "./matrix/startup-validator.js";
@@ -55,7 +56,29 @@ export async function startApp(): Promise<void> {
   const matrixAccessToken = config.channel.kind === "matrix"
     ? await resolveMatrixAccessToken(config.configDirectory, config.channel)
     : null;
-  const channel = createChannelAdapter(config, transcriptionProvider, matrixAccessToken);
+  const rawChannel = createChannelAdapter(config, transcriptionProvider, matrixAccessToken);
+
+  let rejectFatalError: ((error: Error) => void) | null = null;
+  const fatalErrorPromise = new Promise<never>((_, reject) => {
+    rejectFatalError = (error: Error) => reject(error);
+  });
+
+  let shutdownRequested = false;
+  let shutdown: (() => Promise<void>) | null = null;
+  const triggerFatalChannelError = (error: unknown, source: string): void => {
+    if (shutdownRequested) {
+      return;
+    }
+    shutdownRequested = true;
+    const wrappedError = error instanceof Error ? error : new Error(`Fatal channel error from ${source}.`);
+    logger.error("app.fatal_channel_error", {
+      source,
+      message: wrappedError.message,
+    });
+    void shutdown?.().finally(() => rejectFatalError?.(wrappedError));
+  };
+
+  const channel = createRetryingChannelAdapter(rawChannel, triggerFatalChannelError);
 
   const workerImageManager = new WorkerImageManager({
     baseImage: config.workerImage,
@@ -131,7 +154,7 @@ export async function startApp(): Promise<void> {
 
   await sidecarManager?.start();
 
-  const shutdown = async () => {
+  shutdown = async () => {
     logger.info("app.shutdown_started");
     updateCoordinator.stop();
     logger.info("app.shutdown_step_started", {
@@ -216,12 +239,17 @@ export async function startApp(): Promise<void> {
   updateCoordinator.start();
 
   process.once("SIGINT", () => {
+    shutdownRequested = true;
     void shutdown().finally(() => process.exit(130));
   });
   process.once("SIGTERM", () => {
+    shutdownRequested = true;
     void shutdown().finally(() => process.exit(143));
   });
 
+  await channel.start(async (event) => {
+    await orchestrator.handleChatEvent(event);
+  });
   logger.info("app.started");
-  await channel.start(async (event) => orchestrator.handleChatEvent(event));
+  await fatalErrorPromise;
 }
