@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { Codex, type CodexOptions } from "@openai/codex-sdk";
-import { embeddedCodexVersion } from "./codex-version.generated.js";
+import { embeddedCodexVersion } from "./build-constants.js";
 import { resolveCodexCacheRoot } from "./cache-paths.js";
 import { buildGitHubHeaders, isGitHubUrl } from "./github-http.js";
 import { logger } from "./logger.js";

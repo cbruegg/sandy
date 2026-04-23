@@ -26,9 +26,6 @@ jobs:
       - name: Prepare Matrix crypto binary for compile target
         run: bun ./scripts/prepare-matrix-crypto-binary.mjs --target "${{ matrix.target }}"
 
-      - name: Verify generated Codex version is committed
-        run: bun run check:codex-version
-
   build-executables:
     name: ${{ inputs.publish && 'Publish executable' || 'Build executable' }} (${{ matrix.target }})
     runs-on: ubuntu-latest
@@ -55,19 +52,6 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Bake Sandy image metadata into executable build
-        if: inputs.publish
-        run: |
-          cat > src/build-metadata.generated.ts <<EOF
-          // Overwritten by the GitHub executable build job to embed release image defaults.
-          export const embeddedBuildMetadata = {
-            gitRevision: '${{ github.sha }}',
-            imageRegistry: 'ghcr.io/${{ github.repository_owner }}',
-            githubRepository: '${{ github.repository }}',
-            updateReleaseTag: 'main-build',
-          } as const;
-          EOF
-
       - name: Build single-file executables
         run: |
           mkdir -p bin
@@ -75,8 +59,18 @@ jobs:
           if [[ "${{ matrix.target }}" == bun-windows-* ]]; then
             EXT=".exe"
           fi
-          bun build --compile --target="${{ matrix.target }}" --outfile "bin/sandy-${{ matrix.target }}${EXT}" ./src/entrypoint-main.ts
-          bun build --compile --target="${{ matrix.target }}" --outfile "bin/sandy-updater-${{ matrix.target }}${EXT}" ./src/entrypoint-updater.ts
+          bun ./scripts/build-with-constants.mjs --compile --target="${{ matrix.target }}" --outfile "bin/sandy-${{ matrix.target }}${EXT}" --sourcemap \
+            --define "SANDY_BUILD_GIT_REVISION='${{ github.sha }}'" \
+            --define "SANDY_BUILD_IMAGE_REGISTRY='ghcr.io/${{ github.repository_owner }}'" \
+            --define "SANDY_BUILD_GITHUB_REPOSITORY='${{ github.repository }}'" \
+            --define "SANDY_BUILD_UPDATE_RELEASE_TAG='main-build'" \
+            ./src/entrypoint-main.ts
+          bun ./scripts/build-with-constants.mjs --compile --target="${{ matrix.target }}" --outfile "bin/sandy-updater-${{ matrix.target }}${EXT}" --sourcemap \
+            --define "SANDY_BUILD_GIT_REVISION='${{ github.sha }}'" \
+            --define "SANDY_BUILD_IMAGE_REGISTRY='ghcr.io/${{ github.repository_owner }}'" \
+            --define "SANDY_BUILD_GITHUB_REPOSITORY='${{ github.repository }}'" \
+            --define "SANDY_BUILD_UPDATE_RELEASE_TAG='main-build'" \
+            ./src/entrypoint-updater.ts
 
       - name: Package executable bundle
         run: |
@@ -154,6 +148,11 @@ jobs:
           target: ${{ matrix.target }}
           platforms: ${{ matrix.platform }}
           push: false
+          build-args: |
+            SANDY_BUILD_GIT_REVISION=${{ github.sha }}
+            SANDY_BUILD_IMAGE_REGISTRY=ghcr.io/${{ github.repository_owner }}
+            SANDY_BUILD_GITHUB_REPOSITORY=${{ github.repository }}
+            SANDY_BUILD_UPDATE_RELEASE_TAG=main-build
 
       - name: Build and push ${{ matrix.image }} image by digest
         if: inputs.publish
@@ -163,6 +162,11 @@ jobs:
           context: .
           target: ${{ matrix.target }}
           platforms: ${{ matrix.platform }}
+          build-args: |
+            SANDY_BUILD_GIT_REVISION=${{ github.sha }}
+            SANDY_BUILD_IMAGE_REGISTRY=ghcr.io/${{ github.repository_owner }}
+            SANDY_BUILD_GITHUB_REPOSITORY=${{ github.repository }}
+            SANDY_BUILD_UPDATE_RELEASE_TAG=main-build
           outputs: type=image,name=ghcr.io/${{ github.repository_owner }}/${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export image digest

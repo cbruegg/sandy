@@ -1,4 +1,4 @@
-import { embeddedBuildMetadata } from "./build-metadata.generated.js";
+import { embeddedBuildMetadata } from "./build-constants.js";
 
 const LOCAL_DEFAULT_WORKER_IMAGE = "sandy-subagent:latest";
 const LOCAL_DEFAULT_SIDECAR_IMAGE = "sandy-mcp-proxy:latest";
