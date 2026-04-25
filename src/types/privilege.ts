@@ -3,13 +3,13 @@ import type { PrivilegedWorkerToolPayload } from "../subagent/worker-tool-regist
 
 const privilegeApprovalScopeSchema = z.enum(["once", "worker_session", "always"]);
 
-export type HostOperationPrivilegeRequest = {
+type HostOperationPrivilegeRequest = {
   kind: "host_operation";
   requestId: string;
   payload: PrivilegedWorkerToolPayload;
 };
 
-export type McpToolCallPrivilegeRequest = {
+type McpToolCallPrivilegeRequest = {
   kind: "mcp_tool_call";
   requestId: string;
   serverId: string;

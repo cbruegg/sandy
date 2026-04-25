@@ -100,7 +100,7 @@ export function parseHostToMcpSidecarMessage(raw: string): HostToMcpSidecarMessa
 
   switch ((parsed as { type: string }).type) {
     case "bootstrap":
-      return bootstrapMessageSchema.parse(parsed) as McpSidecarBootstrapMessage;
+      return bootstrapMessageSchema.parse(parsed);
     case "authorization_result":
       return authorizationResultMessageSchema.parse(parsed);
     case "shutdown":

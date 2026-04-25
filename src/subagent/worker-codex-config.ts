@@ -41,7 +41,7 @@ function asTomlTable(value: unknown): Record<string, unknown> {
 async function readWorkerCodexConfig(configPath: string): Promise<Record<string, unknown>> {
   try {
     const existingRaw = await readFile(configPath, "utf8");
-    return toml.parse(existingRaw) as Record<string, unknown>;
+    return toml.parse(existingRaw);
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return {};

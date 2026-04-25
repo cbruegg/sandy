@@ -4,7 +4,7 @@ import {resolveHomeDirectory} from "../home-directory.js";
 import {resolveTaskShareHostPath} from "../shared-workspace.js";
 import type {PrivilegedWorkerToolPayload} from "../subagent/worker-tool-registry.js";
 
-export type PrivilegeContext = {
+type PrivilegeContext = {
   taskId: string;
   taskSharePath: string;
 };
@@ -14,7 +14,7 @@ export type SupportedPrivilegeRequest = Extract<
   { type: "copy_into_share" | "copy_out_of_share" }
 >;
 
-export type PrivilegeOperationResult = {
+type PrivilegeOperationResult = {
   outcome: "approved" | "failed";
   message: string;
 };

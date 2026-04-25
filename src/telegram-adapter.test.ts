@@ -24,10 +24,10 @@ test("normalizeTelegramUpdate maps report callback to a danger report event", as
       message: {
         message_id: 12,
         date: 1_700_000_000,
-        chat: { id: 42, type: "private" },
+        chat: { id: 42, type: "private", first_name: "Private" },
       },
     },
-  } as Update);
+  });
 
   assert.deepEqual(event, {
     kind: "danger_report",
@@ -56,10 +56,10 @@ test("normalizeTelegramUpdate maps mark-finished callback to a finish request ev
       message: {
         message_id: 22,
         date: 1_700_000_100,
-        chat: { id: 42, type: "private" },
+        chat: { id: 42, type: "private", first_name: "Private" },
       },
     },
-  } as Update);
+  } satisfies Update);
 
   assert.deepEqual(event, {
     kind: "mark_finished_request",
@@ -78,11 +78,11 @@ test("normalizeTelegramUpdate maps text input and unsupported media deterministi
     message: {
       message_id: 5,
       date: 1_700_000_010,
-      chat: { id: 99, type: "private" },
+      chat: { id: 99, type: "private", first_name: "Private" },
       from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
       text: "/cancel",
     },
-  } as Update);
+  } satisfies Update);
 
   assert.deepEqual(textEvent, {
     kind: "user_text",
@@ -102,7 +102,7 @@ test("normalizeTelegramUpdate maps text input and unsupported media deterministi
     message: {
       message_id: 6,
       date: 1_700_000_020,
-      chat: { id: 99, type: "private" },
+      chat: { id: 99, type: "private", first_name: "Private" },
       from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
       voice: {
         file_id: "voice-1",
@@ -110,7 +110,7 @@ test("normalizeTelegramUpdate maps text input and unsupported media deterministi
         duration: 1,
       },
     },
-  } as Update);
+  } satisfies Update);
 
   assert.deepEqual(voiceEvent, {
     kind: "unsupported_input",
@@ -128,7 +128,7 @@ test("normalizeTelegramUpdate maps text input and unsupported media deterministi
     message: {
       message_id: 7,
       date: 1_700_000_030,
-      chat: { id: 99, type: "private" },
+      chat: { id: 99, type: "private", first_name: "Private" },
       from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
       caption: "Use this input file.",
       document: {
@@ -139,7 +139,7 @@ test("normalizeTelegramUpdate maps text input and unsupported media deterministi
         file_size: 12,
       },
     },
-  } as Update);
+  } satisfies Update);
 
   assert.deepEqual(documentEvent, {
     kind: "user_text",
@@ -182,22 +182,22 @@ test("TelegramBotApiAdapter keeps handling later updates after a handler error",
     message: {
       message_id: 1,
       date: 1_700_000_000,
-      chat: { id: 7, type: "private" },
+      chat: { id: 7, type: "private", first_name: "Private" },
       from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
       text: "hello",
     },
-  } as Update);
+  } satisfies Update);
 
   await fakeBot.dispatch({
     update_id: 2,
     message: {
       message_id: 2,
       date: 1_700_000_010,
-      chat: { id: 7, type: "private" },
+      chat: { id: 7, type: "private", first_name: "Private" },
       from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
       text: "still there?",
     },
-  } as Update);
+  } satisfies Update);
 
   await adapter.stop();
 
@@ -230,10 +230,10 @@ test("TelegramBotApiAdapter acknowledges callback queries", async () => {
       message: {
         message_id: 13,
         date: 1_700_000_030,
-        chat: { id: 42, type: "private" },
+        chat: { id: 42, type: "private", first_name: "Private" },
       },
     },
-  } as Update);
+  } satisfies Update);
 
   await adapter.stop();
 
@@ -264,7 +264,7 @@ test("TelegramBotApiAdapter transcribes voice messages into normal text events",
     message: {
       message_id: 8,
       date: 1_700_000_040,
-      chat: { id: 99, type: "private" },
+      chat: { id: 99, type: "private", first_name: "Private" },
       from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
       voice: {
         file_id: "voice-2",
@@ -273,7 +273,7 @@ test("TelegramBotApiAdapter transcribes voice messages into normal text events",
         mime_type: "audio/ogg",
       },
     },
-  } as Update);
+  } satisfies Update);
 
   await adapter.stop();
 
@@ -315,7 +315,7 @@ test("TelegramBotApiAdapter keeps transcribed voice command text as plain user t
     message: {
       message_id: 9,
       date: 1_700_000_050,
-      chat: { id: 99, type: "private" },
+      chat: { id: 99, type: "private", first_name: "Private" },
       from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
       voice: {
         file_id: "voice-3",
@@ -323,7 +323,7 @@ test("TelegramBotApiAdapter keeps transcribed voice command text as plain user t
         duration: 2,
       },
     },
-  } as Update);
+  } satisfies Update);
 
   await adapter.stop();
 
@@ -359,7 +359,7 @@ test("TelegramBotApiAdapter reports voice messages as disabled without STT confi
     message: {
       message_id: 10,
       date: 1_700_000_060,
-      chat: { id: 99, type: "private" },
+      chat: { id: 99, type: "private", first_name: "Private" },
       from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
       voice: {
         file_id: "voice-4",
@@ -367,7 +367,7 @@ test("TelegramBotApiAdapter reports voice messages as disabled without STT confi
         duration: 2,
       },
     },
-  } as Update);
+  } satisfies Update);
 
   await adapter.stop();
 
@@ -393,11 +393,11 @@ test("TelegramBotApiAdapter ignores unauthorized sender messages", async () => {
     message: {
       message_id: 11,
       date: 1_700_000_070,
-      chat: { id: 99, type: "private" },
+      chat: { id: 99, type: "private", first_name: "Private" },
       from: { id: 77, is_bot: false, first_name: "Intruder", username: "intruder" },
       text: "hello",
     },
-  } as Update);
+  } satisfies Update);
 
   await adapter.stop();
 
@@ -428,7 +428,7 @@ test("TelegramBotApiAdapter ignores unauthorized voice messages before normaliza
     message: {
       message_id: 11_1,
       date: 1_700_000_071,
-      chat: { id: 99, type: "private" },
+      chat: { id: 99, type: "private", first_name: "Private" },
       from: { id: 77, is_bot: false, first_name: "Intruder", username: "intruder" },
       voice: {
         file_id: "voice-unauthorized",
@@ -436,7 +436,7 @@ test("TelegramBotApiAdapter ignores unauthorized voice messages before normaliza
         duration: 2,
       },
     },
-  } as Update);
+  } satisfies Update);
 
   await adapter.stop();
 
@@ -467,7 +467,7 @@ test("TelegramBotApiAdapter ignores owner messages outside private chats", async
       from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
       text: "hello",
     },
-  } as Update);
+  } satisfies Update);
 
   await adapter.stop();
 
@@ -503,10 +503,10 @@ test("TelegramBotApiAdapter ignores unauthorized callback queries", async () => 
       message: {
         message_id: 13,
         date: 1_700_000_090,
-        chat: { id: 42, type: "private" },
+        chat: { id: 42, type: "private", first_name: "Private" },
       },
     },
-  } as Update);
+  } satisfies Update);
 
   await adapter.stop();
 
@@ -532,11 +532,11 @@ test("TelegramBotApiAdapter authorizes by username when configured", async () =>
     message: {
       message_id: 14,
       date: 1_700_000_100,
-      chat: { id: 99, type: "private" },
+      chat: { id: 99, type: "private", first_name: "Private" },
       from: { id: 77, is_bot: false, first_name: "Owner", username: "cbruegg" },
       text: "hello",
     },
-  } as Update);
+  } satisfies Update);
 
   await adapter.stop();
 
@@ -561,11 +561,11 @@ test("TelegramBotApiAdapter ignores messages when username does not match", asyn
     message: {
       message_id: 15,
       date: 1_700_000_110,
-      chat: { id: 99, type: "private" },
+      chat: { id: 99, type: "private", first_name: "Private" },
       from: { id: 5, is_bot: false, first_name: "Owner", username: "someoneelse" },
       text: "hello",
     },
-  } as Update);
+  } satisfies Update);
 
   await adapter.stop();
 

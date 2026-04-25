@@ -71,5 +71,5 @@ function applyPersistentApprovalToRawToml(
   const nextTools = Array.from(new Set([...existingTools, toolName])).sort();
   parsed.approvals.mcp[serverId].always_allow_tools = nextTools;
 
-  return toml.stringify(parsed as toml.JsonMap);
+  return toml.stringify(parsed);
 }
