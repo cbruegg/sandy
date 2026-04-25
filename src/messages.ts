@@ -150,6 +150,20 @@ export const matrixAdminMessages = {
     'Matrix auth state file is missing. Run "sandy matrix login" first.',
   authStateInvalid: (reason: string): string =>
     `Matrix auth state is invalid: ${reason} Run "sandy matrix login" to re-authenticate.`,
+  verifyRecoveryKeyPrompt: (): string =>
+    "Enter Matrix recovery key: ",
+  recoveryKeyRequired: (): string =>
+    "Matrix recovery key is required.",
+  noSecretStorage: (): string =>
+    "Matrix secret storage is not set up on this account. Set up Secure Backup in a Matrix client (e.g. Element) first.",
+  secretStorageKeyNotFound: (eventType: string): string =>
+    `Secret storage key descriptor "${eventType}" not found on the homeserver.`,
+  crossSigningSecretsMissing: (): string =>
+    "Cross-signing secrets are not stored in the account's secret storage. Set up cross-signing in a Matrix client first.",
+  verificationSucceeded: (deviceId: string): string =>
+    `Device ${deviceId} has been signed successfully.`,
+  alreadyVerified: (): string =>
+    "This device is already verified.",
 } as const;
 
 function describePrivilegeRequest(request: PrivilegeRequest): string {

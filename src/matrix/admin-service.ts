@@ -11,6 +11,7 @@ import {matrixAdminMessages} from "../messages.js";
 type MatrixStatus = {
   homeserverUrl: string;
   botUserId: string;
+  deviceId: string | null;
   configured: boolean;
   loggedIn: boolean;
   matchesConfig: boolean;
@@ -41,6 +42,7 @@ export class SandyMatrixAdminService {
     return {
       homeserverUrl: this.matrixConfig.homeserverUrl,
       botUserId: this.matrixConfig.botUserId,
+      deviceId: state?.deviceId ?? null,
       configured: true,
       loggedIn: state !== null,
       matchesConfig: validation.valid,

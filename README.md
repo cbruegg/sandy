@@ -14,7 +14,7 @@ status, completed work, and known gaps relative to that target, see `PLAN_v1.md`
 - Docker installed and available as `docker`.
 - Either:
   - a Telegram bot token plus the Telegram numeric user ID or username of the one person allowed to control Sandy, or
-  - a Matrix homeserver URL, bot access token, and the full Matrix user ID of the one person allowed to control Sandy.
+  - a Matrix homeserver URL and the full Matrix user ID of the bot account and the one person allowed to control Sandy (Sandy acquires the access token via its login CLI).
 - Either:
   - a local Codex ChatGPT login on the host machine, or
   - an OpenAI API key.
@@ -108,7 +108,7 @@ Matrix channel behavior:
 - Both `channel.matrix.bot_user_id` and `channel.matrix.allowed_user_id` must be full Matrix user IDs such as `@user:matrix.org`.
 - Sandy auto-joins invites from the configured Matrix user and leaves rooms that are unencrypted, multi-user, or otherwise fail that qualification.
 - Matrix task controls and approvals are exposed through Matrix polls only. Use a client with poll support such as Element or FluffyChat.
-- Sandy must use a dedicated Matrix device session for encryption. The access token is managed separately from the config file.
+- Sandy uses a dedicated Matrix device session for encryption. The access token is managed separately from the config file.
 
 To set up Matrix authentication:
 
@@ -129,6 +129,31 @@ sandy matrix login "My Sandy Bot"
 4. Check the login status with `sandy matrix status`.
 
 The access token is stored in a state file (not the config file) and is bound to the configured homeserver URL and bot user ID. If you change either in the config, you must run `sandy matrix login` again.
+
+`login` and `logout` clear the stored Matrix auth and crypto state under `state/matrix/`. Re-login creates a new device session and requires re-verification in the user's Matrix client.
+
+`status` reports the configured homeserver, bot user ID, device ID, and whether the stored auth matches the config. It does not report encryption trust or device verification state. Use `sandy matrix verify status` for that.
+
+To verify the bot device so that Matrix clients stop showing "encrypted by a device not verified by its owner" warnings:
+
+1. Log into the bot account from a second Matrix client that supports cross-signing, such as Element Web or Element Desktop.
+2. In that client, set up Secure Backup and enable cross-signing (typically under Settings → Security & Privacy).
+3. Copy or save the recovery key shown during Secure Backup setup.
+4. Run the verification command in Sandy, which will prompt for the recovery key securely:
+
+```bash
+sandy matrix verify recovery-key
+```
+
+5. Confirm the device is verified:
+
+```bash
+sandy matrix verify status
+```
+
+After this, the homeserver knows Sandy's device is signed by the bot account's self-signing key. Other clients that check device trust will no longer show the unverified-device warning for Sandy's messages.
+
+If Sandy is later re-logged in (`sandy matrix logout` followed by `sandy matrix login`), the new device session needs to be verified again.
 
 Local test channel behavior:
 
