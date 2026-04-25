@@ -1,4 +1,16 @@
-import { spawn } from "node:child_process";
+import { join } from "node:path";
+import {
+  DeviceId,
+  KeysClaimRequest,
+  KeysQueryRequest,
+  KeysUploadRequest,
+  OlmMachine,
+  SecretStorageItems,
+  SecretStorageKey,
+  SignatureUploadRequest,
+  ToDeviceRequest,
+  UserId,
+} from "@matrix-org/matrix-sdk-crypto-nodejs";
 import { loadMatrixAuthState } from "./auth-state.js";
 import { promptForPasswordHidden } from "./admin-service.js";
 import { matrixAdminMessages } from "../messages.js";
@@ -14,57 +26,47 @@ export type VerificationStatus = {
   isDeviceVerified: boolean;
 };
 
-const nodeVerificationScript = String.raw`
-import { join } from "node:path";
-import {
-  DeviceId,
-  OlmMachine,
-  RequestType,
-  SecretStorageItems,
-  SecretStorageKey,
-  UserId,
-} from "@matrix-org/matrix-sdk-crypto-nodejs";
-
 const MATRIX_SECRET_STORAGE_DEFAULT_KEY = "m.secret_storage.default_key";
 const CROSS_SIGNING_MASTER = "m.cross_signing.master";
 const CROSS_SIGNING_SELF_SIGNING = "m.cross_signing.self_signing";
 const CROSS_SIGNING_USER_SIGNING = "m.cross_signing.user_signing";
 
-const chunks = [];
-for await (const chunk of process.stdin) {
-  chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-const input = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-
-function fail(message) {
-  process.stderr.write(message + "\n");
-  process.exit(1);
-}
-
-async function fetchAccountData(homeserverUrl, accessToken, userId, eventType) {
+async function fetchAccountData(
+  homeserverUrl: string,
+  accessToken: string,
+  userId: string,
+  eventType: string,
+): Promise<unknown> {
   const url = new URL(
-    "/_matrix/client/v3/user/" + encodeURIComponent(userId) + "/account_data/" + encodeURIComponent(eventType),
+    `/_matrix/client/v3/user/${encodeURIComponent(userId)}/account_data/${encodeURIComponent(eventType)}`,
     homeserverUrl,
   );
   const response = await fetch(url, {
-    headers: { authorization: "Bearer " + accessToken },
+    headers: { authorization: `Bearer ${accessToken}` },
   });
   if (response.status === 404) {
     return null;
   }
   if (!response.ok) {
-    throw new Error("Failed to fetch Matrix account data " + eventType + ": HTTP " + response.status);
+    throw new Error(`Failed to fetch Matrix account data ${eventType}: HTTP ${response.status}`);
   }
   return await response.json();
 }
 
-async function fetchOwnKeysQuery(homeserverUrl, accessToken, userId) {
+async function fetchOwnKeysQuery(
+  homeserverUrl: string,
+  accessToken: string,
+  userId: string,
+): Promise<unknown> {
   const url = new URL("/_matrix/client/v3/keys/query", homeserverUrl);
   const response = await fetch(url, {
     method: "POST",
     headers: {
-      authorization: "Bearer " + accessToken,
+      authorization: `Bearer ${accessToken}`,
       "content-type": "application/json",
     },
     body: JSON.stringify({
@@ -74,38 +76,73 @@ async function fetchOwnKeysQuery(homeserverUrl, accessToken, userId) {
     }),
   });
   if (!response.ok) {
-    throw new Error("Failed to query Matrix device keys: HTTP " + response.status);
+    throw new Error(`Failed to query Matrix device keys: HTTP ${response.status}`);
   }
   return await response.json();
 }
 
-function isDeviceCrossSignedByOwnerFromKeysQuery(keysQueryResponse, userId, deviceId) {
-  const selfSigningKey = keysQueryResponse?.self_signing_keys?.[userId]?.keys
-    ? Object.keys(keysQueryResponse.self_signing_keys[userId].keys)[0]
-    : null;
-  const deviceSignatures = keysQueryResponse?.device_keys?.[userId]?.[deviceId]?.signatures?.[userId];
-  return Boolean(selfSigningKey && deviceSignatures && deviceSignatures[selfSigningKey]);
+function isDeviceCrossSignedByOwnerFromKeysQuery(
+  keysQueryResponse: unknown,
+  userId: string,
+  deviceId: string,
+): boolean {
+  if (!isRecord(keysQueryResponse)) return false;
+
+  const selfSigningKeys = keysQueryResponse["self_signing_keys"];
+  if (!isRecord(selfSigningKeys)) return false;
+
+  const userSelfSigning = selfSigningKeys[userId];
+  if (!isRecord(userSelfSigning)) return false;
+
+  const keys = userSelfSigning["keys"];
+  if (!isRecord(keys)) return false;
+
+  const selfSigningKey = Object.keys(keys)[0] ?? null;
+  if (!selfSigningKey) return false;
+
+  const deviceKeys = keysQueryResponse["device_keys"];
+  if (!isRecord(deviceKeys)) return false;
+
+  const userDevices = deviceKeys[userId];
+  if (!isRecord(userDevices)) return false;
+
+  const device = userDevices[deviceId];
+  if (!isRecord(device)) return false;
+
+  const signatures = device["signatures"];
+  if (!isRecord(signatures)) return false;
+
+  const userSignatures = signatures[userId];
+  if (!isRecord(userSignatures)) return false;
+
+  return selfSigningKey in userSignatures;
 }
 
-async function uploadSignatureRequest(signatureRequest, homeserverUrl, accessToken, machine) {
-  const rawBody = JSON.parse(signatureRequest.body);
-  const requestBody = rawBody && typeof rawBody === "object" && rawBody.signed_keys
-    ? rawBody.signed_keys
-    : rawBody;
+async function uploadSignatureRequest(
+  signatureRequest: { id: string; type: number; body: string },
+  homeserverUrl: string,
+  accessToken: string,
+  machine: OlmMachine,
+): Promise<void> {
+  const rawBody = JSON.parse(signatureRequest.body) as unknown;
+  const requestBody =
+    rawBody && typeof rawBody === "object" && "signed_keys" in rawBody
+      ? (rawBody as Record<string, unknown>)["signed_keys"]
+      : rawBody;
   const uploadUrl = new URL("/_matrix/client/v3/keys/signatures/upload", homeserverUrl);
   const response = await fetch(uploadUrl, {
     method: "POST",
     headers: {
-      authorization: "Bearer " + accessToken,
+      authorization: `Bearer ${accessToken}`,
       "content-type": "application/json",
     },
     body: JSON.stringify(requestBody),
   });
 
   if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({}));
-    const detail = typeof errorBody.error === "string" ? errorBody.error : "HTTP " + response.status;
-    fail("Signature upload failed: " + detail);
+    const errorBody = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+    const detail = typeof errorBody["error"] === "string" ? String(errorBody["error"]) : `HTTP ${response.status}`;
+    throw new Error(`Signature upload failed: ${detail}`);
   }
 
   const responseBody = await response.json();
@@ -116,40 +153,45 @@ async function uploadSignatureRequest(signatureRequest, homeserverUrl, accessTok
   );
 }
 
-async function processOutgoingRequest(request, homeserverUrl, accessToken, machine) {
-  if (request.type === RequestType.SignatureUpload) {
+async function processOutgoingRequest(
+  request:
+    | KeysUploadRequest
+    | KeysQueryRequest
+    | KeysClaimRequest
+    | ToDeviceRequest
+    | SignatureUploadRequest,
+  homeserverUrl: string,
+  accessToken: string,
+  machine: OlmMachine,
+): Promise<void> {
+  if (request instanceof SignatureUploadRequest) {
     await uploadSignatureRequest(request, homeserverUrl, accessToken, machine);
     return;
   }
 
-  const parsedBody = JSON.parse(request.body);
-  let path = "";
+  const parsedBody = JSON.parse(request.body) as Record<string, unknown>;
+  let path: string;
   let method = "POST";
-  let payload = parsedBody;
+  let payload: unknown = parsedBody;
 
-  switch (request.type) {
-    case RequestType.KeysUpload:
-      path = "/_matrix/client/v3/keys/upload";
-      break;
-    case RequestType.KeysQuery:
-      path = "/_matrix/client/v3/keys/query";
-      break;
-    case RequestType.KeysClaim:
-      path = "/_matrix/client/v3/keys/claim";
-      break;
-    case RequestType.ToDevice:
-      method = "PUT";
-      path = "/_matrix/client/v3/sendToDevice/" + encodeURIComponent(parsedBody.event_type) + "/" + encodeURIComponent(parsedBody.txn_id);
-      payload = parsedBody.messages;
-      break;
-    default:
-      fail("Unsupported Matrix crypto outgoing request type: " + request.type);
+  if (request instanceof KeysUploadRequest) {
+    path = "/_matrix/client/v3/keys/upload";
+  } else if (request instanceof KeysQueryRequest) {
+    path = "/_matrix/client/v3/keys/query";
+  } else if (request instanceof KeysClaimRequest) {
+    path = "/_matrix/client/v3/keys/claim";
+  } else if (request instanceof ToDeviceRequest) {
+    method = "PUT";
+    path = `/_matrix/client/v3/sendToDevice/${encodeURIComponent(String(parsedBody["event_type"]))}/${encodeURIComponent(String(parsedBody["txn_id"]))}`;
+    payload = parsedBody["messages"];
+  } else {
+    throw new Error("Unsupported Matrix crypto outgoing request type");
   }
 
   const response = await fetch(new URL(path, homeserverUrl), {
     method,
     headers: {
-      authorization: "Bearer " + accessToken,
+      authorization: `Bearer ${accessToken}`,
       "content-type": "application/json",
     },
     body: JSON.stringify(payload),
@@ -163,7 +205,11 @@ async function processOutgoingRequest(request, homeserverUrl, accessToken, machi
   );
 }
 
-async function drainOutgoingRequests(machine, homeserverUrl, accessToken) {
+async function drainOutgoingRequests(
+  machine: OlmMachine,
+  homeserverUrl: string,
+  accessToken: string,
+): Promise<void> {
   while (true) {
     const requests = await machine.outgoingRequests();
     if (requests.length === 0) {
@@ -175,180 +221,193 @@ async function drainOutgoingRequests(machine, homeserverUrl, accessToken) {
   }
 }
 
-async function prepareOwnDeviceState(machine, homeserverUrl, accessToken, userId) {
+async function prepareOwnDeviceState(
+  machine: OlmMachine,
+  homeserverUrl: string,
+  accessToken: string,
+  userId: string,
+): Promise<void> {
   await drainOutgoingRequests(machine, homeserverUrl, accessToken);
   await machine.updateTrackedUsers([new UserId(userId)]);
   await drainOutgoingRequests(machine, homeserverUrl, accessToken);
 }
 
-async function main() {
-const machine = await OlmMachine.initialize(
-  new UserId(input.botUserId),
-  new DeviceId(input.deviceId),
-  join(input.configDirectory, "state", "matrix", "crypto"),
-  "",
-  0,
-);
+async function createMachine(
+  configDirectory: string,
+  botUserId: string,
+  deviceId: string,
+): Promise<OlmMachine> {
+  return await OlmMachine.initialize(
+    new UserId(botUserId),
+    new DeviceId(deviceId),
+    join(configDirectory, "state", "matrix", "crypto"),
+    "",
+    0,
+  );
+}
 
-await prepareOwnDeviceState(
-  machine,
-  input.homeserverUrl,
-  input.accessToken,
-  input.botUserId,
-);
+async function getVerificationStatus(
+  machine: OlmMachine,
+  homeserverUrl: string,
+  accessToken: string,
+  botUserId: string,
+  deviceId: string,
+): Promise<VerificationStatus> {
+  await prepareOwnDeviceState(machine, homeserverUrl, accessToken, botUserId);
 
-if (input.command === "status") {
   const crossSigningStatus = await machine.crossSigningStatus();
-  const serverKeys = await fetchOwnKeysQuery(
-    input.homeserverUrl,
-    input.accessToken,
-    input.botUserId,
+  const serverKeys = await fetchOwnKeysQuery(homeserverUrl, accessToken, botUserId);
+
+  return {
+    deviceId,
+    hasCrossSigningKeys:
+      crossSigningStatus.hasMaster &&
+      crossSigningStatus.hasSelfSigning &&
+      crossSigningStatus.hasUserSigning,
+    isDeviceVerified: isDeviceCrossSignedByOwnerFromKeysQuery(serverKeys, botUserId, deviceId),
+  };
+}
+
+async function verifyDevice(
+  machine: OlmMachine,
+  homeserverUrl: string,
+  accessToken: string,
+  botUserId: string,
+  deviceId: string,
+  recoveryKey: string | undefined,
+): Promise<{ deviceId: string }> {
+  await prepareOwnDeviceState(machine, homeserverUrl, accessToken, botUserId);
+
+  const localCrossSigningStatus = await machine.crossSigningStatus();
+  const serverKeys = await fetchOwnKeysQuery(homeserverUrl, accessToken, botUserId);
+  const hasServerCrossSigningKeys = Boolean(
+    isRecord(serverKeys) &&
+      isRecord(serverKeys["master_keys"]) &&
+      botUserId in serverKeys["master_keys"] &&
+      isRecord(serverKeys["self_signing_keys"]) &&
+      botUserId in serverKeys["self_signing_keys"] &&
+      isRecord(serverKeys["user_signing_keys"]) &&
+      botUserId in serverKeys["user_signing_keys"],
   );
-  process.stdout.write(JSON.stringify({
-    deviceId: input.deviceId,
-    hasCrossSigningKeys: crossSigningStatus.hasMaster
-      && crossSigningStatus.hasSelfSigning
-      && crossSigningStatus.hasUserSigning,
-    isDeviceVerified: isDeviceCrossSignedByOwnerFromKeysQuery(
-      serverKeys,
-      input.botUserId,
-      input.deviceId,
-    ),
-  }));
-  process.exit(0);
-}
 
-if (input.command !== "verify") {
-  fail("Unknown Matrix verification helper command: " + input.command);
-}
+  if (
+    localCrossSigningStatus.hasMaster &&
+    localCrossSigningStatus.hasSelfSigning &&
+    localCrossSigningStatus.hasUserSigning &&
+    hasServerCrossSigningKeys
+  ) {
+    const bootstrapRequests = await machine.bootstrapCrossSigning(false);
+    await uploadSignatureRequest(
+      bootstrapRequests.uploadSignaturesReq,
+      homeserverUrl,
+      accessToken,
+      machine,
+    );
+    return { deviceId };
+  }
 
-const localCrossSigningStatus = await machine.crossSigningStatus();
-const serverKeys = await fetchOwnKeysQuery(
-  input.homeserverUrl,
-  input.accessToken,
-  input.botUserId,
-);
-const hasServerCrossSigningKeys = Boolean(
-  serverKeys.master_keys?.[input.botUserId]
-  && serverKeys.self_signing_keys?.[input.botUserId]
-  && serverKeys.user_signing_keys?.[input.botUserId],
-);
-
-if (
-  localCrossSigningStatus.hasMaster
-  && localCrossSigningStatus.hasSelfSigning
-  && localCrossSigningStatus.hasUserSigning
-  && hasServerCrossSigningKeys
-) {
-  const bootstrapRequests = await machine.bootstrapCrossSigning(false);
-  await uploadSignatureRequest(
-    bootstrapRequests.uploadSignaturesReq,
-    input.homeserverUrl,
-    input.accessToken,
-    machine,
+  const defaultKeyData = await fetchAccountData(
+    homeserverUrl,
+    accessToken,
+    botUserId,
+    MATRIX_SECRET_STORAGE_DEFAULT_KEY,
   );
-  process.stdout.write(JSON.stringify({
-    deviceId: input.deviceId,
-    path: "local_cross_signing",
-  }));
-  process.exit(0);
-}
+  if (
+    !defaultKeyData ||
+    typeof defaultKeyData !== "object" ||
+    !("key" in defaultKeyData) ||
+    typeof defaultKeyData["key"] !== "string" ||
+    !defaultKeyData["key"]
+  ) {
+    throw new Error(
+      "Matrix secret storage is not set up on this account. Set up Secure Backup in a Matrix client first.",
+    );
+  }
 
-const defaultKeyData = await fetchAccountData(
-  input.homeserverUrl,
-  input.accessToken,
-  input.botUserId,
-  MATRIX_SECRET_STORAGE_DEFAULT_KEY,
-);
-if (!defaultKeyData || !defaultKeyData.key) {
-  fail("Matrix secret storage is not set up on this account. Set up Secure Backup in a Matrix client first.");
-}
-
-const keyEventType = "m.secret_storage.key." + defaultKeyData.key;
-const keyDescriptor = await fetchAccountData(
-  input.homeserverUrl,
-  input.accessToken,
-  input.botUserId,
-  keyEventType,
-);
-if (!keyDescriptor) {
-  fail("Secret storage key descriptor \"" + keyEventType + "\" not found on the homeserver.");
-}
-
-let secretStorageKey;
-try {
-  secretStorageKey = SecretStorageKey.fromAccountData(
-    String(input.recoveryKey).replace(/\s+/g, ""),
+  const keyEventType = `m.secret_storage.key.${defaultKeyData["key"]}`;
+  const keyDescriptor = await fetchAccountData(
+    homeserverUrl,
+    accessToken,
+    botUserId,
     keyEventType,
-    JSON.stringify(keyDescriptor),
   );
-} catch (error) {
-  const detail = error instanceof Error ? error.message : String(error);
-  fail("Failed to parse the provided recovery key against the account's secret-storage key metadata: " + detail);
-}
+  if (!keyDescriptor) {
+    throw new Error(`Secret storage key descriptor "${keyEventType}" not found on the homeserver.`);
+  }
 
-const [masterData, selfSigningData, userSigningData] = await Promise.all([
-  fetchAccountData(input.homeserverUrl, input.accessToken, input.botUserId, CROSS_SIGNING_MASTER),
-  fetchAccountData(input.homeserverUrl, input.accessToken, input.botUserId, CROSS_SIGNING_SELF_SIGNING),
-  fetchAccountData(input.homeserverUrl, input.accessToken, input.botUserId, CROSS_SIGNING_USER_SIGNING),
-]);
-
-if (!masterData || !selfSigningData || !userSigningData) {
-  fail("Cross-signing secrets are not stored in the account's secret storage. Set up cross-signing in a Matrix client first.");
-}
-
-for (const [eventType, value] of [
-  [CROSS_SIGNING_MASTER, masterData],
-  [CROSS_SIGNING_SELF_SIGNING, selfSigningData],
-  [CROSS_SIGNING_USER_SIGNING, userSigningData],
-]) {
+  let secretStorageKey: SecretStorageKey;
   try {
-    secretStorageKey.decrypt(JSON.stringify(value), eventType);
+    secretStorageKey = SecretStorageKey.fromAccountData(
+      String(recoveryKey).replace(/\s+/g, ""),
+      keyEventType,
+      JSON.stringify(keyDescriptor),
+    );
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    fail("Failed to decrypt " + eventType + " using the provided recovery key: " + detail);
+    throw new Error(
+      `Failed to parse the provided recovery key against the account's secret-storage key metadata: ${detail}`,
+      { cause: error },
+    );
   }
+
+  const [masterData, selfSigningData, userSigningData] = await Promise.all([
+    fetchAccountData(homeserverUrl, accessToken, botUserId, CROSS_SIGNING_MASTER),
+    fetchAccountData(homeserverUrl, accessToken, botUserId, CROSS_SIGNING_SELF_SIGNING),
+    fetchAccountData(homeserverUrl, accessToken, botUserId, CROSS_SIGNING_USER_SIGNING),
+  ]);
+
+  if (!masterData || !selfSigningData || !userSigningData) {
+    throw new Error(
+      "Cross-signing secrets are not stored in the account's secret storage. Set up cross-signing in a Matrix client first.",
+    );
+  }
+
+  for (const [eventType, value] of [
+    [CROSS_SIGNING_MASTER, masterData],
+    [CROSS_SIGNING_SELF_SIGNING, selfSigningData],
+    [CROSS_SIGNING_USER_SIGNING, userSigningData],
+  ] as const) {
+    try {
+      secretStorageKey.decrypt(JSON.stringify(value), eventType);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Failed to decrypt ${eventType} using the provided recovery key: ${detail}`,
+        { cause: error },
+      );
+    }
+  }
+
+  let items: SecretStorageItems;
+  try {
+    items = new SecretStorageItems({
+      masterKey: JSON.stringify(masterData),
+      selfSigningKey: JSON.stringify(selfSigningData),
+      userSigningKey: JSON.stringify(userSigningData),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Failed to prepare secret-storage items for import: ${detail}`,
+      { cause: error },
+    );
+  }
+
+  let signatureRequest;
+  try {
+    signatureRequest = await machine.importSecretsFromSecretStorage(secretStorageKey, items);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Matrix secret import failed after successful decryption. This points to a device-store or crypto-binding issue rather than a bad recovery key: ${detail}`,
+      { cause: error },
+    );
+  }
+
+  await uploadSignatureRequest(signatureRequest, homeserverUrl, accessToken, machine);
+
+  return { deviceId };
 }
-
-let items;
-try {
-  items = new SecretStorageItems({
-    masterKey: JSON.stringify(masterData),
-    selfSigningKey: JSON.stringify(selfSigningData),
-    userSigningKey: JSON.stringify(userSigningData),
-  });
-} catch (error) {
-  const detail = error instanceof Error ? error.message : String(error);
-  fail("Failed to prepare secret-storage items for import: " + detail);
-}
-
-let signatureRequest;
-try {
-  signatureRequest = await machine.importSecretsFromSecretStorage(secretStorageKey, items);
-} catch (error) {
-  const detail = error instanceof Error ? error.message : String(error);
-  fail("Matrix secret import failed after successful decryption. This points to a device-store or crypto-binding issue rather than a bad recovery key: " + detail);
-}
-
-await uploadSignatureRequest(
-  signatureRequest,
-  input.homeserverUrl,
-  input.accessToken,
-  machine,
-);
-
-process.stdout.write(JSON.stringify({
-  deviceId: input.deviceId,
-  path: "recovery_key_import",
-}));
-process.exit(0);
-}
-
-await main().catch((error) => {
-  const detail = error instanceof Error ? error.message : String(error);
-  fail(detail);
-});
-`;
 
 export class SandyMatrixVerificationService {
   constructor(
@@ -366,14 +425,23 @@ export class SandyMatrixVerificationService {
       return null;
     }
 
-    return this.runNodeVerificationCommand<VerificationStatus>({
-      command: "status",
-      configDirectory: this.configDirectory,
-      homeserverUrl: this.matrixConfig.homeserverUrl,
-      botUserId: this.matrixConfig.botUserId,
-      deviceId: authState.deviceId,
-      accessToken: authState.accessToken,
-    });
+    const machine = await createMachine(
+      this.configDirectory,
+      this.matrixConfig.botUserId,
+      authState.deviceId,
+    );
+
+    try {
+      return await getVerificationStatus(
+        machine,
+        this.matrixConfig.homeserverUrl,
+        authState.accessToken,
+        this.matrixConfig.botUserId,
+        authState.deviceId,
+      );
+    } finally {
+      machine.close();
+    }
   }
 
   async verifyWithRecoveryKey(): Promise<{ deviceId: string }> {
@@ -387,72 +455,35 @@ export class SandyMatrixVerificationService {
     }
 
     const currentStatus = await this.status();
-    if (currentStatus?.hasCrossSigningKeys) {
-      return this.runNodeVerificationCommand<{ deviceId: string }>({
-        command: "verify",
-        configDirectory: this.configDirectory,
-        homeserverUrl: this.matrixConfig.homeserverUrl,
-        botUserId: this.matrixConfig.botUserId,
-        deviceId: authState.deviceId,
-        accessToken: authState.accessToken,
-      });
-    }
+    let recoveryKey: string | undefined;
 
-    const recoveryKey = await promptForPasswordHidden(
-      matrixAdminMessages.verifyRecoveryKeyPrompt(),
-    );
-
-    if (!recoveryKey) {
-      throw new Error(matrixAdminMessages.recoveryKeyRequired());
-    }
-
-    return this.runNodeVerificationCommand<{ deviceId: string }>({
-      command: "verify",
-      configDirectory: this.configDirectory,
-      homeserverUrl: this.matrixConfig.homeserverUrl,
-      botUserId: this.matrixConfig.botUserId,
-      deviceId: authState.deviceId,
-      accessToken: authState.accessToken,
-      recoveryKey,
-    });
-  }
-
-  private async runNodeVerificationCommand<T>(payload: Record<string, unknown>): Promise<T> {
-    const nodeExecutable = process.env["NODE"]?.trim() || "node";
-    const child = spawn(
-      nodeExecutable,
-      ["--input-type=module", "-e", nodeVerificationScript],
-      {
-        stdio: ["pipe", "pipe", "pipe"],
-      },
-    );
-
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
-
-    child.stdout.on("data", (chunk) => {
-      stdoutChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array));
-    });
-    child.stderr.on("data", (chunk) => {
-      stderrChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array));
-    });
-
-    child.stdin.end(JSON.stringify(payload));
-
-    const exitCode = await new Promise<number | null>((resolve, reject) => {
-      child.on("error", reject);
-      child.on("close", resolve);
-    });
-
-    const stdout = Buffer.concat(stdoutChunks).toString("utf8").trim();
-    const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
-
-    if (exitCode !== 0) {
-      throw new Error(
-        stderr || `Matrix verification helper exited with code ${exitCode ?? "unknown"}.`,
+    if (!currentStatus?.hasCrossSigningKeys) {
+      recoveryKey = await promptForPasswordHidden(
+        matrixAdminMessages.verifyRecoveryKeyPrompt(),
       );
+
+      if (!recoveryKey) {
+        throw new Error(matrixAdminMessages.recoveryKeyRequired());
+      }
     }
 
-    return JSON.parse(stdout) as T;
+    const machine = await createMachine(
+      this.configDirectory,
+      this.matrixConfig.botUserId,
+      authState.deviceId,
+    );
+
+    try {
+      return await verifyDevice(
+        machine,
+        this.matrixConfig.homeserverUrl,
+        authState.accessToken,
+        this.matrixConfig.botUserId,
+        authState.deviceId,
+        recoveryKey,
+      );
+    } finally {
+      machine.close();
+    }
   }
 }
