@@ -198,6 +198,19 @@ test("DockerSandboxRunner waits for an explicit worker_connected handshake", asy
   assert.deepEqual(events, [{ type: "worker_connected" }]);
 });
 
+test("DockerSandboxRunner passes channel formatting as a docker environment variable", async () => {
+  const taskChild = new FakeChildProcess();
+
+  const { invocations } = await launchRunnerWithChild(taskChild, async () => {});
+
+  const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
+  assert.ok(dockerRunInvocation);
+  const channelFormattingIndex = dockerRunInvocation.args.findIndex((arg) =>
+    arg.startsWith("SANDY_CHANNEL_FORMATTING="));
+  assert.notEqual(channelFormattingIndex, -1);
+  assert.equal(dockerRunInvocation.args[channelFormattingIndex - 1], "-e");
+});
+
 test("DockerSandboxRunner passes the configured Codex model into the worker container", async () => {
   const taskChild = new FakeChildProcess();
   const invocationsWithModel: Array<{ command: string; args: string[] }> = [];
