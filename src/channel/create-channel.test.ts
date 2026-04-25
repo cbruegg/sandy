@@ -17,6 +17,7 @@ function baseConfig(): Omit<SandyConfig, "channel"> {
     mcpSidecarImage: "sandy-mcp-proxy:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-shares",
+    agentModel: null,
     workerPreinstall: {
       commands: [],
       refresh: "weekly",

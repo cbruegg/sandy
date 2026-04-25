@@ -36,6 +36,7 @@ export async function startApp(): Promise<void> {
     mcpSidecarImage: config.mcpSidecarImage,
     networkGuardImage: config.networkGuardImage,
     shareRoot: config.shareRoot,
+    agentModel: config.agentModel,
     authMode: config.authMode.mode,
     sttEnabled: config.sttApiKey !== null,
     workerPreinstallCommandCount: config.workerPreinstall.commands.length,
@@ -105,7 +106,12 @@ export async function startApp(): Promise<void> {
     launchImage: initialWorkerImage,
   });
 
-  const mainAgent = new CodexMainAgentController(codex, config.skills, Object.keys(config.mcpServers));
+  const mainAgent = new CodexMainAgentController(
+    codex,
+    config.agentModel,
+    config.skills,
+    Object.keys(config.mcpServers),
+  );
 
   const mcpProxyAccess = new SandyMcpProxyAccess();
   const mcpEnabled = Object.keys(config.mcpServers).length > 0;
@@ -122,6 +128,7 @@ export async function startApp(): Promise<void> {
       workerImage: config.workerImage,
       resolveWorkerImage: () => workerImageManager.getLaunchImage(),
       shareRoot: config.shareRoot,
+      codexModel: config.agentModel,
       openAiApiKey: config.authMode.mode === "api_key" ? config.authMode.openAiApiKey : null,
       codexAuthFile: config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthFile : null,
       skillsDirectory: config.skillsDirectory,

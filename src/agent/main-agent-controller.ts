@@ -31,13 +31,20 @@ const MAX_DECISION_VALIDATION_ATTEMPTS = 3;
 
 export class CodexMainAgentController implements MainAgentController {
   private readonly codex: CodexClient;
+  private readonly model: string | null;
   private readonly skills: SkillMetadata[];
   private readonly workerMcpServerIds: string[];
   private readonly threads = new Map<string, MainAgentThread>();
   private readonly threadDirectories = new Map<string, string>();
 
-  constructor(codex: CodexClient, skills: SkillMetadata[] = [], workerMcpServerIds: string[] = []) {
+  constructor(
+    codex: CodexClient,
+    model: string | null = null,
+    skills: SkillMetadata[] = [],
+    workerMcpServerIds: string[] = [],
+  ) {
     this.codex = codex;
+    this.model = model;
     this.skills = skills;
     this.workerMcpServerIds = [...workerMcpServerIds].sort();
   }
@@ -117,7 +124,7 @@ export class CodexMainAgentController implements MainAgentController {
 
   private createThread(chatId: string): MainAgentThread {
     const workingDirectory = this.getOrCreateThreadDirectory(chatId);
-    const thread = this.codex.startThread(buildMainAgentThreadOptions(workingDirectory));
+    const thread = this.codex.startThread(buildMainAgentThreadOptions(workingDirectory, this.model));
     logger.debug("main_agent.thread_started", {
       chatId,
       workingDirectory,
@@ -141,9 +148,10 @@ export class CodexMainAgentController implements MainAgentController {
   }
 }
 
-export function buildMainAgentThreadOptions(workingDirectory: string): ThreadOptions {
+export function buildMainAgentThreadOptions(workingDirectory: string, model: string | null = null): ThreadOptions {
   return {
     approvalPolicy: "never",
+    ...(model ? { model } : {}),
     sandboxMode: "read-only",
     workingDirectory,
     skipGitRepoCheck: true,

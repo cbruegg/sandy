@@ -11,18 +11,24 @@ export const workerSkillsPath = join(workerHomePath, ".agents", "skills");
 
 export function buildWorkerCodexConfigPatch(
   env: NodeJS.ProcessEnv = process.env,
-): { shell_environment_policy: { set: { PATH: string } } } | undefined {
+): { model?: string; shell_environment_policy?: { set: { PATH: string } } } | undefined {
   const shellPath = env["PATH"]?.trim();
-  if (!shellPath) {
+  const model = env["SANDY_CODEX_MODEL"]?.trim();
+  if (!shellPath && !model) {
     return undefined;
   }
 
   return {
-    shell_environment_policy: {
-      set: {
-        PATH: shellPath,
-      },
-    },
+    ...(model ? { model } : {}),
+    ...(shellPath
+      ? {
+          shell_environment_policy: {
+            set: {
+              PATH: shellPath,
+            },
+          },
+        }
+      : {}),
   };
 }
 
@@ -63,16 +69,26 @@ export async function applyWorkerCodexConfigPatch(
   const existingConfig = await readWorkerCodexConfig(configPath);
   const shellEnvironmentPolicy = asTomlTable(existingConfig["shell_environment_policy"]);
   const shellEnvironmentSet = asTomlTable(shellEnvironmentPolicy["set"]);
+  const mergedShellEnvironmentSet = {
+    ...shellEnvironmentSet,
+    ...(patch.shell_environment_policy
+      ? { PATH: patch.shell_environment_policy.set.PATH }
+      : {}),
+  };
+  const hasShellEnvironmentPolicy = Object.keys(mergedShellEnvironmentSet).length > 0
+    || Object.keys(shellEnvironmentPolicy).some((key) => key !== "set");
 
   const mergedConfig = {
     ...existingConfig,
-    shell_environment_policy: {
-      ...shellEnvironmentPolicy,
-      set: {
-        ...shellEnvironmentSet,
-        PATH: patch.shell_environment_policy.set.PATH,
-      },
-    },
+    ...(patch.model ? { model: patch.model } : {}),
+    ...(hasShellEnvironmentPolicy
+      ? {
+          shell_environment_policy: {
+            ...shellEnvironmentPolicy,
+            set: mergedShellEnvironmentSet,
+          },
+        }
+      : {}),
   };
 
   await mkdir(codexHomePath, { recursive: true });

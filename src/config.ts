@@ -129,6 +129,9 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
     }).default({
       codex_auth_file: defaultCodexAuthFilePath,
     }),
+    agent: z.object({
+      model: z.string().min(1).optional(),
+    }).optional(),
     worker: z.object({
       image: z.string().min(1).default(defaultImages.workerImage),
       share_root: z.string().min(1).default(DEFAULT_SHARE_ROOT),
@@ -250,6 +253,7 @@ export type SandyConfig = {
   mcpSidecarImage: string;
   networkGuardImage: string;
   shareRoot: string;
+  agentModel: string | null;
   workerPreinstall: {
     commands: string[];
     refresh: WorkerPreinstallRefreshMode;
@@ -355,6 +359,7 @@ export function parseConfigToml(
     mcpSidecarImage: parsed.mcp.sidecar_image,
     networkGuardImage: defaultImages.networkGuardImage,
     shareRoot: parsed.worker.share_root,
+    agentModel: parsed.agent?.model ?? null,
     workerPreinstall: {
       commands: parsed.worker.preinstall.commands,
       refresh: parsed.worker.preinstall.refresh,

@@ -254,6 +254,7 @@ export async function main(): Promise<void> {
 
   const taskBrief = getRequiredEnv("SANDY_TASK_BRIEF");
   const apiKey = getOptionalEnv("OPENAI_API_KEY");
+  const codexModel = getOptionalEnv("SANDY_CODEX_MODEL");
   const channelFormatting = parseChannelFormatting(getOptionalEnv("SANDY_CHANNEL_FORMATTING"));
 
   await applyWorkerCodexConfigPatch();
@@ -262,6 +263,7 @@ export async function main(): Promise<void> {
     ? await createCodexClient({ apiKey, env: workerCodexEnvironment })
     : await createCodexClient({ env: workerCodexEnvironment });
   const thread = codex.startThread({
+    model: codexModel ?? undefined,
     workingDirectory: sharedWorkspaceMountPath,
     skipGitRepoCheck: true,
     // Docker is the actual isolation boundary for sub-agents; avoid nested bwrap sandboxing in-container.

@@ -82,9 +82,16 @@ test("buildMainAgentThreadOptions locks the main agent down", () => {
   const options = buildMainAgentThreadOptions("/tmp/sandy-main-agent-test");
 
   assert.equal(options.approvalPolicy, "never");
+  assert.equal(options.model, undefined);
   assert.equal(options.sandboxMode, "read-only");
   assert.equal(options.workingDirectory, "/tmp/sandy-main-agent-test");
   assert.equal(options.skipGitRepoCheck, true);
+});
+
+test("buildMainAgentThreadOptions includes a model override when configured", () => {
+  const options = buildMainAgentThreadOptions("/tmp/sandy-main-agent-test", "gpt-5.4-mini");
+
+  assert.equal(options.model, "gpt-5.4-mini");
 });
 
 test("buildMainAgentPrompt includes only the new visible entries for incremental turns", () => {
@@ -123,6 +130,7 @@ test("CodexMainAgentController starts threads in a unique temp directory with no
 
   const options = expectDefined(codex.startedThreads[0], "Expected started thread options.");
   assert.equal(options.approvalPolicy, "never");
+  assert.equal(options.model, undefined);
   assert.equal(options.sandboxMode, "read-only");
   assert.equal(options.skipGitRepoCheck, true);
   assert.match(options.workingDirectory ?? "", /^.+sandy-main-agent-/);
@@ -186,6 +194,15 @@ test("CodexMainAgentController gives up after repeated validation failures", asy
     /Main agent failed to return a valid decision after 3 attempts/,
   );
   assert.equal(expectDefined(codex.threads[0], "Expected thread.").inputs.length, 3);
+});
+
+test("CodexMainAgentController passes a configured model override into new threads", async () => {
+  const codex = new RecordingCodexClient([[replyDecision("hello")]]);
+  const controller = new CodexMainAgentController(codex, "gpt-5.4-mini");
+
+  await controller.decide(makeContext(["hello"]));
+
+  assert.equal(expectDefined(codex.startedThreads[0], "Expected started thread options.").model, "gpt-5.4-mini");
 });
 
 test("buildMainAgentPrompt includes configured skill metadata only on the initial turn", () => {

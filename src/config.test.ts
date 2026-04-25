@@ -29,6 +29,7 @@ codex_auth_file = "/tmp/codex-auth.json"
   assert.equal(config.sttApiKey, null);
   assert.equal(config.sttBaseUrl, "https://api.openai.com/v1");
   assert.equal(config.sttModel, "gpt-4o-mini-transcribe");
+  assert.equal(config.agentModel, null);
   assert.equal(config.updateMode, "disabled");
   assert.deepEqual(config.workerPreinstall, {
     commands: [],
@@ -60,6 +61,23 @@ model = "custom-transcribe-model"
   assert.equal(config.channel.telegram.allowedUser, "123456");
   assert.equal(config.sttBaseUrl, "https://transcribe.example/v1/");
   assert.equal(config.sttModel, "custom-transcribe-model");
+  assert.equal(config.agentModel, null);
+});
+
+test("parseConfigToml accepts a custom agent model", () => {
+  const config = parseConfigToml(`
+[channel]
+kind = "telegram"
+
+[channel.telegram]
+bot_token = "telegram-token"
+allowed_user = "123456"
+
+[agent]
+model = "gpt-5.5"
+`);
+
+  assert.equal(config.agentModel, "gpt-5.5");
 });
 
 test("parseConfigToml accepts telegram allowed_user usernames", () => {
