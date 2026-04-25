@@ -151,6 +151,7 @@ test("buildMainAgentPrompt includes the precise decision schema", () => {
   assert.match(prompt, /"oneOf"/);
   assert.match(prompt, /"reply"/);
   assert.match(prompt, /"launch_task"/);
+  assert.match(prompt, /"taskLanguage"/);
 });
 
 test("CodexMainAgentController sends only the entries provided for each decision", async () => {

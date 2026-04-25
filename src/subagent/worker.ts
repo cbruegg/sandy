@@ -253,6 +253,7 @@ export async function main(): Promise<void> {
   });
 
   const taskBrief = getRequiredEnv("SANDY_TASK_BRIEF");
+  const taskLanguage = getOptionalEnv("SANDY_TASK_LANGUAGE") ?? "English";
   const apiKey = getOptionalEnv("OPENAI_API_KEY");
   const codexModel = getOptionalEnv("SANDY_CODEX_MODEL");
   const channelFormatting = parseChannelFormatting(getOptionalEnv("SANDY_CHANNEL_FORMATTING"));
@@ -325,7 +326,7 @@ export async function main(): Promise<void> {
   process.stdin.resume();
 
   send({ type: "worker_connected" });
-  enqueueTurn(buildInitialTaskInput(taskBrief, channelFormatting));
+  enqueueTurn(buildInitialTaskInput(taskBrief, taskLanguage, channelFormatting));
 
   input.on("line", (line) => {
     const trimmed = line.trim();

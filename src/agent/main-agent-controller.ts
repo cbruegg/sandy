@@ -227,6 +227,8 @@ export function buildMainAgentPrompt(input: {
     "- It is acceptable to launch a task proactively when that is the best way for Sandy to investigate, inspect, or execute something for the user.",
     "- Reply directly for purely conversational requests or when no sub-agent work is useful.",
     "- Task names must be short, stable, and descriptive.",
+    "- When launching a task, set taskLanguage to the language the sub-agent should use for user-facing output.",
+    "- Choose taskLanguage using the visible conversation history and the task about to be started (for example: English, Spanish, French).",
     "- Task briefs must contain only the minimum instructions needed by the sub-agent.",
     "- Task briefs must be self-contained: include relevant context such as URLs, file paths, or specific values the user provided. The sub-agent does not see the conversation history.",
     "- Any replyText you produce is user-visible. Follow the provided channel formatting instructions exactly.",

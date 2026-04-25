@@ -145,6 +145,8 @@ export class DockerSandboxRunner implements SandboxRunner {
       "-e",
       `SANDY_TASK_BRIEF=${request.taskBrief}`,
       "-e",
+      `SANDY_TASK_LANGUAGE=${request.taskLanguage}`,
+      "-e",
       `SANDY_CHANNEL_FORMATTING=${JSON.stringify(request.channelFormatting)}`,
     ];
 

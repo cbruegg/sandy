@@ -11,6 +11,7 @@ export type MainAgentDecision =
       action: "launch_task";
       taskBrief: string;
       taskName: string;
+      taskLanguage: string;
     };
 
 export type DecideContext = {

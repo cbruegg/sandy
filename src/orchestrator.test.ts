@@ -200,6 +200,7 @@ test("orchestrator launches a task and discards pending output on danger report"
     action: "launch_task",
     taskBrief: "Inspect the repository.",
     taskName: "repo-inspect",
+  taskLanguage: "English",
   });
   const orchestrator = new SandyOrchestrator({
     channel,
@@ -234,6 +235,7 @@ test("orchestrator launches a task and discards pending output on danger report"
   assert.equal(runner.handle.cancellations.length, 1);
   assert.equal(channel.sentTexts.at(-1)?.text, messages.taskTerminatedAndDiscarded("repo-inspect"));
   assert.deepEqual(runner.launches[0]?.channelFormatting, testFormatting);
+  assert.equal(runner.launches[0]?.taskLanguage, "English");
 
   const session = store.getOrCreate("chat-1");
   assert.equal(session.activeTask, null);
@@ -251,6 +253,7 @@ test("orchestrator accepts active-task output without storing host-side history"
     action: "launch_task",
     taskBrief: "Investigate the issue.",
     taskName: "issue-investigation",
+  taskLanguage: "English",
   });
   const orchestrator = new SandyOrchestrator({
     channel,
@@ -299,6 +302,7 @@ test("orchestrator stages attached files into the task share before launching th
     action: "launch_task",
     taskBrief: "Analyze the uploaded file.",
     taskName: "file-analysis",
+  taskLanguage: "English",
   });
   const orchestrator = new SandyOrchestrator({
     channel,
@@ -341,6 +345,7 @@ test("orchestrator stages attached files into the active task share and notifies
       action: "launch_task",
       taskBrief: "Wait for files.",
       taskName: "file-wait",
+    taskLanguage: "English",
     }),
     sandboxRunner: runner,
     sessionStore: store,
@@ -387,6 +392,7 @@ test("orchestrator applies supported privilege requests deterministically and ou
       action: "launch_task",
       taskBrief: "Need a host file copied into the share.",
       taskName: "copy-in",
+    taskLanguage: "English",
     }),
     sandboxRunner: runner,
     sessionStore: store,
@@ -453,6 +459,7 @@ test("orchestrator terminates the task when the user reports a pending privilege
       action: "launch_task",
       taskBrief: "Need a host file copied into the share.",
       taskName: "copy-in",
+    taskLanguage: "English",
     }),
     sandboxRunner: runner,
     sessionStore: store,
@@ -503,6 +510,7 @@ test("orchestrator keeps completed-task summary pending until the user sends ano
       action: "launch_task",
       taskBrief: "Inspect the environment.",
       taskName: "env-inspection",
+    taskLanguage: "English",
     }),
     sandboxRunner: runner,
     sessionStore: store,
@@ -559,6 +567,7 @@ test("orchestrator sends worker-requested shared files back through the channel"
       action: "launch_task",
       taskBrief: "Generate a file.",
       taskName: "file-out",
+    taskLanguage: "English",
     }),
     sandboxRunner: runner,
     sessionStore: store,
@@ -599,6 +608,7 @@ test("orchestrator closes the sandbox handle on normal task completion", async (
     action: "launch_task",
     taskBrief: "Inspect the environment.",
     taskName: "env-inspection",
+  taskLanguage: "English",
   });
   const orchestrator = new SandyOrchestrator({
     channel,
@@ -635,6 +645,7 @@ test("orchestrator asks the worker to finalize when the user marks the task as f
       action: "launch_task",
       taskBrief: "Inspect the environment.",
       taskName: "env-inspection",
+    taskLanguage: "English",
     }),
     sandboxRunner: runner,
     sessionStore: store,
@@ -695,6 +706,7 @@ test("orchestrator uses the task name in task_done completion messages", async (
       action: "launch_task",
       taskBrief: "Inspect the environment.",
       taskName: "env-inspection",
+    taskLanguage: "English",
     }),
     sandboxRunner: runner,
     sessionStore: store,
@@ -737,6 +749,7 @@ test("orchestrator releases completed-task output only when the user continues n
       action: "launch_task",
       taskBrief: "Inspect the environment.",
       taskName: "env-inspection",
+    taskLanguage: "English",
     },
     {
       action: "reply",
@@ -806,6 +819,7 @@ test("orchestrator discards completed-task output when the user sends a danger r
       action: "launch_task",
       taskBrief: "Inspect the filesystem.",
       taskName: "fs-inspect",
+    taskLanguage: "English",
     }),
     sandboxRunner: runner,
     sessionStore: store,
@@ -862,6 +876,7 @@ test("orchestrator keeps final_result output pending until the user continues no
       action: "launch_task",
       taskBrief: "Inspect the environment.",
       taskName: "env-inspection",
+    taskLanguage: "English",
     },
     {
       action: "reply",
@@ -940,6 +955,7 @@ test("orchestrator marks worker disconnects as task failure and clears the task"
       action: "launch_task",
       taskBrief: "Inspect the filesystem.",
       taskName: "fs-inspect",
+    taskLanguage: "English",
     }),
     sandboxRunner: runner,
     sessionStore: store,
@@ -977,6 +993,7 @@ test("orchestrator fails the active task if channel file delivery fails", async 
       action: "launch_task",
       taskBrief: "Prepare a file.",
       taskName: "file-task",
+    taskLanguage: "English",
     }),
     sandboxRunner: runner,
     sessionStore: store,
@@ -1050,6 +1067,7 @@ test("orchestrator prompts before deleting a non-empty shared workspace", async 
       action: "launch_task",
       taskBrief: "Inspect the filesystem.",
       taskName: "fs-inspect",
+    taskLanguage: "English",
     }),
     sandboxRunner: runner,
     sessionStore: store,
@@ -1095,11 +1113,13 @@ test("orchestrator deletes or preserves a finished task share based on user conf
         action: "launch_task",
         taskBrief: "Inspect the filesystem.",
         taskName: "fs-inspect",
+      taskLanguage: "English",
       },
       {
         action: "launch_task",
         taskBrief: "Inspect another filesystem.",
         taskName: "fs-inspect-2",
+      taskLanguage: "English",
       },
     ]),
     sandboxRunner: runner,
@@ -1187,6 +1207,7 @@ test("orchestrator blocks new idle input while shared workspace deletion is pend
       action: "launch_task",
       taskBrief: "Inspect the filesystem.",
       taskName: "fs-inspect",
+    taskLanguage: "English",
     },
     {
       action: "reply",

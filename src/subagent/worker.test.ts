@@ -19,7 +19,7 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
     allowedTags: ["b", "i", "code", "pre"],
     instructions: "Use simple Telegram HTML.",
   };
-  const input = buildInitialTaskInput("Inspect the repository and leave a summary file.", formatting);
+  const input = buildInitialTaskInput("Inspect the repository and leave a summary file.", "English", formatting);
 
   assert.match(input, /\/workspace\/share/);
   assert.match(input, /shared workspace is mounted/);
@@ -33,12 +33,14 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
   assert.match(input, /SANDY_COMPLETE_TASK/);
   assert.match(input, /Telegram HTML/);
   assert.match(input, /<code>/);
+  assert.match(input, /Use English for user-visible replies unless the host provides a later instruction that overrides it\./);
   assert.match(input, /leave a summary file\./);
 });
 
 test("buildInitialTaskInputWithCapabilities includes package-manager guidance when detected during init", () => {
   const input = buildInitialTaskInputWithCapabilities(
     "Install dependencies if needed.",
+    "Spanish",
     null,
     [
       "Detected JavaScript runtime and package manager: Bun.",
@@ -51,6 +53,7 @@ test("buildInitialTaskInputWithCapabilities includes package-manager guidance wh
   );
 
   assert.match(input, /Detected JavaScript runtime and package manager: Bun\./);
+  assert.match(input, /Use Spanish for user-visible replies unless the host provides a later instruction that overrides it\./);
   assert.match(input, /Use bun run, bun test, bun install, and bunx/);
   assert.match(input, /Detected package manager: zypper\./);
   assert.match(input, /openSUSE Tumbleweed packages/);
