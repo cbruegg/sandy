@@ -148,6 +148,7 @@ async function launchRunnerWithChild(
       chatId: "chat-1",
       taskId: "task-1",
       taskName: "test-task",
+      taskLanguage: "English",
       taskBrief: "Inspect the environment.",
       channelFormatting: testFormatting,
     },
@@ -205,6 +206,10 @@ test("DockerSandboxRunner passes channel formatting as a docker environment vari
 
   const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
   assert.ok(dockerRunInvocation);
+  const taskLanguageIndex = dockerRunInvocation.args.findIndex((arg) =>
+    arg.startsWith("SANDY_TASK_LANGUAGE="));
+  assert.notEqual(taskLanguageIndex, -1);
+  assert.equal(dockerRunInvocation.args[taskLanguageIndex - 1], "-e");
   const channelFormattingIndex = dockerRunInvocation.args.findIndex((arg) =>
     arg.startsWith("SANDY_CHANNEL_FORMATTING="));
   assert.notEqual(channelFormattingIndex, -1);
@@ -250,6 +255,7 @@ test("DockerSandboxRunner passes the configured Codex model into the worker cont
     chatId: "chat-1",
     taskId: "task-1",
     taskName: "test-task",
+    taskLanguage: "English",
     taskBrief: "Inspect the environment.",
     channelFormatting: testFormatting,
   }, async () => {});
@@ -475,6 +481,7 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
     chatId: "chat-1",
     taskId: "task-1",
     taskName: "test-task-1",
+    taskLanguage: "English",
     taskBrief: "Inspect the environment.",
     channelFormatting: testFormatting,
   }, async () => {});
@@ -483,6 +490,7 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
     chatId: "chat-1",
     taskId: "task-2",
     taskName: "test-task-2",
+    taskLanguage: "English",
     taskBrief: "Inspect the environment again.",
     channelFormatting: testFormatting,
   }, async () => {});
@@ -664,6 +672,7 @@ test("DockerSandboxRunner launches a network guard and shares its network namesp
     chatId: "chat-1",
     taskId: "task-1",
     taskName: "test-task",
+    taskLanguage: "English",
     taskBrief: "Inspect the environment.",
     channelFormatting: testFormatting,
   }, async () => {});
@@ -738,6 +747,7 @@ test("DockerSandboxRunner reports a disconnect when the network guard exits mid-
     chatId: "chat-1",
     taskId: "task-1",
     taskName: "test-task",
+    taskLanguage: "English",
     taskBrief: "Inspect the environment.",
     channelFormatting: testFormatting,
   }, async (event) => {

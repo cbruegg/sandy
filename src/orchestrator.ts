@@ -384,6 +384,7 @@ export class SandyOrchestrator {
             taskId,
             taskName: decision.taskName,
             taskBrief: taskBrief,
+            taskLanguage: decision.taskLanguage,
             channelFormatting: this.channelFormatting,
           },
           async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),

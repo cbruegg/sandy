@@ -3,12 +3,13 @@ import type { ChannelFormatting, PrivilegeResolutionResult } from "../types.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 import { buildWorkerProtocolInstructions } from "./worker-protocol.js";
 
-export function buildInitialTaskInput(taskBrief: string, channelFormatting: ChannelFormatting | null): string {
-  return buildInitialTaskInputWithCapabilities(taskBrief, channelFormatting, detectRuntimeCapabilities());
+export function buildInitialTaskInput(taskBrief: string, taskLanguage: string, channelFormatting: ChannelFormatting | null): string {
+  return buildInitialTaskInputWithCapabilities(taskBrief, taskLanguage, channelFormatting, detectRuntimeCapabilities());
 }
 
 export function buildInitialTaskInputWithCapabilities(
   taskBrief: string,
+  taskLanguage: string,
   channelFormatting: ChannelFormatting | null,
   runtimeCapabilities: string[],
 ): string {
@@ -19,7 +20,7 @@ export function buildInitialTaskInputWithCapabilities(
     `User-attached files are copied into ${sharedWorkspaceMountPath} before you are told about them.`,
     "Inside this container you may use the filesystem, internet, and installed tools freely.",
     `If you need the host to copy files into or out of ${sharedWorkspaceMountPath}, do not ask the user directly.`,
-    "Always reply in the language of the user's prompt.",
+    `Use ${taskLanguage} for user-visible replies unless the host provides a later instruction that overrides it.`,
     ...buildWorkerProtocolInstructions(),
   ];
 

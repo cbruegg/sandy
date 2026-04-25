@@ -10,6 +10,7 @@ const mainAgentDecisionSchema = z.discriminatedUnion("action", [
     action: z.literal("launch_task"),
     taskBrief: z.string(),
     taskName: z.string(),
+    taskLanguage: z.string().min(1),
   }).strict(),
 ]);
 

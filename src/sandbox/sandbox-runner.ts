@@ -5,6 +5,7 @@ export type LaunchTaskRequest = {
   taskId: string;
   taskName: string;
   taskBrief: string;
+  taskLanguage: string;
   channelFormatting: ChannelFormatting;
 };
 
