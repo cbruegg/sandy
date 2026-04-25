@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 
-export async function resolveEmbeddedCodexVersion() {
+const forwardedArgs = process.argv.slice(2);
+
+async function resolveManagedCodexVersion() {
   const sdkPackageJson = JSON.parse(
     await readFile(new URL("../node_modules/@openai/codex-sdk/package.json", import.meta.url), "utf8"),
   );
@@ -13,8 +15,19 @@ export async function resolveEmbeddedCodexVersion() {
   return codexVersion;
 }
 
-export async function renderCodexVersionFile() {
-  const codexVersion = await resolveEmbeddedCodexVersion();
+const command = Bun.spawn([
+  "bun",
+  "build",
+  ...forwardedArgs,
+  "--define",
+  `SANDY_CODEX_VERSION=${JSON.stringify(await resolveManagedCodexVersion())}`,
+], {
+  stdin: "inherit",
+  stdout: "inherit",
+  stderr: "inherit",
+});
 
-  return `// Overwritten by local tooling and CI to embed the exact managed Codex version.\n// Safe to commit when this value matches the Codex version implied by bun.lock.\nexport const embeddedCodexVersion = ${JSON.stringify(codexVersion)} as const;\n`;
+const exitCode = await command.exited;
+if (exitCode !== 0) {
+  process.exit(exitCode);
 }

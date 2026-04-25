@@ -2,12 +2,22 @@
 FROM oven/bun:1 AS build
 WORKDIR /app
 
+ARG SANDY_BUILD_GIT_REVISION
+ARG SANDY_BUILD_IMAGE_REGISTRY
+ARG SANDY_BUILD_GITHUB_REPOSITORY
+ARG SANDY_BUILD_UPDATE_RELEASE_TAG
+
 COPY package.json bun.lock tsconfig.json eslint.config.mjs knip.json ./
 RUN bun install --frozen-lockfile
 
 COPY scripts ./scripts
 COPY src ./src
-RUN bun run build
+RUN set --; \
+    if [ -n "$SANDY_BUILD_GIT_REVISION" ]; then set -- "$@" --define "SANDY_BUILD_GIT_REVISION='$SANDY_BUILD_GIT_REVISION'"; fi; \
+    if [ -n "$SANDY_BUILD_IMAGE_REGISTRY" ]; then set -- "$@" --define "SANDY_BUILD_IMAGE_REGISTRY='$SANDY_BUILD_IMAGE_REGISTRY'"; fi; \
+    if [ -n "$SANDY_BUILD_GITHUB_REPOSITORY" ]; then set -- "$@" --define "SANDY_BUILD_GITHUB_REPOSITORY='$SANDY_BUILD_GITHUB_REPOSITORY'"; fi; \
+    if [ -n "$SANDY_BUILD_UPDATE_RELEASE_TAG" ]; then set -- "$@" --define "SANDY_BUILD_UPDATE_RELEASE_TAG='$SANDY_BUILD_UPDATE_RELEASE_TAG'"; fi; \
+    bun run build:ci-bundle -- "$@"
 
 # Shared Bun runtime layer for host-side TypeScript entrypoints.
 FROM oven/bun:1 AS runtime-base
