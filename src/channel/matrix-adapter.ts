@@ -5,7 +5,6 @@ import { logger } from "../logger.js";
 import { buttonLabels, messages } from "../messages.js";
 import { matrixHtmlAllowedTags, sanitizeMatrixHtml } from "./matrix-html.js";
 
-import type { StoreType as MatrixCryptoStoreType } from "@matrix-org/matrix-sdk-crypto-nodejs";
 import type {
   ChannelFormatting,
   MessageAttachment,
@@ -140,7 +139,7 @@ const MATRIX_POLL_START_EVENT_TYPE = "org.matrix.msc3381.poll.start";
 const MATRIX_POLL_RESPONSE_EVENT_TYPE = "org.matrix.msc3381.poll.response";
 const MATRIX_POLL_DISCLOSED_KIND = "org.matrix.msc3381.poll.disclosed";
 const MATRIX_REFERENCE_RELATION = "m.reference";
-const MATRIX_CRYPTO_STORE_SQLITE: MatrixCryptoStoreType = 0;
+const MATRIX_CRYPTO_STORE_SQLITE = 0;
 
 async function defaultMatrixClientFactory(options: {
   homeserverUrl: string;
@@ -653,7 +652,7 @@ export async function normalizeMatrixRoomMessage(
   }
 
   if (msgtype === "m.audio") {
-    return normalizeMatrixAudioMessage(base, content as MatrixMessageContent, deps);
+    return normalizeMatrixAudioMessage(base, content, deps);
   }
 
   if (msgtype === "m.file" || msgtype === "m.image" || msgtype === "m.video") {
@@ -706,7 +705,7 @@ export function normalizeMatrixPollResponse(
   return {
     ...matched.event,
     ...buildMatrixEventBase(roomId, event),
-  } as NormalizedChatEvent;
+  };
 }
 
 export function buildMatrixPollStartContent(

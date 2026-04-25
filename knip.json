@@ -8,5 +8,8 @@
   ],
   "project": [
     "src/**/*.ts"
-  ]
+  ],
+  "ignoreExportsUsedInFile": {
+    "type": true
+  }
 }
