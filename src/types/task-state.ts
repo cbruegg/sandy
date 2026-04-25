@@ -1,11 +1,11 @@
 import type { PrivilegeRequest } from "./privilege.js";
 
-export type McpToolGrant = {
+type McpToolGrant = {
   serverId: string;
   toolName: string;
 };
 
-export type TaskStatus =
+type TaskStatus =
   | "idle"
   | "running"
   | "awaiting_privilege_decision"
@@ -27,7 +27,7 @@ export type ActiveTaskState = {
   taskSummary: string | null;
 };
 
-export type PendingShareDeletion = {
+type PendingShareDeletion = {
   requestId: string;
   taskId: string;
   taskName: string;

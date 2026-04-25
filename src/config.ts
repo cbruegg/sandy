@@ -207,7 +207,7 @@ export type McpServerConfig = {
 
 export type SandyUpdateMode = z.infer<typeof updateModeSchema>;
 type WorkerPreinstallRefreshMode = z.infer<typeof workerPreinstallRefreshSchema>;
-export type WorkerNetworkMode = z.infer<typeof workerNetworkModeSchema>;
+type WorkerNetworkMode = z.infer<typeof workerNetworkModeSchema>;
 export type WorkerNetworkConfig = {
   mode: WorkerNetworkMode;
   allowLocalCidrs: string[];

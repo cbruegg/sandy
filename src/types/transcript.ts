@@ -1,4 +1,4 @@
-export type TranscriptRole = "user" | "assistant" | "system";
+type TranscriptRole = "user" | "assistant" | "system";
 
 export type TranscriptEntry = {
   role: TranscriptRole;

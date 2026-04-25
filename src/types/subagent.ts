@@ -6,7 +6,7 @@ import type {PrivilegeResolutionResult} from "./privilege.js";
 const workerToolCallSchema = createWorkerToolPayloadSchema((entry) => entry.name !== "complete_task");
 type HostMediatedWorkerToolPayload = Exclude<WorkerToolPayload, { type: "complete_task" }>;
 
-export type ProgressEvent = {
+type ProgressEvent = {
   type: "progress";
   message: string;
   /** When true, this is a completion message that should not include task-control buttons.
@@ -14,40 +14,40 @@ export type ProgressEvent = {
   isCompletion?: boolean;
 };
 
-export type AssistantOutputEvent = {
+type AssistantOutputEvent = {
   type: "assistant_output";
   text: string;
 };
 
-export type FinalResultEvent = {
+type FinalResultEvent = {
   type: "final_result";
   text: string;
 };
 
-export type TaskSummaryEvent = {
+type TaskSummaryEvent = {
   type: "task_summary";
   summary: string;
 };
 
-export type ToolCallEvent = {
+type ToolCallEvent = {
   type: "tool_call";
   call: HostMediatedWorkerToolPayload;
 };
 
-export type TaskDoneEvent = {
+type TaskDoneEvent = {
   type: "task_done";
 };
 
-export type TaskErrorEvent = {
+type TaskErrorEvent = {
   type: "task_error";
   message: string;
 };
 
-export type WorkerConnectedEvent = {
+type WorkerConnectedEvent = {
   type: "worker_connected";
 };
 
-export type WorkerDisconnectedEvent = {
+type WorkerDisconnectedEvent = {
   type: "worker_disconnected";
   message: string;
 };

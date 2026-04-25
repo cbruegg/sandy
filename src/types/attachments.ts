@@ -1,4 +1,4 @@
-export type AttachmentKind = "file";
+type AttachmentKind = "file";
 
 export type MessageAttachment = {
   attachmentId: string;

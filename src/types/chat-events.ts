@@ -13,25 +13,25 @@ export type UserTextEvent = ChatEventBase & {
   attachments: MessageAttachment[];
 };
 
-export type CancelRequestEvent = ChatEventBase & {
+type CancelRequestEvent = ChatEventBase & {
   kind: "cancel_request";
 };
 
-export type MarkFinishedRequestEvent = ChatEventBase & {
+type MarkFinishedRequestEvent = ChatEventBase & {
   kind: "mark_finished_request";
 };
 
-export type ApprovalResponseEvent = ChatEventBase & {
+type ApprovalResponseEvent = ChatEventBase & {
   kind: "approval_response";
   decision: "approve" | "approve_once" | "approve_worker_session" | "approve_always" | "deny";
   requestId?: string;
 };
 
-export type DangerReportEvent = ChatEventBase & {
+type DangerReportEvent = ChatEventBase & {
   kind: "danger_report";
 };
 
-export type UnsupportedInputEvent = ChatEventBase & {
+type UnsupportedInputEvent = ChatEventBase & {
   kind: "unsupported_input";
   inputType: "image" | "file" | "voice";
 };
