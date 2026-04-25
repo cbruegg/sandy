@@ -2,7 +2,7 @@ import { logger } from "../logger.js";
 import type { ChannelAdapter } from "./channel-adapter.js";
 import { calculateExponentialBackoffMs } from "./exponential-backoff.js";
 
-const CHANNEL_SEND_MAX_ATTEMPTS = 5;
+const CHANNEL_SEND_MAX_ATTEMPTS = 7;
 
 type RetryingChannelAdapterOptions = {
   maxSendAttempts?: number;
@@ -16,7 +16,7 @@ export function createRetryingChannelAdapter(
   options: RetryingChannelAdapterOptions = {},
 ): ChannelAdapter {
   const maxSendAttempts = options.maxSendAttempts ?? CHANNEL_SEND_MAX_ATTEMPTS;
-  const calculateBackoffMs = options.calculateBackoffMs ?? ((attempt: number) => calculateExponentialBackoffMs(attempt, 1_000, 30_000));
+  const calculateBackoffMs = options.calculateBackoffMs ?? ((attempt: number) => calculateExponentialBackoffMs(attempt, 2_000, 60_000));
   const sleep = options.sleep ?? sleepMs;
 
   const failFast = async <T>(source: string, operation: () => Promise<T>): Promise<T> => {

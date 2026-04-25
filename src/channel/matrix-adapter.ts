@@ -4,6 +4,7 @@ import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { buttonLabels, messages } from "../messages.js";
 import { matrixHtmlAllowedTags, sanitizeMatrixHtml } from "./matrix-html.js";
+import { runWithMatrixSendRetry, sleepMs, type MatrixSleep } from "./matrix-send-retry.js";
 
 import type {
   ChannelFormatting,
@@ -89,6 +90,7 @@ type MatrixAdapterOptions = {
   stateRoot: string;
   clientFactory?: MatrixClientFactory;
   transcriptionProvider?: TranscriptionProvider;
+  sleep?: MatrixSleep;
 };
 
 type MatrixAttachmentRef = {
@@ -163,6 +165,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   private readonly stateRoot: string;
   private readonly transcriptionProvider: TranscriptionProvider | null;
   private readonly clientFactory: MatrixClientFactory;
+  private readonly sleep: MatrixSleep;
   private client: MatrixClientLike | null = null;
   private startPromise: Promise<void> | null = null;
   private botUserId: string | null = null;
@@ -178,6 +181,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     this.stateRoot = options.stateRoot;
     this.transcriptionProvider = options.transcriptionProvider ?? null;
     this.clientFactory = options.clientFactory ?? defaultMatrixClientFactory;
+    this.sleep = options.sleep ?? sleepMs;
   }
 
   getFormatting(): ChannelFormatting {
@@ -430,7 +434,10 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   }
 
   private async sendNotice(chatId: string, text: string): Promise<void> {
-    await this.requireClient().sendHtmlNotice(chatId, sanitizeMatrixHtml(text));
+    await this.sendWithMatrixBackoff(
+      "matrix.send_notice",
+      () => this.requireClient().sendHtmlNotice(chatId, sanitizeMatrixHtml(text)),
+    );
   }
 
   private async sendPoll(
@@ -443,11 +450,18 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     }>,
   ): Promise<void> {
     const client = this.requireClient();
-    const eventId = await client.sendEvent(roomId, MATRIX_POLL_START_EVENT_TYPE, buildMatrixPollStartContent(question, options));
+    const eventId = await this.sendWithMatrixBackoff(
+      "matrix.send_poll",
+      () => client.sendEvent(roomId, MATRIX_POLL_START_EVENT_TYPE, buildMatrixPollStartContent(question, options)),
+    );
     this.activePolls.set(eventId, {
       roomId,
       actionsByAnswerId: new Map(options.map((option) => [option.answerId, { event: option.event }])),
     });
+  }
+
+  private async sendWithMatrixBackoff<T>(operationName: string, operation: () => Promise<T>): Promise<T> {
+    return runWithMatrixSendRetry(operationName, operation, this.sleep);
   }
 
   private requireClient(): MatrixClientLike {

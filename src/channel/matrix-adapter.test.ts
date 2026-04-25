@@ -523,6 +523,40 @@ test("MatrixChannelAdapter evicts stale room polls after task completion", async
   }
 });
 
+test("MatrixChannelAdapter honors Matrix retry_after_ms before retrying a task update", async () => {
+  const fakeClient = new FakeMatrixClient();
+  fakeClient.joinedRooms.add(ROOM_ID);
+  fakeClient.roomMembers.set(ROOM_ID, [BOT_ID, OWNER_ID]);
+  fakeClient.encryptedRooms.add(ROOM_ID);
+  fakeClient.sendHtmlNoticeFailures = [
+    createMatrixRateLimitError(2_500),
+    createMatrixRateLimitError(1_000),
+  ];
+
+  const sleepCalls: number[] = [];
+  const adapter = new MatrixChannelAdapter({
+    homeserverUrl: "https://matrix.example",
+    accessToken: "token",
+    allowedUserId: OWNER_ID,
+    stateRoot: "/tmp/sandy-matrix-test",
+    clientFactory: () => fakeClient,
+    sleep: async (delayMs) => {
+      sleepCalls.push(delayMs);
+    },
+  });
+
+  try {
+    await adapter.start(async () => {});
+    await adapter.sendTaskUpdate(ROOM_ID, "Still working.");
+
+    assert.deepEqual(sleepCalls, [2_500, 4_000]);
+    assert.equal(fakeClient.notices.at(-1)?.html, "Still working.");
+    assert.equal(fakeClient.sentEvents.at(-1)?.eventType, "org.matrix.msc3381.poll.start");
+  } finally {
+    await adapter.stop();
+  }
+});
+
 test("MatrixChannelAdapter saves encrypted attachments and sends encrypted files in encrypted rooms", async () => {
   const fakeClient = new FakeMatrixClient();
   fakeClient.joinedRooms.add(ROOM_ID);
@@ -609,6 +643,8 @@ class FakeMatrixClient {
   public readonly sentEvents: Array<{ roomId: string; eventType: string; content: Record<string, unknown>; eventId: string }> = [];
   public readonly media = new Map<string, { data: Buffer; contentType: string }>();
   public readonly uploads: Array<{ mxcUrl: string; data: Buffer; contentType?: string; filename?: string }> = [];
+  public sendHtmlNoticeFailures: Error[] = [];
+  public sendEventFailures: Error[] = [];
   private nextEvent = 1;
   private nextMedia = 1;
 
@@ -684,11 +720,19 @@ class FakeMatrixClient {
   }
 
   async sendHtmlNotice(roomId: string, html: string): Promise<string> {
+    const failure = this.sendHtmlNoticeFailures.shift();
+    if (failure) {
+      throw failure;
+    }
     this.notices.push({ roomId, html });
     return `$notice-${this.nextEvent++}`;
   }
 
   async sendEvent(roomId: string, eventType: string, content: Record<string, unknown>): Promise<string> {
+    const failure = this.sendEventFailures.shift();
+    if (failure) {
+      throw failure;
+    }
     const eventId = `$event-${this.nextEvent++}`;
     this.sentEvents.push({ roomId, eventType, content, eventId });
     return eventId;
@@ -723,4 +767,16 @@ function expectDefined<T>(value: T | null | undefined, message: string): NonNull
   assert.notEqual(value, undefined, message);
   assert.notEqual(value, null, message);
   return value as NonNullable<T>;
+}
+
+function createMatrixRateLimitError(retryAfterMs: number): Error & { retryAfterMs: number; body: { retry_after_ms: number } } {
+  const error = new Error("M_LIMIT_EXCEEDED: Too Many Requests") as Error & {
+    retryAfterMs: number;
+    body: { retry_after_ms: number };
+  };
+  error.retryAfterMs = retryAfterMs;
+  error.body = {
+    retry_after_ms: retryAfterMs,
+  };
+  return error;
 }
