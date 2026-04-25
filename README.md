@@ -56,6 +56,9 @@ allowed_user_id = "@cbruegg:matrix.org"
 # codex_auth_file = "~/.codex/auth.json"
 # openai_api_key = "sk-..." # optional override, no default
 
+[agent]
+# model = "gpt-5.4-mini" # optional override, no default
+
 [worker]
 # image = "sandy-subagent:latest" # explicit override; otherwise Sandy uses a baked GHCR sha tag when present, or this local default
 # share_root = "/tmp/sandy-shares"
@@ -94,6 +97,10 @@ url = "https://todoist.example/mcp"
 [approvals.mcp.todoist]
 # always_allow_tools = []
 ```
+
+`agent.model` optionally overrides the Codex model used by both Sandy's main agent and worker sub-agents.
+If unset, Sandy lets Codex use its current built-in default model. For cheaper/faster runs, consider setting a
+small model such as `gpt-5.4-mini`.
 
 Telegram auth behavior:
 

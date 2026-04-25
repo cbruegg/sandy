@@ -20,6 +20,7 @@ type DockerSandboxRunnerOptions = {
   resolveWorkerImage?: () => string;
   networkGuardImage?: string;
   shareRoot: string;
+  codexModel?: string | null;
   openAiApiKey: string | null;
   codexAuthFile: string | null;
   skillsDirectory: string | null;
@@ -146,6 +147,10 @@ export class DockerSandboxRunner implements SandboxRunner {
       "-e",
       `SANDY_CHANNEL_FORMATTING=${JSON.stringify(request.channelFormatting)}`,
     ];
+
+    if (this.options.codexModel) {
+      dockerArgs.push("-e", `SANDY_CODEX_MODEL=${this.options.codexModel}`);
+    }
 
     if (this.options.openAiApiKey) {
       dockerArgs.push("-e", `OPENAI_API_KEY=${this.options.openAiApiKey}`);

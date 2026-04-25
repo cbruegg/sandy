@@ -109,6 +109,7 @@ async function launchRunnerWithChild(
     handshakeTimeoutMs?: number;
     shareRoot?: string;
     builtWorkerCodexConfigToml?: string | null;
+    codexModel?: string | null;
     skillsDirectory?: string | null;
     workerCodexBinaryPath?: string | null;
     workerNetworkName?: string | null;
@@ -122,6 +123,7 @@ async function launchRunnerWithChild(
     resolveWorkerImage: options?.resolveWorkerImage,
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: options?.shareRoot ?? "/tmp/sandy-test-shares",
+    codexModel: options?.codexModel,
     openAiApiKey: null,
     codexAuthFile: null,
     skillsDirectory: options?.skillsDirectory ?? null,
@@ -194,6 +196,67 @@ test("DockerSandboxRunner waits for an explicit worker_connected handshake", asy
   await flushEvents();
 
   assert.deepEqual(events, [{ type: "worker_connected" }]);
+});
+
+test("DockerSandboxRunner passes channel formatting as a docker environment variable", async () => {
+  const taskChild = new FakeChildProcess();
+
+  const { invocations } = await launchRunnerWithChild(taskChild, async () => {});
+
+  const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
+  assert.ok(dockerRunInvocation);
+  const channelFormattingIndex = dockerRunInvocation.args.findIndex((arg) =>
+    arg.startsWith("SANDY_CHANNEL_FORMATTING="));
+  assert.notEqual(channelFormattingIndex, -1);
+  assert.equal(dockerRunInvocation.args[channelFormattingIndex - 1], "-e");
+});
+
+test("DockerSandboxRunner passes the configured Codex model into the worker container", async () => {
+  const taskChild = new FakeChildProcess();
+  const invocationsWithModel: Array<{ command: string; args: string[] }> = [];
+  const spawnImpl = ((command: string, args: readonly string[]) => {
+    invocationsWithModel.push({ command, args: [...args] });
+    if (args[0] === "run") {
+      return taskChild as unknown as ChildProcessWithoutNullStreams;
+    }
+    const cleanupChild = new FakeChildProcess();
+    queueMicrotask(() => {
+      cleanupChild.emit("exit", 0, null);
+    });
+    return cleanupChild as unknown as ChildProcessWithoutNullStreams;
+  }) as typeof import("node:child_process").spawn;
+
+  const runner = new DockerSandboxRunner({
+    workerImage: "sandy-subagent:latest",
+    networkGuardImage: "sandy-network-guard:latest",
+    shareRoot: "/tmp/sandy-test-shares",
+    codexModel: "gpt-5.4-mini",
+    openAiApiKey: null,
+    codexAuthFile: null,
+    skillsDirectory: null,
+    workerCodexBinaryPath: null,
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
+    workerCodexConfigBuilder: () => ({
+      codexConfigToml: null,
+      environment: {},
+    }),
+    spawnImpl,
+  });
+
+  await runner.launchTask({
+    chatId: "chat-1",
+    taskId: "task-1",
+    taskName: "test-task",
+    taskBrief: "Inspect the environment.",
+    channelFormatting: testFormatting,
+  }, async () => {});
+
+  const dockerRunInvocation = invocationsWithModel.find((invocation) => invocation.args[0] === "run");
+  assert.ok(dockerRunInvocation);
+  assert.ok(dockerRunInvocation.args.includes("SANDY_CODEX_MODEL=gpt-5.4-mini"));
 });
 
 test("DockerSandboxRunner reports a disconnect when the handshake times out", async () => {
