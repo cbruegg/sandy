@@ -20,7 +20,6 @@ type McpSidecarManagerOptions = {
   mcpServers: Record<string, McpServerConfig>;
   workerNetworkName: string;
   sidecarImage: string;
-  networkGuardImage?: string;
   startupTimeoutMs?: number;
   spawnImpl?: typeof spawn;
   setTimeoutImpl?: typeof setTimeout;
@@ -35,14 +34,12 @@ type McpSidecarManagerOptions = {
 
 export class McpSidecarManager {
   private readonly containerName = `sandy-mcp-proxy-${randomUUID()}`;
-  private readonly guardContainerName = `sandy-sidecar-guard-${randomUUID()}`;
   private readonly hostGatewayAlias = "host.docker.internal:host-gateway";
   private readonly startupTimeoutMs: number;
   private readonly spawnImpl: typeof spawn;
   private readonly setTimeoutImpl: typeof setTimeout;
   private readonly clearTimeoutImpl: typeof clearTimeout;
   private child: ChildProcessWithoutNullStreams | null = null;
-  private guardChild: ChildProcessWithoutNullStreams | null = null;
   private started = false;
   private stopped = false;
 
@@ -68,35 +65,6 @@ export class McpSidecarManager {
     await this.pruneStaleNetworks();
     await this.runDockerCommand(["network", "create", this.options.workerNetworkName]);
 
-    const guardImage = this.options.networkGuardImage ?? "sandy-network-guard:latest";
-    const guardDockerArgs = [
-      "run",
-      "--rm",
-      "-i",
-      "--name",
-      this.guardContainerName,
-      "--network",
-      this.options.workerNetworkName,
-      "--network-alias",
-      mcpProxyContainerAlias,
-      "--cap-add",
-      "NET_ADMIN",
-      "--cap-drop",
-      "NET_RAW",
-      "-e",
-      "SANDY_NETWORK_GUARD_MODE=public_internet_only",
-      "-e",
-      "SANDY_NETWORK_GUARD_ALLOWED_LOCAL_CIDRS=",
-      guardImage,
-    ];
-
-    this.guardChild = this.spawnImpl("docker", guardDockerArgs, {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    this.guardChild.stdin.end();
-
-    await this.waitForGuardReady(this.guardChild, this.guardContainerName);
-
     const dockerArgs = [
       "run",
       "--rm",
@@ -104,7 +72,9 @@ export class McpSidecarManager {
       "--name",
       this.containerName,
       "--network",
-      `container:${this.guardContainerName}`,
+      this.options.workerNetworkName,
+      "--network-alias",
+      mcpProxyContainerAlias,
       "--add-host",
       this.hostGatewayAlias,
       "-v",
@@ -239,12 +209,6 @@ export class McpSidecarManager {
       await this.runDockerCommand(["rm", "-f", this.containerName], true);
     }
 
-    if (this.guardChild) {
-      this.guardChild.kill("SIGTERM");
-      this.guardChild = null;
-      await this.runDockerCommand(["rm", "-f", this.guardContainerName], true);
-    }
-
     if (this.started) {
       await this.runDockerCommand(["network", "rm", this.options.workerNetworkName], true);
     }
@@ -322,51 +286,6 @@ export class McpSidecarManager {
     for (const networkName of staleNetworkNames) {
       await this.runDockerCommand(["network", "rm", networkName], true);
     }
-  }
-
-  private async waitForGuardReady(
-    guardChild: ChildProcessWithoutNullStreams,
-    containerName: string,
-  ): Promise<void> {
-    const guardStdout = createInterface({
-      input: guardChild.stdout,
-      crlfDelay: Infinity,
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      const timer = this.setTimeoutImpl(() => {
-        guardChild.kill("SIGTERM");
-        reject(new Error("Sidecar network guard did not become ready in time."));
-      }, this.startupTimeoutMs);
-
-      guardStdout.on("line", (line) => {
-        if (line.trim() === "ready") {
-          this.clearTimeoutImpl(timer);
-          guardStdout.close();
-          resolve();
-        }
-      });
-
-      guardChild.once("error", (error) => {
-        this.clearTimeoutImpl(timer);
-        reject(error);
-      });
-
-      guardChild.once("exit", (code, signal) => {
-        this.clearTimeoutImpl(timer);
-        reject(new Error(`Sidecar network guard exited before ready (code=${code}, signal=${signal}).`));
-      });
-    });
-
-    guardChild.stderr.on("data", (chunk) => {
-      const message = String(chunk).trim();
-      if (message) {
-        logger.warn("mcp.sidecar.guard_stderr", {
-          containerName,
-          message,
-        });
-      }
-    });
   }
 
   private async runDockerCommand(args: string[], ignoreFailure = false): Promise<void> {

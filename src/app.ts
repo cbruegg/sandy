@@ -181,7 +181,6 @@ export async function startApp(): Promise<void> {
     mcpServers: config.mcpServers,
     workerNetworkName,
     sidecarImage: config.mcpSidecarImage,
-    networkGuardImage: config.networkGuardImage,
     authorizeToolCall: (input) => orchestrator.authorizeMcpToolCall(input),
   }, mcpProxyAccess);
 
