@@ -151,7 +151,10 @@ export class DockerSandboxRunner implements SandboxRunner {
     let proxyContainerName: string | null = null;
     let proxyChild: ChildProcessWithoutNullStreams | null = null;
 
-    if (hasProxyConfig && networkGuard) {
+    if (hasProxyConfig) {
+      if (!networkGuard) {
+        throw new Error("HTTP proxy requires a network guard container.");
+      }
       proxyContainerName = `sandy-http-proxy-${request.taskId}`;
       const proxyDockerArgs = [
         "run",

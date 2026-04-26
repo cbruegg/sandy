@@ -9,7 +9,7 @@ export default tseslint.config(
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {
-    files: ["**/*.ts", "**/*.mts"],
+    files: ["**/*.ts"],
     languageOptions: {
       ecmaVersion: "latest",
       sourceType: "module",
@@ -31,7 +31,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["**/*.test.ts", "**/*.test.mts"],
+    files: ["**/*.test.ts"],
     rules: {
       "@typescript-eslint/no-floating-promises": "off",
       "@typescript-eslint/require-await": "off",
