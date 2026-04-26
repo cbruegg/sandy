@@ -168,7 +168,9 @@ export async function startApp(): Promise<void> {
         ? (taskId) => {
             const jwt = workerAccess.issueWorkerGrant(taskId).bearerToken;
             const encodedJwt = encodeURIComponent(jwt);
-            return `http://Bearer:${encodedJwt}@sandy-http-proxy:8081`;
+            // The worker container shares the network namespace with the proxy
+            // sidecar, so the proxy is reachable on localhost from the worker.
+            return `http://Bearer:${encodedJwt}@127.0.0.1:8081`;
           }
         : undefined,
       networkGuardImage: config.networkGuardImage,

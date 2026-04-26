@@ -938,8 +938,7 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
   const workerRunInvocation = invocations.find((invocation) =>
     invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-subagent:latest");
   assert.ok(workerRunInvocation);
-  assert.ok(workerRunInvocation.args.includes("--add-host"));
-  assert.ok(workerRunInvocation.args.includes("sandy-http-proxy:127.0.0.1"));
+  assert.ok(!workerRunInvocation.args.includes("--add-host"));
   assert.ok(workerRunInvocation.args.includes("NO_PROXY=sandy-mcp-proxy"));
   assert.ok(!workerRunInvocation.args.includes("NO_PROXY=sandy-mcp-proxy,sandy-http-proxy"));
   assert.ok(workerRunInvocation.args.includes("/tmp/sandy-ca.pem:/etc/pki/trust/anchors/sandy-ca.pem:ro"));

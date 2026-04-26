@@ -237,9 +237,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       dockerArgs.push("-e", `https_proxy=${httpProxyUrl}`);
       dockerArgs.push("-e", `NO_PROXY=sandy-mcp-proxy`);
       dockerArgs.push("-e", `no_proxy=sandy-mcp-proxy`);
-      // The worker and proxy join the same guard-owned network namespace, so
-      // the proxy is reachable on 127.0.0.1 from inside the worker container.
-      dockerArgs.push("--add-host", "sandy-http-proxy:127.0.0.1");
+
     }
 
     if (httpProxyUrl) {

@@ -110,15 +110,12 @@ export class ProxyAuthService {
 }
 
 const HOP_BY_HOP_HEADERS = new Set([
-  "connection",
-  "keep-alive",
   "proxy-authenticate",
   "proxy-authorization",
   "proxy-connection",
   "te",
   "trailer",
   "transfer-encoding",
-  "upgrade",
 ]);
 
 function isHopByHopHeader(name: string): boolean {

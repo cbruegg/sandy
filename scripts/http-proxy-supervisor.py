@@ -66,6 +66,8 @@ class Supervisor:
         threading.Thread(target=self._read_mitmdump_stdout, daemon=True).start()
         threading.Thread(target=self._read_mitmdump_stderr, daemon=True).start()
 
+        self._emit({"type": "ready"})
+
         try:
             for line in sys.stdin:
                 raw = line.strip()
