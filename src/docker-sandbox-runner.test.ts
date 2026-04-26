@@ -135,7 +135,6 @@ async function launchRunnerWithChild(
     workerCodexConfigBuilder: () => ({
       codexConfigToml: options?.builtWorkerCodexConfigToml ?? null,
       environment: {},
-      httpProxyUrl: null,
     }),
     workerNetworkName: options?.workerNetworkName,
     handshakeTimeoutMs: options?.handshakeTimeoutMs ?? 10_000,
@@ -248,7 +247,6 @@ test("DockerSandboxRunner passes the configured Codex model into the worker cont
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
-      httpProxyUrl: null,
     }),
     spawnImpl,
   });
@@ -475,7 +473,6 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
-      httpProxyUrl: null,
     }),
     spawnImpl,
   });
@@ -523,7 +520,6 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
-      httpProxyUrl: null,
     }),
   });
 
@@ -667,7 +663,6 @@ test("DockerSandboxRunner launches a network guard and shares its network namesp
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
-      httpProxyUrl: null,
     }),
     workerNetworkName: "sandy-mcp-net",
     spawnImpl,
@@ -744,7 +739,6 @@ test("DockerSandboxRunner reports a disconnect when the network guard exits mid-
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
-      httpProxyUrl: null,
     }),
     spawnImpl,
   });
@@ -807,7 +801,6 @@ test("DockerSandboxRunner rejects share inspection outside the configured share 
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
-      httpProxyUrl: null,
     }),
   });
 
@@ -843,7 +836,6 @@ test("DockerSandboxRunner rejects share deletion outside the configured share ro
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
-      httpProxyUrl: null,
     }),
   });
 
@@ -908,8 +900,8 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
-      httpProxyUrl: "http://Bearer:token@sandy-http-proxy:8081",
     }),
+    httpProxyUrlFactory: () => "http://Bearer:token@sandy-http-proxy:8081",
     workerNetworkName: "sandy-mcp-net",
     httpProxyImage: "sandy-mcp-proxy:latest",
     httpProxyAuthSocketPath: "/tmp/sandy-proxy-auth.sock",
@@ -1003,8 +995,8 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
-      httpProxyUrl: "http://Bearer:token@sandy-http-proxy:8081",
     }),
+    httpProxyUrlFactory: () => "http://Bearer:token@sandy-http-proxy:8081",
     httpProxyImage: "sandy-mcp-proxy:latest",
     httpProxyAuthSocketPath: "/tmp/sandy-proxy-auth.sock",
     httpTokens: { api_key: { value: "secret", allowedHosts: ["api.example.com"] } },

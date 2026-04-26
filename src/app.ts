@@ -136,7 +136,6 @@ export async function startApp(): Promise<void> {
     config.mcpServers,
     mcpProxyAccess,
     mcpEnabled,
-    httpTokensEnabled,
   );
 
   const sandboxRunner = new DockerSandboxRunner(
@@ -150,6 +149,13 @@ export async function startApp(): Promise<void> {
       skillsDirectory: config.skillsDirectory,
       workerCodexBinaryPath,
       workerCodexConfigBuilder: (taskId) => mcpWorkerLaunchConfigBuilder.build(taskId),
+      httpProxyUrlFactory: httpTokensEnabled
+        ? (taskId) => {
+            const jwt = mcpProxyAccess.issueWorkerGrant(taskId).bearerToken;
+            const encodedJwt = encodeURIComponent(jwt);
+            return `http://Bearer:${encodedJwt}@sandy-http-proxy:8081`;
+          }
+        : undefined,
       networkGuardImage: config.networkGuardImage,
       workerNetwork: config.workerNetwork,
       workerNetworkName,

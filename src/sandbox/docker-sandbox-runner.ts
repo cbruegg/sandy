@@ -30,8 +30,8 @@ type DockerSandboxRunnerOptions = {
   workerCodexConfigBuilder: (taskId: string) => {
     codexConfigToml: string | null;
     environment: Record<string, string>;
-    httpProxyUrl: string | null;
   };
+  httpProxyUrlFactory?: (taskId: string) => string | null;
   handshakeTimeoutMs?: number;
   spawnImpl?: typeof spawn;
   setTimeoutImpl?: typeof setTimeout;
@@ -84,7 +84,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     const builtWorkerConfig = this.options.workerCodexConfigBuilder(request.taskId);
     const workerCodexConfig = builtWorkerConfig.codexConfigToml;
     const workerEnvironment = builtWorkerConfig.environment;
-    const httpProxyUrl = builtWorkerConfig.httpProxyUrl;
+    const httpProxyUrl = this.options.httpProxyUrlFactory?.(request.taskId) ?? null;
     const workerImage = this.resolveWorkerImage();
     let workerCodexHomeTempDir: string | null = null;
     const needsWorkerCodexHome = Boolean(this.options.codexAuthFile || workerCodexConfig);
