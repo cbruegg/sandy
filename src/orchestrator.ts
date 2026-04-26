@@ -384,7 +384,8 @@ export class SandyOrchestrator {
           lastActivityAt: now,
           pendingPrivilegeRequest: null,
           approvedMcpTools: [],
-          approvedHttpTokens: [],
+          approvedHttpTokenSessionGrants: [],
+          approvedHttpTokenOnceGrants: [],
           workerConnected: false,
           hasReportableOutput: false,
           taskSummary: null,
@@ -935,7 +936,7 @@ export class SandyOrchestrator {
       });
     }
 
-    if (this.isHttpTokenGrantAllowed(activeTask, input.tokenId, input.host)) {
+    if (this.isHttpTokenSessionGrantAllowed(activeTask, input.tokenId, input.host)) {
       return Promise.resolve({
         requestId: randomUUID(),
         outcome: "approved",
@@ -953,7 +954,7 @@ export class SandyOrchestrator {
       });
     }
 
-    const onceGrant = activeTask.approvedHttpTokens.find(
+    const onceGrant = activeTask.approvedHttpTokenOnceGrants.find(
       (entry) => entry.tokenId === input.tokenId && entry.host === input.host && !entry.consumed,
     );
     if (onceGrant) {
@@ -1024,13 +1025,13 @@ export class SandyOrchestrator {
     }
   }
 
-  private isHttpTokenGrantAllowed(
+  private isHttpTokenSessionGrantAllowed(
     task: NonNullable<SessionState["activeTask"]>,
     tokenId: string,
     host: string,
   ): boolean {
-    return task.approvedHttpTokens.some(
-      (entry) => entry.tokenId === tokenId && entry.host === host && !entry.consumed,
+    return task.approvedHttpTokenSessionGrants.some(
+      (entry) => entry.tokenId === tokenId && entry.host === host,
     );
   }
 
@@ -1039,7 +1040,7 @@ export class SandyOrchestrator {
     tokenId: string,
     host: string,
   ): void {
-    task.approvedHttpTokens.push({ tokenId, host, consumed: false });
+    task.approvedHttpTokenOnceGrants.push({ tokenId, host, consumed: false });
   }
 
   private grantHttpTokenSessionAccess(
@@ -1047,13 +1048,7 @@ export class SandyOrchestrator {
     tokenId: string,
     host: string,
   ): void {
-    const existing = task.approvedHttpTokens.find(
-      (entry) => entry.tokenId === tokenId && entry.host === host && !entry.consumed,
-    );
-    if (existing) {
-      existing.consumed = true;
-    }
-    task.approvedHttpTokens.push({ tokenId, host, consumed: false });
+    task.approvedHttpTokenSessionGrants.push({ tokenId, host });
   }
 }
 

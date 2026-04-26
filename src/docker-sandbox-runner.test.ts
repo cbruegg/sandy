@@ -135,6 +135,7 @@ async function launchRunnerWithChild(
     workerCodexConfigBuilder: () => ({
       codexConfigToml: options?.builtWorkerCodexConfigToml ?? null,
       environment: {},
+      httpProxyUrl: null,
     }),
     workerNetworkName: options?.workerNetworkName,
     handshakeTimeoutMs: options?.handshakeTimeoutMs ?? 10_000,
@@ -247,6 +248,7 @@ test("DockerSandboxRunner passes the configured Codex model into the worker cont
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
+      httpProxyUrl: null,
     }),
     spawnImpl,
   });
@@ -473,6 +475,7 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
+      httpProxyUrl: null,
     }),
     spawnImpl,
   });
@@ -520,6 +523,7 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
+      httpProxyUrl: null,
     }),
   });
 
@@ -663,6 +667,7 @@ test("DockerSandboxRunner launches a network guard and shares its network namesp
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
+      httpProxyUrl: null,
     }),
     workerNetworkName: "sandy-mcp-net",
     spawnImpl,
@@ -739,6 +744,7 @@ test("DockerSandboxRunner reports a disconnect when the network guard exits mid-
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
+      httpProxyUrl: null,
     }),
     spawnImpl,
   });
@@ -801,6 +807,7 @@ test("DockerSandboxRunner rejects share inspection outside the configured share 
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
+      httpProxyUrl: null,
     }),
   });
 
@@ -836,6 +843,7 @@ test("DockerSandboxRunner rejects share deletion outside the configured share ro
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
+      httpProxyUrl: null,
     }),
   });
 
@@ -850,4 +858,181 @@ test("DockerSandboxRunner rejects share deletion outside the configured share ro
 
   await assert.doesNotReject(access(join(outsidePath, "keep.txt")));
   await rm(baseRoot, { recursive: true, force: true });
+});
+
+test("DockerSandboxRunner launches HTTP proxy container alongside worker", async () => {
+  const guardChild = new FakeChildProcess();
+  const proxyChild = new FakeChildProcess();
+  const taskChild = new FakeChildProcess();
+  const invocations: Array<{ command: string; args: string[] }> = [];
+  let runCount = 0;
+
+  const spawnImpl = ((command: string, args: readonly string[]) => {
+    invocations.push({ command, args: [...args] });
+    if (args[0] === "run") {
+      runCount += 1;
+      if (runCount === 1) {
+        queueMicrotask(() => {
+          guardChild.stdout.write("ready\n");
+        });
+        return guardChild as unknown as ChildProcessWithoutNullStreams;
+      }
+      if (runCount === 2) {
+        queueMicrotask(() => {
+          proxyChild.stdout.write('{"type":"ready"}\n');
+        });
+        return proxyChild as unknown as ChildProcessWithoutNullStreams;
+      }
+      return taskChild as unknown as ChildProcessWithoutNullStreams;
+    }
+
+    const cleanupChild = new FakeChildProcess();
+    queueMicrotask(() => {
+      cleanupChild.emit("exit", 0, null);
+    });
+    return cleanupChild as unknown as ChildProcessWithoutNullStreams;
+  }) as typeof import("node:child_process").spawn;
+
+  const runner = new DockerSandboxRunner({
+    workerImage: "sandy-subagent:latest",
+    networkGuardImage: "sandy-network-guard:latest",
+    shareRoot: "/tmp/sandy-test-shares",
+    openAiApiKey: null,
+    codexAuthFile: null,
+    skillsDirectory: null,
+    workerCodexBinaryPath: null,
+    workerNetwork: {
+      mode: "public_internet_only",
+      allowLocalCidrs: [],
+    },
+    workerCodexConfigBuilder: () => ({
+      codexConfigToml: null,
+      environment: {},
+      httpProxyUrl: "http://Bearer:token@sandy-http-proxy:8081",
+    }),
+    workerNetworkName: "sandy-mcp-net",
+    httpProxyImage: "sandy-mcp-proxy:latest",
+    httpProxyAuthSocketPath: "/tmp/sandy-proxy-auth.sock",
+    httpProxyCaCertPath: "/tmp/sandy-ca.pem",
+    httpTokens: { api_key: { value: "secret", allowedHosts: ["api.example.com"] } },
+    mcpProxyAccessSharedSecret: "shared-secret",
+    spawnImpl,
+  });
+
+  await runner.launchTask({
+    chatId: "chat-1",
+    taskId: "task-1",
+    taskName: "test-task",
+    taskLanguage: "English",
+    taskBrief: "Inspect the environment.",
+    channelFormatting: testFormatting,
+  }, async () => {});
+
+  const proxyRunInvocation = invocations.find((invocation) =>
+    invocation.args[0] === "run" && invocation.args.includes("sandy-http-proxy-task-1"));
+  assert.ok(proxyRunInvocation);
+  assert.ok(proxyRunInvocation.args.includes("--network"));
+  assert.ok(proxyRunInvocation.args.includes("container:sandy-netguard-task-1"));
+  assert.ok(proxyRunInvocation.args.includes("--cap-drop"));
+  assert.ok(proxyRunInvocation.args.includes("NET_ADMIN"));
+  assert.ok(proxyRunInvocation.args.includes("sandy-mcp-proxy:latest"));
+  assert.ok(proxyRunInvocation.args.includes("bun"));
+  assert.ok(proxyRunInvocation.args.includes("dist/entrypoint-http-proxy.js"));
+
+  const workerRunInvocation = invocations.find((invocation) =>
+    invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-subagent:latest");
+  assert.ok(workerRunInvocation);
+  assert.ok(workerRunInvocation.args.includes("--add-host"));
+  assert.ok(workerRunInvocation.args.includes("sandy-http-proxy:127.0.0.1"));
+  assert.ok(workerRunInvocation.args.includes("NO_PROXY=sandy-mcp-proxy"));
+  assert.ok(!workerRunInvocation.args.includes("NO_PROXY=sandy-mcp-proxy,sandy-http-proxy"));
+  assert.ok(workerRunInvocation.args.includes("/tmp/sandy-ca.pem:/run/sandy-ca.pem:ro"));
+  assert.ok(workerRunInvocation.args.includes("SSL_CERT_FILE=/run/sandy-ca.pem"));
+
+  const guardRunInvocation = invocations.find((invocation) =>
+    invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-network-guard:latest");
+  assert.ok(guardRunInvocation);
+  assert.ok(!guardRunInvocation.args.includes("sandy-http-proxy"));
+});
+
+test("DockerSandboxRunner launches a namespace holder for unrestricted workers when HTTP proxying is enabled", async () => {
+  const guardChild = new FakeChildProcess();
+  const proxyChild = new FakeChildProcess();
+  const taskChild = new FakeChildProcess();
+  const invocations: Array<{ command: string; args: string[] }> = [];
+  let runCount = 0;
+
+  const spawnImpl = ((command: string, args: readonly string[]) => {
+    invocations.push({ command, args: [...args] });
+    if (args[0] === "run") {
+      runCount += 1;
+      if (runCount === 1) {
+        queueMicrotask(() => {
+          guardChild.stdout.write("ready\n");
+        });
+        return guardChild as unknown as ChildProcessWithoutNullStreams;
+      }
+      if (runCount === 2) {
+        queueMicrotask(() => {
+          proxyChild.stdout.write('{"type":"ready"}\n');
+        });
+        return proxyChild as unknown as ChildProcessWithoutNullStreams;
+      }
+      return taskChild as unknown as ChildProcessWithoutNullStreams;
+    }
+
+    const cleanupChild = new FakeChildProcess();
+    queueMicrotask(() => {
+      cleanupChild.emit("exit", 0, null);
+    });
+    return cleanupChild as unknown as ChildProcessWithoutNullStreams;
+  }) as typeof import("node:child_process").spawn;
+
+  const runner = new DockerSandboxRunner({
+    workerImage: "sandy-subagent:latest",
+    networkGuardImage: "sandy-network-guard:latest",
+    shareRoot: "/tmp/sandy-test-shares",
+    openAiApiKey: null,
+    codexAuthFile: null,
+    skillsDirectory: null,
+    workerCodexBinaryPath: null,
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
+    workerCodexConfigBuilder: () => ({
+      codexConfigToml: null,
+      environment: {},
+      httpProxyUrl: "http://Bearer:token@sandy-http-proxy:8081",
+    }),
+    httpProxyImage: "sandy-mcp-proxy:latest",
+    httpProxyAuthSocketPath: "/tmp/sandy-proxy-auth.sock",
+    httpTokens: { api_key: { value: "secret", allowedHosts: ["api.example.com"] } },
+    mcpProxyAccessSharedSecret: "shared-secret",
+    spawnImpl,
+  });
+
+  await runner.launchTask({
+    chatId: "chat-1",
+    taskId: "task-1",
+    taskName: "test-task",
+    taskLanguage: "English",
+    taskBrief: "Inspect the environment.",
+    channelFormatting: testFormatting,
+  }, async () => {});
+
+  const guardRunInvocation = invocations.find((invocation) =>
+    invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-network-guard:latest");
+  assert.ok(guardRunInvocation);
+  assert.ok(!guardRunInvocation.args.includes("--network"));
+
+  const proxyRunInvocation = invocations.find((invocation) =>
+    invocation.args[0] === "run" && invocation.args.includes("sandy-http-proxy-task-1"));
+  assert.ok(proxyRunInvocation);
+  assert.ok(proxyRunInvocation.args.includes("container:sandy-netguard-task-1"));
+
+  const workerRunInvocation = invocations.find((invocation) =>
+    invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-subagent:latest");
+  assert.ok(workerRunInvocation);
+  assert.ok(workerRunInvocation.args.includes("container:sandy-netguard-task-1"));
 });

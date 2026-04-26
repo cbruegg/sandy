@@ -197,8 +197,11 @@ HTTP token behavior:
 - `approvals.http.<name>` persists `always allow` decisions for specific hosts via `always_allow_hosts`. This serves both as the persistent config storage and as the allowlist of destination hosts that can be approved for this token. Hosts not in this list are always rejected.
 - Workers _must_ explicitly request token use via Sandy's `request_http_token` tool before making proxied requests. This tool requires privilege escalation and follows the same approval flow as MCP tools.
 - If no approval is active when the proxy sees a placeholder token, the request is rejected immediately with HTTP 403.
-- Workers receive `HTTP_PROXY` and `HTTPS_PROXY` environment variables pointing to Sandy's HTTP proxy sidecar. Only tools that respect proxy environment variables are routed through the proxy; direct network access from workers is unchanged.
-- The HTTP proxy runs in the same sidecar container as the MCP proxy and is exposed on the worker network as `sandy-http-proxy:8081`.
+- Workers receive `HTTP_PROXY` and `HTTPS_PROXY` environment variables pointing to a per-worker Sandy HTTP proxy with embedded task credentials for automatic proxy authentication. Only tools that respect proxy environment variables are routed through the proxy; direct network access from workers is unchanged.
+- The HTTP proxy runs in its own container per worker. It shares the worker's network-guard namespace so it sees the same effective connectivity restrictions, while remaining isolated from worker process control.
+- Workers still reach the proxy as `sandy-http-proxy:8081`; Sandy injects that hostname inside the shared namespace.
+- The MCP sidecar remains separate and runs behind its own network-guard container for network isolation.
+- HTTPS connections are handled via TLS interception (MITM). Sandy generates a root CA at startup, provisions per-host leaf certificates, and workers trust Sandy's CA for HTTPS request inspection and header rewriting.
 
 Update behavior:
 
@@ -247,7 +250,7 @@ Build the worker image:
 docker build --target worker-runtime -t sandy-subagent:latest .
 ```
 
-Build the sidecar image (hosts Sandy's MCP proxy and HTTP proxy):
+Build the sidecar image (hosts Sandy's MCP proxy and the standalone HTTP proxy entrypoint):
 
 ```bash
 docker build --target mcp-proxy-runtime -t sandy-mcp-proxy:latest .

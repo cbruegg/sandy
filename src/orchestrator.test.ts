@@ -1256,3 +1256,99 @@ test("orchestrator blocks new idle input while shared workspace deletion is pend
   assert.equal(mainAgent.contexts.length, 1);
   assert.equal(channel.sentTexts.at(-1)?.text, messages.shareDeletionStillPending());
 });
+
+test("orchestrator preserves session HTTP token grants across repeated checks", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Use HTTP token.",
+      taskName: "http-task",
+      taskLanguage: "English",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-http-session",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Use HTTP token",
+    rawText: "Use HTTP token",
+    attachments: [],
+  });
+
+  const activeTask = expectDefined(store.getOrCreate("chat-http-session").activeTask, "Expected active task.");
+  activeTask.approvedHttpTokenSessionGrants.push({ tokenId: "api-token", host: "api.example.com" });
+  activeTask.approvedHttpTokenOnceGrants.push({ tokenId: "api-token", host: "api.example.com", consumed: false });
+
+  const first = await orchestrator.authorizeHttpTokenUse({
+    taskId: activeTask.taskId,
+    tokenId: "api-token",
+    host: "api.example.com",
+  });
+  const second = await orchestrator.authorizeHttpTokenUse({
+    taskId: activeTask.taskId,
+    tokenId: "api-token",
+    host: "api.example.com",
+  });
+
+  assert.equal(first.outcome, "approved");
+  assert.equal(first.scope, "worker_session");
+  assert.equal(second.outcome, "approved");
+  assert.equal(second.scope, "worker_session");
+  assert.equal(activeTask.approvedHttpTokenOnceGrants[0]?.consumed, false);
+});
+
+test("orchestrator consumes once HTTP token grants without affecting session grants", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Use HTTP token once.",
+      taskName: "http-once-task",
+      taskLanguage: "English",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-http-once",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Use HTTP token once",
+    rawText: "Use HTTP token once",
+    attachments: [],
+  });
+
+  const activeTask = expectDefined(store.getOrCreate("chat-http-once").activeTask, "Expected active task.");
+  activeTask.approvedHttpTokenOnceGrants.push({ tokenId: "api-token", host: "api.example.com", consumed: false });
+
+  const first = await orchestrator.authorizeHttpTokenUse({
+    taskId: activeTask.taskId,
+    tokenId: "api-token",
+    host: "api.example.com",
+  });
+  const second = await orchestrator.authorizeHttpTokenUse({
+    taskId: activeTask.taskId,
+    tokenId: "api-token",
+    host: "api.example.com",
+  });
+
+  assert.equal(first.outcome, "approved");
+  assert.equal(first.scope, "once");
+  assert.equal(activeTask.approvedHttpTokenOnceGrants[0]?.consumed, true);
+  assert.equal(second.outcome, "denied");
+});

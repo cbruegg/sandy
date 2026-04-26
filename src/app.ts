@@ -7,6 +7,8 @@ import { configureLogger, logger } from "./logger.js";
 import { SandyMcpProxyAccess } from "./mcp/proxy-access.js";
 import { McpSidecarManager } from "./mcp/sidecar-manager.js";
 import { validateOAuthStateFilesForStartup } from "./mcp/oauth-state-validator.js";
+import { createCertificateAuthority } from "./http/ca.js";
+import { ProxyAuthService } from "./http/proxy-auth-service.js";
 import { McpWorkerLaunchConfigBuilder } from "./mcp/worker-launch-config-builder.js";
 import { createMcpWorkerNetworkName } from "./mcp/worker-network-name.js";
 import { SandyOrchestrator } from "./orchestrator.js";
@@ -116,13 +118,25 @@ export async function startApp(): Promise<void> {
   const mcpProxyAccess = new SandyMcpProxyAccess();
   const mcpEnabled = Object.keys(config.mcpServers).length > 0;
   const httpTokensEnabled = Object.keys(config.httpTokens).length > 0;
-  const sidecarEnabled = mcpEnabled || httpTokensEnabled;
-  const workerNetworkName = sidecarEnabled ? createMcpWorkerNetworkName() : null;
+  const workerNetworkName = mcpEnabled ? createMcpWorkerNetworkName() : null;
+
+  const certificateAuthority = httpTokensEnabled ? await createCertificateAuthority() : null;
+
+  const httpProxyAuthSocketPath = httpTokensEnabled
+    ? "/tmp/sandy-http-proxy-auth.sock"
+    : null;
+  const proxyAuthService = httpTokensEnabled && httpProxyAuthSocketPath
+    ? new ProxyAuthService({
+        socketPath: httpProxyAuthSocketPath,
+        authorize: async (input) => orchestrator.authorizeHttpTokenUse(input),
+      })
+    : null;
 
   const mcpWorkerLaunchConfigBuilder = new McpWorkerLaunchConfigBuilder(
     config.mcpServers,
     mcpProxyAccess,
     mcpEnabled,
+    httpTokensEnabled,
   );
 
   const sandboxRunner = new DockerSandboxRunner(
@@ -139,7 +153,13 @@ export async function startApp(): Promise<void> {
       networkGuardImage: config.networkGuardImage,
       workerNetwork: config.workerNetwork,
       workerNetworkName,
-      httpTokensEnabled,
+      httpProxyCaCertPath: certificateAuthority?.certPath ?? null,
+      httpProxyImage: httpTokensEnabled ? config.mcpSidecarImage : null,
+      httpProxyAuthSocketPath,
+      httpTokens: config.httpTokens,
+      mcpProxyAccessSharedSecret: mcpProxyAccess.sharedSecret,
+      caCert: certificateAuthority?.cert ?? null,
+      caKey: certificateAuthority?.key ?? null,
     },
   );
 
@@ -154,14 +174,15 @@ export async function startApp(): Promise<void> {
     persistentApprovalStore: new TomlPersistentApprovalStore(config.configFilePath, config.persistentMcpApprovals, config.persistentHttpApprovals),
   });
 
-  const sidecarManager = !sidecarEnabled || !workerNetworkName ? null : new McpSidecarManager({
+  await proxyAuthService?.start();
+
+  const sidecarManager = !mcpEnabled || !workerNetworkName ? null : new McpSidecarManager({
     configDirectory: config.configDirectory,
     mcpServers: config.mcpServers,
-    httpTokens: config.httpTokens,
     workerNetworkName,
     sidecarImage: config.mcpSidecarImage,
+    networkGuardImage: config.networkGuardImage,
     authorizeToolCall: (input) => orchestrator.authorizeMcpToolCall(input),
-    authorizeHttpTokenUse: (input) => orchestrator.authorizeHttpTokenUse(input),
   }, mcpProxyAccess);
 
   await sidecarManager?.start();
@@ -202,6 +223,16 @@ export async function startApp(): Promise<void> {
       await sidecarManager.stop();
       logger.info("app.shutdown_step_completed", {
         step: "sidecarManager.stop",
+      });
+    }
+
+    if (proxyAuthService) {
+      logger.info("app.shutdown_step_started", {
+        step: "proxyAuthService.stop",
+      });
+      await proxyAuthService.stop();
+      logger.info("app.shutdown_step_completed", {
+        step: "proxyAuthService.stop",
       });
     }
     logger.info("app.shutdown_completed");

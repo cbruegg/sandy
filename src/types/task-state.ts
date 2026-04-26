@@ -5,10 +5,15 @@ type McpToolGrant = {
   toolName: string;
 };
 
-type HttpTokenGrant = {
+type HttpTokenOnceGrant = {
   tokenId: string;
   host: string;
   consumed: boolean;
+};
+
+type HttpTokenSessionGrant = {
+  tokenId: string;
+  host: string;
 };
 
 type TaskStatus =
@@ -28,7 +33,8 @@ export type ActiveTaskState = {
   lastActivityAt: string;
   pendingPrivilegeRequest: PrivilegeRequest | null;
   approvedMcpTools: McpToolGrant[];
-  approvedHttpTokens: HttpTokenGrant[];
+  approvedHttpTokenSessionGrants: HttpTokenSessionGrant[];
+  approvedHttpTokenOnceGrants: HttpTokenOnceGrant[];
   workerConnected: boolean;
   hasReportableOutput: boolean;
   taskSummary: string | null;

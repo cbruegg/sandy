@@ -17,6 +17,7 @@ type LaunchNetworkGuardOptions = {
   networkGuardImage?: string;
   workerNetworkName?: string | null;
   additionalAllowedHosts?: string[];
+  forceLaunch?: boolean;
   handshakeTimeoutMs: number;
   spawnImpl?: typeof spawn;
   setTimeoutImpl?: typeof setTimeout;
@@ -36,7 +37,7 @@ type LaunchNetworkGuardOptions = {
 export async function launchNetworkGuardContainer(
   options: LaunchNetworkGuardOptions,
 ): Promise<StartedNetworkGuard | null> {
-  if (options.workerNetwork.mode !== "public_internet_only") {
+  if (options.workerNetwork.mode !== "public_internet_only" && !options.forceLaunch) {
     return null;
   }
 

@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
-import type { HttpTokenConfig, McpServerConfig } from "../config.js";
+import type { McpServerConfig } from "../config.js";
 import { logger } from "../logger.js";
 import type { PrivilegeResolutionResult } from "../types.js";
 import { SandyMcpProxyAccess } from "./proxy-access.js";
@@ -12,18 +12,15 @@ import { mcpWorkerNetworkNamePrefix } from "./worker-network-name.js";
 import {
   parseMcpSidecarToHostMessage,
   type McpSidecarAuthorizationRequestMessage,
-  type McpSidecarHttpTokenAuthorizationRequestMessage,
   type McpSidecarLogMessage,
 } from "./sidecar-protocol.js";
-
-const httpProxyContainerAlias = "sandy-http-proxy";
 
 type McpSidecarManagerOptions = {
   configDirectory: string;
   mcpServers: Record<string, McpServerConfig>;
-  httpTokens?: Record<string, HttpTokenConfig>;
   workerNetworkName: string;
   sidecarImage: string;
+  networkGuardImage?: string;
   startupTimeoutMs?: number;
   spawnImpl?: typeof spawn;
   setTimeoutImpl?: typeof setTimeout;
@@ -34,21 +31,18 @@ type McpSidecarManagerOptions = {
     toolName: string;
     arguments: unknown;
   }) => Promise<PrivilegeResolutionResult>;
-  authorizeHttpTokenUse?: (input: {
-    taskId: string;
-    tokenId: string;
-    host: string;
-  }) => Promise<PrivilegeResolutionResult>;
 };
 
 export class McpSidecarManager {
   private readonly containerName = `sandy-mcp-proxy-${randomUUID()}`;
+  private readonly guardContainerName = `sandy-sidecar-guard-${randomUUID()}`;
   private readonly hostGatewayAlias = "host.docker.internal:host-gateway";
   private readonly startupTimeoutMs: number;
   private readonly spawnImpl: typeof spawn;
   private readonly setTimeoutImpl: typeof setTimeout;
   private readonly clearTimeoutImpl: typeof clearTimeout;
   private child: ChildProcessWithoutNullStreams | null = null;
+  private guardChild: ChildProcessWithoutNullStreams | null = null;
   private started = false;
   private stopped = false;
 
@@ -64,8 +58,7 @@ export class McpSidecarManager {
 
   async start(): Promise<void> {
     const hasMCP = Object.keys(this.options.mcpServers).length > 0;
-    const hasHttpTokens = Boolean(this.options.httpTokens && Object.keys(this.options.httpTokens).length > 0);
-    if (this.started || (!hasMCP && !hasHttpTokens)) {
+    if (this.started || !hasMCP) {
       return;
     }
 
@@ -75,6 +68,35 @@ export class McpSidecarManager {
     await this.pruneStaleNetworks();
     await this.runDockerCommand(["network", "create", this.options.workerNetworkName]);
 
+    const guardImage = this.options.networkGuardImage ?? "sandy-network-guard:latest";
+    const guardDockerArgs = [
+      "run",
+      "--rm",
+      "-i",
+      "--name",
+      this.guardContainerName,
+      "--network",
+      this.options.workerNetworkName,
+      "--network-alias",
+      mcpProxyContainerAlias,
+      "--cap-add",
+      "NET_ADMIN",
+      "--cap-drop",
+      "NET_RAW",
+      "-e",
+      "SANDY_NETWORK_GUARD_MODE=public_internet_only",
+      "-e",
+      "SANDY_NETWORK_GUARD_ALLOWED_LOCAL_CIDRS=",
+      guardImage,
+    ];
+
+    this.guardChild = this.spawnImpl("docker", guardDockerArgs, {
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    this.guardChild.stdin.end();
+
+    await this.waitForGuardReady(this.guardChild, this.guardContainerName);
+
     const dockerArgs = [
       "run",
       "--rm",
@@ -82,11 +104,7 @@ export class McpSidecarManager {
       "--name",
       this.containerName,
       "--network",
-      this.options.workerNetworkName,
-      "--network-alias",
-      mcpProxyContainerAlias,
-      "--network-alias",
-      httpProxyContainerAlias,
+      `container:${this.guardContainerName}`,
       "--add-host",
       this.hostGatewayAlias,
       "-v",
@@ -146,10 +164,6 @@ export class McpSidecarManager {
             this.dispatchAuthorizationRequest(message);
             return;
           }
-          if (message.type === "http_token_authorization_request") {
-            this.dispatchHttpTokenAuthorizationRequest(message);
-            return;
-          }
           if (message.type === "log") {
             this.forwardSidecarLog(message);
             return;
@@ -193,7 +207,6 @@ export class McpSidecarManager {
       oauthStateDirectory: sidecarOauthMountPath,
       workerProxyTokenSecret: this.access.sharedSecret,
       mcpServers: this.options.mcpServers,
-      httpTokens: this.options.httpTokens ?? {},
     });
 
     try {
@@ -224,6 +237,12 @@ export class McpSidecarManager {
       this.child.kill("SIGTERM");
       this.child = null;
       await this.runDockerCommand(["rm", "-f", this.containerName], true);
+    }
+
+    if (this.guardChild) {
+      this.guardChild.kill("SIGTERM");
+      this.guardChild = null;
+      await this.runDockerCommand(["rm", "-f", this.guardContainerName], true);
     }
 
     if (this.started) {
@@ -269,57 +288,6 @@ export class McpSidecarManager {
     });
   }
 
-  private dispatchHttpTokenAuthorizationRequest(message: McpSidecarHttpTokenAuthorizationRequestMessage): void {
-    void this.handleHttpTokenAuthorizationRequest(message).catch((error) => {
-      const failureMessage = error instanceof Error ? error.message : "Unknown HTTP token authorization failure.";
-
-      logger.warn("mcp.sidecar.http_token_authorization_failed", {
-        requestId: message.requestId,
-        taskId: message.taskId,
-        tokenId: message.tokenId,
-        host: message.host,
-        message: failureMessage,
-      });
-
-      this.sendToSidecar({
-        type: "http_token_authorization_result",
-        requestId: message.requestId,
-        result: {
-          requestId: message.requestId,
-          outcome: "failed",
-          message: failureMessage,
-        } satisfies PrivilegeResolutionResult,
-      });
-    });
-  }
-
-  private async handleHttpTokenAuthorizationRequest(message: McpSidecarHttpTokenAuthorizationRequestMessage): Promise<void> {
-    if (!this.options.authorizeHttpTokenUse) {
-      this.sendToSidecar({
-        type: "http_token_authorization_result",
-        requestId: message.requestId,
-        result: {
-          requestId: message.requestId,
-          outcome: "failed",
-          message: "HTTP token authorization is not configured.",
-        } satisfies PrivilegeResolutionResult,
-      });
-      return;
-    }
-
-    const result = await this.options.authorizeHttpTokenUse({
-      taskId: message.taskId,
-      tokenId: message.tokenId,
-      host: message.host,
-    });
-
-    this.sendToSidecar({
-      type: "http_token_authorization_result",
-      requestId: message.requestId,
-      result,
-    });
-  }
-
   private forwardSidecarLog(message: McpSidecarLogMessage): void {
     switch (message.level) {
       case "debug":
@@ -354,6 +322,51 @@ export class McpSidecarManager {
     for (const networkName of staleNetworkNames) {
       await this.runDockerCommand(["network", "rm", networkName], true);
     }
+  }
+
+  private async waitForGuardReady(
+    guardChild: ChildProcessWithoutNullStreams,
+    containerName: string,
+  ): Promise<void> {
+    const guardStdout = createInterface({
+      input: guardChild.stdout,
+      crlfDelay: Infinity,
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = this.setTimeoutImpl(() => {
+        guardChild.kill("SIGTERM");
+        reject(new Error("Sidecar network guard did not become ready in time."));
+      }, this.startupTimeoutMs);
+
+      guardStdout.on("line", (line) => {
+        if (line.trim() === "ready") {
+          this.clearTimeoutImpl(timer);
+          guardStdout.close();
+          resolve();
+        }
+      });
+
+      guardChild.once("error", (error) => {
+        this.clearTimeoutImpl(timer);
+        reject(error);
+      });
+
+      guardChild.once("exit", (code, signal) => {
+        this.clearTimeoutImpl(timer);
+        reject(new Error(`Sidecar network guard exited before ready (code=${code}, signal=${signal}).`));
+      });
+    });
+
+    guardChild.stderr.on("data", (chunk) => {
+      const message = String(chunk).trim();
+      if (message) {
+        logger.warn("mcp.sidecar.guard_stderr", {
+          containerName,
+          message,
+        });
+      }
+    });
   }
 
   private async runDockerCommand(args: string[], ignoreFailure = false): Promise<void> {

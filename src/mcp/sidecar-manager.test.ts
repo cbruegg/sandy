@@ -27,7 +27,7 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
     stdinContent += String(chunk);
   });
   const invocations: string[][] = [];
-  const spawnImpl = ((_command: string, args: readonly string[]) => {
+    const spawnImpl = ((_command: string, args: readonly string[]) => {
     invocations.push([...args]);
     const child = new FakeChildProcess();
     if (args[0] === "network" && args[1] === "ls") {
@@ -38,6 +38,12 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
       return child as unknown as ChildProcessWithoutNullStreams;
     }
     if (args[0] === "run") {
+      if (args.includes("sandy-network-guard:latest") || args.includes("--cap-add")) {
+        queueMicrotask(() => {
+          child.stdout.write("ready\n");
+        });
+        return child as unknown as ChildProcessWithoutNullStreams;
+      }
       sidecarChild.stdout.write('{"type":"ready"}\n');
       return sidecarChild as unknown as ChildProcessWithoutNullStreams;
     }
@@ -80,7 +86,12 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
   assert.equal(createInvocation[0], "network");
   assert.equal(createInvocation[1], "create");
   assert.equal(createInvocation[2], workerNetworkName);
-  assert.ok(invocations.some((invocation) => invocation[0] === "run" && invocation.includes("--network-alias")));
+  const guardRunInvocation = invocations.find((invocation) =>
+    invocation[0] === "run" && invocation.includes("sandy-network-guard:latest"));
+  assert.ok(guardRunInvocation);
+  assert.ok(guardRunInvocation.includes("--network-alias"));
+  assert.ok(guardRunInvocation.includes("sandy-mcp-proxy"));
+  assert.ok(!guardRunInvocation.includes("sandy-http-proxy"));
   assert.ok(invocations.some((invocation) =>
     invocation[0] === "run"
     && invocation.includes("--add-host")
@@ -88,6 +99,9 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
   assert.ok(invocations.some((invocation) => invocation[0] === "network" && invocation[1] === "rm"));
   assert.match(stdinContent, /"type":"bootstrap"/);
   assert.match(stdinContent, /"workerProxyTokenSecret":"shared-secret"/);
+  assert.ok(!stdinContent.includes("httpTokens"));
+  assert.ok(!stdinContent.includes("caCert"));
+  assert.ok(!stdinContent.includes("caKey"));
 });
 
 test("McpSidecarManager returns a failed authorization result when authorization handling throws", async () => {
@@ -106,6 +120,12 @@ test("McpSidecarManager returns a failed authorization result when authorization
       return child as unknown as ChildProcessWithoutNullStreams;
     }
     if (args[0] === "run") {
+      if (args.includes("--cap-add")) {
+        queueMicrotask(() => {
+          child.stdout.write("ready\n");
+        });
+        return child as unknown as ChildProcessWithoutNullStreams;
+      }
       sidecarChild.stdout.write('{"type":"ready"}\n');
       return sidecarChild as unknown as ChildProcessWithoutNullStreams;
     }
@@ -163,6 +183,12 @@ test("McpSidecarManager forwards structured sidecar logs through the host logger
       return child as unknown as ChildProcessWithoutNullStreams;
     }
     if (args[0] === "run") {
+      if (args.includes("--cap-add")) {
+        queueMicrotask(() => {
+          child.stdout.write("ready\n");
+        });
+        return child as unknown as ChildProcessWithoutNullStreams;
+      }
       sidecarChild.stdout.write('{"type":"ready"}\n');
       return sidecarChild as unknown as ChildProcessWithoutNullStreams;
     }

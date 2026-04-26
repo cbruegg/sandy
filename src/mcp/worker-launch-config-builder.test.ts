@@ -15,6 +15,7 @@ test("McpWorkerLaunchConfigBuilder returns an empty config when no MCP servers a
   assert.deepEqual(builder.build("task-1"), {
     codexConfigToml: null,
     environment: {},
+    httpProxyUrl: null,
   });
 });
 
@@ -73,5 +74,25 @@ test("McpWorkerLaunchConfigBuilder builds worker TOML and env from access data",
   assert.deepEqual(access.validateWorkerGrant({
     taskId: "task-1",
     bearerToken: launchConfig.environment[workerProxyTokenEnvVar],
+  }), { ok: true });
+});
+
+test("McpWorkerLaunchConfigBuilder embeds worker grant in the HTTP proxy URL", async () => {
+  const access = new SandyMcpProxyAccess("shared-secret");
+  const builder = new McpWorkerLaunchConfigBuilder({}, access, false, true);
+
+  const launchConfig = builder.build("task-1");
+  assert.ok(launchConfig.httpProxyUrl);
+
+  const proxyUrl = new URL(launchConfig.httpProxyUrl);
+  assert.equal(proxyUrl.protocol, "http:");
+  assert.equal(proxyUrl.hostname, "sandy-http-proxy");
+  assert.equal(proxyUrl.port, "8081");
+  assert.equal(proxyUrl.username, "Bearer");
+
+  const bearerToken = decodeURIComponent(proxyUrl.password);
+  assert.deepEqual(access.validateWorkerGrant({
+    taskId: "task-1",
+    bearerToken,
   }), { ok: true });
 });

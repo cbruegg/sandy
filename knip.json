@@ -4,6 +4,7 @@
     "src/entrypoint-updater.ts",
     "src/entrypoint-worker.ts",
     "src/entrypoint-mcp-proxy.ts",
+    "src/entrypoint-http-proxy.ts",
     "src/**/*.test.ts"
   ],
   "project": [

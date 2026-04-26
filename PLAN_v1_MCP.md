@@ -18,15 +18,18 @@ Implemented in the current codebase:
 - Workers use placeholder header values like `Authorization: Bearer SANDY_TOKEN_<name>`. The HTTP proxy replaces these with the real token value only when the task holds an active approval for that token + host.
 - If no approval is active when the proxy sees a placeholder token, the request is rejected immediately with HTTP 403.
 - Token config lives in `[http.tokens.<name>]` with `value` and `allowed_hosts`. Persistent approvals live in `[approvals.http.<name>]` with `always_allow_hosts`.
-- The HTTP proxy runs in the same sidecar container as the MCP proxy, on port 8081 with alias `sandy-http-proxy`.
-- Workers receive `HTTP_PROXY` and `HTTPS_PROXY` env vars pointing to the proxy. Only tools that honor proxy env vars are routed through it; direct network access from workers is unchanged.
-- Worker network guards are updated to allow-list `sandy-http-proxy` alongside `sandy-mcp-proxy`.
-- HTTPS CONNECT tunneling is supported (passthrough without MITM in the current implementation).
+- The HTTP proxy runs as a separate per-worker container, not inside the MCP sidecar.
+- Workers receive `HTTP_PROXY` and `HTTPS_PROXY` env vars pointing to the proxy with embedded task JWT credentials for automatic proxy authentication.
+- The HTTP proxy shares the worker network-guard namespace so it inherits the same effective connectivity restrictions while remaining isolated from the worker process.
+- Workers resolve `sandy-http-proxy` to `127.0.0.1` inside the shared namespace; no Docker network alias is required for the proxy.
+- The MCP sidecar still runs behind its own network-guard container, but only advertises the `sandy-mcp-proxy` alias.
+- HTTPS CONNECT is terminated with TLS MITM when a CA is configured: the proxy generates per-host leaf certs, reads decrypted HTTP requests, and applies the same header-rewriting and approval logic as plain HTTP.
+- Workers are provisioned with Sandy's CA certificate for HTTPS trust validation.
+- Once and session grants are stored separately (prevents session grants from being consumed and nullifies ambiguity).
 
 Explicitly deferred:
 
 - Rewriting Sandy's own host-mediated worker-tool flow to MCP. V1 keeps the native worker protocol for file copy and channel-file send operations.
-- TLS-intercepting MITM for HTTPS header inspection. Current HTTPS CONNECT passes through without header rewriting.
 
 Current limitations:
 

@@ -3,7 +3,7 @@ import {type ChildProcessWithoutNullStreams, spawn} from "node:child_process";
 import {tmpdir} from "node:os";
 import {join, relative, resolve} from "node:path";
 import {createInterface} from "node:readline";
-import type {WorkerNetworkConfig} from "../config.js";
+import type {HttpTokenConfig, WorkerNetworkConfig} from "../config.js";
 import {logger} from "../logger.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {workerSkillsPath} from "../subagent/worker-codex-config.js";
@@ -30,19 +30,29 @@ type DockerSandboxRunnerOptions = {
   workerCodexConfigBuilder: (taskId: string) => {
     codexConfigToml: string | null;
     environment: Record<string, string>;
+    httpProxyUrl: string | null;
   };
   handshakeTimeoutMs?: number;
   spawnImpl?: typeof spawn;
   setTimeoutImpl?: typeof setTimeout;
   clearTimeoutImpl?: typeof clearTimeout;
-  httpTokensEnabled?: boolean;
+  httpProxyCaCertPath?: string | null;
+  httpProxyImage?: string | null;
+  httpProxyAuthSocketPath?: string | null;
+  httpTokens?: Record<string, HttpTokenConfig>;
+  mcpProxyAccessSharedSecret?: string;
+  caCert?: string | null;
+  caKey?: string | null;
 };
 
 type ActiveTaskContainer = {
   child: ChildProcessWithoutNullStreams;
   guardChild: ChildProcessWithoutNullStreams | null;
   guardContainerName: string | null;
+  proxyChild: ChildProcessWithoutNullStreams | null;
+  proxyContainerName: string | null;
   cleanupWorkerCodexConfig: () => Promise<void>;
+  cleanupProxyBootstrap: () => Promise<void>;
 };
 
 export class DockerSandboxRunner implements SandboxRunner {
@@ -72,8 +82,9 @@ export class DockerSandboxRunner implements SandboxRunner {
     const sharePath = this.getTaskSharePath(request.taskId);
     await mkdir(sharePath, {recursive: true});
     const builtWorkerConfig = this.options.workerCodexConfigBuilder(request.taskId);
-    const workerCodexConfig = builtWorkerConfig?.codexConfigToml ?? null;
-    const workerEnvironment = builtWorkerConfig?.environment ?? {};
+    const workerCodexConfig = builtWorkerConfig.codexConfigToml;
+    const workerEnvironment = builtWorkerConfig.environment;
+    const httpProxyUrl = builtWorkerConfig.httpProxyUrl;
     const workerImage = this.resolveWorkerImage();
     let workerCodexHomeTempDir: string | null = null;
     const needsWorkerCodexHome = Boolean(this.options.codexAuthFile || workerCodexConfig);
@@ -96,6 +107,39 @@ export class DockerSandboxRunner implements SandboxRunner {
         }
       }
     }
+
+    let proxyBootstrapDir: string | null = null;
+    const hasProxyConfig = Boolean(
+      httpProxyUrl
+      && this.options.httpProxyImage
+      && this.options.httpProxyAuthSocketPath
+      && this.options.httpTokens
+      && this.options.mcpProxyAccessSharedSecret,
+    );
+    if (hasProxyConfig) {
+      proxyBootstrapDir = await mkdtemp(join(tmpdir(), "sandy-http-proxy-"));
+      const bootstrap = {
+        httpTokens: this.options.httpTokens,
+        sharedSecret: this.options.mcpProxyAccessSharedSecret,
+        ...(this.options.caCert ? {caCert: this.options.caCert} : {}),
+        ...(this.options.caKey ? {caKey: this.options.caKey} : {}),
+      };
+      try {
+        await writeFile(join(proxyBootstrapDir, "bootstrap.json"), JSON.stringify(bootstrap), "utf8");
+      } catch (error) {
+        await rm(proxyBootstrapDir, {recursive: true, force: true});
+        throw error;
+      }
+    }
+
+    let proxyBootstrapCleanedUp = false;
+    const cleanupProxyBootstrap = async (): Promise<void> => {
+      if (proxyBootstrapCleanedUp || !proxyBootstrapDir) {
+        return;
+      }
+      proxyBootstrapCleanedUp = true;
+      await rm(proxyBootstrapDir, {recursive: true, force: true});
+    };
 
     let tempConfigCleanedUp = false;
     const cleanupWorkerCodexConfig = async (): Promise<void> => {
@@ -123,10 +167,55 @@ export class DockerSandboxRunner implements SandboxRunner {
 
     let networkGuard: StartedNetworkGuard | null = null;
     try {
-      networkGuard = await this.launchNetworkGuard(request.taskId);
+      networkGuard = await this.launchNetworkGuard(request.taskId, httpProxyUrl !== null);
     } catch (error) {
       await cleanupWorkerCodexConfig();
+      await cleanupProxyBootstrap();
       throw error;
+    }
+
+    let proxyContainerName: string | null = null;
+    let proxyChild: ChildProcessWithoutNullStreams | null = null;
+
+    if (hasProxyConfig && networkGuard && proxyBootstrapDir) {
+      proxyContainerName = `sandy-http-proxy-${request.taskId}`;
+      const proxyDockerArgs = [
+        "run",
+        "--rm",
+        "-i",
+        "--name",
+        proxyContainerName,
+        "--network",
+        `container:${networkGuard.containerName}`,
+        "--cap-drop",
+        "NET_ADMIN",
+        "--cap-drop",
+        "NET_RAW",
+        "-v",
+        `${join(proxyBootstrapDir, "bootstrap.json")}:/run/sandy-http-proxy-bootstrap.json:ro`,
+        "-v",
+        `${this.options.httpProxyAuthSocketPath}:/run/sandy-proxy-auth.sock`,
+        "-e",
+        "SANDY_HTTP_PROXY_BOOTSTRAP_FILE=/run/sandy-http-proxy-bootstrap.json",
+        "-e",
+        "SANDY_HTTP_PROXY_AUTH_SOCKET=/run/sandy-proxy-auth.sock",
+        this.options.httpProxyImage!,
+        "bun",
+        "dist/entrypoint-http-proxy.js",
+      ];
+
+      proxyChild = this.spawnImpl("docker", proxyDockerArgs, {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+
+      try {
+        await this.waitForProxyReady(proxyChild, proxyContainerName);
+      } catch (error) {
+        proxyChild.kill("SIGTERM");
+        await cleanupWorkerCodexConfig();
+        await cleanupProxyBootstrap();
+        throw error;
+      }
     }
 
     const dockerArgs = [
@@ -167,12 +256,19 @@ export class DockerSandboxRunner implements SandboxRunner {
       dockerArgs.push("-e", `${name}=${value}`);
     }
 
-    if (this.options.httpTokensEnabled) {
-      const proxyUrl = "http://sandy-http-proxy:8081";
-      dockerArgs.push("-e", `HTTP_PROXY=${proxyUrl}`);
-      dockerArgs.push("-e", `http_proxy=${proxyUrl}`);
-      dockerArgs.push("-e", `HTTPS_PROXY=${proxyUrl}`);
-      dockerArgs.push("-e", `https_proxy=${proxyUrl}`);
+    if (httpProxyUrl) {
+      dockerArgs.push("-e", `HTTP_PROXY=${httpProxyUrl}`);
+      dockerArgs.push("-e", `http_proxy=${httpProxyUrl}`);
+      dockerArgs.push("-e", `HTTPS_PROXY=${httpProxyUrl}`);
+      dockerArgs.push("-e", `https_proxy=${httpProxyUrl}`);
+      dockerArgs.push("-e", `NO_PROXY=sandy-mcp-proxy`);
+      dockerArgs.push("-e", `no_proxy=sandy-mcp-proxy`);
+      dockerArgs.push("--add-host", "sandy-http-proxy:127.0.0.1");
+    }
+
+    if (this.options.httpProxyCaCertPath) {
+      dockerArgs.push("-v", `${this.options.httpProxyCaCertPath}:/run/sandy-ca.pem:ro`);
+      dockerArgs.push("-e", "SSL_CERT_FILE=/run/sandy-ca.pem");
     }
 
     if (workerCodexHomeTempDir) {
@@ -223,11 +319,18 @@ export class DockerSandboxRunner implements SandboxRunner {
       child,
       guardChild: networkGuard?.child ?? null,
       guardContainerName: networkGuard?.containerName ?? null,
+      proxyChild,
+      proxyContainerName,
       cleanupWorkerCodexConfig,
+      cleanupProxyBootstrap,
     });
 
     const cleanupTaskContainers = async (): Promise<void> => {
-      await this.cleanupTaskContainers(containerName, networkGuard?.containerName ?? null);
+      await this.cleanupTaskContainers(
+        containerName,
+        networkGuard?.containerName ?? null,
+        proxyContainerName,
+      );
     };
 
     const handshakeTimer = this.setTimeoutImpl(() => {
@@ -303,6 +406,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       taskId: request.taskId,
       containerName,
       guardContainerName: networkGuard?.containerName ?? null,
+      proxyContainerName,
     });
 
     child.stderr.on("data", (chunk) => {
@@ -323,6 +427,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       finished = true;
       clearHandshakeTimer();
       void cleanupWorkerCodexConfig();
+      void cleanupProxyBootstrap();
       void cleanupTaskContainers();
       logger.error("sandbox.launch_failed", {
         taskId: request.taskId,
@@ -344,6 +449,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     child.on("exit", (code, signal) => {
       this.activeContainers.delete(containerName);
       void cleanupWorkerCodexConfig();
+      void cleanupProxyBootstrap();
       void cleanupTaskContainers();
       if (finished) {
         return;
@@ -386,6 +492,29 @@ export class DockerSandboxRunner implements SandboxRunner {
         signal,
       });
       void reportDisconnect(`Task network guard exited before task completion (code=${code}, signal=${signal}).`);
+      shutdownRequested = true;
+      clearHandshakeTimer();
+      child.kill("SIGTERM");
+      void cleanupTaskContainers();
+    });
+
+    proxyChild?.on("error", (error) => {
+      logger.error("sandbox.http_proxy_failed", {
+        taskId: request.taskId,
+        message: error.message,
+      });
+    });
+
+    proxyChild?.on("exit", (code, signal) => {
+      if (finished || shutdownRequested || terminalEventSeen) {
+        return;
+      }
+      logger.error("sandbox.http_proxy_exited", {
+        taskId: request.taskId,
+        code,
+        signal,
+      });
+      void reportDisconnect(`HTTP proxy container exited before task completion (code=${code}, signal=${signal}).`);
       shutdownRequested = true;
       clearHandshakeTimer();
       child.kill("SIGTERM");
@@ -483,9 +612,11 @@ export class DockerSandboxRunner implements SandboxRunner {
       });
       activeContainer.child.kill("SIGTERM");
       activeContainer.guardChild?.kill("SIGTERM");
+      activeContainer.proxyChild?.kill("SIGTERM");
       await Promise.all([
         activeContainer.cleanupWorkerCodexConfig(),
-        this.cleanupTaskContainers(containerName, activeContainer.guardContainerName),
+        activeContainer.cleanupProxyBootstrap(),
+        this.cleanupTaskContainers(containerName, activeContainer.guardContainerName, activeContainer.proxyContainerName),
       ]);
       this.activeContainers.delete(containerName);
     })).then(() => {
@@ -610,14 +741,14 @@ export class DockerSandboxRunner implements SandboxRunner {
     }
   }
 
-  private async launchNetworkGuard(taskId: string): Promise<StartedNetworkGuard | null> {
-    const additionalAllowedHosts = this.options.httpTokensEnabled ? ["sandy-http-proxy"] : [];
+  private async launchNetworkGuard(taskId: string, forceLaunch: boolean): Promise<StartedNetworkGuard | null> {
     return await launchNetworkGuardContainer({
       taskId,
       workerNetwork: this.options.workerNetwork,
       networkGuardImage: this.options.networkGuardImage,
       workerNetworkName: this.options.workerNetworkName,
-      additionalAllowedHosts,
+      additionalAllowedHosts: [],
+      forceLaunch,
       handshakeTimeoutMs: this.handshakeTimeoutMs,
       spawnImpl: this.spawnImpl,
       setTimeoutImpl: this.setTimeoutImpl,
@@ -626,10 +757,73 @@ export class DockerSandboxRunner implements SandboxRunner {
     });
   }
 
-  private async cleanupTaskContainers(containerName: string, guardContainerName: string | null): Promise<void> {
+  private async waitForProxyReady(
+    proxyChild: ChildProcessWithoutNullStreams,
+    containerName: string,
+  ): Promise<void> {
+    const proxyStdout = createInterface({
+      input: proxyChild.stdout,
+      crlfDelay: Infinity,
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = this.setTimeoutImpl(() => {
+        proxyChild.kill("SIGTERM");
+        reject(new Error("HTTP proxy container did not become ready in time."));
+      }, this.handshakeTimeoutMs);
+
+      proxyStdout.on("line", (line) => {
+        try {
+          const message = JSON.parse(line.trim()) as { type?: string; message?: string };
+          if (message.type === "ready") {
+            this.clearTimeoutImpl(timer);
+            proxyStdout.close();
+            resolve();
+            return;
+          }
+          if (message.type === "fatal_error") {
+            this.clearTimeoutImpl(timer);
+            proxyStdout.close();
+            reject(new Error(message.message ?? "HTTP proxy container failed during startup."));
+          }
+        } catch {
+          // Ignore non-JSON lines
+        }
+      });
+
+      proxyChild.once("error", (error) => {
+        this.clearTimeoutImpl(timer);
+        reject(error);
+      });
+
+      proxyChild.once("exit", (code, signal) => {
+        this.clearTimeoutImpl(timer);
+        reject(new Error(`HTTP proxy container exited before ready (code=${code}, signal=${signal}).`));
+      });
+    });
+
+    proxyChild.stderr.on("data", (chunk) => {
+      const message = String(chunk).trim();
+      if (message) {
+        logger.warn("sandbox.http_proxy_stderr", {
+          containerName,
+          message,
+        });
+      }
+    });
+  }
+
+  private async cleanupTaskContainers(
+    containerName: string,
+    guardContainerName: string | null,
+    proxyContainerName: string | null,
+  ): Promise<void> {
     const containerNames = [containerName];
     if (guardContainerName) {
       containerNames.push(guardContainerName);
+    }
+    if (proxyContainerName) {
+      containerNames.push(proxyContainerName);
     }
     await Promise.all(containerNames.map(async (name) => this.cleanupContainer(name)));
   }
