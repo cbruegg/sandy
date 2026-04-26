@@ -30,15 +30,19 @@ FROM runtime-base AS mcp-proxy-runtime
 CMD ["bun", "dist/entrypoint-mcp-proxy.js"]
 
 # HTTP proxy runtime built on mitmproxy.
-FROM python:3.13-alpine AS http-proxy-runtime
+# Use a glibc-based Python image so arm64 can consume mitmproxy's prebuilt wheels
+# instead of trying to compile mitmproxy-rs from source on musl.
+FROM python:3.13-slim AS http-proxy-runtime
 WORKDIR /app
-RUN apk add --no-cache tini \
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends tini \
+  && rm -rf /var/lib/apt/lists/* \
   && pip install --no-cache-dir mitmproxy
 COPY scripts/http-proxy-addon.py /app/http-proxy-addon.py
 COPY scripts/http-proxy-supervisor.py /app/http-proxy-supervisor.py
 COPY scripts/http-proxy-entrypoint.sh /usr/local/bin/sandy-http-proxy
 RUN chmod 0755 /usr/local/bin/sandy-http-proxy
-ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/sandy-http-proxy"]
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/sandy-http-proxy"]
 
 # Dedicated network guard runtime that owns the worker's network namespace.
 FROM opensuse/tumbleweed:latest AS network-guard-runtime
