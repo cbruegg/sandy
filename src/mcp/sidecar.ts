@@ -32,29 +32,23 @@ export async function main(): Promise<void> {
   const pendingAuthorization = new Map<string, (result: PrivilegeResolutionResult) => void>();
   let shuttingDown = false;
 
-  const hasMcpServers = Object.keys(bootstrap.mcpServers).length > 0;
+  const proxy = new SandyMcpProxy({
+    access,
+    registry,
+    port: 8080,
+    authorizeToolCall: async (request) => {
+      const requestId = randomUUID();
+      send({
+        type: "authorization_request",
+        requestId,
+        ...request,
+      });
 
-  let mcpProxy: SandyMcpProxy | null = null;
-
-  if (hasMcpServers) {
-    mcpProxy = new SandyMcpProxy({
-      access,
-      registry,
-      port: 8080,
-      authorizeToolCall: async (request) => {
-        const requestId = randomUUID();
-        send({
-          type: "authorization_request",
-          requestId,
-          ...request,
-        });
-
-        return await new Promise<PrivilegeResolutionResult>((resolve) => {
-          pendingAuthorization.set(requestId, resolve);
-        });
-      },
-    });
-  }
+      return await new Promise<PrivilegeResolutionResult>((resolve) => {
+        pendingAuthorization.set(requestId, resolve);
+      });
+    },
+  });
 
   input.on("line", (line) => {
     const trimmed = line.trim();
@@ -71,7 +65,7 @@ export async function main(): Promise<void> {
       }
       if (message.type === "shutdown") {
         shuttingDown = true;
-        void shutdownAll().finally(() => {
+        void proxy.stop().finally(() => {
           process.exit(0);
         });
       }
@@ -83,21 +77,13 @@ export async function main(): Promise<void> {
     }
   });
 
-  async function shutdownAll(): Promise<void> {
-    const stops: Promise<void>[] = [];
-    if (mcpProxy) stops.push(mcpProxy.stop());
-    await Promise.all(stops);
-  }
-
   try {
-    const starts: Promise<void>[] = [];
-    if (mcpProxy) starts.push(mcpProxy.start());
-    await Promise.all(starts);
+    await proxy.start();
     send({ type: "ready" });
   } catch (error) {
     send({
       type: "fatal_error",
-      message: error instanceof Error ? error.message : "Sidecar failed to start.",
+      message: error instanceof Error ? error.message : "MCP sidecar failed to start.",
     });
     process.exit(1);
   }

@@ -54,8 +54,7 @@ export class McpSidecarManager {
   }
 
   async start(): Promise<void> {
-    const hasMCP = Object.keys(this.options.mcpServers).length > 0;
-    if (this.started || !hasMCP) {
+    if (this.started || Object.keys(this.options.mcpServers).length === 0) {
       return;
     }
 
@@ -65,7 +64,7 @@ export class McpSidecarManager {
     await this.pruneStaleNetworks();
     await this.runDockerCommand(["network", "create", this.options.workerNetworkName]);
 
-    const dockerArgs = [
+    const child = this.spawnImpl("docker", [
       "run",
       "--rm",
       "-i",
@@ -79,11 +78,8 @@ export class McpSidecarManager {
       this.hostGatewayAlias,
       "-v",
       `${oauthStateDirectory}:${sidecarOauthMountPath}`,
-    ];
-
-    dockerArgs.push(this.options.sidecarImage);
-
-    const child = this.spawnImpl("docker", dockerArgs, {
+      this.options.sidecarImage,
+    ], {
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;
