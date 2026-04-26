@@ -35,6 +35,7 @@ WORKDIR /app
 RUN apk add --no-cache tini \
   && pip install --no-cache-dir mitmproxy
 COPY scripts/http-proxy-addon.py /app/http-proxy-addon.py
+COPY scripts/http-proxy-supervisor.py /app/http-proxy-supervisor.py
 COPY scripts/http-proxy-entrypoint.sh /usr/local/bin/sandy-http-proxy
 RUN chmod 0755 /usr/local/bin/sandy-http-proxy
 ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/sandy-http-proxy"]

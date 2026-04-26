@@ -1,13 +1,8 @@
-import { createServer, type Server } from "node:net";
-import { existsSync, mkdirSync, unlinkSync } from "node:fs";
-import { dirname } from "node:path";
 import type { HttpTokenConfig } from "../config.js";
-import { logger } from "../logger.js";
 import { SandyMcpProxyAccess } from "../mcp/proxy-access.js";
-import { parseProxyAuthRequest, serializeProxyAuthResponse, type ProxyAuthRequest, type ProxyAuthResponse, type ProxyRequestHeader } from "./proxy-auth-protocol.js";
+import type { HttpProxyAuthRequestMessage, HttpProxyAuthResponseMessage, HttpProxyRequestHeader } from "./http-proxy-protocol.js";
 
 type ProxyAuthServiceOptions = {
-  socketPath: string;
   access: SandyMcpProxyAccess;
   httpTokens: Record<string, HttpTokenConfig>;
   authorizeHttpTokenUse: (input: {
@@ -18,89 +13,13 @@ type ProxyAuthServiceOptions = {
 };
 
 export class ProxyAuthService {
-  private server: Server | null = null;
-
   constructor(private readonly options: ProxyAuthServiceOptions) {}
 
-  async start(): Promise<void> {
-    const socketPath = this.options.socketPath;
-    const directory = dirname(socketPath);
-    if (!existsSync(directory)) {
-      mkdirSync(directory, { recursive: true });
-    }
-    if (existsSync(socketPath)) {
-      unlinkSync(socketPath);
-    }
-
-    this.server = createServer((socket) => {
-      let buffer = "";
-      socket.on("data", (data) => {
-        buffer += data.toString();
-        const lines = buffer.split("\n");
-        buffer = lines.pop()!;
-        for (const line of lines) {
-          if (!line.trim()) {
-            continue;
-          }
-          try {
-            const request = parseProxyAuthRequest(line);
-            this.resolveProxyRequest(request)
-              .then((result) => {
-                socket.write(serializeProxyAuthResponse(result));
-              })
-              .catch((error) => {
-                socket.write(serializeProxyAuthResponse({
-                  outcome: "failed",
-                  message:
-                    error instanceof Error
-                      ? error.message
-                      : "Authorization service error.",
-                }));
-              });
-          } catch {
-            socket.write(serializeProxyAuthResponse({
-              outcome: "failed",
-              message: "Invalid authorization request format.",
-            }));
-          }
-        }
-      });
-
-      socket.on("error", (error) => {
-        logger.warn("proxy_auth.socket_error", {
-          message: error.message,
-        });
-      });
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      this.server!.once("error", reject);
-      this.server!.listen(socketPath, () => {
-        this.server!.off("error", reject);
-        logger.info("proxy_auth.service_started", { socketPath });
-        resolve();
-      });
-    });
-  }
-
-  async stop(): Promise<void> {
-    if (!this.server) {
-      return;
-    }
-    await new Promise<void>((resolve) => {
-      this.server!.close(() => resolve());
-    });
-    if (existsSync(this.options.socketPath)) {
-      unlinkSync(this.options.socketPath);
-    }
-    logger.info("proxy_auth.service_stopped", {
-      socketPath: this.options.socketPath,
-    });
-  }
-
-  private async resolveProxyRequest(request: ProxyAuthRequest): Promise<ProxyAuthResponse> {
+  async resolveProxyRequest(request: HttpProxyAuthRequestMessage): Promise<HttpProxyAuthResponseMessage> {
     if (request.proxyAuthUsername !== "Bearer") {
       return {
+        type: "auth_response",
+        requestId: request.requestId,
         outcome: "denied",
         message: "Proxy authentication username must be Bearer.",
       };
@@ -109,12 +28,14 @@ export class ProxyAuthService {
     const grant = this.options.access.resolveWorkerGrant(request.proxyAuthPassword);
     if (!grant.ok) {
       return {
+        type: "auth_response",
+        requestId: request.requestId,
         outcome: "denied",
         message: grant.message,
       };
     }
 
-    const resolvedHeaders: ProxyRequestHeader[] = [];
+    const resolvedHeaders: HttpProxyRequestHeader[] = [];
     const tokenRequests = new Map<string, Promise<{ approved: boolean; message: string }>>();
 
     for (const header of request.headers) {
@@ -134,6 +55,8 @@ export class ProxyAuthService {
       const result = await tokenRequests.get(tokenId)!;
       if (!result.approved) {
         return {
+          type: "auth_response",
+          requestId: request.requestId,
           outcome: "denied",
           message: result.message,
         };
@@ -142,6 +65,8 @@ export class ProxyAuthService {
       const tokenConfig = this.options.httpTokens[tokenId];
       if (!tokenConfig) {
         return {
+          type: "auth_response",
+          requestId: request.requestId,
           outcome: "denied",
           message: `HTTP token "${tokenId}" is not configured.`,
         };
@@ -154,6 +79,8 @@ export class ProxyAuthService {
     }
 
     return {
+      type: "auth_response",
+      requestId: request.requestId,
       outcome: "approved",
       headers: resolvedHeaders,
     };

@@ -1,40 +1,17 @@
 import json
-import logging
 import socket
-from datetime import datetime, timezone
 
 from mitmproxy import ctx, http
-
-
-def emit(message: dict) -> None:
-    print(json.dumps(message), flush=True)
-
-
-class JsonLogHandler(logging.Handler):
-    def emit(self, record: logging.LogRecord) -> None:
-        event = record.name or "mitmproxy.log"
-        emit({
-            "type": "log",
-            "timestamp": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
-            "level": record.levelname.lower(),
-            "event": event,
-            "data": {
-                "message": record.getMessage(),
-            },
-        })
 
 
 class SandyHttpProxyAddon:
     def load(self, loader):
         loader.add_option(
-            name="sandy_auth_socket",
-            typespec=str,
-            default="/run/sandy-proxy-auth.sock",
-            help="Unix socket used for Sandy proxy authorization and header resolution.",
+            name="sandy_auth_port",
+            typespec=int,
+            default=8765,
+            help="Local TCP port used by the proxy supervisor for auth requests.",
         )
-
-    def running(self):
-        emit({"type": "ready"})
 
     def requestheaders(self, flow: http.HTTPFlow) -> None:
         username, password = self._get_proxy_credentials(flow)
@@ -53,15 +30,8 @@ class SandyHttpProxyAddon:
         }
 
         try:
-            response = self._call_auth_service(request)
+            response = self._call_supervisor(request)
         except Exception as error:  # pragma: no cover - defensive runtime path
-            emit({
-                "type": "log",
-                "timestamp": "",
-                "level": "error",
-                "event": "http.proxy.auth_service_failed",
-                "data": {"message": str(error)},
-            })
             flow.response = http.Response.make(502, f"Authorization service failure: {error}".encode("utf8"))
             return
 
@@ -74,11 +44,11 @@ class SandyHttpProxyAddon:
         for header in response["headers"]:
             flow.request.headers.add(header["name"], header["value"])
 
-    def _call_auth_service(self, request: dict) -> dict:
-        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    def _call_supervisor(self, request: dict) -> dict:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             sock.settimeout(5)
-            sock.connect(ctx.options.sandy_auth_socket)
+            sock.connect(("127.0.0.1", ctx.options.sandy_auth_port))
             sock.sendall((json.dumps(request) + "\n").encode("utf8"))
 
             buffer = b""
@@ -103,8 +73,5 @@ class SandyHttpProxyAddon:
             return None, None
         return username, password
 
-
-logging.getLogger().handlers = [JsonLogHandler()]
-logging.getLogger().setLevel(logging.INFO)
 
 addons = [SandyHttpProxyAddon()]

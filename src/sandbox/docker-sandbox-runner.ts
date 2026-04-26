@@ -9,7 +9,7 @@ import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {workerSkillsPath} from "../subagent/worker-codex-config.js";
 import type {HostCommand, PrivilegeResolutionResult, SubAgentEvent} from "../types.js";
 import {parseSubAgentEvent, serializeHostCommand} from "../types.js";
-import { parseHttpProxyContainerMessage } from "../http/http-proxy-protocol.js";
+import { parseHttpProxyContainerMessage, serializeHttpProxyHostMessage, type HttpProxyAuthRequestMessage, type HttpProxyAuthResponseMessage } from "../http/http-proxy-protocol.js";
 import {launchNetworkGuardContainer, type StartedNetworkGuard} from "./network-guard.js";
 import type {LaunchTaskRequest, SandboxHandle, SandboxRunner, ShareInspection} from "./sandbox-runner.js";
 
@@ -40,7 +40,7 @@ type DockerSandboxRunnerOptions = {
   httpProxyCaCertPath?: string | null;
   httpProxyConfDirPath?: string | null;
   httpProxyImage?: string | null;
-  httpProxyAuthSocketPath?: string | null;
+  resolveHttpProxyRequest?: (request: HttpProxyAuthRequestMessage) => Promise<HttpProxyAuthResponseMessage>;
 };
 
 type ActiveTaskContainer = {
@@ -112,8 +112,8 @@ export class DockerSandboxRunner implements SandboxRunner {
       httpProxyUrl
       && this.options.httpProxyImage
       && this.options.httpProxyConfDirPath
-      && this.options.httpProxyAuthSocketPath
       && this.options.httpProxyCaCertPath
+      && this.options.resolveHttpProxyRequest
     );
 
     let tempConfigCleanedUp = false;
@@ -166,11 +166,7 @@ export class DockerSandboxRunner implements SandboxRunner {
         "--cap-drop",
         "NET_RAW",
         "-v",
-        `${this.options.httpProxyAuthSocketPath}:/run/sandy-proxy-auth.sock`,
-        "-v",
         `${this.options.httpProxyConfDirPath}:/run/sandy-mitmproxy-conf:ro`,
-        "-e",
-        "SANDY_HTTP_PROXY_AUTH_SOCKET=/run/sandy-proxy-auth.sock",
         "-e",
         "MITMPROXY_CONFDIR=/run/sandy-mitmproxy-conf",
         this.options.httpProxyImage!,
@@ -181,7 +177,11 @@ export class DockerSandboxRunner implements SandboxRunner {
       });
 
       try {
-        await this.waitForProxyReady(proxyChild, proxyContainerName);
+        await this.waitForProxyReady(
+          proxyChild,
+          proxyContainerName,
+          async (proxyRequest) => await this.options.resolveHttpProxyRequest!(proxyRequest),
+        );
       } catch (error) {
         proxyChild.kill("SIGTERM");
         await cleanupWorkerCodexConfig();
@@ -731,6 +731,7 @@ export class DockerSandboxRunner implements SandboxRunner {
   private async waitForProxyReady(
     proxyChild: ChildProcessWithoutNullStreams,
     containerName: string,
+    resolveHttpProxyRequest: (request: HttpProxyAuthRequestMessage) => Promise<HttpProxyAuthResponseMessage>,
   ): Promise<void> {
     const proxyStdout = createInterface({
       input: proxyChild.stdout,
@@ -753,6 +754,10 @@ export class DockerSandboxRunner implements SandboxRunner {
           const message = parseHttpProxyContainerMessage(line.trim());
           if (message.type === "log") {
             this.forwardHttpProxyLog(containerName, message.level, message.event, message.data);
+            return;
+          }
+          if (message.type === "auth_request") {
+            void this.handleHttpProxyAuthRequest(proxyChild, resolveHttpProxyRequest, message);
             return;
           }
           if (message.type === "ready") {
@@ -804,6 +809,34 @@ export class DockerSandboxRunner implements SandboxRunner {
           message,
         });
       }
+    });
+  }
+
+  private async handleHttpProxyAuthRequest(
+    proxyChild: ChildProcessWithoutNullStreams,
+    resolveHttpProxyRequest: (request: HttpProxyAuthRequestMessage) => Promise<HttpProxyAuthResponseMessage>,
+    request: HttpProxyAuthRequestMessage,
+  ): Promise<void> {
+    let response: HttpProxyAuthResponseMessage;
+    try {
+      response = await resolveHttpProxyRequest(request);
+    } catch (error) {
+      response = {
+        type: "auth_response",
+        requestId: request.requestId,
+        outcome: "failed",
+        message: error instanceof Error ? error.message : "Authorization service error.",
+      };
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      proxyChild.stdin.write(serializeHttpProxyHostMessage(response), (error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
     });
   }
 
@@ -922,14 +955,14 @@ function assertHttpProxySupportConfigured(options: DockerSandboxRunnerOptions): 
   if (!options.httpProxyImage) {
     throw new Error("HTTP proxy URL factory requires httpProxyImage.");
   }
-  if (!options.httpProxyAuthSocketPath) {
-    throw new Error("HTTP proxy URL factory requires httpProxyAuthSocketPath.");
-  }
   if (!options.httpProxyCaCertPath) {
     throw new Error("HTTP proxy URL factory requires httpProxyCaCertPath.");
   }
   if (!options.httpProxyConfDirPath) {
     throw new Error("HTTP proxy URL factory requires httpProxyConfDirPath.");
+  }
+  if (!options.resolveHttpProxyRequest) {
+    throw new Error("HTTP proxy URL factory requires resolveHttpProxyRequest.");
   }
 }
 

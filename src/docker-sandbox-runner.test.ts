@@ -904,9 +904,14 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
     httpProxyUrlFactory: () => "http://Bearer:token@sandy-http-proxy:8081",
     workerNetworkName: "sandy-mcp-net",
     httpProxyImage: "sandy-http-proxy:latest",
-    httpProxyAuthSocketPath: "/tmp/sandy-proxy-auth.sock",
     httpProxyCaCertPath: "/tmp/sandy-ca.pem",
     httpProxyConfDirPath: "/tmp/sandy-mitmproxy-conf",
+    resolveHttpProxyRequest: async (request) => ({
+      type: "auth_response",
+      requestId: request.requestId,
+      outcome: "approved",
+      headers: request.headers,
+    }),
     spawnImpl,
   });
 
@@ -997,9 +1002,14 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
     }),
     httpProxyUrlFactory: () => "http://Bearer:token@sandy-http-proxy:8081",
     httpProxyImage: "sandy-http-proxy:latest",
-    httpProxyAuthSocketPath: "/tmp/sandy-proxy-auth.sock",
     httpProxyCaCertPath: "/tmp/sandy-ca.pem",
     httpProxyConfDirPath: "/tmp/sandy-mitmproxy-conf",
+    resolveHttpProxyRequest: async (request) => ({
+      type: "auth_response",
+      requestId: request.requestId,
+      outcome: "approved",
+      headers: request.headers,
+    }),
     spawnImpl,
   });
 

@@ -205,6 +205,7 @@ HTTP token behavior:
 - The HTTP proxy runs in its own container per worker. It shares the worker's network-guard namespace so it sees the same effective connectivity restrictions, while remaining isolated from worker process control.
 - Workers still reach the proxy as `sandy-http-proxy:8081`; Sandy injects that hostname inside the shared namespace.
 - The MCP sidecar remains separate and runs behind its own network-guard container for network isolation.
+- The host exchanges proxy authorization and header-rewrite decisions with the proxy container over the Docker stdio stream, so this bridge does not depend on Unix-domain sockets.
 - HTTPS connections are handled via TLS interception (MITM). Sandy generates a root CA at startup, mounts it into a per-worker `mitmproxy` container, and workers trust Sandy's CA for HTTPS request inspection and header rewriting.
 - The HTTP proxy container now runs on `mitmproxy`. Sandy keeps request approval and token placeholder resolution on the host side, while the proxy container handles the battle-tested HTTP/TLS interception layer.
 

@@ -122,18 +122,22 @@ export async function startApp(): Promise<void> {
   const workerNetworkName = mcpEnabled ? createMcpWorkerNetworkName() : null;
 
   const certificateAuthority = httpTokensEnabled ? await createCertificateAuthority() : null;
+  let authorizeHttpTokenUse:
+    | ((input: { taskId: string; tokenId: string; host: string }) => Promise<{ outcome: "approved" | "denied" | "failed"; message: string }>)
+    | null = null;
 
   // The mitmproxy-based HTTP proxy container asks the host orchestrator for per-request
-  // token approvals and header resolution over this Unix socket.
-  const httpProxyAuthSocketPath = httpTokensEnabled
-    ? "/tmp/sandy-http-proxy-auth.sock"
-    : null;
-  const proxyAuthService = httpTokensEnabled && httpProxyAuthSocketPath
+  // token approvals and header resolution over the proxy container stdio bridge.
+  const proxyAuthService = httpTokensEnabled
     ? new ProxyAuthService({
-        socketPath: httpProxyAuthSocketPath,
         access: workerAccess,
         httpTokens: config.httpTokens,
-        authorizeHttpTokenUse: async (input) => orchestrator.authorizeHttpTokenUse(input),
+        authorizeHttpTokenUse: async (input) => {
+          if (!authorizeHttpTokenUse) {
+            throw new Error("HTTP token authorization is not ready.");
+          }
+          return await authorizeHttpTokenUse(input);
+        },
       })
     : null;
 
@@ -167,7 +171,9 @@ export async function startApp(): Promise<void> {
       httpProxyCaCertPath: certificateAuthority?.certPath ?? null,
       httpProxyConfDirPath: certificateAuthority?.confDirPath ?? null,
       httpProxyImage: httpTokensEnabled ? config.httpProxyImage : null,
-      httpProxyAuthSocketPath,
+      resolveHttpProxyRequest: proxyAuthService
+        ? async (request) => await proxyAuthService.resolveProxyRequest(request)
+        : undefined,
     },
   );
 
@@ -181,8 +187,7 @@ export async function startApp(): Promise<void> {
     privilegeBroker: new PrivilegeBrokerImpl(),
     persistentApprovalStore: new TomlPersistentApprovalStore(config.configFilePath, config.persistentMcpApprovals, config.persistentHttpApprovals),
   });
-
-  await proxyAuthService?.start();
+  authorizeHttpTokenUse = async (input) => await orchestrator.authorizeHttpTokenUse(input);
 
   const sidecarManager = !mcpEnabled || !workerNetworkName ? null : new McpSidecarManager({
     configDirectory: config.configDirectory,
@@ -210,7 +215,6 @@ export async function startApp(): Promise<void> {
     await stopWithLogging("workerImageManager.stop", () => workerImageManager.stop());
     await stopWithLogging("sandboxRunner.shutdown", sandboxRunner.shutdown?.bind(sandboxRunner));
     await stopWithLogging("sidecarManager.stop", sidecarManager?.stop.bind(sidecarManager));
-    await stopWithLogging("proxyAuthService.stop", proxyAuthService?.stop.bind(proxyAuthService));
     logger.info("app.shutdown_completed");
   };
 
