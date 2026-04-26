@@ -1,7 +1,11 @@
 import http, { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import https from "node:https";
+import { randomUUID } from "node:crypto";
+import { rmSync } from "node:fs";
 import { connect } from "node:net";
-import { TLSSocket } from "node:tls";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createServer as createTlsServer, type TLSSocket } from "node:tls";
 import type { Socket } from "node:net";
 import type { HttpTokenConfig } from "../config.js";
 import { logger } from "../logger.js";
@@ -199,25 +203,84 @@ export class SandyHttpProxy {
 
     try {
       const leaf = createLeafCertificate(this.options.caCert!, this.options.caKey!, targetHost);
-
-      clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n");
-      if (head.length > 0) {
-        clientSocket.unshift(head);
-      }
-
-      const tlsSocket = new TLSSocket(clientSocket, {
-        isServer: true,
+      const socketPath = join(tmpdir(), `sandy-mitm-tls-${randomUUID()}.sock`);
+      const tlsServer = createTlsServer({
         cert: leaf.cert,
         key: leaf.key,
         requestCert: false,
         rejectUnauthorized: false,
+      }, (tlsSocket) => {
+        this.handleMitmTlsSocket(tlsSocket, taskId);
       });
 
-      const httpServer = createServer((mitmReq: IncomingMessage, mitmRes: ServerResponse) => {
-        void this.handlePlainProxy(mitmReq, mitmRes, taskId, "https:");
+      let cleanedUp = false;
+      let tlsServerListening = false;
+      let bridgeSocket: Socket | null = null;
+      const cleanup = (): void => {
+        if (cleanedUp) {
+          return;
+        }
+        cleanedUp = true;
+        bridgeSocket?.destroy();
+        if (tlsServerListening) {
+          tlsServer.close(() => {
+            rmSync(socketPath, { force: true });
+          });
+        } else {
+          rmSync(socketPath, { force: true });
+        }
+      };
+      const startClientTunnel = (): void => {
+        if (!tlsServerListening) {
+          return;
+        }
+        clientSocket.write("HTTP/1.1 200 Connection Established\r\n\r\n", () => {
+          bridgeSocket = connect(socketPath);
+          bridgeSocket.once("connect", () => {
+            if (head.length > 0) {
+              clientSocket.unshift(head);
+            }
+            clientSocket.pipe(bridgeSocket!);
+            bridgeSocket!.pipe(clientSocket);
+          });
+          bridgeSocket.once("error", (error: Error) => {
+            logger.warn("http.proxy.connect_mitm_bridge_error", {
+              taskId,
+              targetHost,
+              message: error.message,
+            });
+            clientSocket.destroy();
+            cleanup();
+          });
+          bridgeSocket.once("close", cleanup);
+        });
+      };
+
+      tlsServer.on("tlsClientError", (error: Error) => {
+        logger.warn("http.proxy.connect_mitm_tls_error", {
+          taskId,
+          targetHost,
+          message: error.message,
+        });
+        clientSocket.destroy();
+        cleanup();
+      });
+      tlsServer.once("error", (error: Error) => {
+        logger.warn("http.proxy.connect_mitm_setup_failed", {
+          taskId,
+          targetHost,
+          message: error.message,
+        });
+        clientSocket.destroy();
+        cleanup();
       });
 
-      httpServer.emit("connection", tlsSocket);
+      tlsServer.listen(socketPath, () => {
+        tlsServerListening = true;
+        startClientTunnel();
+      });
+      clientSocket.once("error", cleanup);
+      clientSocket.once("close", cleanup);
     } catch (error) {
       logger.warn("http.proxy.connect_mitm_setup_failed", {
         taskId,
@@ -226,6 +289,86 @@ export class SandyHttpProxy {
       });
       clientSocket.destroy();
     }
+  }
+
+  private handleMitmTlsSocket(tlsSocket: TLSSocket, taskId: string): void {
+    let buffered = Buffer.alloc(0);
+    let handling = false;
+
+    tlsSocket.on("data", (chunk: Buffer) => {
+      if (handling) {
+        return;
+      }
+      buffered = Buffer.concat([buffered, chunk]);
+      const headerEndIndex = buffered.indexOf("\r\n\r\n");
+      if (headerEndIndex === -1) {
+        return;
+      }
+
+      const headerText = buffered.subarray(0, headerEndIndex).toString("utf8");
+      const parsed = parseRawHttpRequestHeader(headerText);
+      if (!parsed) {
+        writeRawHttpResponse(tlsSocket, 400, {}, "Invalid HTTP request.");
+        return;
+      }
+
+      const contentLength = parseInt(parsed.headers["content-length"] ?? "0", 10) || 0;
+      const bodyStartIndex = headerEndIndex + 4;
+      if (buffered.length < bodyStartIndex + contentLength) {
+        return;
+      }
+
+      handling = true;
+      const body = buffered.subarray(bodyStartIndex, bodyStartIndex + contentLength);
+      void this.forwardParsedMitmRequest(tlsSocket, taskId, parsed.method, parsed.target, parsed.headers, body);
+    });
+  }
+
+  private async forwardParsedMitmRequest(
+    tlsSocket: TLSSocket,
+    taskId: string,
+    method: string,
+    target: string,
+    headers: Record<string, string>,
+    body: Buffer,
+  ): Promise<void> {
+    const targetUrl = resolveRawMitmTargetUrl(target, headers);
+    if (!targetUrl) {
+      writeRawHttpResponse(tlsSocket, 400, {}, "Proxy requires a Host header.");
+      return;
+    }
+
+    const targetHost = targetUrl.hostname;
+    const targetPort = parseInt(targetUrl.port, 10) || 443;
+    const { resolvedHeaders, rejectionMessage } = await this.resolveTokenPlaceholders(
+      taskId,
+      targetHost,
+      headers,
+    );
+
+    if (rejectionMessage) {
+      writeRawHttpResponse(tlsSocket, 403, {}, rejectionMessage);
+      return;
+    }
+
+    const proxyReq = https.request({
+      host: targetHost,
+      port: targetPort,
+      method,
+      path: targetUrl.pathname + targetUrl.search,
+      headers: resolvedHeaders,
+    }, (upstreamRes: IncomingMessage) => {
+      writeRawHttpResponseHead(tlsSocket, upstreamRes.statusCode ?? 200, upstreamRes.headers);
+      upstreamRes.pipe(tlsSocket, { end: false });
+      upstreamRes.once("end", () => {
+        tlsSocket.end();
+      });
+    });
+
+    proxyReq.on("error", (error: Error) => {
+      writeRawHttpResponse(tlsSocket, 502, {}, error.message);
+    });
+    proxyReq.end(body);
   }
 
   private async handlePlainProxy(
@@ -464,6 +607,86 @@ function resolveProxyTargetUrl(
   }
 
   return new URL(`${targetProtocolOverride}//${hostHeader}${reqUrl}`);
+}
+
+function parseRawHttpRequestHeader(headerText: string): {
+  method: string;
+  target: string;
+  headers: Record<string, string>;
+} | null {
+  const lines = headerText.split("\r\n");
+  const requestLine = lines.shift();
+  if (!requestLine) {
+    return null;
+  }
+
+  const [method, target] = requestLine.split(" ");
+  if (!method || !target) {
+    return null;
+  }
+
+  const headers: Record<string, string> = {};
+  for (const line of lines) {
+    const colonIndex = line.indexOf(":");
+    if (colonIndex === -1) {
+      continue;
+    }
+    const name = line.slice(0, colonIndex).trim().toLowerCase();
+    const value = line.slice(colonIndex + 1).trim();
+    if (name) {
+      headers[name] = value;
+    }
+  }
+
+  return { method, target, headers };
+}
+
+function resolveRawMitmTargetUrl(target: string, headers: Record<string, string>): URL | null {
+  if (target.startsWith("http://") || target.startsWith("https://")) {
+    return new URL(target);
+  }
+
+  const host = headers["host"];
+  if (!host) {
+    return null;
+  }
+
+  return new URL(`https://${host}${target}`);
+}
+
+function writeRawHttpResponse(
+  socket: TLSSocket,
+  statusCode: number,
+  headers: Record<string, string | number | readonly string[] | undefined>,
+  body: string,
+): void {
+  const contentType = headers["content-type"];
+  writeRawHttpResponseHead(socket, statusCode, {
+    ...headers,
+    "content-length": String(Buffer.byteLength(body)),
+    "content-type": typeof contentType === "string" ? contentType : "text/plain",
+  });
+  socket.end(body);
+}
+
+function writeRawHttpResponseHead(
+  socket: TLSSocket,
+  statusCode: number,
+  headers: Record<string, string | number | readonly string[] | undefined>,
+): void {
+  const statusMessage = http.STATUS_CODES[statusCode] ?? "OK";
+  const lines = [`HTTP/1.1 ${statusCode} ${statusMessage}`];
+  for (const [name, rawValue] of Object.entries(headers)) {
+    if (rawValue === undefined || isHopByHopHeader(name)) {
+      continue;
+    }
+    const values = Array.isArray(rawValue) ? rawValue : [rawValue];
+    for (const value of values) {
+      lines.push(`${name}: ${String(value)}`);
+    }
+  }
+  lines.push("connection: close", "", "");
+  socket.write(lines.join("\r\n"));
 }
 
 const HOP_BY_HOP_HEADERS = new Set([
