@@ -29,12 +29,15 @@ COPY --from=build /app/dist ./dist
 FROM runtime-base AS mcp-proxy-runtime
 CMD ["bun", "dist/entrypoint-mcp-proxy.js"]
 
-# HTTP proxy runtime (Node.js, not Bun, because raw TLS socket upgrades are more reliable in Node).
-FROM node:25-alpine AS http-proxy-runtime
-RUN apk add --no-cache openssl
+# HTTP proxy runtime built on mitmproxy.
+FROM python:3.13-alpine AS http-proxy-runtime
 WORKDIR /app
-COPY --from=build /app/dist/entrypoint-http-proxy.js ./
-CMD ["node", "entrypoint-http-proxy.js"]
+RUN apk add --no-cache tini \
+  && pip install --no-cache-dir mitmproxy
+COPY scripts/http-proxy-addon.py /app/http-proxy-addon.py
+COPY scripts/http-proxy-entrypoint.sh /usr/local/bin/sandy-http-proxy
+RUN chmod 0755 /usr/local/bin/sandy-http-proxy
+ENTRYPOINT ["/sbin/tini", "--", "/usr/local/bin/sandy-http-proxy"]
 
 # Dedicated network guard runtime that owns the worker's network namespace.
 FROM opensuse/tumbleweed:latest AS network-guard-runtime

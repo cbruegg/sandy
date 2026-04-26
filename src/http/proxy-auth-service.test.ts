@@ -2,7 +2,9 @@ import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { createConnection } from "node:net";
 import { existsSync, unlinkSync } from "node:fs";
+import { SandyMcpProxyAccess } from "../mcp/proxy-access.js";
 import { ProxyAuthService } from "./proxy-auth-service.js";
+import { serializeProxyAuthRequest } from "./proxy-auth-protocol.js";
 
 const TEST_SOCKET_PATH = "/tmp/sandy-test-proxy-auth.sock";
 
@@ -14,14 +16,19 @@ function cleanupSocket(): void {
 
 async function sendAuthRequest(
   socketPath: string,
-  request: { taskId: string; tokenId: string; host: string },
-): Promise<{ outcome: string; message: string }> {
+  request: {
+    proxyAuthUsername: string;
+    proxyAuthPassword: string;
+    targetHost: string;
+    headers: Array<{ name: string; value: string }>;
+  },
+): Promise<{ outcome: string; message?: string; headers?: Array<{ name: string; value: string }> }> {
   return new Promise((resolve, reject) => {
     const socket = createConnection(socketPath);
     let buffer = "";
 
     socket.on("connect", () => {
-      socket.write(`${JSON.stringify(request)}\n`);
+      socket.write(serializeProxyAuthRequest(request));
     });
 
     socket.on("data", (data) => {
@@ -31,7 +38,7 @@ async function sendAuthRequest(
       for (const line of lines) {
         if (line.trim()) {
           try {
-            resolve(JSON.parse(line) as { outcome: string; message: string });
+            resolve(JSON.parse(line) as { outcome: string; message?: string; headers?: Array<{ name: string; value: string }> });
           } catch (error) {
             reject(error instanceof Error ? error : new Error("Failed to parse authorization response."));
           }
@@ -45,38 +52,51 @@ async function sendAuthRequest(
   });
 }
 
-test("ProxyAuthService approves authorized requests", async () => {
+test("ProxyAuthService resolves headers for approved requests", async () => {
   cleanupSocket();
+  const access = new SandyMcpProxyAccess("test-secret");
   const service = new ProxyAuthService({
     socketPath: TEST_SOCKET_PATH,
-    authorize: async () => ({ outcome: "approved", message: "ok" }),
+    access,
+    httpTokens: { token_1: { value: "real-secret" } },
+    authorizeHttpTokenUse: async () => ({ outcome: "approved", message: "ok" }),
   });
   await service.start();
 
   const result = await sendAuthRequest(TEST_SOCKET_PATH, {
-    taskId: "task-1",
-    tokenId: "token-1",
-    host: "api.example.com",
+    proxyAuthUsername: "Bearer",
+    proxyAuthPassword: access.issueWorkerGrant("task-1").bearerToken,
+    targetHost: "api.example.com",
+    headers: [
+      { name: "x-api-key", value: "SANDY_TOKEN_token_1" },
+      { name: "proxy-connection", value: "keep-alive" },
+    ],
   });
 
   assert.equal(result.outcome, "approved");
-  assert.equal(result.message, "ok");
+  assert.deepEqual(result.headers, [
+    { name: "x-api-key", value: "real-secret" },
+  ]);
 
   await service.stop();
 });
 
-test("ProxyAuthService denies unauthorized requests", async () => {
+test("ProxyAuthService denies rejected token approvals", async () => {
   cleanupSocket();
+  const access = new SandyMcpProxyAccess("test-secret");
   const service = new ProxyAuthService({
     socketPath: TEST_SOCKET_PATH,
-    authorize: async () => ({ outcome: "denied", message: "not allowed" }),
+    access,
+    httpTokens: { token_1: { value: "real-secret" } },
+    authorizeHttpTokenUse: async () => ({ outcome: "denied", message: "not allowed" }),
   });
   await service.start();
 
   const result = await sendAuthRequest(TEST_SOCKET_PATH, {
-    taskId: "task-1",
-    tokenId: "token-1",
-    host: "api.example.com",
+    proxyAuthUsername: "Bearer",
+    proxyAuthPassword: access.issueWorkerGrant("task-1").bearerToken,
+    targetHost: "api.example.com",
+    headers: [{ name: "authorization", value: "Bearer SANDY_TOKEN_token_1" }],
   });
 
   assert.equal(result.outcome, "denied");
@@ -87,22 +107,26 @@ test("ProxyAuthService denies unauthorized requests", async () => {
 
 test("ProxyAuthService handles authorization errors gracefully", async () => {
   cleanupSocket();
+  const access = new SandyMcpProxyAccess("test-secret");
   const service = new ProxyAuthService({
     socketPath: TEST_SOCKET_PATH,
-    authorize: async () => {
+    access,
+    httpTokens: { token_1: { value: "real-secret" } },
+    authorizeHttpTokenUse: async () => {
       throw new Error("database down");
     },
   });
   await service.start();
 
   const result = await sendAuthRequest(TEST_SOCKET_PATH, {
-    taskId: "task-1",
-    tokenId: "token-1",
-    host: "api.example.com",
+    proxyAuthUsername: "Bearer",
+    proxyAuthPassword: access.issueWorkerGrant("task-1").bearerToken,
+    targetHost: "api.example.com",
+    headers: [{ name: "authorization", value: "Bearer SANDY_TOKEN_token_1" }],
   });
 
   assert.equal(result.outcome, "failed");
-  assert.match(result.message, /database down/);
+  assert.match(result.message ?? "", /database down/);
 
   await service.stop();
 });
@@ -111,7 +135,9 @@ test("ProxyAuthService handles invalid request format", async () => {
   cleanupSocket();
   const service = new ProxyAuthService({
     socketPath: TEST_SOCKET_PATH,
-    authorize: async () => ({ outcome: "approved", message: "ok" }),
+    access: new SandyMcpProxyAccess("test-secret"),
+    httpTokens: { token_1: { value: "real-secret" } },
+    authorizeHttpTokenUse: async () => ({ outcome: "approved", message: "ok" }),
   });
   await service.start();
 
@@ -153,11 +179,36 @@ test("ProxyAuthService cleans up socket on stop", async () => {
   cleanupSocket();
   const service = new ProxyAuthService({
     socketPath: TEST_SOCKET_PATH,
-    authorize: async () => ({ outcome: "approved", message: "ok" }),
+    access: new SandyMcpProxyAccess("test-secret"),
+    httpTokens: { token_1: { value: "real-secret" } },
+    authorizeHttpTokenUse: async () => ({ outcome: "approved", message: "ok" }),
   });
   await service.start();
   assert.ok(existsSync(TEST_SOCKET_PATH));
 
   await service.stop();
   assert.ok(!existsSync(TEST_SOCKET_PATH));
+});
+
+test("ProxyAuthService denies invalid worker grants", async () => {
+  cleanupSocket();
+  const service = new ProxyAuthService({
+    socketPath: TEST_SOCKET_PATH,
+    access: new SandyMcpProxyAccess("test-secret"),
+    httpTokens: { token_1: { value: "real-secret" } },
+    authorizeHttpTokenUse: async () => ({ outcome: "approved", message: "ok" }),
+  });
+  await service.start();
+
+  const result = await sendAuthRequest(TEST_SOCKET_PATH, {
+    proxyAuthUsername: "Bearer",
+    proxyAuthPassword: "invalid",
+    targetHost: "api.example.com",
+    headers: [{ name: "authorization", value: "Bearer SANDY_TOKEN_token_1" }],
+  });
+
+  assert.equal(result.outcome, "denied");
+  assert.match(result.message ?? "", /(invalid|malformed)/i);
+
+  await service.stop();
 });

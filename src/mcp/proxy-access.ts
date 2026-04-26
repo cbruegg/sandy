@@ -20,6 +20,14 @@ type McpWorkerGrantValidationResult =
       message: string;
     };
 
+type McpWorkerGrantResolutionResult =
+  | { ok: true; taskId: string }
+  | {
+      ok: false;
+      code: "invalid_token";
+      message: string;
+    };
+
 export class SandyMcpProxyAccess {
   constructor(private readonly secret: string = randomBytes(32).toString("hex")) {}
 
@@ -41,19 +49,12 @@ export class SandyMcpProxyAccess {
     taskId: string;
     bearerToken: string;
   }): McpWorkerGrantValidationResult {
-    let payload: McpProxyTokenPayload;
-
-    try {
-      payload = jwt.verify(input.bearerToken, this.secret) as McpProxyTokenPayload;
-    } catch (error) {
-      return {
-        ok: false,
-        code: "invalid_token",
-        message: error instanceof Error ? error.message : "Invalid bearer token.",
-      };
+    const resolved = this.resolveWorkerGrant(input.bearerToken);
+    if (!resolved.ok) {
+      return resolved;
     }
 
-    if (payload.taskId !== input.taskId) {
+    if (resolved.taskId !== input.taskId) {
       return {
         ok: false,
         code: "task_mismatch",
@@ -62,5 +63,21 @@ export class SandyMcpProxyAccess {
     }
 
     return { ok: true };
+  }
+
+  resolveWorkerGrant(bearerToken: string): McpWorkerGrantResolutionResult {
+    try {
+      const payload = jwt.verify(bearerToken, this.secret) as McpProxyTokenPayload;
+      return {
+        ok: true,
+        taskId: payload.taskId,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        code: "invalid_token",
+        message: error instanceof Error ? error.message : "Invalid bearer token.",
+      };
+    }
   }
 }

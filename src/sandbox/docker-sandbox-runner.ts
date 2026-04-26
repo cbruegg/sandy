@@ -3,7 +3,7 @@ import {type ChildProcessWithoutNullStreams, spawn} from "node:child_process";
 import {tmpdir} from "node:os";
 import {join, relative, resolve} from "node:path";
 import {createInterface} from "node:readline";
-import type {HttpTokenConfig, WorkerNetworkConfig} from "../config.js";
+import type {WorkerNetworkConfig} from "../config.js";
 import {logger} from "../logger.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {workerSkillsPath} from "../subagent/worker-codex-config.js";
@@ -38,12 +38,9 @@ type DockerSandboxRunnerOptions = {
   setTimeoutImpl?: typeof setTimeout;
   clearTimeoutImpl?: typeof clearTimeout;
   httpProxyCaCertPath?: string | null;
+  httpProxyConfDirPath?: string | null;
   httpProxyImage?: string | null;
   httpProxyAuthSocketPath?: string | null;
-  httpTokens?: Record<string, HttpTokenConfig>;
-  mcpProxyAccessSharedSecret?: string;
-  caCert?: string | null;
-  caKey?: string | null;
 };
 
 type ActiveTaskContainer = {
@@ -53,7 +50,6 @@ type ActiveTaskContainer = {
   proxyChild: ChildProcessWithoutNullStreams | null;
   proxyContainerName: string | null;
   cleanupWorkerCodexConfig: () => Promise<void>;
-  cleanupProxyBootstrap: () => Promise<void>;
 };
 
 export class DockerSandboxRunner implements SandboxRunner {
@@ -112,39 +108,13 @@ export class DockerSandboxRunner implements SandboxRunner {
       }
     }
 
-    let proxyBootstrapDir: string | null = null;
     const hasProxyConfig = Boolean(
       httpProxyUrl
       && this.options.httpProxyImage
+      && this.options.httpProxyConfDirPath
       && this.options.httpProxyAuthSocketPath
-      && this.options.httpTokens
       && this.options.httpProxyCaCertPath
-      && this.options.mcpProxyAccessSharedSecret,
     );
-    if (hasProxyConfig) {
-      proxyBootstrapDir = await mkdtemp(join(tmpdir(), "sandy-http-proxy-"));
-      const bootstrap = {
-        httpTokens: this.options.httpTokens,
-        sharedSecret: this.options.mcpProxyAccessSharedSecret,
-        ...(this.options.caCert ? {caCert: this.options.caCert} : {}),
-        ...(this.options.caKey ? {caKey: this.options.caKey} : {}),
-      };
-      try {
-        await writeFile(join(proxyBootstrapDir, "bootstrap.json"), JSON.stringify(bootstrap), "utf8");
-      } catch (error) {
-        await rm(proxyBootstrapDir, {recursive: true, force: true});
-        throw error;
-      }
-    }
-
-    let proxyBootstrapCleanedUp = false;
-    const cleanupProxyBootstrap = async (): Promise<void> => {
-      if (proxyBootstrapCleanedUp || !proxyBootstrapDir) {
-        return;
-      }
-      proxyBootstrapCleanedUp = true;
-      await rm(proxyBootstrapDir, {recursive: true, force: true});
-    };
 
     let tempConfigCleanedUp = false;
     const cleanupWorkerCodexConfig = async (): Promise<void> => {
@@ -175,14 +145,13 @@ export class DockerSandboxRunner implements SandboxRunner {
       networkGuard = await this.launchNetworkGuard(request.taskId, httpProxyUrl !== null);
     } catch (error) {
       await cleanupWorkerCodexConfig();
-      await cleanupProxyBootstrap();
       throw error;
     }
 
     let proxyContainerName: string | null = null;
     let proxyChild: ChildProcessWithoutNullStreams | null = null;
 
-    if (hasProxyConfig && networkGuard && proxyBootstrapDir) {
+    if (hasProxyConfig && networkGuard) {
       proxyContainerName = `sandy-http-proxy-${request.taskId}`;
       const proxyDockerArgs = [
         "run",
@@ -197,13 +166,13 @@ export class DockerSandboxRunner implements SandboxRunner {
         "--cap-drop",
         "NET_RAW",
         "-v",
-        `${join(proxyBootstrapDir, "bootstrap.json")}:/run/sandy-http-proxy-bootstrap.json:ro`,
-        "-v",
         `${this.options.httpProxyAuthSocketPath}:/run/sandy-proxy-auth.sock`,
-        "-e",
-        "SANDY_HTTP_PROXY_BOOTSTRAP_FILE=/run/sandy-http-proxy-bootstrap.json",
+        "-v",
+        `${this.options.httpProxyConfDirPath}:/run/sandy-mitmproxy-conf:ro`,
         "-e",
         "SANDY_HTTP_PROXY_AUTH_SOCKET=/run/sandy-proxy-auth.sock",
+        "-e",
+        "MITMPROXY_CONFDIR=/run/sandy-mitmproxy-conf",
         this.options.httpProxyImage!,
       ];
 
@@ -216,7 +185,6 @@ export class DockerSandboxRunner implements SandboxRunner {
       } catch (error) {
         proxyChild.kill("SIGTERM");
         await cleanupWorkerCodexConfig();
-        await cleanupProxyBootstrap();
         throw error;
       }
     }
@@ -327,7 +295,6 @@ export class DockerSandboxRunner implements SandboxRunner {
       proxyChild,
       proxyContainerName,
       cleanupWorkerCodexConfig,
-      cleanupProxyBootstrap,
     });
 
     const cleanupTaskContainers = async (): Promise<void> => {
@@ -432,7 +399,6 @@ export class DockerSandboxRunner implements SandboxRunner {
       finished = true;
       clearHandshakeTimer();
       void cleanupWorkerCodexConfig();
-      void cleanupProxyBootstrap();
       void cleanupTaskContainers();
       logger.error("sandbox.launch_failed", {
         taskId: request.taskId,
@@ -454,7 +420,6 @@ export class DockerSandboxRunner implements SandboxRunner {
     child.on("exit", (code, signal) => {
       this.activeContainers.delete(containerName);
       void cleanupWorkerCodexConfig();
-      void cleanupProxyBootstrap();
       void cleanupTaskContainers();
       if (finished) {
         return;
@@ -620,7 +585,6 @@ export class DockerSandboxRunner implements SandboxRunner {
       activeContainer.proxyChild?.kill("SIGTERM");
       await Promise.all([
         activeContainer.cleanupWorkerCodexConfig(),
-        activeContainer.cleanupProxyBootstrap(),
         this.cleanupTaskContainers(containerName, activeContainer.guardContainerName, activeContainer.proxyContainerName),
       ]);
       this.activeContainers.delete(containerName);
@@ -961,17 +925,11 @@ function assertHttpProxySupportConfigured(options: DockerSandboxRunnerOptions): 
   if (!options.httpProxyAuthSocketPath) {
     throw new Error("HTTP proxy URL factory requires httpProxyAuthSocketPath.");
   }
-  if (!options.httpTokens) {
-    throw new Error("HTTP proxy URL factory requires httpTokens.");
-  }
-  if (!options.mcpProxyAccessSharedSecret) {
-    throw new Error("HTTP proxy URL factory requires mcpProxyAccessSharedSecret.");
-  }
   if (!options.httpProxyCaCertPath) {
     throw new Error("HTTP proxy URL factory requires httpProxyCaCertPath.");
   }
-  if (!options.caCert || !options.caKey) {
-    throw new Error("HTTP proxy URL factory requires CA certificate material.");
+  if (!options.httpProxyConfDirPath) {
+    throw new Error("HTTP proxy URL factory requires httpProxyConfDirPath.");
   }
 }
 

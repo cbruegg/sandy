@@ -906,10 +906,7 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
     httpProxyImage: "sandy-http-proxy:latest",
     httpProxyAuthSocketPath: "/tmp/sandy-proxy-auth.sock",
     httpProxyCaCertPath: "/tmp/sandy-ca.pem",
-    httpTokens: { api_key: { value: "secret" } },
-    mcpProxyAccessSharedSecret: "shared-secret",
-    caCert: "cert",
-    caKey: "key",
+    httpProxyConfDirPath: "/tmp/sandy-mitmproxy-conf",
     spawnImpl,
   });
 
@@ -930,6 +927,8 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
   assert.ok(proxyRunInvocation.args.includes("--cap-drop"));
   assert.ok(proxyRunInvocation.args.includes("NET_ADMIN"));
   assert.ok(proxyRunInvocation.args.includes("sandy-http-proxy:latest"));
+  assert.ok(proxyRunInvocation.args.includes("/tmp/sandy-mitmproxy-conf:/run/sandy-mitmproxy-conf:ro"));
+  assert.ok(proxyRunInvocation.args.includes("MITMPROXY_CONFDIR=/run/sandy-mitmproxy-conf"));
 
   const workerRunInvocation = invocations.find((invocation) =>
     invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-subagent:latest");
@@ -1000,10 +999,7 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
     httpProxyImage: "sandy-http-proxy:latest",
     httpProxyAuthSocketPath: "/tmp/sandy-proxy-auth.sock",
     httpProxyCaCertPath: "/tmp/sandy-ca.pem",
-    httpTokens: { api_key: { value: "secret" } },
-    mcpProxyAccessSharedSecret: "shared-secret",
-    caCert: "cert",
-    caKey: "key",
+    httpProxyConfDirPath: "/tmp/sandy-mitmproxy-conf",
     spawnImpl,
   });
 

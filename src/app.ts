@@ -123,15 +123,17 @@ export async function startApp(): Promise<void> {
 
   const certificateAuthority = httpTokensEnabled ? await createCertificateAuthority() : null;
 
-  // The Node-based HTTP proxy container asks the host orchestrator for per-request
-  // token approvals over this Unix socket.
+  // The mitmproxy-based HTTP proxy container asks the host orchestrator for per-request
+  // token approvals and header resolution over this Unix socket.
   const httpProxyAuthSocketPath = httpTokensEnabled
     ? "/tmp/sandy-http-proxy-auth.sock"
     : null;
   const proxyAuthService = httpTokensEnabled && httpProxyAuthSocketPath
     ? new ProxyAuthService({
         socketPath: httpProxyAuthSocketPath,
-        authorize: async (input) => orchestrator.authorizeHttpTokenUse(input),
+        access: workerAccess,
+        httpTokens: config.httpTokens,
+        authorizeHttpTokenUse: async (input) => orchestrator.authorizeHttpTokenUse(input),
       })
     : null;
 
@@ -163,12 +165,9 @@ export async function startApp(): Promise<void> {
       workerNetwork: config.workerNetwork,
       workerNetworkName,
       httpProxyCaCertPath: certificateAuthority?.certPath ?? null,
+      httpProxyConfDirPath: certificateAuthority?.confDirPath ?? null,
       httpProxyImage: httpTokensEnabled ? config.httpProxyImage : null,
       httpProxyAuthSocketPath,
-      httpTokens: config.httpTokens,
-      mcpProxyAccessSharedSecret: workerAccess.sharedSecret,
-      caCert: certificateAuthority?.cert ?? null,
-      caKey: certificateAuthority?.key ?? null,
     },
   );
 

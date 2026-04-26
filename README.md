@@ -12,6 +12,7 @@ status, completed work, and known gaps relative to that target, see `PLAN_v1.md`
 
 - Bun 1.3 or newer.
 - Docker installed and available as `docker`.
+- `openssl` installed and available as `openssl` on the host. Sandy uses it at startup to generate the local CA for HTTPS interception when HTTP token proxying is enabled.
 - Either:
   - a Telegram bot token plus the Telegram numeric user ID or username of the one person allowed to control Sandy, or
   - a Matrix homeserver URL and the full Matrix user ID of the bot account and the one person allowed to control Sandy (Sandy acquires the access token via its login CLI).
@@ -204,8 +205,8 @@ HTTP token behavior:
 - The HTTP proxy runs in its own container per worker. It shares the worker's network-guard namespace so it sees the same effective connectivity restrictions, while remaining isolated from worker process control.
 - Workers still reach the proxy as `sandy-http-proxy:8081`; Sandy injects that hostname inside the shared namespace.
 - The MCP sidecar remains separate and runs behind its own network-guard container for network isolation.
-- HTTPS connections are handled via TLS interception (MITM). Sandy generates a root CA at startup, provisions per-host leaf certificates, and workers trust Sandy's CA for HTTPS request inspection and header rewriting.
-- The HTTP proxy container runs on Node.js rather than Bun. Raw socket TLS upgrades for MITM are more reliable in Node, and the container boundary means the proxy runtime can differ from the host runtime without affecting it.
+- HTTPS connections are handled via TLS interception (MITM). Sandy generates a root CA at startup, mounts it into a per-worker `mitmproxy` container, and workers trust Sandy's CA for HTTPS request inspection and header rewriting.
+- The HTTP proxy container now runs on `mitmproxy`. Sandy keeps request approval and token placeholder resolution on the host side, while the proxy container handles the battle-tested HTTP/TLS interception layer.
 
 Update behavior:
 

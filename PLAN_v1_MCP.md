@@ -23,7 +23,7 @@ Implemented in the current codebase:
 - The HTTP proxy shares the worker network-guard namespace so it inherits the same effective connectivity restrictions while remaining isolated from the worker process.
 - Workers resolve `sandy-http-proxy` to `127.0.0.1` inside the shared namespace; no Docker network alias is required for the proxy.
 - The MCP sidecar still runs behind its own network-guard container, but only advertises the `sandy-mcp-proxy` alias.
-- HTTPS CONNECT is terminated with TLS MITM when a CA is configured: the proxy generates per-host leaf certs, reads decrypted HTTP requests, and applies the same header-rewriting and approval logic as plain HTTP.
+- HTTPS CONNECT is terminated with TLS MITM when a CA is configured: a per-worker `mitmproxy` container decrypts requests, while the Sandy host runtime resolves token placeholders and approval decisions over a Unix socket.
 - Workers are provisioned with Sandy's CA certificate for HTTPS trust validation.
 - Once and session grants are stored separately (prevents session grants from being consumed and nullifies ambiguity).
 

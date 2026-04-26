@@ -1,14 +1,9 @@
 {
   "entry": [
-    "src/entrypoint-main.ts",
     "src/entrypoint-updater.ts",
     "src/entrypoint-worker.ts",
     "src/entrypoint-mcp-proxy.ts",
-    "src/entrypoint-http-proxy.ts",
-    "src/**/*.test.ts",
-    "src/**/*.test.mts",
-    "src/http/http-proxy.node-e2e.mts",
-    "src/http/http-proxy-test-exports.ts"
+    "src/**/*.test.ts"
   ],
   "project": [
     "src/**/*.ts"
