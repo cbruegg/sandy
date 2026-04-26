@@ -75,5 +75,3 @@ test("McpWorkerLaunchConfigBuilder builds worker TOML and env from access data",
     bearerToken: launchConfig.environment[workerProxyTokenEnvVar],
   }), { ok: true });
 });
-
-
