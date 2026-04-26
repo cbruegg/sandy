@@ -15,6 +15,7 @@ function baseConfig(): Omit<SandyConfig, "channel"> {
     logLevel: "info",
     workerImage: "sandy-subagent:latest",
     mcpSidecarImage: "sandy-mcp-proxy:latest",
+    httpProxyImage: "sandy-http-proxy:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-shares",
     agentModel: null,
@@ -40,6 +41,7 @@ function baseConfig(): Omit<SandyConfig, "channel"> {
     explicitImageOverrides: {
       workerImage: false,
       mcpSidecarImage: false,
+      httpProxyImage: false,
     },
   };
 }

@@ -15,7 +15,7 @@ function createProxy(
   return new SandyHttpProxy({
     access,
     httpTokens: {
-      api_key: { value: "real-secret-key", allowedHosts: ["127.0.0.1", "localhost"] },
+      api_key: { value: "real-secret-key" },
     },
     authorizeHttpTokenUse: async () => ({
       outcome: "approved",

@@ -903,11 +903,13 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
     }),
     httpProxyUrlFactory: () => "http://Bearer:token@sandy-http-proxy:8081",
     workerNetworkName: "sandy-mcp-net",
-    httpProxyImage: "sandy-mcp-proxy:latest",
+    httpProxyImage: "sandy-http-proxy:latest",
     httpProxyAuthSocketPath: "/tmp/sandy-proxy-auth.sock",
     httpProxyCaCertPath: "/tmp/sandy-ca.pem",
-    httpTokens: { api_key: { value: "secret", allowedHosts: ["api.example.com"] } },
+    httpTokens: { api_key: { value: "secret" } },
     mcpProxyAccessSharedSecret: "shared-secret",
+    caCert: "cert",
+    caKey: "key",
     spawnImpl,
   });
 
@@ -927,9 +929,7 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
   assert.ok(proxyRunInvocation.args.includes("container:sandy-netguard-task-1"));
   assert.ok(proxyRunInvocation.args.includes("--cap-drop"));
   assert.ok(proxyRunInvocation.args.includes("NET_ADMIN"));
-  assert.ok(proxyRunInvocation.args.includes("sandy-mcp-proxy:latest"));
-  assert.ok(proxyRunInvocation.args.includes("bun"));
-  assert.ok(proxyRunInvocation.args.includes("dist/entrypoint-http-proxy.js"));
+  assert.ok(proxyRunInvocation.args.includes("sandy-http-proxy:latest"));
 
   const workerRunInvocation = invocations.find((invocation) =>
     invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-subagent:latest");
@@ -997,10 +997,13 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
       environment: {},
     }),
     httpProxyUrlFactory: () => "http://Bearer:token@sandy-http-proxy:8081",
-    httpProxyImage: "sandy-mcp-proxy:latest",
+    httpProxyImage: "sandy-http-proxy:latest",
     httpProxyAuthSocketPath: "/tmp/sandy-proxy-auth.sock",
-    httpTokens: { api_key: { value: "secret", allowedHosts: ["api.example.com"] } },
+    httpProxyCaCertPath: "/tmp/sandy-ca.pem",
+    httpTokens: { api_key: { value: "secret" } },
     mcpProxyAccessSharedSecret: "shared-secret",
+    caCert: "cert",
+    caKey: "key",
     spawnImpl,
   });
 

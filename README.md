@@ -99,6 +99,9 @@ url = "https://todoist.example/mcp"
 
 # Optional HTTP token injection for proxied worker requests:
 
+[http]
+# proxy_image = "sandy-http-proxy:latest" # explicit override; otherwise Sandy uses a baked GHCR sha tag when present, or this local default
+
 [http.tokens.vid2text]
 # value = "real-api-key-or-token"
 
@@ -194,7 +197,7 @@ MCP OAuth behavior:
 HTTP token behavior:
 
 - `http.tokens.<name>` defines a named token secret with `value`. Workers use placeholder headers like `Authorization: Bearer SANDY_TOKEN_<name>` in proxied HTTP requests. The HTTP proxy replaces these placeholders with the real token value at request time, but only if the requesting task holds an active approval for that token + host.
-- `approvals.http.<name>` persists `always allow` decisions for specific hosts via `always_allow_hosts`. This serves both as the persistent config storage and as the allowlist of destination hosts that can be approved for this token. Hosts not in this list are always rejected.
+- `approvals.http.<name>` persists `always allow` decisions for specific hosts via `always_allow_hosts`. This is persistent approval state only; new hosts can still go through the interactive approval flow and become persisted later if approved with `always allow`.
 - Workers _must_ explicitly request token use via Sandy's `request_http_token` tool before making proxied requests. This tool requires privilege escalation and follows the same approval flow as MCP tools.
 - If no approval is active when the proxy sees a placeholder token, the request is rejected immediately with HTTP 403.
 - Workers receive `HTTP_PROXY` and `HTTPS_PROXY` environment variables pointing to a per-worker Sandy HTTP proxy with embedded task credentials for automatic proxy authentication. Only tools that respect proxy environment variables are routed through the proxy; direct network access from workers is unchanged.
@@ -211,7 +214,7 @@ Update behavior:
 - `updates.mode = "relaunch"` stages an update, exits once idle, and has the updater relaunch Sandy directly.
 - `updates.mode = "exit"` replaces the on-disk Sandy executable first and then exits the running process so an external supervisor can restart it.
 - If you use `updates.mode = "exit"` under systemd, configure the unit with `Restart=always`. In this mode Sandy does not relaunch itself after updating.
-- If you explicitly pin `worker.image` or `mcp.sidecar_image`, you must also set `[updates].mode = "disabled"`. Sandy refuses to start with pinned Docker images while automatic updates remain enabled in either `"relaunch"` or `"exit"` mode.
+- If you explicitly pin `worker.image`, `mcp.sidecar_image`, or `http.proxy_image`, you must also set `[updates].mode = "disabled"`. Sandy refuses to start with pinned Docker images while automatic updates remain enabled in either `"relaunch"` or `"exit"` mode.
 
 Worker preinstall behavior:
 

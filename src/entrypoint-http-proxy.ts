@@ -1,11 +1,12 @@
-import { createConnection } from "node:net";
 import { readFileSync } from "node:fs";
 import { SandyHttpProxy } from "./http/http-proxy.js";
 import { configureLogger } from "./logger.js";
 import { SandyMcpProxyAccess } from "./mcp/proxy-access.js";
+import { createUnixSocketAuthorizer } from "./http/proxy-auth-client.js";
+import type { HttpTokenConfig } from "./config.js";
 
 type Bootstrap = {
-  httpTokens: Record<string, { value: string; allowedHosts: string[] }>;
+  httpTokens: Record<string, HttpTokenConfig>;
   sharedSecret: string;
   caCert?: string;
   caKey?: string;
@@ -15,89 +16,13 @@ function send(message: object): void {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
 
-function createUnixSocketAuthorizer(socketPath: string) {
-  return async (input: {
-    taskId: string;
-    tokenId: string;
-    host: string;
-  }): Promise<{
-    outcome: "approved" | "denied" | "failed";
-    message: string;
-  }> => {
-    return new Promise((resolve) => {
-      const socket = createConnection(socketPath);
-      let buffer = "";
-      let resolved = false;
-
-      const cleanup = (): void => {
-        resolved = true;
-        socket.destroy();
-      };
-
-      socket.on("connect", () => {
-        socket.write(`${JSON.stringify(input)}\n`);
-      });
-
-      socket.on("data", (data) => {
-        if (resolved) {
-          return;
-        }
-        buffer += data.toString();
-        const lines = buffer.split("\n");
-        buffer = lines.pop()!;
-        for (const line of lines) {
-          if (line.trim()) {
-            try {
-              resolve(JSON.parse(line) as {
-                outcome: "approved" | "denied" | "failed";
-                message: string;
-              });
-            } catch {
-              resolve({
-                outcome: "failed",
-                message: "Invalid response from authorization service.",
-              });
-            }
-            cleanup();
-            return;
-          }
-        }
-      });
-
-      socket.on("error", (error) => {
-        if (!resolved) {
-          resolve({
-            outcome: "failed",
-            message: `Authorization service connection failed: ${error.message}`,
-          });
-        }
-      });
-
-      socket.on("close", () => {
-        if (!resolved) {
-          resolve({
-            outcome: "failed",
-            message: "Authorization service closed connection unexpectedly.",
-          });
-        }
-      });
-
-      setTimeout(() => {
-        if (!resolved) {
-          resolve({
-            outcome: "failed",
-            message: "Authorization request timed out.",
-          });
-          cleanup();
-        }
-      }, 5_000);
-    });
-  };
-}
-
 async function main(): Promise<void> {
   configureLogger({
     outputMode: "stderr",
+    forwardLog: (payload) => send({
+      type: "log",
+      ...payload,
+    }),
   });
 
   const bootstrapPath = process.env["SANDY_HTTP_PROXY_BOOTSTRAP_FILE"];

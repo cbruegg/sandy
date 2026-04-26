@@ -9,6 +9,7 @@ import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {workerSkillsPath} from "../subagent/worker-codex-config.js";
 import type {HostCommand, PrivilegeResolutionResult, SubAgentEvent} from "../types.js";
 import {parseSubAgentEvent, serializeHostCommand} from "../types.js";
+import { parseHttpProxyContainerMessage } from "../http/http-proxy-protocol.js";
 import {launchNetworkGuardContainer, type StartedNetworkGuard} from "./network-guard.js";
 import type {LaunchTaskRequest, SandboxHandle, SandboxRunner, ShareInspection} from "./sandbox-runner.js";
 
@@ -85,6 +86,9 @@ export class DockerSandboxRunner implements SandboxRunner {
     const workerCodexConfig = builtWorkerConfig.codexConfigToml;
     const workerEnvironment = builtWorkerConfig.environment;
     const httpProxyUrl = this.options.httpProxyUrlFactory?.(request.taskId) ?? null;
+    if (httpProxyUrl) {
+      assertHttpProxySupportConfigured(this.options);
+    }
     const workerImage = this.resolveWorkerImage();
     let workerCodexHomeTempDir: string | null = null;
     const needsWorkerCodexHome = Boolean(this.options.codexAuthFile || workerCodexConfig);
@@ -114,6 +118,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       && this.options.httpProxyImage
       && this.options.httpProxyAuthSocketPath
       && this.options.httpTokens
+      && this.options.httpProxyCaCertPath
       && this.options.mcpProxyAccessSharedSecret,
     );
     if (hasProxyConfig) {
@@ -200,8 +205,6 @@ export class DockerSandboxRunner implements SandboxRunner {
         "-e",
         "SANDY_HTTP_PROXY_AUTH_SOCKET=/run/sandy-proxy-auth.sock",
         this.options.httpProxyImage!,
-        "bun",
-        "dist/entrypoint-http-proxy.js",
       ];
 
       proxyChild = this.spawnImpl("docker", proxyDockerArgs, {
@@ -263,6 +266,8 @@ export class DockerSandboxRunner implements SandboxRunner {
       dockerArgs.push("-e", `https_proxy=${httpProxyUrl}`);
       dockerArgs.push("-e", `NO_PROXY=sandy-mcp-proxy`);
       dockerArgs.push("-e", `no_proxy=sandy-mcp-proxy`);
+      // The worker and proxy join the same guard-owned network namespace, so
+      // the proxy is reachable on 127.0.0.1 from inside the worker container.
       dockerArgs.push("--add-host", "sandy-http-proxy:127.0.0.1");
     }
 
@@ -741,14 +746,16 @@ export class DockerSandboxRunner implements SandboxRunner {
     }
   }
 
-  private async launchNetworkGuard(taskId: string, forceLaunch: boolean): Promise<StartedNetworkGuard | null> {
+  private async launchNetworkGuard(taskId: string, requireNetworkNamespace: boolean): Promise<StartedNetworkGuard | null> {
     return await launchNetworkGuardContainer({
       taskId,
       workerNetwork: this.options.workerNetwork,
       networkGuardImage: this.options.networkGuardImage,
       workerNetworkName: this.options.workerNetworkName,
       additionalAllowedHosts: [],
-      forceLaunch,
+      // HTTP proxying still needs a shared namespace container even when the
+      // worker network mode is unrestricted, because the proxy binds localhost.
+      requireNetworkNamespace,
       handshakeTimeoutMs: this.handshakeTimeoutMs,
       spawnImpl: this.spawnImpl,
       setTimeoutImpl: this.setTimeoutImpl,
@@ -767,23 +774,38 @@ export class DockerSandboxRunner implements SandboxRunner {
     });
 
     await new Promise<void>((resolve, reject) => {
+      let settled = false;
       const timer = this.setTimeoutImpl(() => {
+        if (settled) {
+          return;
+        }
+        settled = true;
         proxyChild.kill("SIGTERM");
         reject(new Error("HTTP proxy container did not become ready in time."));
       }, this.handshakeTimeoutMs);
 
       proxyStdout.on("line", (line) => {
         try {
-          const message = JSON.parse(line.trim()) as { type?: string; message?: string };
+          const message = parseHttpProxyContainerMessage(line.trim());
+          if (message.type === "log") {
+            this.forwardHttpProxyLog(containerName, message.level, message.event, message.data);
+            return;
+          }
           if (message.type === "ready") {
+            if (settled) {
+              return;
+            }
+            settled = true;
             this.clearTimeoutImpl(timer);
-            proxyStdout.close();
             resolve();
             return;
           }
           if (message.type === "fatal_error") {
+            if (settled) {
+              return;
+            }
+            settled = true;
             this.clearTimeoutImpl(timer);
-            proxyStdout.close();
             reject(new Error(message.message ?? "HTTP proxy container failed during startup."));
           }
         } catch {
@@ -792,11 +814,19 @@ export class DockerSandboxRunner implements SandboxRunner {
       });
 
       proxyChild.once("error", (error) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
         this.clearTimeoutImpl(timer);
         reject(error);
       });
 
       proxyChild.once("exit", (code, signal) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
         this.clearTimeoutImpl(timer);
         reject(new Error(`HTTP proxy container exited before ready (code=${code}, signal=${signal}).`));
       });
@@ -811,6 +841,33 @@ export class DockerSandboxRunner implements SandboxRunner {
         });
       }
     });
+  }
+
+  private forwardHttpProxyLog(
+    containerName: string,
+    level: "debug" | "info" | "warn" | "error",
+    event: string,
+    data?: Record<string, unknown>,
+  ): void {
+    const payload = {
+      containerName,
+      source: "http_proxy_container",
+      ...(data ?? {}),
+    };
+    switch (level) {
+      case "debug":
+        logger.debug(event, payload);
+        return;
+      case "info":
+        logger.info(event, payload);
+        return;
+      case "warn":
+        logger.warn(event, payload);
+        return;
+      case "error":
+        logger.error(event, payload);
+        return;
+    }
   }
 
   private async cleanupTaskContainers(
@@ -895,6 +952,27 @@ export class DockerSandboxRunner implements SandboxRunner {
 
 function isMissingPathError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+function assertHttpProxySupportConfigured(options: DockerSandboxRunnerOptions): void {
+  if (!options.httpProxyImage) {
+    throw new Error("HTTP proxy URL factory requires httpProxyImage.");
+  }
+  if (!options.httpProxyAuthSocketPath) {
+    throw new Error("HTTP proxy URL factory requires httpProxyAuthSocketPath.");
+  }
+  if (!options.httpTokens) {
+    throw new Error("HTTP proxy URL factory requires httpTokens.");
+  }
+  if (!options.mcpProxyAccessSharedSecret) {
+    throw new Error("HTTP proxy URL factory requires mcpProxyAccessSharedSecret.");
+  }
+  if (!options.httpProxyCaCertPath) {
+    throw new Error("HTTP proxy URL factory requires httpProxyCaCertPath.");
+  }
+  if (!options.caCert || !options.caKey) {
+    throw new Error("HTTP proxy URL factory requires CA certificate material.");
+  }
 }
 
 function isAbsolutePathEscape(path: string): boolean {

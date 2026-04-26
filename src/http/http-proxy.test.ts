@@ -15,7 +15,7 @@ function createProxy(
   return new SandyHttpProxy({
     access,
     httpTokens: {
-      api_key: { value: "real-secret-key", allowedHosts: ["127.0.0.1", "localhost"] },
+      api_key: { value: "real-secret-key" },
     },
     authorizeHttpTokenUse: async () => ({
       outcome: "approved",
@@ -117,6 +117,35 @@ test("SandyHttpProxy replaces placeholders and strips hop-by-hop headers", async
     "x-api-key": "real-secret-key",
     "x-custom-header": "preserved",
   });
+});
+
+test("SandyHttpProxy requests approval for the concrete host without a static allowlist", async () => {
+  const approvals: Array<{ taskId: string; tokenId: string; host: string }> = [];
+  const proxy = createProxy({
+    authorizeHttpTokenUse: async (input) => {
+      approvals.push(input);
+      return {
+        outcome: "approved",
+        message: "ok",
+      };
+    },
+  });
+
+  const result = await (proxy as unknown as {
+    resolveTokenPlaceholders: (taskId: string, targetHost: string, headers: Record<string, string | string[] | undefined>) => Promise<{
+      resolvedHeaders: Record<string, string | string[]>;
+      rejectionMessage: string | null;
+    }>;
+  }).resolveTokenPlaceholders("task-1", "api.example.com", {
+    authorization: "Bearer SANDY_TOKEN_api_key",
+  });
+
+  assert.equal(result.rejectionMessage, null);
+  assert.deepEqual(approvals, [{
+    taskId: "task-1",
+    tokenId: "api_key",
+    host: "api.example.com",
+  }]);
 });
 
 test("SandyHttpProxy rejects denied placeholder approvals", async () => {

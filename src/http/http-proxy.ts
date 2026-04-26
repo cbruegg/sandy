@@ -356,13 +356,6 @@ export class SandyHttpProxy {
       return { approved: false, message: `HTTP token "${tokenId}" is not configured.` };
     }
 
-    if (!isHostAllowed(tokenConfig, host)) {
-      return {
-        approved: false,
-        message: `Host "${host}" is not in the configured allowed_hosts for token ${tokenId}.`,
-      };
-    }
-
     const result = await this.options.authorizeHttpTokenUse({
       taskId,
       tokenId,
@@ -422,15 +415,6 @@ function extractPlaceholderTokenId(value: string): string | null {
     ? value.match(new RegExp(`${PLACEHOLDER_PREFIX}([a-zA-Z0-9_]+)`))
     : null;
   return match?.[1] ?? null;
-}
-
-function isHostAllowed(tokenConfig: HttpTokenConfig, host: string): boolean {
-  if (tokenConfig.allowedHosts.length === 0) {
-    return false;
-  }
-  return tokenConfig.allowedHosts.some(
-    (allowedHost) => host === allowedHost || host.endsWith(`.${allowedHost}`),
-  );
 }
 
 function extractTaskIdFromJwt(token: string): string | null {

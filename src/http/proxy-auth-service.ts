@@ -2,14 +2,11 @@ import { createServer, type Server } from "node:net";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { logger } from "../logger.js";
+import { parseProxyAuthRequest, serializeProxyAuthResponse, type ProxyAuthRequest, type ProxyAuthResponse } from "./proxy-auth-protocol.js";
 
 type ProxyAuthServiceOptions = {
   socketPath: string;
-  authorize: (input: {
-    taskId: string;
-    tokenId: string;
-    host: string;
-  }) => Promise<{ outcome: "approved" | "denied" | "failed"; message: string }>;
+  authorize: (input: ProxyAuthRequest) => Promise<ProxyAuthResponse>;
 };
 
 export class ProxyAuthService {
@@ -38,34 +35,26 @@ export class ProxyAuthService {
             continue;
           }
           try {
-            const request = JSON.parse(line) as {
-              taskId: string;
-              tokenId: string;
-              host: string;
-            };
+            const request = parseProxyAuthRequest(line);
             this.options
               .authorize(request)
               .then((result) => {
-                socket.write(`${JSON.stringify(result)}\n`);
+                socket.write(serializeProxyAuthResponse(result));
               })
               .catch((error) => {
-                socket.write(
-                  `${JSON.stringify({
-                    outcome: "failed" as const,
-                    message:
-                      error instanceof Error
-                        ? error.message
-                        : "Authorization service error.",
-                  })}\n`,
-                );
+                socket.write(serializeProxyAuthResponse({
+                  outcome: "failed",
+                  message:
+                    error instanceof Error
+                      ? error.message
+                      : "Authorization service error.",
+                }));
               });
           } catch {
-            socket.write(
-              `${JSON.stringify({
-                outcome: "failed" as const,
-                message: "Invalid authorization request format.",
-              })}\n`,
-            );
+            socket.write(serializeProxyAuthResponse({
+              outcome: "failed",
+              message: "Invalid authorization request format.",
+            }));
           }
         }
       });

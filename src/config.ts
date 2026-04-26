@@ -185,10 +185,12 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
       servers: {},
     }),
     http: z.object({
+      proxy_image: z.string().min(1).default(defaultImages.httpProxyImage),
       tokens: z.record(z.string(), z.object({
         value: z.string().min(1),
       }).strict()).default({}),
     }).default({
+      proxy_image: defaultImages.httpProxyImage,
       tokens: {},
     }),
     approvals: z.object({
@@ -221,7 +223,6 @@ export type McpServerConfig = {
 
 export type HttpTokenConfig = {
   value: string;
-  allowedHosts: string[];
 };
 
 export type SandyUpdateMode = z.infer<typeof updateModeSchema>;
@@ -267,6 +268,7 @@ export type SandyConfig = {
       };
   workerImage: string;
   mcpSidecarImage: string;
+  httpProxyImage: string;
   networkGuardImage: string;
   shareRoot: string;
   agentModel: string | null;
@@ -291,6 +293,7 @@ export type SandyConfig = {
   explicitImageOverrides: {
     workerImage: boolean;
     mcpSidecarImage: boolean;
+    httpProxyImage: boolean;
   };
 };
 
@@ -356,10 +359,15 @@ export function parseConfigToml(
       : { mode: "ambient_codex_auth" };
 
   if (parsed.updates.mode !== "disabled"
-    && (parsedFile.explicitImageOverrides.workerImage || parsedFile.explicitImageOverrides.mcpSidecarImage)) {
+    && (
+      parsedFile.explicitImageOverrides.workerImage
+      || parsedFile.explicitImageOverrides.mcpSidecarImage
+      || parsedFile.explicitImageOverrides.httpProxyImage
+    )) {
     const configuredImages = [
       parsedFile.explicitImageOverrides.workerImage ? "worker.image" : null,
       parsedFile.explicitImageOverrides.mcpSidecarImage ? "mcp.sidecar_image" : null,
+      parsedFile.explicitImageOverrides.httpProxyImage ? "http.proxy_image" : null,
     ].filter((value): value is string => value !== null);
     throw new Error(
       `Automatic updates require Sandy-managed Docker image defaults. Explicitly configured ${configuredImages.join(", ")} conflicts with [updates].mode = "${parsed.updates.mode}". Set [updates].mode = "disabled" to keep pinned images.`,
@@ -375,6 +383,7 @@ export function parseConfigToml(
     channel: buildChannelConfig(parsed.channel),
     workerImage: parsed.worker.image,
     mcpSidecarImage: parsed.mcp.sidecar_image,
+    httpProxyImage: parsed.http.proxy_image,
     networkGuardImage: defaultImages.networkGuardImage,
     shareRoot: parsed.worker.share_root,
     agentModel: parsed.agent?.model ?? null,
@@ -396,7 +405,6 @@ export function parseConfigToml(
     httpTokens: Object.fromEntries(
       Object.entries(parsed.http.tokens).map(([identifier, token]) => [identifier, {
         value: token.value,
-        allowedHosts: parsed.approvals.http[identifier]?.always_allow_hosts ?? [],
       }]),
     ),
     persistentMcpApprovals: Object.fromEntries(
@@ -437,6 +445,7 @@ function parseConfigTomlFile(
   explicitImageOverrides: {
     workerImage: boolean;
     mcpSidecarImage: boolean;
+    httpProxyImage: boolean;
   };
 } {
   // @iarna/toml attaches symbol-keyed metadata to parsed table objects.
@@ -449,6 +458,7 @@ function parseConfigTomlFile(
   const explicitImageOverrides = {
     workerImage: hasOwnString(parsedToml, ["worker", "image"]),
     mcpSidecarImage: hasOwnString(parsedToml, ["mcp", "sidecar_image"]),
+    httpProxyImage: hasOwnString(parsedToml, ["http", "proxy_image"]),
   };
 
   return {
