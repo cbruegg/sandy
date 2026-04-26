@@ -2,7 +2,7 @@ import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { configureLogger } from "../logger.js";
 import { SandyMcpProxy } from "./proxy.js";
-import { SandyMcpProxyAccess } from "./proxy-access.js";
+import { ProxyAccess } from "../proxy-access.js";
 import { McpServerRegistryImpl } from "./server-registry.js";
 import { parseHostToMcpSidecarMessage, type McpSidecarBootstrapMessage } from "./sidecar-protocol.js";
 import type { PrivilegeResolutionResult } from "../types.js";
@@ -27,7 +27,7 @@ export async function main(): Promise<void> {
   });
 
   const bootstrap = await readBootstrapMessage(input);
-  const access = new SandyMcpProxyAccess(bootstrap.workerProxyTokenSecret);
+  const access = new ProxyAccess(bootstrap.workerProxyTokenSecret);
   const registry = new McpServerRegistryImpl(bootstrap.oauthStateDirectory, bootstrap.mcpServers);
   const pendingAuthorization = new Map<string, (result: PrivilegeResolutionResult) => void>();
   let shuttingDown = false;

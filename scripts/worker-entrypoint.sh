@@ -6,4 +6,8 @@ if [ -d /run/sandy-codex-seed ]; then
   cp -R /run/sandy-codex-seed/. /root/.codex
 fi
 
+if [ -f /etc/pki/trust/anchors/sandy-ca.pem ]; then
+  update-ca-certificates
+fi
+
 exec bun dist/entrypoint-worker.js

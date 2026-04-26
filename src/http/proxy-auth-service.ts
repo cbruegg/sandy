@@ -1,9 +1,9 @@
 import type { HttpTokenConfig } from "../config.js";
-import { SandyMcpProxyAccess } from "../mcp/proxy-access.js";
+import { ProxyAccess } from "../proxy-access.js";
 import type { HttpProxyAuthRequestMessage, HttpProxyAuthResponseMessage, HttpProxyRequestHeader } from "./http-proxy-protocol.js";
 
 type ProxyAuthServiceOptions = {
-  access: SandyMcpProxyAccess;
+  access: ProxyAccess;
   httpTokens: Record<string, HttpTokenConfig>;
   authorizeHttpTokenUse: (input: {
     taskId: string;
@@ -25,7 +25,7 @@ export class ProxyAuthService {
       };
     }
 
-    const grant = this.options.access.resolveWorkerGrant(request.proxyAuthPassword);
+    const grant = this.options.access.resolveVerifiedWorkerGrant(request.proxyAuthPassword);
     if (!grant.ok) {
       return {
         type: "auth_response",
@@ -74,7 +74,7 @@ export class ProxyAuthService {
 
       resolvedHeaders.push({
         name: header.name,
-        value: header.value.replace(`SANDY_TOKEN_${tokenId}`, tokenConfig.value),
+        value: header.value.replace(`${SANDY_TOKEN_PREFIX}${tokenId}`, tokenConfig.value),
       });
     }
 
@@ -125,9 +125,11 @@ function isHopByHopHeader(name: string): boolean {
   return HOP_BY_HOP_HEADERS.has(name.toLowerCase());
 }
 
+const SANDY_TOKEN_PREFIX = "SANDY_TOKEN_";
+
 function extractPlaceholderTokenId(value: string): string | null {
-  const match = value.includes("SANDY_TOKEN_")
-    ? value.match(/SANDY_TOKEN_([a-zA-Z0-9_]+)/)
+  const match = value.includes(SANDY_TOKEN_PREFIX)
+    ? value.match(new RegExp(`${SANDY_TOKEN_PREFIX}([a-zA-Z0-9_]+)`))
     : null;
   return match?.[1] ?? null;
 }

@@ -942,8 +942,7 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
   assert.ok(workerRunInvocation.args.includes("sandy-http-proxy:127.0.0.1"));
   assert.ok(workerRunInvocation.args.includes("NO_PROXY=sandy-mcp-proxy"));
   assert.ok(!workerRunInvocation.args.includes("NO_PROXY=sandy-mcp-proxy,sandy-http-proxy"));
-  assert.ok(workerRunInvocation.args.includes("/tmp/sandy-ca.pem:/run/sandy-ca.pem:ro"));
-  assert.ok(workerRunInvocation.args.includes("SSL_CERT_FILE=/run/sandy-ca.pem"));
+  assert.ok(workerRunInvocation.args.includes("/tmp/sandy-ca.pem:/etc/pki/trust/anchors/sandy-ca.pem:ro"));
 
   const guardRunInvocation = invocations.find((invocation) =>
     invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-network-guard:latest");

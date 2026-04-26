@@ -1,10 +1,10 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { SandyMcpProxyAccess } from "../mcp/proxy-access.js";
+import { ProxyAccess } from "../proxy-access.js";
 import { ProxyAuthService } from "./proxy-auth-service.js";
 
 test("ProxyAuthService resolves headers for approved requests", async () => {
-  const access = new SandyMcpProxyAccess("test-secret");
+  const access = new ProxyAccess("test-secret");
   const service = new ProxyAuthService({
     access,
     httpTokens: { token_1: { value: "real-secret" } },
@@ -34,7 +34,7 @@ test("ProxyAuthService resolves headers for approved requests", async () => {
 });
 
 test("ProxyAuthService denies rejected token approvals", async () => {
-  const access = new SandyMcpProxyAccess("test-secret");
+  const access = new ProxyAccess("test-secret");
   const service = new ProxyAuthService({
     access,
     httpTokens: { token_1: { value: "real-secret" } },
@@ -59,7 +59,7 @@ test("ProxyAuthService denies rejected token approvals", async () => {
 });
 
 test("ProxyAuthService handles authorization errors gracefully", async () => {
-  const access = new SandyMcpProxyAccess("test-secret");
+  const access = new ProxyAccess("test-secret");
   const service = new ProxyAuthService({
     access,
     httpTokens: { token_1: { value: "real-secret" } },
@@ -80,7 +80,7 @@ test("ProxyAuthService handles authorization errors gracefully", async () => {
 
 test("ProxyAuthService denies invalid proxy auth usernames", async () => {
   const service = new ProxyAuthService({
-    access: new SandyMcpProxyAccess("test-secret"),
+    access: new ProxyAccess("test-secret"),
     httpTokens: { token_1: { value: "real-secret" } },
     authorizeHttpTokenUse: async () => ({ outcome: "approved", message: "ok" }),
   });
@@ -104,7 +104,7 @@ test("ProxyAuthService denies invalid proxy auth usernames", async () => {
 
 test("ProxyAuthService denies invalid worker grants", async () => {
   const service = new ProxyAuthService({
-    access: new SandyMcpProxyAccess("test-secret"),
+    access: new ProxyAccess("test-secret"),
     httpTokens: { token_1: { value: "real-secret" } },
     authorizeHttpTokenUse: async () => ({ outcome: "approved", message: "ok" }),
   });

@@ -6,6 +6,7 @@ import { isSupportedPrivilegeRequest } from "./privilege/privilege-broker.js";
 import type { PersistentApprovalStore } from "./privilege/persistent-approval-store.js";
 import type { SandboxHandle, SandboxRunner } from "./sandbox/sandbox-runner.js";
 import type { SessionStore } from "./session/in-memory-session-store.js";
+import type { TaskRegistry } from "./task-registry.js";
 import { logger } from "./logger.js";
 import { messages } from "./messages.js";
 import type {
@@ -39,12 +40,12 @@ type SandyOrchestratorDependencies = {
   sandboxRunner: SandboxRunner;
   sessionStore: SessionStore;
   privilegeBroker: PrivilegeBroker;
+  taskRegistry: TaskRegistry;
   persistentApprovalStore?: PersistentApprovalStore;
 };
 
 export class SandyOrchestrator {
   private readonly handles = new Map<string, ActiveHandleRecord>();
-  private readonly taskChatIds = new Map<string, string>();
   private readonly pendingMcpPrivilegeResolvers = new Map<string, (result: PrivilegeResolutionResult) => void>();
   private readonly channelFormatting: ReturnType<ChannelAdapter["getFormatting"]>;
   private readonly persistentApprovalStore: PersistentApprovalStore;
@@ -404,7 +405,7 @@ export class SandyOrchestrator {
         );
 
         this.handles.set(taskId, { handle });
-        this.taskChatIds.set(taskId, event.chatId);
+        this.deps.taskRegistry.register(taskId, event.chatId);
         logger.info("task.started", {
           chatId: event.chatId,
           taskId,
@@ -676,7 +677,7 @@ export class SandyOrchestrator {
       this.pendingMcpPrivilegeResolvers.delete(task.pendingPrivilegeRequest.requestId);
     }
     this.handles.delete(task.taskId);
-    this.taskChatIds.delete(task.taskId);
+    this.deps.taskRegistry.unregister(task.taskId);
     session.activeTask = null;
     await this.promptForShareDeletionIfNeeded(session, task.taskId, task.taskName);
   }
@@ -781,7 +782,7 @@ export class SandyOrchestrator {
     toolName: string;
     arguments: unknown;
   }): Promise<PrivilegeResolutionResult> {
-    const chatId = this.taskChatIds.get(input.taskId);
+    const chatId = this.deps.taskRegistry.getChatId(input.taskId);
     if (!chatId) {
       return {
         requestId: randomUUID(),
@@ -912,68 +913,6 @@ export class SandyOrchestrator {
     task.approvedMcpTools.push({ serverId, toolName });
   }
 
-  authorizeHttpTokenUse(input: {
-    taskId: string;
-    tokenId: string;
-    host: string;
-  }): Promise<PrivilegeResolutionResult> {
-    const chatId = this.taskChatIds.get(input.taskId);
-    if (!chatId) {
-      return Promise.resolve({
-        requestId: randomUUID(),
-        outcome: "failed",
-        message: messages.taskNotActive(input.taskId),
-      });
-    }
-
-    const session = this.deps.sessionStore.getOrCreate(chatId);
-    const activeTask = session.activeTask;
-    if (!activeTask || activeTask.taskId !== input.taskId) {
-      return Promise.resolve({
-        requestId: randomUUID(),
-        outcome: "failed",
-        message: messages.taskNotActive(input.taskId),
-      });
-    }
-
-    if (this.isHttpTokenSessionGrantAllowed(activeTask, input.tokenId, input.host)) {
-      return Promise.resolve({
-        requestId: randomUUID(),
-        outcome: "approved",
-        message: messages.httpTokenAllowedForWorkerSession(input.tokenId, input.host),
-        scope: "worker_session",
-      });
-    }
-
-    if (this.persistentApprovalStore.isHttpTokenAlwaysAllowed(input.tokenId, input.host)) {
-      return Promise.resolve({
-        requestId: randomUUID(),
-        outcome: "approved",
-        message: messages.httpTokenAllowedFromPersistentConfig(input.tokenId, input.host),
-        scope: "always",
-      });
-    }
-
-    const onceGrant = activeTask.approvedHttpTokenOnceGrants.find(
-      (entry) => entry.tokenId === input.tokenId && entry.host === input.host && !entry.consumed,
-    );
-    if (onceGrant) {
-      onceGrant.consumed = true;
-      return Promise.resolve({
-        requestId: randomUUID(),
-        outcome: "approved",
-        message: messages.httpTokenAllowedOnce(input.tokenId, input.host),
-        scope: "once",
-      });
-    }
-
-    return Promise.resolve({
-      requestId: randomUUID(),
-      outcome: "denied",
-      message: messages.httpTokenProxyRejected(input.tokenId),
-    });
-  }
-
   private async resolvePendingHttpTokenRequest(
     session: SessionState,
     request: Extract<PrivilegeRequest, { kind: "http_token_use" }>,
@@ -1023,16 +962,6 @@ export class SandyOrchestrator {
       default:
         assertNever(decision);
     }
-  }
-
-  private isHttpTokenSessionGrantAllowed(
-    task: NonNullable<SessionState["activeTask"]>,
-    tokenId: string,
-    host: string,
-  ): boolean {
-    return task.approvedHttpTokenSessionGrants.some(
-      (entry) => entry.tokenId === tokenId && entry.host === host,
-    );
   }
 
   private grantHttpTokenOnce(

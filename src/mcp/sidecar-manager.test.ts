@@ -5,7 +5,7 @@ import { PassThrough } from "node:stream";
 import { setImmediate as setImmediateCallback } from "node:timers";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { McpSidecarManager } from "./sidecar-manager.js";
-import { SandyMcpProxyAccess } from "./proxy-access.js";
+import { ProxyAccess } from "../proxy-access.js";
 import { createMcpWorkerNetworkName, mcpWorkerNetworkNamePrefix } from "./worker-network-name.js";
 
 class FakeChildProcess extends EventEmitter {
@@ -47,7 +47,7 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
     return child as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const access = new SandyMcpProxyAccess("shared-secret");
+  const access = new ProxyAccess("shared-secret");
   const workerNetworkName = createMcpWorkerNetworkName();
   const manager = new McpSidecarManager({
     configDirectory: "/tmp/sandy-config",
@@ -130,7 +130,7 @@ test("McpSidecarManager returns a failed authorization result when authorization
     authorizeToolCall: async () => {
       throw new Error("approval service unavailable");
     },
-  }, new SandyMcpProxyAccess("shared-secret"));
+  }, new ProxyAccess("shared-secret"));
 
   await manager.start();
   sidecarChild.stdout.write(
@@ -207,7 +207,7 @@ test("McpSidecarManager forwards structured sidecar logs through the host logger
       outcome: "approved",
       message: "approved",
     }),
-  }, new SandyMcpProxyAccess("shared-secret"));
+  }, new ProxyAccess("shared-secret"));
 
   await manager.start();
   sidecarChild.stdout.write(

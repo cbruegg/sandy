@@ -4,11 +4,13 @@ import { loadConfig } from "./config.js";
 import { createCodexClient, ensureManagedCodexPath } from "./codex-client.js";
 import { resolveSandyCacheRoot } from "./cache-paths.js";
 import { configureLogger, logger } from "./logger.js";
-import { SandyMcpProxyAccess } from "./mcp/proxy-access.js";
+import { ProxyAccess } from "./proxy-access.js";
 import { McpSidecarManager } from "./mcp/sidecar-manager.js";
 import { validateOAuthStateFilesForStartup } from "./mcp/oauth-state-validator.js";
 import { createCertificateAuthority } from "./http/ca.js";
+import { HttpTokenAuthorizer } from "./http/token-authorizer.js";
 import { ProxyAuthService } from "./http/proxy-auth-service.js";
+import { TaskRegistry } from "./task-registry.js";
 import { McpWorkerLaunchConfigBuilder } from "./mcp/worker-launch-config-builder.js";
 import { createMcpWorkerNetworkName } from "./mcp/worker-network-name.js";
 import { SandyOrchestrator } from "./orchestrator.js";
@@ -116,15 +118,24 @@ export async function startApp(): Promise<void> {
     Object.keys(config.mcpServers),
   );
 
-  const workerAccess = new SandyMcpProxyAccess();
+  const workerAccess = new ProxyAccess();
   const mcpEnabled = Object.keys(config.mcpServers).length > 0;
   const httpTokensEnabled = Object.keys(config.httpTokens).length > 0;
   const workerNetworkName = mcpEnabled ? createMcpWorkerNetworkName() : null;
 
   const certificateAuthority = httpTokensEnabled ? await createCertificateAuthority() : null;
-  let authorizeHttpTokenUse:
-    | ((input: { taskId: string; tokenId: string; host: string }) => Promise<{ outcome: "approved" | "denied" | "failed"; message: string }>)
-    | null = null;
+  const taskRegistry = new TaskRegistry();
+  const sessionStore = new InMemorySessionStore();
+  const persistentApprovalStore = new TomlPersistentApprovalStore(
+    config.configFilePath,
+    config.persistentMcpApprovals,
+    config.persistentHttpApprovals,
+  );
+  const httpTokenAuthorizer = new HttpTokenAuthorizer(
+    taskRegistry,
+    sessionStore,
+    persistentApprovalStore,
+  );
 
   // The mitmproxy-based HTTP proxy container asks the host orchestrator for per-request
   // token approvals and header resolution over the proxy container stdio bridge.
@@ -132,12 +143,7 @@ export async function startApp(): Promise<void> {
     ? new ProxyAuthService({
         access: workerAccess,
         httpTokens: config.httpTokens,
-        authorizeHttpTokenUse: async (input) => {
-          if (!authorizeHttpTokenUse) {
-            throw new Error("HTTP token authorization is not ready.");
-          }
-          return await authorizeHttpTokenUse(input);
-        },
+        authorizeHttpTokenUse: async (input) => await httpTokenAuthorizer.authorizeHttpTokenUse(input),
       })
     : null;
 
@@ -177,17 +183,15 @@ export async function startApp(): Promise<void> {
     },
   );
 
-  const sessionStore = new InMemorySessionStore();
-
   const orchestrator = new SandyOrchestrator({
     channel,
     mainAgent,
     sandboxRunner,
     sessionStore,
     privilegeBroker: new PrivilegeBrokerImpl(),
-    persistentApprovalStore: new TomlPersistentApprovalStore(config.configFilePath, config.persistentMcpApprovals, config.persistentHttpApprovals),
+    taskRegistry,
+    persistentApprovalStore,
   });
-  authorizeHttpTokenUse = async (input) => await orchestrator.authorizeHttpTokenUse(input);
 
   const sidecarManager = !mcpEnabled || !workerNetworkName ? null : new McpSidecarManager({
     configDirectory: config.configDirectory,

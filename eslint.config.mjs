@@ -4,7 +4,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["dist/**", "src/**/*.node-e2e.mts"],
+    ignores: ["dist/**"],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,

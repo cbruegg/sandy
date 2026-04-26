@@ -16,8 +16,7 @@ type LaunchNetworkGuardOptions = {
   workerNetwork: WorkerNetworkConfig;
   networkGuardImage?: string;
   workerNetworkName?: string | null;
-  additionalAllowedHosts?: string[];
-  requireNetworkNamespace?: boolean;
+  needsNamespaceHolder?: boolean;
   handshakeTimeoutMs: number;
   spawnImpl?: typeof spawn;
   setTimeoutImpl?: typeof setTimeout;
@@ -37,7 +36,7 @@ type LaunchNetworkGuardOptions = {
 export async function launchNetworkGuardContainer(
   options: LaunchNetworkGuardOptions,
 ): Promise<StartedNetworkGuard | null> {
-  if (options.workerNetwork.mode !== "public_internet_only" && !options.requireNetworkNamespace) {
+  if (options.workerNetwork.mode !== "public_internet_only" && !options.needsNamespaceHolder) {
     return null;
   }
 
@@ -62,7 +61,7 @@ export async function launchNetworkGuardContainer(
   ];
 
   if (options.workerNetworkName) {
-    const allowedHosts = [mcpProxyContainerAlias, ...(options.additionalAllowedHosts ?? [])];
+    const allowedHosts = [mcpProxyContainerAlias];
     dockerArgs.push(
       "--network",
       options.workerNetworkName,

@@ -108,6 +108,16 @@ jobs:
             platform: linux/arm64
             platform_slug: arm64
             runner: ubuntu-24.04-arm
+          - target: http-proxy-runtime
+            image: sandy-http-proxy
+            platform: linux/amd64
+            platform_slug: amd64
+            runner: ubuntu-24.04
+          - target: http-proxy-runtime
+            image: sandy-http-proxy
+            platform: linux/arm64
+            platform_slug: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Checkout
         uses: actions/checkout@v6.0.2
@@ -179,6 +189,7 @@ jobs:
           - image: sandy-subagent
           - image: sandy-mcp-proxy
           - image: sandy-network-guard
+          - image: sandy-http-proxy
     steps:
       - name: Download image digests
         uses: actions/download-artifact@v8

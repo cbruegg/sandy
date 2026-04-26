@@ -177,7 +177,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       });
 
       try {
-        await this.waitForProxyReady(
+        await this.attachProxyControlChannelAndWaitForReady(
           proxyChild,
           proxyContainerName,
           async (proxyRequest) => await this.options.resolveHttpProxyRequest!(proxyRequest),
@@ -239,9 +239,17 @@ export class DockerSandboxRunner implements SandboxRunner {
       dockerArgs.push("--add-host", "sandy-http-proxy:127.0.0.1");
     }
 
-    if (this.options.httpProxyCaCertPath) {
-      dockerArgs.push("-v", `${this.options.httpProxyCaCertPath}:/run/sandy-ca.pem:ro`);
-      dockerArgs.push("-e", "SSL_CERT_FILE=/run/sandy-ca.pem");
+    if (httpProxyUrl) {
+      // The proxy CA must be present when proxying is enabled; the earlier
+      // assertion guarantees this, but we assert again at the point of use
+      // so the dependency is visible here.
+      if (!this.options.httpProxyCaCertPath) {
+        throw new Error("HTTP proxy CA cert path is required when proxy URL is set.");
+      }
+      // Mount the Sandy CA into the system anchors directory so the worker
+      // retains the default system trust store. The entrypoint runs
+      // update-ca-certificates to refresh the bundle before starting.
+      dockerArgs.push("-v", `${this.options.httpProxyCaCertPath}:/etc/pki/trust/anchors/sandy-ca.pem:ro`);
     }
 
     if (workerCodexHomeTempDir) {
@@ -710,16 +718,15 @@ export class DockerSandboxRunner implements SandboxRunner {
     }
   }
 
-  private async launchNetworkGuard(taskId: string, requireNetworkNamespace: boolean): Promise<StartedNetworkGuard | null> {
+  private async launchNetworkGuard(taskId: string, needsNamespaceHolder: boolean): Promise<StartedNetworkGuard | null> {
     return await launchNetworkGuardContainer({
       taskId,
       workerNetwork: this.options.workerNetwork,
       networkGuardImage: this.options.networkGuardImage,
       workerNetworkName: this.options.workerNetworkName,
-      additionalAllowedHosts: [],
       // HTTP proxying still needs a shared namespace container even when the
       // worker network mode is unrestricted, because the proxy binds localhost.
-      requireNetworkNamespace,
+      needsNamespaceHolder,
       handshakeTimeoutMs: this.handshakeTimeoutMs,
       spawnImpl: this.spawnImpl,
       setTimeoutImpl: this.setTimeoutImpl,
@@ -728,7 +735,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     });
   }
 
-  private async waitForProxyReady(
+  private async attachProxyControlChannelAndWaitForReady(
     proxyChild: ChildProcessWithoutNullStreams,
     containerName: string,
     resolveHttpProxyRequest: (request: HttpProxyAuthRequestMessage) => Promise<HttpProxyAuthResponseMessage>,
@@ -777,8 +784,12 @@ export class DockerSandboxRunner implements SandboxRunner {
             this.clearTimeoutImpl(timer);
             reject(new Error(message.message ?? "HTTP proxy container failed during startup."));
           }
-        } catch {
-          // Ignore non-JSON lines
+        } catch (error) {
+          logger.error("sandbox.http_proxy_protocol_error", {
+            containerName,
+            line: line.trim(),
+            message: error instanceof Error ? error.message : "Invalid proxy control message.",
+          });
         }
       });
 
