@@ -29,6 +29,13 @@ COPY --from=build /app/dist ./dist
 FROM runtime-base AS mcp-proxy-runtime
 CMD ["bun", "dist/entrypoint-mcp-proxy.js"]
 
+# HTTP proxy runtime (Node.js, not Bun, because raw TLS socket upgrades are more reliable in Node).
+FROM node:25-alpine AS http-proxy-runtime
+RUN apk add --no-cache openssl
+WORKDIR /app
+COPY --from=build /app/dist/entrypoint-http-proxy.js ./
+CMD ["node", "entrypoint-http-proxy.js"]
+
 # Dedicated network guard runtime that owns the worker's network namespace.
 FROM opensuse/tumbleweed:latest AS network-guard-runtime
 WORKDIR /app

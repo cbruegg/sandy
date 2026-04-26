@@ -202,6 +202,7 @@ HTTP token behavior:
 - Workers still reach the proxy as `sandy-http-proxy:8081`; Sandy injects that hostname inside the shared namespace.
 - The MCP sidecar remains separate and runs behind its own network-guard container for network isolation.
 - HTTPS connections are handled via TLS interception (MITM). Sandy generates a root CA at startup, provisions per-host leaf certificates, and workers trust Sandy's CA for HTTPS request inspection and header rewriting.
+- The HTTP proxy container runs on Node.js rather than Bun. Raw socket TLS upgrades for MITM are more reliable in Node, and the container boundary means the proxy runtime can differ from the host runtime without affecting it.
 
 Update behavior:
 
@@ -250,10 +251,16 @@ Build the worker image:
 docker build --target worker-runtime -t sandy-subagent:latest .
 ```
 
-Build the sidecar image (hosts Sandy's MCP proxy and the standalone HTTP proxy entrypoint):
+Build the sidecar image (hosts Sandy's MCP proxy):
 
 ```bash
 docker build --target mcp-proxy-runtime -t sandy-mcp-proxy:latest .
+```
+
+Build the HTTP proxy image:
+
+```bash
+docker build --target http-proxy-runtime -t sandy-http-proxy:latest .
 ```
 
 Build the network-guard image:
@@ -265,10 +272,10 @@ docker build --target network-guard-runtime -t sandy-network-guard:latest .
 The host runtime is intentionally not containerized, because it is designed to mediate host-system access directly.
 
 Published Sandy executables built in GitHub Actions are baked with the matching `github.sha` and default to
-`ghcr.io/<owner>/sandy-subagent:sha-<git revision>`, `ghcr.io/<owner>/sandy-mcp-proxy:sha-<git revision>`, and
-`ghcr.io/<owner>/sandy-network-guard:sha-<git revision>`.
-Local `bun start` runs and locally built executables fall back to `sandy-subagent:latest` and
-`sandy-mcp-proxy:latest` for the worker-side images unless the config file overrides them.
+`ghcr.io/<owner>/sandy-subagent:sha-<git revision>`, `ghcr.io/<owner>/sandy-mcp-proxy:sha-<git revision>`,
+`ghcr.io/<owner>/sandy-http-proxy:sha-<git revision>`, and `ghcr.io/<owner>/sandy-network-guard:sha-<git revision>`.
+Local `bun start` runs and locally built executables fall back to `sandy-subagent:latest`, `sandy-mcp-proxy:latest`,
+and `sandy-http-proxy:latest` for the worker-side images unless the config file overrides them.
 
 Build the Bun bundles and verify linting, TypeScript type-checking, and dependency hygiene:
 

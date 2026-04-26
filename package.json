@@ -11,7 +11,7 @@
     "lint": "eslint src --max-warnings 0",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "clean": "rm -rf dist bin",
-    "build:bundle": "mkdir -p dist && bun ./scripts/build-with-constants.mjs ./src/entrypoint-main.ts ./src/entrypoint-local-test.ts ./src/entrypoint-updater.ts ./src/entrypoint-worker.ts ./src/entrypoint-mcp-proxy.ts ./src/entrypoint-http-proxy.ts --outdir dist --target bun --sourcemap",
+    "build:bundle": "mkdir -p dist && bun ./scripts/build-with-constants.mjs ./src/entrypoint-main.ts ./src/entrypoint-local-test.ts ./src/entrypoint-updater.ts ./src/entrypoint-worker.ts ./src/entrypoint-mcp-proxy.ts --outdir dist --target bun --sourcemap && bun ./scripts/build-with-constants.mjs ./src/entrypoint-http-proxy.ts ./src/http/http-proxy-test-exports.ts --outdir dist --target node --sourcemap",
     "build:exe": "bun run prepare:matrix-crypto && mkdir -p bin && bun ./scripts/build-with-constants.mjs --compile --outfile bin/sandy --sourcemap ./src/entrypoint-main.ts",
     "build:exe:updater": "mkdir -p bin && bun ./scripts/build-with-constants.mjs --compile --outfile bin/sandy-updater --sourcemap ./src/entrypoint-updater.ts",
     "build:exe:worker": "mkdir -p bin && bun ./scripts/build-with-constants.mjs --compile --outfile bin/sandy-worker --sourcemap ./src/entrypoint-worker.ts",
@@ -20,7 +20,7 @@
     "build": "bun run clean && bun run lint && bun run typecheck && bun run build:bundle && bun run knip",
     "start": "bun run src/entrypoint-main.ts",
     "start:local-test": "bun run src/entrypoint-local-test.ts",
-    "test": "bun run build && bun test"
+    "test": "bun run build && bun test && node --experimental-strip-types --test src/http/http-proxy.node-e2e.mts"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
