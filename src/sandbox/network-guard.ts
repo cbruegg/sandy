@@ -16,6 +16,7 @@ type LaunchNetworkGuardOptions = {
   workerNetwork: WorkerNetworkConfig;
   networkGuardImage?: string;
   workerNetworkName?: string | null;
+  additionalAllowedHosts?: string[];
   handshakeTimeoutMs: number;
   spawnImpl?: typeof spawn;
   setTimeoutImpl?: typeof setTimeout;
@@ -60,11 +61,12 @@ export async function launchNetworkGuardContainer(
   ];
 
   if (options.workerNetworkName) {
+    const allowedHosts = [mcpProxyContainerAlias, ...(options.additionalAllowedHosts ?? [])];
     dockerArgs.push(
       "--network",
       options.workerNetworkName,
       "-e",
-      `SANDY_NETWORK_GUARD_ALLOWED_HOSTS=${mcpProxyContainerAlias}`,
+      `SANDY_NETWORK_GUARD_ALLOWED_HOSTS=${allowedHosts.join(",")}`,
     );
   }
 

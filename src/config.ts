@@ -184,12 +184,23 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
       sidecar_image: defaultImages.sidecarImage,
       servers: {},
     }),
+    http: z.object({
+      tokens: z.record(z.string(), z.object({
+        value: z.string().min(1),
+      }).strict()).default({}),
+    }).default({
+      tokens: {},
+    }),
     approvals: z.object({
       mcp: z.record(z.string(), z.object({
         always_allow_tools: z.array(z.string()).default([]),
       }).strict()).default({}),
+      http: z.record(z.string(), z.object({
+        always_allow_hosts: z.array(z.string()).default([]),
+      }).strict()).default({}),
     }).default({
       mcp: {},
+      http: {},
     }),
     updates: z.object({
       mode: updateModeSchema.default(DEFAULT_UPDATE_MODE),
@@ -206,6 +217,11 @@ export type McpServerConfig = {
   transport: "streamable_http";
   url: string;
   oauthScopes: string[];
+};
+
+export type HttpTokenConfig = {
+  value: string;
+  allowedHosts: string[];
 };
 
 export type SandyUpdateMode = z.infer<typeof updateModeSchema>;
@@ -264,7 +280,9 @@ export type SandyConfig = {
   sttModel: string;
   authMode: SandyAuthMode;
   mcpServers: Record<string, McpServerConfig>;
+  httpTokens: Record<string, HttpTokenConfig>;
   persistentMcpApprovals: Record<string, string[]>;
+  persistentHttpApprovals: Record<string, string[]>;
   updateMode: SandyUpdateMode;
   // The resolved image values alone are not enough here because a user may
   // explicitly pin an image to the same string as the baked default. The
@@ -375,8 +393,17 @@ export function parseConfigToml(
     mcpServers: Object.fromEntries(
       Object.entries(parsed.mcp.servers).map(([identifier, server]) => [identifier, normalizeMcpServerConfig(server)]),
     ),
+    httpTokens: Object.fromEntries(
+      Object.entries(parsed.http.tokens).map(([identifier, token]) => [identifier, {
+        value: token.value,
+        allowedHosts: parsed.approvals.http[identifier]?.always_allow_hosts ?? [],
+      }]),
+    ),
     persistentMcpApprovals: Object.fromEntries(
       Object.entries(parsed.approvals.mcp).map(([identifier, approval]) => [identifier, approval.always_allow_tools]),
+    ),
+    persistentHttpApprovals: Object.fromEntries(
+      Object.entries(parsed.approvals.http).map(([identifier, approval]) => [identifier, approval.always_allow_hosts]),
     ),
     updateMode: parsed.updates.mode,
     explicitImageOverrides: parsedFile.explicitImageOverrides,

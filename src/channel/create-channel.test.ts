@@ -33,7 +33,9 @@ function baseConfig(): Omit<SandyConfig, "channel"> {
       mode: "ambient_codex_auth",
     },
     mcpServers: {},
+    httpTokens: {},
     persistentMcpApprovals: {},
+    persistentHttpApprovals: {},
     updateMode: "disabled",
     explicitImageOverrides: {
       workerImage: false,

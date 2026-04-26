@@ -5,6 +5,12 @@ type McpToolGrant = {
   toolName: string;
 };
 
+type HttpTokenGrant = {
+  tokenId: string;
+  host: string;
+  consumed: boolean;
+};
+
 type TaskStatus =
   | "idle"
   | "running"
@@ -22,6 +28,7 @@ export type ActiveTaskState = {
   lastActivityAt: string;
   pendingPrivilegeRequest: PrivilegeRequest | null;
   approvedMcpTools: McpToolGrant[];
+  approvedHttpTokens: HttpTokenGrant[];
   workerConnected: boolean;
   hasReportableOutput: boolean;
   taskSummary: string | null;

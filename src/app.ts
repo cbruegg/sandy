@@ -115,7 +115,9 @@ export async function startApp(): Promise<void> {
 
   const mcpProxyAccess = new SandyMcpProxyAccess();
   const mcpEnabled = Object.keys(config.mcpServers).length > 0;
-  const workerNetworkName = mcpEnabled ? createMcpWorkerNetworkName() : null;
+  const httpTokensEnabled = Object.keys(config.httpTokens).length > 0;
+  const sidecarEnabled = mcpEnabled || httpTokensEnabled;
+  const workerNetworkName = sidecarEnabled ? createMcpWorkerNetworkName() : null;
 
   const mcpWorkerLaunchConfigBuilder = new McpWorkerLaunchConfigBuilder(
     config.mcpServers,
@@ -137,6 +139,7 @@ export async function startApp(): Promise<void> {
       networkGuardImage: config.networkGuardImage,
       workerNetwork: config.workerNetwork,
       workerNetworkName,
+      httpTokensEnabled,
     },
   );
 
@@ -148,15 +151,17 @@ export async function startApp(): Promise<void> {
     sandboxRunner,
     sessionStore,
     privilegeBroker: new PrivilegeBrokerImpl(),
-    persistentApprovalStore: new TomlPersistentApprovalStore(config.configFilePath, config.persistentMcpApprovals),
+    persistentApprovalStore: new TomlPersistentApprovalStore(config.configFilePath, config.persistentMcpApprovals, config.persistentHttpApprovals),
   });
 
-  const sidecarManager = !mcpEnabled || !workerNetworkName ? null : new McpSidecarManager({
+  const sidecarManager = !sidecarEnabled || !workerNetworkName ? null : new McpSidecarManager({
     configDirectory: config.configDirectory,
     mcpServers: config.mcpServers,
+    httpTokens: config.httpTokens,
     workerNetworkName,
     sidecarImage: config.mcpSidecarImage,
     authorizeToolCall: (input) => orchestrator.authorizeMcpToolCall(input),
+    authorizeHttpTokenUse: (input) => orchestrator.authorizeHttpTokenUse(input),
   }, mcpProxyAccess);
 
   await sidecarManager?.start();

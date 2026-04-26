@@ -58,4 +58,14 @@ export const workerToolDefinitions = {
       type: z.literal("complete_task"),
     }).strict(),
   },
+  request_http_token: {
+    description: "Ask the host for permission to use a preconfigured HTTP token. You must request approval before making HTTP requests that use placeholder headers like 'Authorization: Bearer SANDY_TOKEN_<tokenId>'. The host will inject the real token value into proxied HTTP requests if approved.",
+    requiresPrivilegeEscalation: true,
+    schema: z.object({
+      type: z.literal("request_http_token"),
+      tokenId: z.string(),
+      host: z.string(),
+      reason: z.string(),
+    }).strict(),
+  },
 } as const satisfies Record<string, WorkerToolDefinition>;

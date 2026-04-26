@@ -54,6 +54,8 @@ export class SandyOrchestrator {
     this.persistentApprovalStore = deps.persistentApprovalStore ?? {
       isAlwaysAllowed: () => false,
       allowTool: async () => {},
+      isHttpTokenAlwaysAllowed: () => false,
+      allowHttpToken: async () => {},
     };
   }
 
@@ -222,6 +224,15 @@ export class SandyOrchestrator {
           payload: call,
         });
         return;
+      case "request_http_token":
+        await this.presentPrivilegeRequestToUser(chatId, session, {
+          kind: "http_token_use",
+          requestId: randomUUID(),
+          tokenId: call.tokenId,
+          host: call.host,
+          reason: call.reason,
+        });
+        return;
     }
 
     assertNever(call); // would fail at compile-time
@@ -373,6 +384,7 @@ export class SandyOrchestrator {
           lastActivityAt: now,
           pendingPrivilegeRequest: null,
           approvedMcpTools: [],
+          approvedHttpTokens: [],
           workerConnected: false,
           hasReportableOutput: false,
           taskSummary: null,
@@ -475,6 +487,8 @@ export class SandyOrchestrator {
     let result: PrivilegeResolutionResult;
     if (request.kind === "mcp_tool_call") {
       result = await this.resolvePendingMcpPrivilegeRequest(session, request, decision);
+    } else if (request.kind === "http_token_use") {
+      result = await this.resolvePendingHttpTokenRequest(session, request, decision);
     } else if (decision === "deny") {
       result = {
         requestId: request.requestId,
@@ -496,6 +510,8 @@ export class SandyOrchestrator {
 
     if (request.kind === "host_operation") {
       await this.requireHandle(activeTask.taskId).resolvePrivilege(result);
+    } else if (request.kind === "http_token_use") {
+      await this.requireHandle(activeTask.taskId).resolvePrivilege(result);
     } else {
       this.pendingMcpPrivilegeResolvers.get(request.requestId)?.(result);
       this.pendingMcpPrivilegeResolvers.delete(request.requestId);
@@ -512,11 +528,13 @@ export class SandyOrchestrator {
       return;
     }
 
+    const requestType = resolveRequestTypeLabel(request);
+
     logger.info("task.privilege_requested", {
       chatId,
       taskId: activeTask.taskId,
       requestId: request.requestId,
-      requestType: request.kind === "host_operation" ? request.payload.type : request.toolName,
+      requestType,
     });
 
     if (request.kind === "host_operation" && !isSupportedPrivilegeRequest(request.payload)) {
@@ -550,13 +568,26 @@ export class SandyOrchestrator {
   }
 
   private buildUnsupportedPrivilegeResult(request: PrivilegeRequest): PrivilegeResolutionResult {
-    return {
-      requestId: request.requestId,
-      outcome: "failed",
-      message: request.kind === "host_operation"
-        ? messages.unsupportedPrivilegeRequestType(request.payload.type)
-        : messages.unsupportedMcpPrivilegeRequest(request.serverId, request.toolName),
-    };
+    switch (request.kind) {
+      case "host_operation":
+        return {
+          requestId: request.requestId,
+          outcome: "failed",
+          message: messages.unsupportedPrivilegeRequestType(request.payload.type),
+        };
+      case "mcp_tool_call":
+        return {
+          requestId: request.requestId,
+          outcome: "failed",
+          message: messages.unsupportedMcpPrivilegeRequest(request.serverId, request.toolName),
+        };
+      case "http_token_use":
+        return {
+          requestId: request.requestId,
+          outcome: "failed",
+          message: messages.httpTokenNotConfigured(request.tokenId),
+        };
+    }
   }
 
   private async sendPrivilegeResolutionMessage(
@@ -879,10 +910,166 @@ export class SandyOrchestrator {
     }
     task.approvedMcpTools.push({ serverId, toolName });
   }
+
+  authorizeHttpTokenUse(input: {
+    taskId: string;
+    tokenId: string;
+    host: string;
+  }): Promise<PrivilegeResolutionResult> {
+    const chatId = this.taskChatIds.get(input.taskId);
+    if (!chatId) {
+      return Promise.resolve({
+        requestId: randomUUID(),
+        outcome: "failed",
+        message: messages.taskNotActive(input.taskId),
+      });
+    }
+
+    const session = this.deps.sessionStore.getOrCreate(chatId);
+    const activeTask = session.activeTask;
+    if (!activeTask || activeTask.taskId !== input.taskId) {
+      return Promise.resolve({
+        requestId: randomUUID(),
+        outcome: "failed",
+        message: messages.taskNotActive(input.taskId),
+      });
+    }
+
+    if (this.isHttpTokenGrantAllowed(activeTask, input.tokenId, input.host)) {
+      return Promise.resolve({
+        requestId: randomUUID(),
+        outcome: "approved",
+        message: messages.httpTokenAllowedForWorkerSession(input.tokenId, input.host),
+        scope: "worker_session",
+      });
+    }
+
+    if (this.persistentApprovalStore.isHttpTokenAlwaysAllowed(input.tokenId, input.host)) {
+      return Promise.resolve({
+        requestId: randomUUID(),
+        outcome: "approved",
+        message: messages.httpTokenAllowedFromPersistentConfig(input.tokenId, input.host),
+        scope: "always",
+      });
+    }
+
+    const onceGrant = activeTask.approvedHttpTokens.find(
+      (entry) => entry.tokenId === input.tokenId && entry.host === input.host && !entry.consumed,
+    );
+    if (onceGrant) {
+      onceGrant.consumed = true;
+      return Promise.resolve({
+        requestId: randomUUID(),
+        outcome: "approved",
+        message: messages.httpTokenAllowedOnce(input.tokenId, input.host),
+        scope: "once",
+      });
+    }
+
+    return Promise.resolve({
+      requestId: randomUUID(),
+      outcome: "denied",
+      message: messages.httpTokenProxyRejected(input.tokenId),
+    });
+  }
+
+  private async resolvePendingHttpTokenRequest(
+    session: SessionState,
+    request: Extract<PrivilegeRequest, { kind: "http_token_use" }>,
+    decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
+  ): Promise<PrivilegeResolutionResult> {
+    const activeTask = session.activeTask;
+    if (!activeTask) {
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: messages.taskNoLongerActive(session.chatId),
+      };
+    }
+
+    switch (decision) {
+      case "deny":
+        return {
+          requestId: request.requestId,
+          outcome: "denied",
+          message: messages.httpTokenDenied(request.tokenId, request.host),
+        };
+      case "approve":
+      case "approve_once":
+        this.grantHttpTokenOnce(activeTask, request.tokenId, request.host);
+        return {
+          requestId: request.requestId,
+          outcome: "approved",
+          message: messages.httpTokenAllowedOnce(request.tokenId, request.host),
+          scope: "once",
+        };
+      case "approve_worker_session":
+        this.grantHttpTokenSessionAccess(activeTask, request.tokenId, request.host);
+        return {
+          requestId: request.requestId,
+          outcome: "approved",
+          message: messages.httpTokenAllowedForWorkerSession(request.tokenId, request.host),
+          scope: "worker_session",
+        };
+      case "approve_always":
+        await this.persistentApprovalStore.allowHttpToken(request.tokenId, request.host);
+        return {
+          requestId: request.requestId,
+          outcome: "approved",
+          message: messages.httpTokenAllowedAndPersisted(request.tokenId, request.host),
+          scope: "always",
+        };
+      default:
+        assertNever(decision);
+    }
+  }
+
+  private isHttpTokenGrantAllowed(
+    task: NonNullable<SessionState["activeTask"]>,
+    tokenId: string,
+    host: string,
+  ): boolean {
+    return task.approvedHttpTokens.some(
+      (entry) => entry.tokenId === tokenId && entry.host === host && !entry.consumed,
+    );
+  }
+
+  private grantHttpTokenOnce(
+    task: NonNullable<SessionState["activeTask"]>,
+    tokenId: string,
+    host: string,
+  ): void {
+    task.approvedHttpTokens.push({ tokenId, host, consumed: false });
+  }
+
+  private grantHttpTokenSessionAccess(
+    task: NonNullable<SessionState["activeTask"]>,
+    tokenId: string,
+    host: string,
+  ): void {
+    const existing = task.approvedHttpTokens.find(
+      (entry) => entry.tokenId === tokenId && entry.host === host && !entry.consumed,
+    );
+    if (existing) {
+      existing.consumed = true;
+    }
+    task.approvedHttpTokens.push({ tokenId, host, consumed: false });
+  }
 }
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled main agent decision: ${JSON.stringify(value)}`);
+}
+
+function resolveRequestTypeLabel(request: PrivilegeRequest): string {
+  switch (request.kind) {
+    case "host_operation":
+      return request.payload.type;
+    case "mcp_tool_call":
+      return request.toolName;
+    case "http_token_use":
+      return `http:${request.tokenId}@${request.host}`;
+  }
 }
 
 function mapApprovalDecisionToBoolean(

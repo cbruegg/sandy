@@ -345,16 +345,28 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   }
 
   async sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void> {
+    let requestType: string;
+    switch (request.kind) {
+      case "host_operation":
+        requestType = request.payload.type;
+        break;
+      case "mcp_tool_call":
+        requestType = `${request.serverId}.${request.toolName}`;
+        break;
+      case "http_token_use":
+        requestType = `http:${request.tokenId}@${request.host}`;
+        break;
+    }
     logger.info("matrix.send_privilege_request", {
       chatId,
       requestId: request.requestId,
-      requestType: request.kind === "host_operation" ? request.payload.type : `${request.serverId}.${request.toolName}`,
+      requestType,
     });
     await this.sendNotice(chatId, messages.privilegeRequestPrompt(request));
     await this.sendPoll(
       chatId,
       "Privilege request",
-      request.kind === "mcp_tool_call"
+      request.kind === "mcp_tool_call" || request.kind === "http_token_use"
         ? [
             {
               answerId: "approve_once",

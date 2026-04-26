@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
-import type { McpServerConfig } from "../config.js";
+import type { HttpTokenConfig, McpServerConfig } from "../config.js";
 import { logger } from "../logger.js";
 import type { PrivilegeResolutionResult } from "../types.js";
 import { SandyMcpProxyAccess } from "./proxy-access.js";
@@ -12,12 +12,16 @@ import { mcpWorkerNetworkNamePrefix } from "./worker-network-name.js";
 import {
   parseMcpSidecarToHostMessage,
   type McpSidecarAuthorizationRequestMessage,
+  type McpSidecarHttpTokenAuthorizationRequestMessage,
   type McpSidecarLogMessage,
 } from "./sidecar-protocol.js";
+
+const httpProxyContainerAlias = "sandy-http-proxy";
 
 type McpSidecarManagerOptions = {
   configDirectory: string;
   mcpServers: Record<string, McpServerConfig>;
+  httpTokens?: Record<string, HttpTokenConfig>;
   workerNetworkName: string;
   sidecarImage: string;
   startupTimeoutMs?: number;
@@ -29,6 +33,11 @@ type McpSidecarManagerOptions = {
     serverId: string;
     toolName: string;
     arguments: unknown;
+  }) => Promise<PrivilegeResolutionResult>;
+  authorizeHttpTokenUse?: (input: {
+    taskId: string;
+    tokenId: string;
+    host: string;
   }) => Promise<PrivilegeResolutionResult>;
 };
 
@@ -54,7 +63,9 @@ export class McpSidecarManager {
   }
 
   async start(): Promise<void> {
-    if (this.started || Object.keys(this.options.mcpServers).length === 0) {
+    const hasMCP = Object.keys(this.options.mcpServers).length > 0;
+    const hasHttpTokens = Boolean(this.options.httpTokens && Object.keys(this.options.httpTokens).length > 0);
+    if (this.started || (!hasMCP && !hasHttpTokens)) {
       return;
     }
 
@@ -64,7 +75,7 @@ export class McpSidecarManager {
     await this.pruneStaleNetworks();
     await this.runDockerCommand(["network", "create", this.options.workerNetworkName]);
 
-    const child = this.spawnImpl("docker", [
+    const dockerArgs = [
       "run",
       "--rm",
       "-i",
@@ -74,12 +85,17 @@ export class McpSidecarManager {
       this.options.workerNetworkName,
       "--network-alias",
       mcpProxyContainerAlias,
+      "--network-alias",
+      httpProxyContainerAlias,
       "--add-host",
       this.hostGatewayAlias,
       "-v",
       `${oauthStateDirectory}:${sidecarOauthMountPath}`,
-      this.options.sidecarImage,
-    ], {
+    ];
+
+    dockerArgs.push(this.options.sidecarImage);
+
+    const child = this.spawnImpl("docker", dockerArgs, {
       stdio: ["pipe", "pipe", "pipe"],
     });
     this.child = child;
@@ -130,6 +146,10 @@ export class McpSidecarManager {
             this.dispatchAuthorizationRequest(message);
             return;
           }
+          if (message.type === "http_token_authorization_request") {
+            this.dispatchHttpTokenAuthorizationRequest(message);
+            return;
+          }
           if (message.type === "log") {
             this.forwardSidecarLog(message);
             return;
@@ -173,6 +193,7 @@ export class McpSidecarManager {
       oauthStateDirectory: sidecarOauthMountPath,
       workerProxyTokenSecret: this.access.sharedSecret,
       mcpServers: this.options.mcpServers,
+      httpTokens: this.options.httpTokens ?? {},
     });
 
     try {
@@ -243,6 +264,57 @@ export class McpSidecarManager {
 
     this.sendToSidecar({
       type: "authorization_result",
+      requestId: message.requestId,
+      result,
+    });
+  }
+
+  private dispatchHttpTokenAuthorizationRequest(message: McpSidecarHttpTokenAuthorizationRequestMessage): void {
+    void this.handleHttpTokenAuthorizationRequest(message).catch((error) => {
+      const failureMessage = error instanceof Error ? error.message : "Unknown HTTP token authorization failure.";
+
+      logger.warn("mcp.sidecar.http_token_authorization_failed", {
+        requestId: message.requestId,
+        taskId: message.taskId,
+        tokenId: message.tokenId,
+        host: message.host,
+        message: failureMessage,
+      });
+
+      this.sendToSidecar({
+        type: "http_token_authorization_result",
+        requestId: message.requestId,
+        result: {
+          requestId: message.requestId,
+          outcome: "failed",
+          message: failureMessage,
+        } satisfies PrivilegeResolutionResult,
+      });
+    });
+  }
+
+  private async handleHttpTokenAuthorizationRequest(message: McpSidecarHttpTokenAuthorizationRequestMessage): Promise<void> {
+    if (!this.options.authorizeHttpTokenUse) {
+      this.sendToSidecar({
+        type: "http_token_authorization_result",
+        requestId: message.requestId,
+        result: {
+          requestId: message.requestId,
+          outcome: "failed",
+          message: "HTTP token authorization is not configured.",
+        } satisfies PrivilegeResolutionResult,
+      });
+      return;
+    }
+
+    const result = await this.options.authorizeHttpTokenUse({
+      taskId: message.taskId,
+      tokenId: message.tokenId,
+      host: message.host,
+    });
+
+    this.sendToSidecar({
+      type: "http_token_authorization_result",
       requestId: message.requestId,
       result,
     });

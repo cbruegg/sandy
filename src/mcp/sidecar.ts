@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { configureLogger } from "../logger.js";
+import { SandyHttpProxy } from "../http/http-proxy.js";
 import { SandyMcpProxy } from "./proxy.js";
 import { SandyMcpProxyAccess } from "./proxy-access.js";
 import { McpServerRegistryImpl } from "./server-registry.js";
@@ -30,25 +31,54 @@ export async function main(): Promise<void> {
   const access = new SandyMcpProxyAccess(bootstrap.workerProxyTokenSecret);
   const registry = new McpServerRegistryImpl(bootstrap.oauthStateDirectory, bootstrap.mcpServers);
   const pendingAuthorization = new Map<string, (result: PrivilegeResolutionResult) => void>();
+  const pendingHttpTokenAuthorization = new Map<string, (result: PrivilegeResolutionResult) => void>();
   let shuttingDown = false;
 
-  const proxy = new SandyMcpProxy({
-    access,
-    registry,
-    port: 8080,
-    authorizeToolCall: async (request) => {
-      const requestId = randomUUID();
-      send({
-        type: "authorization_request",
-        requestId,
-        ...request,
-      });
+  const hasMcpServers = Object.keys(bootstrap.mcpServers).length > 0;
+  const hasHttpTokens = Object.keys(bootstrap.httpTokens).length > 0;
 
-      return await new Promise<PrivilegeResolutionResult>((resolve) => {
-        pendingAuthorization.set(requestId, resolve);
-      });
-    },
-  });
+  let mcpProxy: SandyMcpProxy | null = null;
+  let httpProxy: SandyHttpProxy | null = null;
+
+  if (hasMcpServers) {
+    mcpProxy = new SandyMcpProxy({
+      access,
+      registry,
+      port: 8080,
+      authorizeToolCall: async (request) => {
+        const requestId = randomUUID();
+        send({
+          type: "authorization_request",
+          requestId,
+          ...request,
+        });
+
+        return await new Promise<PrivilegeResolutionResult>((resolve) => {
+          pendingAuthorization.set(requestId, resolve);
+        });
+      },
+    });
+  }
+
+  if (hasHttpTokens) {
+    httpProxy = new SandyHttpProxy({
+      access,
+      httpTokens: bootstrap.httpTokens,
+      port: 8081,
+      authorizeHttpTokenUse: async (request) => {
+        const requestId = randomUUID();
+        send({
+          type: "http_token_authorization_request",
+          requestId,
+          ...request,
+        });
+
+        return await new Promise<PrivilegeResolutionResult>((resolve) => {
+          pendingHttpTokenAuthorization.set(requestId, resolve);
+        });
+      },
+    });
+  }
 
   input.on("line", (line) => {
     const trimmed = line.trim();
@@ -63,9 +93,14 @@ export async function main(): Promise<void> {
         pendingAuthorization.delete(message.requestId);
         return;
       }
+      if (message.type === "http_token_authorization_result") {
+        pendingHttpTokenAuthorization.get(message.requestId)?.(message.result);
+        pendingHttpTokenAuthorization.delete(message.requestId);
+        return;
+      }
       if (message.type === "shutdown") {
         shuttingDown = true;
-        void proxy.stop().finally(() => {
+        void shutdownAll().finally(() => {
           process.exit(0);
         });
       }
@@ -77,13 +112,23 @@ export async function main(): Promise<void> {
     }
   });
 
+  async function shutdownAll(): Promise<void> {
+    const stops: Promise<void>[] = [];
+    if (mcpProxy) stops.push(mcpProxy.stop());
+    if (httpProxy) stops.push(httpProxy.stop());
+    await Promise.all(stops);
+  }
+
   try {
-    await proxy.start();
+    const starts: Promise<void>[] = [];
+    if (mcpProxy) starts.push(mcpProxy.start());
+    if (httpProxy) starts.push(httpProxy.start());
+    await Promise.all(starts);
     send({ type: "ready" });
   } catch (error) {
     send({
       type: "fatal_error",
-      message: error instanceof Error ? error.message : "MCP sidecar failed to start.",
+      message: error instanceof Error ? error.message : "Sidecar failed to start.",
     });
     process.exit(1);
   }

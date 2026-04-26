@@ -223,10 +223,22 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
   }
 
   async sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void> {
+    let requestType: string;
+    switch (request.kind) {
+      case "host_operation":
+        requestType = request.payload.type;
+        break;
+      case "mcp_tool_call":
+        requestType = `${request.serverId}.${request.toolName}`;
+        break;
+      case "http_token_use":
+        requestType = `http:${request.tokenId}@${request.host}`;
+        break;
+    }
     logger.info("telegram.send_privilege_request", {
       chatId,
       requestId: request.requestId,
-      requestType: request.kind === "host_operation" ? request.payload.type : `${request.serverId}.${request.toolName}`,
+      requestType,
     });
     await this.sendFormattedMessage(chatId, messages.privilegeRequestPrompt(request), {
       reply_markup: {
@@ -300,7 +312,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
 }
 
 function buildPrivilegeKeyboard(request: PrivilegeRequest): Array<Array<{ text: string; callback_data: string }>> {
-  if (request.kind === "mcp_tool_call") {
+  if (request.kind === "mcp_tool_call" || request.kind === "http_token_use") {
     return [
       [
         { text: buttonLabels.approve, callback_data: `approve:${request.requestId}` },

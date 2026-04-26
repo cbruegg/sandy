@@ -35,6 +35,7 @@ type DockerSandboxRunnerOptions = {
   spawnImpl?: typeof spawn;
   setTimeoutImpl?: typeof setTimeout;
   clearTimeoutImpl?: typeof clearTimeout;
+  httpTokensEnabled?: boolean;
 };
 
 type ActiveTaskContainer = {
@@ -164,6 +165,14 @@ export class DockerSandboxRunner implements SandboxRunner {
 
     for (const [name, value] of Object.entries(workerEnvironment)) {
       dockerArgs.push("-e", `${name}=${value}`);
+    }
+
+    if (this.options.httpTokensEnabled) {
+      const proxyUrl = "http://sandy-http-proxy:8081";
+      dockerArgs.push("-e", `HTTP_PROXY=${proxyUrl}`);
+      dockerArgs.push("-e", `http_proxy=${proxyUrl}`);
+      dockerArgs.push("-e", `HTTPS_PROXY=${proxyUrl}`);
+      dockerArgs.push("-e", `https_proxy=${proxyUrl}`);
     }
 
     if (workerCodexHomeTempDir) {
@@ -602,11 +611,13 @@ export class DockerSandboxRunner implements SandboxRunner {
   }
 
   private async launchNetworkGuard(taskId: string): Promise<StartedNetworkGuard | null> {
+    const additionalAllowedHosts = this.options.httpTokensEnabled ? ["sandy-http-proxy"] : [];
     return await launchNetworkGuardContainer({
       taskId,
       workerNetwork: this.options.workerNetwork,
       networkGuardImage: this.options.networkGuardImage,
       workerNetworkName: this.options.workerNetworkName,
+      additionalAllowedHosts,
       handshakeTimeoutMs: this.handshakeTimeoutMs,
       spawnImpl: this.spawnImpl,
       setTimeoutImpl: this.setTimeoutImpl,

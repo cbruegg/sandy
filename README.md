@@ -96,6 +96,14 @@ url = "https://todoist.example/mcp"
 
 [approvals.mcp.todoist]
 # always_allow_tools = []
+
+# Optional HTTP token injection for proxied worker requests:
+
+[http.tokens.vid2text]
+# value = "real-api-key-or-token"
+
+[approvals.http.vid2text]
+# always_allow_hosts = ["api.vid2text.example"]
 ```
 
 `agent.model` optionally overrides the Codex model used by both Sandy's main agent and worker sub-agents.
@@ -183,6 +191,15 @@ MCP OAuth behavior:
 - Sandy runs upstream MCP connections from an MCP sidecar container, not from the host process directly.
 - If an MCP server runs on the same host as Sandy, use `http://host.docker.internal:<port>/...` when configuring `mcp.servers.<name>.url`.
 
+HTTP token behavior:
+
+- `http.tokens.<name>` defines a named token secret with `value`. Workers use placeholder headers like `Authorization: Bearer SANDY_TOKEN_<name>` in proxied HTTP requests. The HTTP proxy replaces these placeholders with the real token value at request time, but only if the requesting task holds an active approval for that token + host.
+- `approvals.http.<name>` persists `always allow` decisions for specific hosts via `always_allow_hosts`. This serves both as the persistent config storage and as the allowlist of destination hosts that can be approved for this token. Hosts not in this list are always rejected.
+- Workers _must_ explicitly request token use via Sandy's `request_http_token` tool before making proxied requests. This tool requires privilege escalation and follows the same approval flow as MCP tools.
+- If no approval is active when the proxy sees a placeholder token, the request is rejected immediately with HTTP 403.
+- Workers receive `HTTP_PROXY` and `HTTPS_PROXY` environment variables pointing to Sandy's HTTP proxy sidecar. Only tools that respect proxy environment variables are routed through the proxy; direct network access from workers is unchanged.
+- The HTTP proxy runs in the same sidecar container as the MCP proxy and is exposed on the worker network as `sandy-http-proxy:8081`.
+
 Update behavior:
 
 - `updates.mode` defaults to `"disabled"`.
@@ -230,7 +247,7 @@ Build the worker image:
 docker build --target worker-runtime -t sandy-subagent:latest .
 ```
 
-Build the MCP sidecar image:
+Build the sidecar image (hosts Sandy's MCP proxy and HTTP proxy):
 
 ```bash
 docker build --target mcp-proxy-runtime -t sandy-mcp-proxy:latest .
@@ -403,7 +420,7 @@ Sub-agents may request access to additional resources from the user, such as:
 - Read-only mount access to a specific directory on the host machine.
 - Read-write mount access to a specific directory on the host machine.
 - MCP tools exposed through Sandy's host-side MCP proxy.
-- Tools to send authenticated HTTPS requests through OneCLI,
+- Tools to send authenticated HTTP requests through Sandy's HTTP token proxy,
   [similar to NanoClaw](https://docs.nanoclaw.dev/concepts/security#6-credential-handling).
 
 Privilege evaluation requests are forwarded to the user verbatim, without the main agent getting to see them.
