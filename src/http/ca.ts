@@ -21,6 +21,8 @@ export async function createCertificateAuthority(): Promise<CertificateAuthority
     "-out", certPath,
     "-days", "365",
     "-subj", "/CN=Sandy Root CA/O=Sandy",
+    "-addext", "keyUsage=critical,keyCertSign,cRLSign",
+    "-addext", "basicConstraints=critical,CA:TRUE",
   ], { stdio: "ignore" });
 
   const [key, cert] = await Promise.all([
