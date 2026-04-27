@@ -15,7 +15,7 @@ type OpenAiTranscriptionResponse = {
 };
 
 const TRANSCRIPTION_PROMPT =
-  "Transcribe verbatim. Do not translate anything. Preserve all foreign words, names, and terms in their original language.";
+  "Transcribe verbatim. Do not translate anything. Preserve all foreign words, names, and terms in their original language and script, even within a sentence of different language.";
 
 export class OpenAiTranscriptionProvider implements TranscriptionProvider {
   private readonly apiKey: string;
