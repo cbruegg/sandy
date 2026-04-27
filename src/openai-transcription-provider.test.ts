@@ -39,6 +39,10 @@ test("OpenAiTranscriptionProvider uses the default OpenAI endpoint and model", a
   const body = requestInit?.body;
   assert.ok(body instanceof FormData);
   assert.equal(body.get("model"), "gpt-4o-mini-transcribe");
+  assert.equal(
+    body.get("prompt"),
+    "Transcribe verbatim. Do not translate anything. Preserve all foreign words, names, and terms in their original language.",
+  );
 });
 
 test("OpenAiTranscriptionProvider trims the base URL before appending the transcription path", async () => {

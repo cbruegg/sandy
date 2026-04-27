@@ -14,6 +14,9 @@ type OpenAiTranscriptionResponse = {
   text?: unknown;
 };
 
+const TRANSCRIPTION_PROMPT =
+  "Transcribe verbatim. Do not translate anything. Preserve all foreign words, names, and terms in their original language.";
+
 export class OpenAiTranscriptionProvider implements TranscriptionProvider {
   private readonly apiKey: string;
   private readonly baseUrl: string;
@@ -36,6 +39,7 @@ export class OpenAiTranscriptionProvider implements TranscriptionProvider {
       }),
     );
     formData.set("model", this.model);
+    formData.set("prompt", TRANSCRIPTION_PROMPT);
 
     const response = await this.fetchFn(buildTranscriptionUrl(this.baseUrl), {
       method: "POST",
