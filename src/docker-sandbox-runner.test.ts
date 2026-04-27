@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -537,6 +537,59 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
   await runner.deleteTaskShare("task-1");
   await assert.rejects(access(taskShare));
   await rm(shareRoot, { recursive: true, force: true });
+});
+
+test("DockerSandboxRunner falls back to a root Docker container when host rm fails due to permissions", async () => {
+  const shareRoot = mkdtempSync(join(tmpdir(), "sandy-share-perm-test-"));
+  const taskShare = join(shareRoot, "task-1");
+  const innerDir = join(taskShare, "inner");
+  await mkdir(innerDir, { recursive: true });
+  await writeFile(join(innerDir, "file.txt"), "data\n");
+  await chmod(innerDir, 0o000);
+
+  const invocations: Array<{ command: string; args: string[] }> = [];
+  const spawnImpl = ((command: string, args: readonly string[]) => {
+    invocations.push({ command, args: [...args] });
+    const child = new FakeChildProcess();
+    queueMicrotask(() => {
+      child.emit("exit", 0, null);
+    });
+    return child as unknown as ChildProcessWithoutNullStreams;
+  }) as typeof import("node:child_process").spawn;
+
+  const runner = new DockerSandboxRunner({
+    workerImage: "sandy-subagent:latest",
+    networkGuardImage: "sandy-network-guard:latest",
+    shareRoot,
+    openAiApiKey: null,
+    codexAuthFile: null,
+    skillsDirectory: null,
+    workerCodexBinaryPath: null,
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
+    workerCodexConfigBuilder: () => ({
+      codexConfigToml: null,
+      environment: {},
+    }),
+    spawnImpl,
+  });
+
+  try {
+    await runner.deleteTaskShare("task-1");
+  } finally {
+    await chmod(innerDir, 0o755);
+    await rm(shareRoot, { recursive: true, force: true });
+  }
+
+  const dockerRun = invocations.find((inv) => inv.command === "docker" && inv.args[0] === "run");
+  assert.ok(dockerRun, "Expected a docker run invocation for permission fallback cleanup");
+  assert.ok(dockerRun.args.includes("--rm"));
+  assert.ok(dockerRun.args.includes("--entrypoint"));
+  assert.ok(dockerRun.args.includes("rm"));
+  assert.ok(dockerRun.args.includes("-rf"));
+  assert.ok(dockerRun.args.includes("/target"));
 });
 
 test("DockerSandboxRunner mounts a writable worker Codex home from a temp path outside the task share", async () => {

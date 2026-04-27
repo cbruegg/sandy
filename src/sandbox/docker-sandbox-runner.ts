@@ -664,10 +664,71 @@ export class DockerSandboxRunner implements SandboxRunner {
 
   async deleteTaskShare(taskId: string): Promise<void> {
     const sharePath = this.getTaskSharePath(taskId);
-    await rm(sharePath, {recursive: true, force: true});
+    try {
+      await rm(sharePath, {recursive: true, force: true});
+    } catch (error) {
+      if (isPermissionError(error)) {
+        logger.warn("sandbox.share_cleanup_permission_denied", {
+          taskId,
+          sharePath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        await this.deleteTaskShareWithDocker(taskId, sharePath);
+      } else {
+        throw error;
+      }
+    }
     logger.info("sandbox.share_deleted", {
       taskId,
       sharePath,
+    });
+  }
+
+  private async deleteTaskShareWithDocker(taskId: string, sharePath: string): Promise<void> {
+    const workerImage = this.resolveWorkerImage();
+    logger.info("sandbox.share_cleanup_docker_starting", {
+      taskId,
+      sharePath,
+      workerImage,
+    });
+    return new Promise<void>((resolve, reject) => {
+      const child = this.spawnImpl("docker", [
+        "run",
+        "--rm",
+        "-v",
+        `${sharePath}:/target`,
+        "--entrypoint",
+        "rm",
+        workerImage,
+        "-rf",
+        "/target",
+      ], {
+        stdio: "ignore",
+      });
+      child.on("exit", (code) => {
+        if (code === 0) {
+          logger.info("sandbox.share_cleanup_docker_finished", {
+            taskId,
+            sharePath,
+          });
+          resolve();
+        } else {
+          logger.error("sandbox.share_cleanup_docker_failed", {
+            taskId,
+            sharePath,
+            exitCode: code,
+          });
+          reject(new Error(`Docker share cleanup exited with code ${code}`));
+        }
+      });
+      child.on("error", (error) => {
+        logger.error("sandbox.share_cleanup_docker_failed", {
+          taskId,
+          sharePath,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        reject(error);
+      });
     });
   }
 
@@ -988,6 +1049,10 @@ export class DockerSandboxRunner implements SandboxRunner {
 
 function isMissingPathError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error && error.code === "ENOENT";
+}
+
+function isPermissionError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && "code" in error && (error.code === "EACCES" || error.code === "EPERM");
 }
 
 function assertHttpProxySupportConfigured(options: DockerSandboxRunnerOptions): void {
