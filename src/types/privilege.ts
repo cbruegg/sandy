@@ -17,7 +17,15 @@ type McpToolCallPrivilegeRequest = {
   arguments: unknown;
 };
 
-export type PrivilegeRequest = HostOperationPrivilegeRequest | McpToolCallPrivilegeRequest;
+type HttpTokenUsePrivilegeRequest = {
+  kind: "http_token_use";
+  requestId: string;
+  tokenId: string;
+  host: string;
+  reason: string;
+};
+
+export type PrivilegeRequest = HostOperationPrivilegeRequest | McpToolCallPrivilegeRequest | HttpTokenUsePrivilegeRequest;
 
 export const privilegeResolutionResultSchema = z.object({
   requestId: z.string().min(1),

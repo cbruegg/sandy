@@ -29,6 +29,21 @@ COPY --from=build /app/dist ./dist
 FROM runtime-base AS mcp-proxy-runtime
 CMD ["bun", "dist/entrypoint-mcp-proxy.js"]
 
+# HTTP proxy runtime built on mitmproxy.
+# Use a glibc-based Python image so arm64 can consume mitmproxy's prebuilt wheels
+# instead of trying to compile mitmproxy-rs from source on musl.
+FROM python:3.13-slim AS http-proxy-runtime
+WORKDIR /app
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends tini \
+  && rm -rf /var/lib/apt/lists/* \
+  && pip install --no-cache-dir mitmproxy
+COPY scripts/http-proxy-addon.py /app/http-proxy-addon.py
+COPY scripts/http-proxy-supervisor.py /app/http-proxy-supervisor.py
+COPY scripts/http-proxy-entrypoint.sh /usr/local/bin/sandy-http-proxy
+RUN chmod 0755 /usr/local/bin/sandy-http-proxy
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/sandy-http-proxy"]
+
 # Dedicated network guard runtime that owns the worker's network namespace.
 FROM opensuse/tumbleweed:latest AS network-guard-runtime
 WORKDIR /app
@@ -88,6 +103,7 @@ ENV PATH="${BUN_INSTALL}/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/home
 
 COPY --from=build /app/dist ./dist
 COPY scripts/worker-entrypoint.sh /usr/local/bin/sandy-worker-entrypoint
-RUN chmod 0755 /usr/local/bin/sandy-worker-entrypoint
+COPY scripts/http-proxy-exec.sh /usr/local/bin/sandy-http-proxy-exec
+RUN chmod 0755 /usr/local/bin/sandy-worker-entrypoint /usr/local/bin/sandy-http-proxy-exec
 
 ENTRYPOINT ["/usr/local/bin/sandy-worker-entrypoint"]

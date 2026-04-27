@@ -8,6 +8,7 @@ import type { PrivilegeBroker } from "./privilege/privilege-broker.js";
 import type { SandboxHandle, SandboxRunner, LaunchTaskRequest } from "./sandbox/sandbox-runner.js";
 import { SandyOrchestrator } from "./orchestrator.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
+import { TaskRegistry } from "./task-registry.js";
 import type {
   ChannelFormatting,
   DecideContext,
@@ -208,6 +209,7 @@ test("orchestrator launches a task and discards pending output on danger report"
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -261,6 +263,7 @@ test("orchestrator accepts active-task output without storing host-side history"
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -310,6 +313,7 @@ test("orchestrator stages attached files into the task share before launching th
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -350,6 +354,7 @@ test("orchestrator stages attached files into the active task share and notifies
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -397,6 +402,7 @@ test("orchestrator applies supported privilege requests deterministically and ou
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker,
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -464,6 +470,7 @@ test("orchestrator terminates the task when the user reports a pending privilege
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -515,6 +522,7 @@ test("orchestrator keeps completed-task summary pending until the user sends ano
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -572,6 +580,7 @@ test("orchestrator sends worker-requested shared files back through the channel"
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -616,6 +625,7 @@ test("orchestrator closes the sandbox handle on normal task completion", async (
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -650,6 +660,7 @@ test("orchestrator asks the worker to finalize when the user marks the task as f
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -711,6 +722,7 @@ test("orchestrator uses the task name in task_done completion messages", async (
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -762,6 +774,7 @@ test("orchestrator releases completed-task output only when the user continues n
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -824,6 +837,7 @@ test("orchestrator discards completed-task output when the user sends a danger r
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -889,6 +903,7 @@ test("orchestrator keeps final_result output pending until the user continues no
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -960,6 +975,7 @@ test("orchestrator marks worker disconnects as task failure and clears the task"
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -998,6 +1014,7 @@ test("orchestrator fails the active task if channel file delivery fails", async 
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -1038,6 +1055,7 @@ test("orchestrator reports top-level chat event failures back to the user", asyn
     sandboxRunner: new FakeSandboxRunner(),
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -1072,6 +1090,7 @@ test("orchestrator prompts before deleting a non-empty shared workspace", async 
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -1125,6 +1144,7 @@ test("orchestrator deletes or preserves a finished task share based on user conf
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -1220,6 +1240,7 @@ test("orchestrator blocks new idle input while shared workspace deletion is pend
     sandboxRunner: runner,
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
   });
 
   await orchestrator.handleChatEvent({
@@ -1256,3 +1277,5 @@ test("orchestrator blocks new idle input while shared workspace deletion is pend
   assert.equal(mainAgent.contexts.length, 1);
   assert.equal(channel.sentTexts.at(-1)?.text, messages.shareDeletionStillPending());
 });
+
+

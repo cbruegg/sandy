@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import type { McpServerConfig } from "../config.js";
 import { logger } from "../logger.js";
 import type { PrivilegeResolutionResult } from "../types.js";
-import { SandyMcpProxyAccess } from "./proxy-access.js";
+import { ProxyAccess } from "../proxy-access.js";
 import { buildHostOauthStateDirectory, sidecarOauthMountPath } from "./oauth-paths.js";
 import { mcpProxyContainerAlias } from "./proxy-route.js";
 import { mcpWorkerNetworkNamePrefix } from "./worker-network-name.js";
@@ -45,7 +45,7 @@ export class McpSidecarManager {
 
   constructor(
     private readonly options: McpSidecarManagerOptions,
-    private readonly access: SandyMcpProxyAccess,
+    private readonly access: ProxyAccess,
   ) {
     this.startupTimeoutMs = options.startupTimeoutMs ?? 300_000;
     this.spawnImpl = options.spawnImpl ?? spawn;

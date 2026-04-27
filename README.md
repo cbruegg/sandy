@@ -12,6 +12,7 @@ status, completed work, and known gaps relative to that target, see `PLAN_v1.md`
 
 - Bun 1.3 or newer.
 - Docker installed and available as `docker`.
+- `openssl` installed and available as `openssl` on the host. Sandy uses it at startup to generate the local CA for HTTPS interception when HTTP token proxying is enabled.
 - Either:
   - a Telegram bot token plus the Telegram numeric user ID or username of the one person allowed to control Sandy, or
   - a Matrix homeserver URL and the full Matrix user ID of the bot account and the one person allowed to control Sandy (Sandy acquires the access token via its login CLI).
@@ -96,6 +97,18 @@ url = "https://todoist.example/mcp"
 
 [approvals.mcp.todoist]
 # always_allow_tools = []
+
+# Optional HTTP token injection for proxied worker requests:
+
+[http]
+# proxy_image = "sandy-http-proxy:latest" # explicit override; otherwise Sandy uses a baked GHCR sha tag when present, or this local default
+
+[http.tokens.vid2text]
+# description = "Token for the Vid2Text API"
+# value = "real-api-key-or-token"
+
+[approvals.http.vid2text]
+# always_allow_hosts = ["api.vid2text.example"]
 ```
 
 `agent.model` optionally overrides the Codex model used by both Sandy's main agent and worker sub-agents.
@@ -183,6 +196,20 @@ MCP OAuth behavior:
 - Sandy runs upstream MCP connections from an MCP sidecar container, not from the host process directly.
 - If an MCP server runs on the same host as Sandy, use `http://host.docker.internal:<port>/...` when configuring `mcp.servers.<name>.url`.
 
+HTTP token behavior:
+
+- `http.tokens.<name>` defines a named token secret with both `description` and `value`. Sandy includes the token ID and description in the main-agent and sub-agent prompts so they know what each token is for. Workers use placeholder headers like `Authorization: Bearer SANDY_TOKEN_<name>` in proxied HTTP requests. The HTTP proxy replaces these placeholders with the real token value at request time, but only if the requesting task holds an active approval for that token + host.
+- `approvals.http.<name>` persists `always allow` decisions for specific hosts via `always_allow_hosts`. This is persistent approval state only; new hosts can still go through the interactive approval flow and become persisted later if approved with `always allow`.
+- Workers _must_ explicitly request token use via Sandy's `request_http_token` tool before making proxied requests. This tool requires privilege escalation and follows the same approval flow as MCP tools.
+- If no approval is active when the proxy sees a placeholder token, the request is rejected immediately with HTTP 403.
+- Workers do not receive global proxy environment variables anymore. Instead, Sandy tells sub-agents to run commands that need HTTP token injection through `/usr/local/bin/sandy-http-proxy-exec`, which sets `HTTP_PROXY`, `HTTPS_PROXY`, their lowercase variants, and `NO_PROXY` only for that child process while pointing at the per-worker Sandy HTTP proxy with embedded task credentials.
+- The HTTP proxy runs in its own container per worker. It shares the worker's network-guard namespace so it sees the same effective connectivity restrictions, while remaining isolated from worker process control.
+- The wrapper targets the proxy on `127.0.0.1:8081` inside the shared namespace.
+- The MCP sidecar remains separate and runs behind its own network-guard container for network isolation.
+- The host exchanges proxy authorization and header-rewrite decisions with the proxy container over the Docker stdio stream, so this bridge does not depend on Unix-domain sockets.
+- HTTPS connections are handled via TLS interception (MITM). Sandy generates a root CA at startup, mounts it into a per-worker `mitmproxy` container, and workers trust Sandy's CA for HTTPS request inspection and header rewriting.
+- The HTTP proxy container now runs on `mitmproxy`. Sandy keeps request approval and token placeholder resolution on the host side, while the proxy container handles the battle-tested HTTP/TLS interception layer.
+
 Update behavior:
 
 - `updates.mode` defaults to `"disabled"`.
@@ -190,7 +217,7 @@ Update behavior:
 - `updates.mode = "relaunch"` stages an update, exits once idle, and has the updater relaunch Sandy directly.
 - `updates.mode = "exit"` replaces the on-disk Sandy executable first and then exits the running process so an external supervisor can restart it.
 - If you use `updates.mode = "exit"` under systemd, configure the unit with `Restart=always`. In this mode Sandy does not relaunch itself after updating.
-- If you explicitly pin `worker.image` or `mcp.sidecar_image`, you must also set `[updates].mode = "disabled"`. Sandy refuses to start with pinned Docker images while automatic updates remain enabled in either `"relaunch"` or `"exit"` mode.
+- If you explicitly pin `worker.image`, `mcp.sidecar_image`, or `http.proxy_image`, you must also set `[updates].mode = "disabled"`. Sandy refuses to start with pinned Docker images while automatic updates remain enabled in either `"relaunch"` or `"exit"` mode.
 
 Worker preinstall behavior:
 
@@ -230,10 +257,16 @@ Build the worker image:
 docker build --target worker-runtime -t sandy-subagent:latest .
 ```
 
-Build the MCP sidecar image:
+Build the sidecar image (hosts Sandy's MCP proxy):
 
 ```bash
 docker build --target mcp-proxy-runtime -t sandy-mcp-proxy:latest .
+```
+
+Build the HTTP proxy image:
+
+```bash
+docker build --target http-proxy-runtime -t sandy-http-proxy:latest .
 ```
 
 Build the network-guard image:
@@ -245,10 +278,10 @@ docker build --target network-guard-runtime -t sandy-network-guard:latest .
 The host runtime is intentionally not containerized, because it is designed to mediate host-system access directly.
 
 Published Sandy executables built in GitHub Actions are baked with the matching `github.sha` and default to
-`ghcr.io/<owner>/sandy-subagent:sha-<git revision>`, `ghcr.io/<owner>/sandy-mcp-proxy:sha-<git revision>`, and
-`ghcr.io/<owner>/sandy-network-guard:sha-<git revision>`.
-Local `bun start` runs and locally built executables fall back to `sandy-subagent:latest` and
-`sandy-mcp-proxy:latest` for the worker-side images unless the config file overrides them.
+`ghcr.io/<owner>/sandy-subagent:sha-<git revision>`, `ghcr.io/<owner>/sandy-mcp-proxy:sha-<git revision>`,
+`ghcr.io/<owner>/sandy-http-proxy:sha-<git revision>`, and `ghcr.io/<owner>/sandy-network-guard:sha-<git revision>`.
+Local `bun start` runs and locally built executables fall back to `sandy-subagent:latest`, `sandy-mcp-proxy:latest`,
+and `sandy-http-proxy:latest` for the worker-side images unless the config file overrides them.
 
 Build the Bun bundles and verify linting, TypeScript type-checking, and dependency hygiene:
 
@@ -403,7 +436,7 @@ Sub-agents may request access to additional resources from the user, such as:
 - Read-only mount access to a specific directory on the host machine.
 - Read-write mount access to a specific directory on the host machine.
 - MCP tools exposed through Sandy's host-side MCP proxy.
-- Tools to send authenticated HTTPS requests through OneCLI,
+- Tools to send authenticated HTTP requests through Sandy's HTTP token proxy,
   [similar to NanoClaw](https://docs.nanoclaw.dev/concepts/security#6-credential-handling).
 
 Privilege evaluation requests are forwarded to the user verbatim, without the main agent getting to see them.

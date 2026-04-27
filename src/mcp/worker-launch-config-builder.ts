@@ -1,6 +1,7 @@
 import * as toml from "@iarna/toml";
 import type { McpServerConfig } from "../config.js";
-import { SandyMcpProxyAccess, mcpProxyWorkerBaseUrl, workerProxyTokenEnvVar } from "./proxy-access.js";
+import { ProxyAccess } from "../proxy-access.js";
+import { mcpProxyWorkerBaseUrl, workerProxyTokenEnvVar } from "./proxy-access.js";
 import { buildMcpProxyWorkerUrl } from "./proxy-route.js";
 
 type McpWorkerLaunchConfig = {
@@ -13,7 +14,7 @@ export class McpWorkerLaunchConfigBuilder {
 
   constructor(
     mcpServers: Record<string, McpServerConfig>,
-    private readonly access: SandyMcpProxyAccess,
+    private readonly access: ProxyAccess,
     private readonly sidecarEnabled: boolean,
   ) {
     this.serverIds = Object.keys(mcpServers);

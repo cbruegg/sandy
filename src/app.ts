@@ -4,9 +4,13 @@ import { loadConfig } from "./config.js";
 import { createCodexClient, ensureManagedCodexPath } from "./codex-client.js";
 import { resolveSandyCacheRoot } from "./cache-paths.js";
 import { configureLogger, logger } from "./logger.js";
-import { SandyMcpProxyAccess } from "./mcp/proxy-access.js";
+import { ProxyAccess } from "./proxy-access.js";
 import { McpSidecarManager } from "./mcp/sidecar-manager.js";
 import { validateOAuthStateFilesForStartup } from "./mcp/oauth-state-validator.js";
+import { createCertificateAuthority } from "./http/ca.js";
+import { HttpTokenAuthorizer } from "./http/token-authorizer.js";
+import { ProxyAuthService } from "./http/proxy-auth-service.js";
+import { TaskRegistry } from "./task-registry.js";
 import { McpWorkerLaunchConfigBuilder } from "./mcp/worker-launch-config-builder.js";
 import { createMcpWorkerNetworkName } from "./mcp/worker-network-name.js";
 import { SandyOrchestrator } from "./orchestrator.js";
@@ -34,6 +38,7 @@ export async function startApp(): Promise<void> {
     channelKind: config.channel.kind,
     workerImage: config.workerImage,
     mcpSidecarImage: config.mcpSidecarImage,
+    httpProxyImage: config.httpProxyImage,
     networkGuardImage: config.networkGuardImage,
     shareRoot: config.shareRoot,
     agentModel: config.agentModel,
@@ -111,15 +116,41 @@ export async function startApp(): Promise<void> {
     config.agentModel,
     config.skills,
     Object.keys(config.mcpServers),
+    config.httpTokens,
   );
 
-  const mcpProxyAccess = new SandyMcpProxyAccess();
+  const workerAccess = new ProxyAccess();
   const mcpEnabled = Object.keys(config.mcpServers).length > 0;
+  const httpTokensEnabled = Object.keys(config.httpTokens).length > 0;
   const workerNetworkName = mcpEnabled ? createMcpWorkerNetworkName() : null;
+
+  const certificateAuthority = httpTokensEnabled ? await createCertificateAuthority() : null;
+  const taskRegistry = new TaskRegistry();
+  const sessionStore = new InMemorySessionStore();
+  const persistentApprovalStore = new TomlPersistentApprovalStore(
+    config.configFilePath,
+    config.persistentMcpApprovals,
+    config.persistentHttpApprovals,
+  );
+  const httpTokenAuthorizer = new HttpTokenAuthorizer(
+    taskRegistry,
+    sessionStore,
+    persistentApprovalStore,
+  );
+
+  // The mitmproxy-based HTTP proxy container asks the host orchestrator for per-request
+  // token approvals and header resolution over the proxy container stdio bridge.
+  const proxyAuthService = httpTokensEnabled
+    ? new ProxyAuthService({
+        access: workerAccess,
+        httpTokens: config.httpTokens,
+        authorizeHttpTokenUse: async (input) => await httpTokenAuthorizer.authorizeHttpTokenUse(input),
+      })
+    : null;
 
   const mcpWorkerLaunchConfigBuilder = new McpWorkerLaunchConfigBuilder(
     config.mcpServers,
-    mcpProxyAccess,
+    workerAccess,
     mcpEnabled,
   );
 
@@ -134,13 +165,29 @@ export async function startApp(): Promise<void> {
       skillsDirectory: config.skillsDirectory,
       workerCodexBinaryPath,
       workerCodexConfigBuilder: (taskId) => mcpWorkerLaunchConfigBuilder.build(taskId),
+      httpTokenDescriptions: Object.fromEntries(
+        Object.entries(config.httpTokens).map(([tokenId, token]) => [tokenId, token.description]),
+      ),
+      httpProxyUrlFactory: httpTokensEnabled
+        ? (taskId) => {
+            const jwt = workerAccess.issueWorkerGrant(taskId).bearerToken;
+            const encodedJwt = encodeURIComponent(jwt);
+            // The worker container shares the network namespace with the proxy
+            // sidecar, so the proxy is reachable on localhost from the worker.
+            return `http://Bearer:${encodedJwt}@127.0.0.1:8081`;
+          }
+        : undefined,
       networkGuardImage: config.networkGuardImage,
       workerNetwork: config.workerNetwork,
       workerNetworkName,
+      httpProxyCaCertPath: certificateAuthority?.certPath ?? null,
+      httpProxyConfDirPath: certificateAuthority?.confDirPath ?? null,
+      httpProxyImage: httpTokensEnabled ? config.httpProxyImage : null,
+      resolveHttpProxyRequest: proxyAuthService
+        ? async (request) => await proxyAuthService.resolveProxyRequest(request)
+        : undefined,
     },
   );
-
-  const sessionStore = new InMemorySessionStore();
 
   const orchestrator = new SandyOrchestrator({
     channel,
@@ -148,7 +195,8 @@ export async function startApp(): Promise<void> {
     sandboxRunner,
     sessionStore,
     privilegeBroker: new PrivilegeBrokerImpl(),
-    persistentApprovalStore: new TomlPersistentApprovalStore(config.configFilePath, config.persistentMcpApprovals),
+    taskRegistry,
+    persistentApprovalStore,
   });
 
   const sidecarManager = !mcpEnabled || !workerNetworkName ? null : new McpSidecarManager({
@@ -157,48 +205,26 @@ export async function startApp(): Promise<void> {
     workerNetworkName,
     sidecarImage: config.mcpSidecarImage,
     authorizeToolCall: (input) => orchestrator.authorizeMcpToolCall(input),
-  }, mcpProxyAccess);
+  }, workerAccess);
 
   await sidecarManager?.start();
+
+  const stopWithLogging = async (step: string, fn: (() => Promise<void>) | null | undefined): Promise<void> => {
+    if (!fn) {
+      return;
+    }
+    logger.info("app.shutdown_step_started", { step });
+    await fn();
+    logger.info("app.shutdown_step_completed", { step });
+  };
 
   shutdown = async () => {
     logger.info("app.shutdown_started");
     updateCoordinator.stop();
-    logger.info("app.shutdown_step_started", {
-      step: "channel.stop",
-    });
-    await channel.stop();
-    logger.info("app.shutdown_step_completed", {
-      step: "channel.stop",
-    });
-
-    logger.info("app.shutdown_step_started", {
-      step: "workerImageManager.stop",
-    });
-    await workerImageManager.stop();
-    logger.info("app.shutdown_step_completed", {
-      step: "workerImageManager.stop",
-    });
-
-    if (sandboxRunner.shutdown) {
-      logger.info("app.shutdown_step_started", {
-        step: "sandboxRunner.shutdown",
-      });
-      await sandboxRunner.shutdown();
-      logger.info("app.shutdown_step_completed", {
-        step: "sandboxRunner.shutdown",
-      });
-    }
-
-    if (sidecarManager) {
-      logger.info("app.shutdown_step_started", {
-        step: "sidecarManager.stop",
-      });
-      await sidecarManager.stop();
-      logger.info("app.shutdown_step_completed", {
-        step: "sidecarManager.stop",
-      });
-    }
+    await stopWithLogging("channel.stop", () => channel.stop());
+    await stopWithLogging("workerImageManager.stop", () => workerImageManager.stop());
+    await stopWithLogging("sandboxRunner.shutdown", sandboxRunner.shutdown?.bind(sandboxRunner));
+    await stopWithLogging("sidecarManager.stop", sidecarManager?.stop.bind(sidecarManager));
     logger.info("app.shutdown_completed");
   };
 

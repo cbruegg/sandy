@@ -1,12 +1,12 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { SandyMcpProxyAccess } from "./proxy-access.js";
+import { ProxyAccess } from "../proxy-access.js";
 
 function createAccess() {
-  return new SandyMcpProxyAccess();
+  return new ProxyAccess();
 }
 
-test("SandyMcpProxyAccess issues grants that validate for the matching task and server", () => {
+test("ProxyAccess issues grants that validate for the matching task and server", () => {
   const access = createAccess();
   const grant = access.issueWorkerGrant("task-1");
 
@@ -16,7 +16,7 @@ test("SandyMcpProxyAccess issues grants that validate for the matching task and 
   }), { ok: true });
 });
 
-test("SandyMcpProxyAccess rejects grants for the wrong task", () => {
+test("ProxyAccess rejects grants for the wrong task", () => {
   const access = createAccess();
   const grant = access.issueWorkerGrant("task-1");
 
@@ -30,8 +30,8 @@ test("SandyMcpProxyAccess rejects grants for the wrong task", () => {
   });
 });
 
-test("SandyMcpProxyAccess accepts the same task grant across different MCP servers", () => {
-  const access = new SandyMcpProxyAccess();
+test("ProxyAccess accepts the same task grant across different MCP servers", () => {
+  const access = new ProxyAccess();
   const grant = access.issueWorkerGrant("task-1");
 
   assert.deepEqual(access.validateWorkerGrant({
@@ -40,7 +40,7 @@ test("SandyMcpProxyAccess accepts the same task grant across different MCP serve
   }), { ok: true });
 });
 
-test("SandyMcpProxyAccess rejects invalid bearer tokens", () => {
+test("ProxyAccess rejects invalid bearer tokens", () => {
   const access = createAccess();
   const result = access.validateWorkerGrant({
     taskId: "task-1",

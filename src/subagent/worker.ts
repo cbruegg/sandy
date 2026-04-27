@@ -1,5 +1,6 @@
 import {createInterface} from "node:readline";
 import {pathToFileURL} from "node:url";
+import { existsSync, readFileSync } from "node:fs";
 import {type Thread, type ThreadEvent, type TodoListItem,} from "@openai/codex-sdk";
 import { createCodexClient } from "../codex-client.js";
 import { configureLogger } from "../logger.js";
@@ -50,6 +51,17 @@ function parseChannelFormatting(raw: string | null): ChannelFormatting | null {
   return channelFormattingSchema.parse(JSON.parse(raw));
 }
 
+const httpTokenDescriptionsPath = "/run/sandy-http-token-descriptions.json";
+
+function loadHttpTokenPromptInput(): Array<{ tokenId: string; description: string }> {
+  if (!existsSync(httpTokenDescriptionsPath)) {
+    return [];
+  }
+  const parsed = JSON.parse(readFileSync(httpTokenDescriptionsPath, "utf8")) as Record<string, string>;
+  return Object.entries(parsed)
+    .map(([tokenId, description]) => ({ tokenId, description }));
+}
+
 function send(event: SubAgentEvent): void {
   process.stdout.write(`${JSON.stringify(event)}\n`);
 }
@@ -95,6 +107,13 @@ async function streamTurn(thread: Thread, input: string, channelFormatting: Chan
     }
     sawTaskDone = disposition === "task_done" || sawTaskDone;
     sawTerminalError = disposition === "terminal_error" || sawTerminalError;
+
+    // Sandy tool calls are host-mediated turn boundaries. Stop consuming the
+    // current Codex turn immediately so the model cannot continue past a
+    // pending approval in the same turn.
+    if (disposition === "privileged_tool_call" || disposition === "task_done" || disposition === "terminal_error") {
+      break;
+    }
   }
 
   return {
@@ -121,6 +140,9 @@ function handleTaskTurnEvent(event: ThreadEvent, channelFormatting: ChannelForma
             message: toolEventResult.message,
           });
           return "terminal_error";
+        }
+        if (!event.item.text.trim()) {
+          return "none";
         }
         send({
           type: "assistant_output",
@@ -257,6 +279,8 @@ export async function main(): Promise<void> {
   const apiKey = getOptionalEnv("OPENAI_API_KEY");
   const codexModel = getOptionalEnv("SANDY_CODEX_MODEL");
   const channelFormatting = parseChannelFormatting(getOptionalEnv("SANDY_CHANNEL_FORMATTING"));
+  const httpTokens = loadHttpTokenPromptInput();
+  const httpProxyWrapper = getOptionalEnv("SANDY_HTTP_PROXY_WRAPPER");
 
   await applyWorkerCodexConfigPatch();
   const workerCodexEnvironment = buildWorkerCodexEnvironment();
@@ -326,7 +350,7 @@ export async function main(): Promise<void> {
   process.stdin.resume();
 
   send({ type: "worker_connected" });
-  enqueueTurn(buildInitialTaskInput(taskBrief, taskLanguage, channelFormatting));
+  enqueueTurn(buildInitialTaskInput(taskBrief, taskLanguage, channelFormatting, httpTokens, httpProxyWrapper));
 
   input.on("line", (line) => {
     const trimmed = line.trim();
@@ -372,6 +396,9 @@ export {
   parseWorkerToolCall,
   workerToolCallToSubAgentEvent,
 } from "./worker-protocol.js";
+export {
+  streamTurn,
+};
 export {
   buildInitialTaskInput,
   buildInitialTaskInputWithCapabilities,

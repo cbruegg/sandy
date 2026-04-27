@@ -151,6 +151,7 @@ allowed_user = "123456"
 
   assert.equal(config.workerImage, "sandy-subagent:latest");
   assert.equal(config.mcpSidecarImage, "sandy-mcp-proxy:latest");
+  assert.equal(config.httpProxyImage, "sandy-http-proxy:latest");
   assert.equal(config.networkGuardImage, "sandy-network-guard:latest");
 });
 
@@ -169,6 +170,7 @@ allowed_user = "123456"
 
   assert.equal(config.workerImage, "ghcr.io/example/sandy-subagent:sha-abcdef0123456789");
   assert.equal(config.mcpSidecarImage, "ghcr.io/example/sandy-mcp-proxy:sha-abcdef0123456789");
+  assert.equal(config.httpProxyImage, "ghcr.io/example/sandy-http-proxy:sha-abcdef0123456789");
   assert.equal(config.networkGuardImage, "ghcr.io/example/sandy-network-guard:sha-abcdef0123456789");
 });
 
@@ -189,6 +191,9 @@ image = "custom-worker:dev"
 
 [mcp]
 sidecar_image = "custom-sidecar:dev"
+
+[http]
+proxy_image = "custom-http-proxy:dev"
 `, "/tmp/sandy-config.toml", {
     imageRegistry: "ghcr.io/example",
     gitRevision: "abcdef0123456789",
@@ -196,9 +201,11 @@ sidecar_image = "custom-sidecar:dev"
 
   assert.equal(config.workerImage, "custom-worker:dev");
   assert.equal(config.mcpSidecarImage, "custom-sidecar:dev");
+  assert.equal(config.httpProxyImage, "custom-http-proxy:dev");
   assert.deepEqual(config.explicitImageOverrides, {
     workerImage: true,
     mcpSidecarImage: true,
+    httpProxyImage: true,
   });
 });
 
@@ -240,6 +247,25 @@ sidecar_image = "custom-sidecar:dev"
   }, /\[updates\]\.mode = "disabled"/);
 });
 
+test("parseConfigToml rejects explicit HTTP proxy image overrides when update mode is relaunch", () => {
+  assert.throws(() => {
+    parseConfigToml(`
+[channel]
+kind = "telegram"
+
+[channel.telegram]
+bot_token = "telegram-token"
+allowed_user = "123456"
+
+[updates]
+mode = "relaunch"
+
+[http]
+proxy_image = "custom-http-proxy:dev"
+`);
+  }, /\[updates\]\.mode = "disabled"/);
+});
+
 test("parseConfigToml rejects explicit image overrides when update mode is exit", () => {
   assert.throws(() => {
     parseConfigToml(`
@@ -276,11 +302,56 @@ image = "custom-worker:dev"
 
 [mcp]
 sidecar_image = "custom-sidecar:dev"
+
+[http]
+proxy_image = "custom-http-proxy:dev"
 `);
 
   assert.equal(config.updateMode, "disabled");
   assert.equal(config.workerImage, "custom-worker:dev");
   assert.equal(config.mcpSidecarImage, "custom-sidecar:dev");
+  assert.equal(config.httpProxyImage, "custom-http-proxy:dev");
+});
+
+test("parseConfigToml keeps HTTP tokens separate from persistent host approvals", () => {
+  const config = parseConfigToml(`
+[channel]
+kind = "telegram"
+
+[channel.telegram]
+bot_token = "telegram-token"
+allowed_user = "123456"
+
+[http.tokens.api_key]
+description = "API key for api.example.com"
+value = "secret"
+
+[approvals.http.api_key]
+always_allow_hosts = ["api.example.com"]
+`);
+
+  assert.deepEqual(config.httpTokens, {
+    api_key: { description: "API key for api.example.com", value: "secret" },
+  });
+  assert.deepEqual(config.persistentHttpApprovals, {
+    api_key: ["api.example.com"],
+  });
+});
+
+test("parseConfigToml requires descriptions for configured HTTP tokens", () => {
+  assert.throws(() => {
+    parseConfigToml(`
+[channel]
+kind = "telegram"
+
+[channel.telegram]
+bot_token = "telegram-token"
+allowed_user = "123456"
+
+[http.tokens.api_key]
+value = "secret"
+`);
+  }, /description/);
 });
 
 test("parseConfigToml parses worker preinstall config", () => {
@@ -421,6 +492,7 @@ Use the Todoist MCP.
     assert.deepEqual(config.persistentMcpApprovals["todoist"], ["list_projects"]);
     assert.equal(config.workerImage, "sandy-subagent:latest");
     assert.equal(config.mcpSidecarImage, "sandy-mcp-proxy:latest");
+    assert.equal(config.httpProxyImage, "sandy-http-proxy:latest");
     assert.equal(config.skillsDirectory, skillsDirectory);
     assert.deepEqual(config.skills, [{
       name: "Adding task to Todoist",

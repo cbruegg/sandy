@@ -42,9 +42,10 @@ Build a safe MVP for Sandy as a channel-driven orchestration service around Code
   - MCP privilege approval scopes `once`, `worker_session`, and `always allow`, with `always allow` persisted automatically to the Sandy TOML config.
 - Not fully implemented yet:
   - Image handling.
-  - Host-side enforcement for approved resource requests beyond shared-workspace file copy and MCP tool access, such as mount setup and OneCLI enablement.
-- Mount and OneCLI requests remain represented in Sandy's typed protocol for future expansion, but they are currently rejected as unsupported by the host runtime.
+  - Host-side enforcement for approved resource requests beyond shared-workspace file copy, MCP tool access, and HTTP token use.
+- Dynamic host mounts remain represented in Sandy's typed protocol for future expansion, but they are currently rejected as unsupported by the host runtime.
 - Sandy's own worker-tool flow is intentionally not rewritten to MCP in v1; that remains follow-up work after external MCP support.
+- HTTP token proxying is now implemented natively, including worker `request_http_token` tool, HTTP proxy sidecar, placeholder header replacement, and the same approval scopes as MCP (once / worker session / persist).
 
 ## Key Changes
 ### Host runtime and orchestration
@@ -112,13 +113,13 @@ Build a safe MVP for Sandy as a channel-driven orchestration service around Code
   - read-only host directory mount,
   - read-write host directory mount,
   - enabling access to a preconfigured MCP server identifier,
-  - enabling access to a preconfigured OneCLI-backed tool identifier.
+  - enabling access to a preconfigured HTTP token identifier.
 - Do not route privilege requests through the main agent. The host forwards them directly to the user and resolves them deterministically.
-- For MCP tool calls, support three positive approval scopes:
+- For MCP tool calls and HTTP token use, support three positive approval scopes:
   - once
   - always in this worker session
   - always allow, persisted to Sandy's TOML config on disk
-- Restrict approvable resources to configured allowlists. Unknown host paths or unknown MCP/OneCLI identifiers are denied before user prompting.
+- Restrict approvable resources to configured allowlists. Unknown host paths or unknown MCP/HTTP identifiers are denied before user prompting.
 - On approval, the host applies the change deterministically and informs the sub-agent. On denial, the host sends a deterministic rejection event.
 
 ### Channel and interface design
@@ -155,8 +156,7 @@ Build a safe MVP for Sandy as a channel-driven orchestration service around Code
   - configured MCP server definitions
   - persisted `always allow` MCP tool grants
   - allowlisted host mount roots
-  - allowlisted OneCLI tool identifiers
-
+  - allowlisted HTTP token identifiers and hosts
 ## Public Interfaces and Types
 - `MainAgentDecision`
   - structured response with `action: "launch_task" | "reply"`
@@ -211,7 +211,7 @@ Build a safe MVP for Sandy as a channel-driven orchestration service around Code
 - User-uploaded files are copied into the task share by the channel adapter and do not require privilege escalation.
 - Sending a file from `/workspace/share` back to the user through the channel does not require privilege escalation.
 - Dynamic host directory mounts are out of scope for v1.
-- OneCLI capability enablement is out of scope for v1.
+- HTTP token proxying is in scope for v1 through Sandy's Docker sidecar proxy.
 - External MCP server access is in scope for v1 through Sandy's Docker sidecar proxy.
 - Sandy's own worker-tool flow is not rewritten to MCP in v1.
 - “STT” is the intended term for voice transcription in v1.

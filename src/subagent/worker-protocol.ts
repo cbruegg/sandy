@@ -23,6 +23,7 @@ export function buildWorkerProtocolInstructions(): string[] {
   return [
     "Protocol requirements for host-mediated actions:",
     "Use a tool by emitting exactly one line with no surrounding text.",
+    "Emit Sandy tool calls as assistant messages, not as shell commands or file contents.",
     "Never combine a Sandy tool call with user-visible text in the same assistant message.",
     "If you need to show text to the user and also emit a Sandy tool call, send them as separate assistant messages.",
     "When finishing after a user-visible update, send the user-visible text first and then send the Sandy tool call by itself in a following assistant message.",

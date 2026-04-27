@@ -1,4 +1,4 @@
-# MCP (Model Context Protocol) Integration
+# MCP (Model Context Protocol) Integration & HTTP Token Proxy
 
 Implemented in the current codebase:
 
@@ -11,6 +11,22 @@ Implemented in the current codebase:
 - `Always allow` decisions are written back automatically to Sandy's human-readable TOML config file on disk.
 - Upstream MCP OAuth login is handled on the host through `sandy mcp list|status|login|logout`.
 
+## HTTP Token Proxy
+
+- Sandy supports injecting preconfigured HTTP token secrets into proxied worker HTTP requests.
+- Workers request token use via the native `request_http_token` tool, which follows the same interactive approval flow as MCP tools (once / worker session / always allow).
+- Workers use placeholder header values like `Authorization: Bearer SANDY_TOKEN_<name>`. The HTTP proxy replaces these with the real token value only when the task holds an active approval for that token + host.
+- If no approval is active when the proxy sees a placeholder token, the request is rejected immediately with HTTP 403.
+- Token config lives in `[http.tokens.<name>]` with `description` and `value`. Persistent approvals live in `[approvals.http.<name>]` with `always_allow_hosts`.
+- The HTTP proxy runs as a separate per-worker container, not inside the MCP sidecar.
+- Workers learn about available token IDs and descriptions in their prompt. Commands that need token injection are expected to run through a Sandy wrapper that sets proxy env vars only for that child process.
+- The HTTP proxy shares the worker network-guard namespace so it inherits the same effective connectivity restrictions while remaining isolated from the worker process.
+- Workers resolve `sandy-http-proxy` to `127.0.0.1` inside the shared namespace; no Docker network alias is required for the proxy.
+- The MCP sidecar still runs behind its own network-guard container, but only advertises the `sandy-mcp-proxy` alias.
+- HTTPS CONNECT is terminated with TLS MITM when a CA is configured: a per-worker `mitmproxy` container decrypts requests, while the Sandy host runtime resolves token placeholders and approval decisions over the container stdio bridge.
+- Workers are provisioned with Sandy's CA certificate for HTTPS trust validation.
+- Once and session grants are stored separately (prevents session grants from being consumed and nullifies ambiguity).
+
 Explicitly deferred:
 
 - Rewriting Sandy's own host-mediated worker-tool flow to MCP. V1 keeps the native worker protocol for file copy and channel-file send operations.
@@ -18,4 +34,4 @@ Explicitly deferred:
 Current limitations:
 
 - The current upstream OAuth flow is intended for streamable HTTP MCP servers.
-- Dynamic host mounts and OneCLI remain out of scope for v1 and are still rejected by the runtime.
+- Dynamic host mounts remain out of scope for v1.

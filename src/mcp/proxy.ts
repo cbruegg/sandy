@@ -13,13 +13,13 @@ import {
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "../logger.js";
-import { SandyMcpProxyAccess } from "./proxy-access.js";
+import { ProxyAccess } from "../proxy-access.js";
 import { parseMcpProxyPath, type McpProxyRoute } from "./proxy-route.js";
 import type { McpServerRegistry } from "./server-registry.js";
 import type { PrivilegeResolutionResult } from "../types.js";
 
 type SandyMcpProxyOptions = {
-  access: SandyMcpProxyAccess;
+  access: ProxyAccess;
   registry: McpServerRegistry;
   authorizeToolCall: (input: {
     taskId: string;

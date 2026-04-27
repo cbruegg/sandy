@@ -1,5 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import type { Thread } from "@openai/codex-sdk";
 import { messages } from "../messages.js";
 import {
   buildInitialTaskInput,
@@ -7,6 +8,7 @@ import {
   buildPrivilegeResolutionInput,
   buildTaskSummaryInput,
   parseWorkerToolCall,
+  streamTurn,
   workerToolCallToSubAgentEvent,
 } from "./worker.js";
 import type { ChannelFormatting, PrivilegeResolutionResult } from "../types.js";
@@ -19,7 +21,13 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
     allowedTags: ["b", "i", "code", "pre"],
     instructions: "Use simple Telegram HTML.",
   };
-  const input = buildInitialTaskInput("Inspect the repository and leave a summary file.", "English", formatting);
+  const input = buildInitialTaskInput(
+    "Inspect the repository and leave a summary file.",
+    "English",
+    formatting,
+    [{ tokenId: "vid2text", description: "Token for the video transcription API." }],
+    "/usr/local/bin/sandy-http-proxy-exec",
+  );
 
   assert.match(input, /\/workspace\/share/);
   assert.match(input, /shared workspace is mounted/);
@@ -27,6 +35,7 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
   assert.match(input, /SANDY_SEND_FILE_TO_CHANNEL/);
   assert.match(input, /Schema:/);
   assert.match(input, /Use a tool by emitting exactly one line with no surrounding text/);
+  assert.match(input, /Emit Sandy tool calls as assistant messages, not as shell commands or file contents/);
   assert.match(input, /Never combine a Sandy tool call with user-visible text in the same assistant message/);
   assert.match(input, /send the user-visible text first and then send the Sandy tool call by itself in a following assistant message/);
   assert.match(input, /Send a file that already exists in the shared workspace back to the user through the channel adapter/);
@@ -34,6 +43,17 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
   assert.match(input, /Telegram HTML/);
   assert.match(input, /<code>/);
   assert.match(input, /Use English for user-visible replies unless the host provides a later instruction that overrides it\./);
+  assert.match(input, /Configured HTTP tokens available to this task:/);
+  assert.match(input, /vid2text: Token for the video transcription API\./);
+  assert.match(input, /SANDY_REQUEST_HTTP_TOKEN/);
+  assert.match(input, /do not ask the user in plain text/i);
+  assert.match(input, /Do not run SANDY_REQUEST_HTTP_TOKEN inside bash/i);
+  assert.match(input, /sandy-http-proxy-exec/);
+  assert.match(input, /always run it through \/usr\/local\/bin\/sandy-http-proxy-exec/i);
+  assert.match(input, /placeholder will not be injected/i);
+  assert.match(input, /not limited to curl/i);
+  assert.match(input, /any executable that respects proxy environment variables/i);
+  assert.match(input, /Example pattern: \/usr\/local\/bin\/sandy-http-proxy-exec curl/);
   assert.match(input, /leave a summary file\./);
 });
 
@@ -50,6 +70,8 @@ test("buildInitialTaskInputWithCapabilities includes package-manager guidance wh
       "Detected package manager: Homebrew.",
       "Use brew for fast-moving CLI and developer tools; the container's brew command runs under the dedicated linuxbrew user automatically.",
     ],
+    [{ tokenId: "vid2text", description: "Token for the video transcription API." }],
+    "/usr/local/bin/sandy-http-proxy-exec",
   );
 
   assert.match(input, /Detected JavaScript runtime and package manager: Bun\./);
@@ -59,6 +81,8 @@ test("buildInitialTaskInputWithCapabilities includes package-manager guidance wh
   assert.match(input, /openSUSE Tumbleweed packages/);
   assert.match(input, /Detected package manager: Homebrew\./);
   assert.match(input, /brew command runs under the dedicated linuxbrew user/);
+  assert.match(input, /HTTP_PROXY\/HTTPS_PROXY are set only for that process/);
+  assert.match(input, /must use \/usr\/local\/bin\/sandy-http-proxy-exec unless the host explicitly tells you otherwise/i);
 });
 
 test("buildPrivilegeResolutionInput explains the host privilege result to the sub-agent", () => {
@@ -196,4 +220,112 @@ test("parseSubAgentEvent accepts task-summary events", () => {
     type: "task_summary",
     summary: "Task completed successfully",
   });
+});
+
+test("streamTurn stops after a privileged Sandy tool call", async () => {
+  const writes: string[] = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  const mockWrite: typeof process.stdout.write = (
+    chunk,
+    encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
+    callback?: (err?: Error | null) => void,
+  ) => {
+    writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    if (typeof encodingOrCallback === "function") {
+      encodingOrCallback();
+    } else {
+      callback?.();
+    }
+    return true;
+  };
+  process.stdout.write = mockWrite;
+
+  try {
+    const thread = {
+      async runStreamed() {
+        return {
+          events: (async function* () {
+            yield {
+              type: "item.completed",
+              item: {
+                type: "agent_message",
+                text: 'SANDY_REQUEST_HTTP_TOKEN {"tokenId":"vid2text","host":"api.example.com","reason":"Need the transcript API."}',
+              },
+            };
+            yield {
+              type: "item.completed",
+              item: {
+                type: "agent_message",
+                text: "This should never be forwarded after the token request.",
+              },
+            };
+          })(),
+        };
+      },
+    } as unknown as Thread;
+
+    const result = await streamTurn(thread, "Inspect the reel.", null);
+
+    assert.equal(result.sawPrivilegedToolCall, true);
+    assert.equal(result.sawTaskDone, false);
+    assert.equal(result.sawTerminalError, false);
+    assert.equal(writes.length, 1);
+    assert.deepEqual(parseSubAgentEvent(writes[0]!.trim()), {
+      type: "tool_call",
+      call: {
+        type: "request_http_token",
+        tokenId: "vid2text",
+        host: "api.example.com",
+        reason: "Need the transcript API.",
+      },
+    });
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+});
+
+test("streamTurn ignores empty assistant messages", async () => {
+  const writes: string[] = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  const mockWrite: typeof process.stdout.write = (
+    chunk,
+    encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
+    callback?: (err?: Error | null) => void,
+  ) => {
+    writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    if (typeof encodingOrCallback === "function") {
+      encodingOrCallback();
+    } else {
+      callback?.();
+    }
+    return true;
+  };
+  process.stdout.write = mockWrite;
+
+  try {
+    const thread = {
+      async runStreamed() {
+        return {
+          events: (async function* () {
+            yield {
+              type: "item.completed",
+              item: {
+                type: "agent_message",
+                text: "",
+              },
+            };
+          })(),
+        };
+      },
+    } as unknown as Thread;
+
+    const result = await streamTurn(thread, "Inspect the reel.", null);
+
+    assert.equal(result.sawPrivilegedToolCall, false);
+    assert.equal(result.sawTaskDone, false);
+    assert.equal(result.sawTerminalError, false);
+    assert.deepEqual(writes, []);
+  } finally {
+    process.stdout.write = originalWrite;
+  }
 });

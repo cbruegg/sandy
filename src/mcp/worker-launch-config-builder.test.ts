@@ -2,13 +2,14 @@ import { test } from "bun:test";
 import assert from "node:assert/strict";
 import * as toml from "@iarna/toml";
 import type { McpServerConfig } from "../config.js";
-import { SandyMcpProxyAccess, mcpProxyWorkerBaseUrl, workerProxyTokenEnvVar } from "./proxy-access.js";
+import { ProxyAccess } from "../proxy-access.js";
+import { mcpProxyWorkerBaseUrl, workerProxyTokenEnvVar } from "./proxy-access.js";
 import { McpWorkerLaunchConfigBuilder } from "./worker-launch-config-builder.js";
 
 test("McpWorkerLaunchConfigBuilder returns an empty config when no MCP servers are enabled", async () => {
   const builder = new McpWorkerLaunchConfigBuilder(
     {},
-    new SandyMcpProxyAccess(),
+    new ProxyAccess(),
     false,
   );
 
@@ -27,7 +28,7 @@ test("McpWorkerLaunchConfigBuilder throws when MCP servers are enabled without a
         oauthScopes: [],
       },
     },
-    new SandyMcpProxyAccess(),
+    new ProxyAccess(),
     false,
   );
 
@@ -47,7 +48,7 @@ test("McpWorkerLaunchConfigBuilder builds worker TOML and env from access data",
       oauthScopes: [],
     },
   };
-  const access = new SandyMcpProxyAccess();
+  const access = new ProxyAccess();
   const builder = new McpWorkerLaunchConfigBuilder(mcpServers, access, true);
   const launchConfig = builder.build("task-1");
 

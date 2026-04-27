@@ -184,12 +184,26 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
       sidecar_image: defaultImages.sidecarImage,
       servers: {},
     }),
+    http: z.object({
+      proxy_image: z.string().min(1).default(defaultImages.httpProxyImage),
+      tokens: z.record(z.string(), z.object({
+        description: z.string().trim().min(1),
+        value: z.string().min(1),
+      }).strict()).default({}),
+    }).default({
+      proxy_image: defaultImages.httpProxyImage,
+      tokens: {},
+    }),
     approvals: z.object({
       mcp: z.record(z.string(), z.object({
         always_allow_tools: z.array(z.string()).default([]),
       }).strict()).default({}),
+      http: z.record(z.string(), z.object({
+        always_allow_hosts: z.array(z.string()).default([]),
+      }).strict()).default({}),
     }).default({
       mcp: {},
+      http: {},
     }),
     updates: z.object({
       mode: updateModeSchema.default(DEFAULT_UPDATE_MODE),
@@ -206,6 +220,11 @@ export type McpServerConfig = {
   transport: "streamable_http";
   url: string;
   oauthScopes: string[];
+};
+
+export type HttpTokenConfig = {
+  description: string;
+  value: string;
 };
 
 export type SandyUpdateMode = z.infer<typeof updateModeSchema>;
@@ -251,6 +270,7 @@ export type SandyConfig = {
       };
   workerImage: string;
   mcpSidecarImage: string;
+  httpProxyImage: string;
   networkGuardImage: string;
   shareRoot: string;
   agentModel: string | null;
@@ -264,7 +284,9 @@ export type SandyConfig = {
   sttModel: string;
   authMode: SandyAuthMode;
   mcpServers: Record<string, McpServerConfig>;
+  httpTokens: Record<string, HttpTokenConfig>;
   persistentMcpApprovals: Record<string, string[]>;
+  persistentHttpApprovals: Record<string, string[]>;
   updateMode: SandyUpdateMode;
   // The resolved image values alone are not enough here because a user may
   // explicitly pin an image to the same string as the baked default. The
@@ -273,6 +295,7 @@ export type SandyConfig = {
   explicitImageOverrides: {
     workerImage: boolean;
     mcpSidecarImage: boolean;
+    httpProxyImage: boolean;
   };
 };
 
@@ -338,10 +361,15 @@ export function parseConfigToml(
       : { mode: "ambient_codex_auth" };
 
   if (parsed.updates.mode !== "disabled"
-    && (parsedFile.explicitImageOverrides.workerImage || parsedFile.explicitImageOverrides.mcpSidecarImage)) {
+    && (
+      parsedFile.explicitImageOverrides.workerImage
+      || parsedFile.explicitImageOverrides.mcpSidecarImage
+      || parsedFile.explicitImageOverrides.httpProxyImage
+    )) {
     const configuredImages = [
       parsedFile.explicitImageOverrides.workerImage ? "worker.image" : null,
       parsedFile.explicitImageOverrides.mcpSidecarImage ? "mcp.sidecar_image" : null,
+      parsedFile.explicitImageOverrides.httpProxyImage ? "http.proxy_image" : null,
     ].filter((value): value is string => value !== null);
     throw new Error(
       `Automatic updates require Sandy-managed Docker image defaults. Explicitly configured ${configuredImages.join(", ")} conflicts with [updates].mode = "${parsed.updates.mode}". Set [updates].mode = "disabled" to keep pinned images.`,
@@ -357,6 +385,7 @@ export function parseConfigToml(
     channel: buildChannelConfig(parsed.channel),
     workerImage: parsed.worker.image,
     mcpSidecarImage: parsed.mcp.sidecar_image,
+    httpProxyImage: parsed.http.proxy_image,
     networkGuardImage: defaultImages.networkGuardImage,
     shareRoot: parsed.worker.share_root,
     agentModel: parsed.agent?.model ?? null,
@@ -375,8 +404,17 @@ export function parseConfigToml(
     mcpServers: Object.fromEntries(
       Object.entries(parsed.mcp.servers).map(([identifier, server]) => [identifier, normalizeMcpServerConfig(server)]),
     ),
+    httpTokens: Object.fromEntries(
+      Object.entries(parsed.http.tokens).map(([identifier, token]) => [identifier, {
+        description: token.description,
+        value: token.value,
+      }]),
+    ),
     persistentMcpApprovals: Object.fromEntries(
       Object.entries(parsed.approvals.mcp).map(([identifier, approval]) => [identifier, approval.always_allow_tools]),
+    ),
+    persistentHttpApprovals: Object.fromEntries(
+      Object.entries(parsed.approvals.http).map(([identifier, approval]) => [identifier, approval.always_allow_hosts]),
     ),
     updateMode: parsed.updates.mode,
     explicitImageOverrides: parsedFile.explicitImageOverrides,
@@ -410,6 +448,7 @@ function parseConfigTomlFile(
   explicitImageOverrides: {
     workerImage: boolean;
     mcpSidecarImage: boolean;
+    httpProxyImage: boolean;
   };
 } {
   // @iarna/toml attaches symbol-keyed metadata to parsed table objects.
@@ -422,6 +461,7 @@ function parseConfigTomlFile(
   const explicitImageOverrides = {
     workerImage: hasOwnString(parsedToml, ["worker", "image"]),
     mcpSidecarImage: hasOwnString(parsedToml, ["mcp", "sidecar_image"]),
+    httpProxyImage: hasOwnString(parsedToml, ["http", "proxy_image"]),
   };
 
   return {

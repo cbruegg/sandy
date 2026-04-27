@@ -82,6 +82,25 @@ export const messages = {
     status === "completed"
       ? `MCP ${status}: ${serverId}.${toolName} ${describeMcpToolPayload(payload)}`
       : `MCP ${status}: ${serverId}.${toolName}`,
+  httpTokenDenied: (tokenId: string, host: string): string =>
+    `The user denied HTTP token use ${tokenId} for host ${host}.`,
+  httpTokenAllowedOnce: (tokenId: string, host: string): string =>
+    `Allowed HTTP token ${tokenId} for host ${host} once.`,
+  httpTokenAllowedForWorkerSession: (tokenId: string, host: string): string =>
+    `Allowed HTTP token ${tokenId} for host ${host} for this worker session.`,
+  httpTokenAllowedFromPersistentConfig: (tokenId: string, host: string): string =>
+    `Allowed HTTP token ${tokenId} for host ${host} from persistent config.`,
+  httpTokenAllowedAndPersisted: (tokenId: string, host: string): string =>
+    `Allowed HTTP token ${tokenId} for host ${host} and updated Sandy's config file.`,
+  httpTokenAlreadyConsumed: (tokenId: string, host: string): string =>
+    `One-shot HTTP token grant ${tokenId} for host ${host} has already been consumed.`,
+  httpTokenProxyRejected: (tokenId: string): string =>
+    `HTTP proxy rejected request for token ${tokenId} because no approval is active. Emit SANDY_REQUEST_HTTP_TOKEN for that token and wait for host approval before retrying.`,
+  httpTokenNotConfigured: (tokenId: string): string =>
+    `HTTP token "${tokenId}" is not configured in Sandy's config file.`,
+  httpTokenHostNotAllowed: (tokenId: string, host: string): string =>
+    `Host "${host}" is not in the configured allowed_hosts for token ${tokenId}.`,
+
 } as const;
 
 export const mcpAdminMessages = {
@@ -174,6 +193,14 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
     ].join("\n");
   }
 
+  if (request.kind === "http_token_use") {
+    return [
+      `http_token_use: ${request.tokenId}`,
+      `Host: ${request.host}`,
+      `Reason: ${request.reason}`,
+    ].join("\n");
+  }
+
   switch (request.payload.type) {
     case "copy_into_share":
     case "copy_out_of_share":
@@ -181,12 +208,14 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
     case "mount_ro":
     case "mount_rw":
       return `${request.payload.type}: ${request.payload.hostPath} -> ${request.payload.targetPath}\nReason: ${request.payload.reason}`;
+    default:
+      return `host_operation: ${request.payload.type}`;
   }
 }
 
 function describePrivilegeActions(request: PrivilegeRequest): string | null {
-  if (request.kind === "mcp_tool_call") {
-    // In this case, it's pretty clear to the user that approve/deny will approve/deny the tool call
+  if (request.kind === "mcp_tool_call" || request.kind === "http_token_use") {
+    // In this case, it's pretty clear to the user that approve/deny will approve/deny the request
     return null;
   }
   return "Approve or deny this request.";

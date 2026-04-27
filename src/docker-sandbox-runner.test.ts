@@ -558,7 +558,8 @@ test("DockerSandboxRunner mounts a writable worker Codex home from a temp path o
   assert.doesNotMatch(codexMountArg, /\/task-1\/.*:\/run\/sandy-codex-seed:ro/);
 
   const codexHomeHostPath = codexMountArg.slice(0, codexMountArg.indexOf(":/run/sandy-codex-seed:ro"));
-  assert.match(codexHomeHostPath, /sandy-worker-codex-home-/);
+  assert.match(codexHomeHostPath, /sandy-worker-launch-/);
+  assert.match(codexHomeHostPath, /\/codex-home$/);
   const configHostPath = join(codexHomeHostPath, "config.toml");
   assert.equal(await readFile(configHostPath, "utf8"), "model = \"gpt-5\"\n");
   assert.equal(dockerRunInvocation.args.at(-1), "sandy-subagent:latest");
@@ -850,4 +851,196 @@ test("DockerSandboxRunner rejects share deletion outside the configured share ro
 
   await assert.doesNotReject(access(join(outsidePath, "keep.txt")));
   await rm(baseRoot, { recursive: true, force: true });
+});
+
+test("DockerSandboxRunner launches HTTP proxy container alongside worker", async () => {
+  const guardChild = new FakeChildProcess();
+  const proxyChild = new FakeChildProcess();
+  const taskChild = new FakeChildProcess();
+  const invocations: Array<{ command: string; args: string[] }> = [];
+  let runCount = 0;
+
+  const spawnImpl = ((command: string, args: readonly string[]) => {
+    invocations.push({ command, args: [...args] });
+    if (args[0] === "run") {
+      runCount += 1;
+      if (runCount === 1) {
+        queueMicrotask(() => {
+          guardChild.stdout.write("ready\n");
+        });
+        return guardChild as unknown as ChildProcessWithoutNullStreams;
+      }
+      if (runCount === 2) {
+        queueMicrotask(() => {
+          proxyChild.stdout.write('{"type":"ready"}\n');
+        });
+        return proxyChild as unknown as ChildProcessWithoutNullStreams;
+      }
+      return taskChild as unknown as ChildProcessWithoutNullStreams;
+    }
+
+    const cleanupChild = new FakeChildProcess();
+    queueMicrotask(() => {
+      cleanupChild.emit("exit", 0, null);
+    });
+    return cleanupChild as unknown as ChildProcessWithoutNullStreams;
+  }) as typeof import("node:child_process").spawn;
+
+  const runner = new DockerSandboxRunner({
+    workerImage: "sandy-subagent:latest",
+    networkGuardImage: "sandy-network-guard:latest",
+    shareRoot: "/tmp/sandy-test-shares",
+    openAiApiKey: null,
+    codexAuthFile: null,
+    skillsDirectory: null,
+    workerCodexBinaryPath: null,
+    workerNetwork: {
+      mode: "public_internet_only",
+      allowLocalCidrs: [],
+    },
+    workerCodexConfigBuilder: () => ({
+      codexConfigToml: null,
+      environment: {},
+    }),
+    httpTokenDescriptions: {
+      vid2text: "Token for the video transcription API.",
+    },
+    httpProxyUrlFactory: () => "http://Bearer:token@sandy-http-proxy:8081",
+    workerNetworkName: "sandy-mcp-net",
+    httpProxyImage: "sandy-http-proxy:latest",
+    httpProxyCaCertPath: "/tmp/sandy-ca.pem",
+    httpProxyConfDirPath: "/tmp/sandy-mitmproxy-conf",
+    resolveHttpProxyRequest: async (request) => ({
+      type: "auth_response",
+      requestId: request.requestId,
+      outcome: "approved",
+      headers: request.headers,
+    }),
+    spawnImpl,
+  });
+
+  await runner.launchTask({
+    chatId: "chat-1",
+    taskId: "task-1",
+    taskName: "test-task",
+    taskLanguage: "English",
+    taskBrief: "Inspect the environment.",
+    channelFormatting: testFormatting,
+  }, async () => {});
+
+  const proxyRunInvocation = invocations.find((invocation) =>
+    invocation.args[0] === "run" && invocation.args.includes("sandy-http-proxy-task-1"));
+  assert.ok(proxyRunInvocation);
+  assert.ok(proxyRunInvocation.args.includes("--network"));
+  assert.ok(proxyRunInvocation.args.includes("container:sandy-netguard-task-1"));
+  assert.ok(proxyRunInvocation.args.includes("--cap-drop"));
+  assert.ok(proxyRunInvocation.args.includes("NET_ADMIN"));
+  assert.ok(proxyRunInvocation.args.includes("sandy-http-proxy:latest"));
+  assert.ok(proxyRunInvocation.args.includes("/tmp/sandy-mitmproxy-conf:/run/sandy-mitmproxy-conf:ro"));
+  assert.ok(proxyRunInvocation.args.includes("MITMPROXY_CONFDIR=/run/sandy-mitmproxy-conf"));
+
+  const workerRunInvocation = invocations.find((invocation) =>
+    invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-subagent:latest");
+  assert.ok(workerRunInvocation);
+  assert.ok(!workerRunInvocation.args.includes("--add-host"));
+  assert.ok(workerRunInvocation.args.includes("SANDY_HTTP_PROXY_URL=http://Bearer:token@sandy-http-proxy:8081"));
+  assert.ok(workerRunInvocation.args.includes("SANDY_HTTP_PROXY_WRAPPER=/usr/local/bin/sandy-http-proxy-exec"));
+  assert.ok(workerRunInvocation.args.some((arg) =>
+    arg.endsWith(":/run/sandy-http-token-descriptions.json:ro")));
+  assert.ok(workerRunInvocation.args.includes("/tmp/sandy-ca.pem:/etc/pki/trust/anchors/sandy-ca.pem:ro"));
+
+  const guardRunInvocation = invocations.find((invocation) =>
+    invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-network-guard:latest");
+  assert.ok(guardRunInvocation);
+  assert.ok(!guardRunInvocation.args.includes("sandy-http-proxy"));
+});
+
+test("DockerSandboxRunner launches a namespace holder for unrestricted workers when HTTP proxying is enabled", async () => {
+  const guardChild = new FakeChildProcess();
+  const proxyChild = new FakeChildProcess();
+  const taskChild = new FakeChildProcess();
+  const invocations: Array<{ command: string; args: string[] }> = [];
+  let runCount = 0;
+
+  const spawnImpl = ((command: string, args: readonly string[]) => {
+    invocations.push({ command, args: [...args] });
+    if (args[0] === "run") {
+      runCount += 1;
+      if (runCount === 1) {
+        queueMicrotask(() => {
+          guardChild.stdout.write("ready\n");
+        });
+        return guardChild as unknown as ChildProcessWithoutNullStreams;
+      }
+      if (runCount === 2) {
+        queueMicrotask(() => {
+          proxyChild.stdout.write('{"type":"ready"}\n');
+        });
+        return proxyChild as unknown as ChildProcessWithoutNullStreams;
+      }
+      return taskChild as unknown as ChildProcessWithoutNullStreams;
+    }
+
+    const cleanupChild = new FakeChildProcess();
+    queueMicrotask(() => {
+      cleanupChild.emit("exit", 0, null);
+    });
+    return cleanupChild as unknown as ChildProcessWithoutNullStreams;
+  }) as typeof import("node:child_process").spawn;
+
+  const runner = new DockerSandboxRunner({
+    workerImage: "sandy-subagent:latest",
+    networkGuardImage: "sandy-network-guard:latest",
+    shareRoot: "/tmp/sandy-test-shares",
+    openAiApiKey: null,
+    codexAuthFile: null,
+    skillsDirectory: null,
+    workerCodexBinaryPath: null,
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
+    workerCodexConfigBuilder: () => ({
+      codexConfigToml: null,
+      environment: {},
+    }),
+    httpTokenDescriptions: {
+      vid2text: "Token for the video transcription API.",
+    },
+    httpProxyUrlFactory: () => "http://Bearer:token@sandy-http-proxy:8081",
+    httpProxyImage: "sandy-http-proxy:latest",
+    httpProxyCaCertPath: "/tmp/sandy-ca.pem",
+    httpProxyConfDirPath: "/tmp/sandy-mitmproxy-conf",
+    resolveHttpProxyRequest: async (request) => ({
+      type: "auth_response",
+      requestId: request.requestId,
+      outcome: "approved",
+      headers: request.headers,
+    }),
+    spawnImpl,
+  });
+
+  await runner.launchTask({
+    chatId: "chat-1",
+    taskId: "task-1",
+    taskName: "test-task",
+    taskLanguage: "English",
+    taskBrief: "Inspect the environment.",
+    channelFormatting: testFormatting,
+  }, async () => {});
+
+  const guardRunInvocation = invocations.find((invocation) =>
+    invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-network-guard:latest");
+  assert.ok(guardRunInvocation);
+  assert.ok(!guardRunInvocation.args.includes("--network"));
+
+  const proxyRunInvocation = invocations.find((invocation) =>
+    invocation.args[0] === "run" && invocation.args.includes("sandy-http-proxy-task-1"));
+  assert.ok(proxyRunInvocation);
+  assert.ok(proxyRunInvocation.args.includes("container:sandy-netguard-task-1"));
+
+  const workerRunInvocation = invocations.find((invocation) =>
+    invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-subagent:latest");
+  assert.ok(workerRunInvocation);
+  assert.ok(workerRunInvocation.args.includes("container:sandy-netguard-task-1"));
 });

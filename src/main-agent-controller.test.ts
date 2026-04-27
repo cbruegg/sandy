@@ -8,6 +8,7 @@ import {
 } from "./agent/main-agent-controller.js";
 import type { SkillMetadata } from "./skills.js";
 import type { ChannelFormatting, DecideContext } from "./types.js";
+import type { HttpTokenConfig } from "./config.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
@@ -20,6 +21,13 @@ const testSkills: SkillMetadata[] = [{
   name: "Adding task to Todoist",
   description: "When the user asks you to add a task to their Todoist, use this skill.",
 }];
+
+const testHttpTokens: Record<string, HttpTokenConfig> = {
+  vid2text: {
+    description: "Token for the video transcription API.",
+    value: "secret",
+  },
+};
 
 function expectDefined<T>(value: T | null | undefined, message: string): NonNullable<T> {
   assert.notEqual(value, undefined, message);
@@ -102,6 +110,7 @@ test("buildMainAgentPrompt includes only the new visible entries for incremental
     isInitialTurn: true,
     skills: [],
     workerMcpServerIds: [],
+    httpTokens: {},
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["follow-up"]).newVisibleEntries,
@@ -110,6 +119,7 @@ test("buildMainAgentPrompt includes only the new visible entries for incremental
     isInitialTurn: false,
     skills: [],
     workerMcpServerIds: [],
+    httpTokens: {},
   });
 
   assert.match(initialPrompt, /Visible chat entries for this first decision:/);
@@ -145,6 +155,7 @@ test("buildMainAgentPrompt includes the precise decision schema", () => {
     isInitialTurn: true,
     skills: [],
     workerMcpServerIds: [],
+    httpTokens: {},
   });
 
   assert.match(prompt, /Required JSON schema:/);
@@ -214,6 +225,7 @@ test("buildMainAgentPrompt includes configured skill metadata only on the initia
     isInitialTurn: true,
     skills: testSkills,
     workerMcpServerIds: [],
+    httpTokens: {},
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["another request"]).newVisibleEntries,
@@ -222,6 +234,7 @@ test("buildMainAgentPrompt includes configured skill metadata only on the initia
     isInitialTurn: false,
     skills: testSkills,
     workerMcpServerIds: [],
+    httpTokens: {},
   });
 
   assert.match(initialPrompt, /Configured skills available to sub-agents:/);
@@ -238,6 +251,7 @@ test("buildMainAgentPrompt does not include skill body text below the frontmatte
     isInitialTurn: true,
     skills: testSkills,
     workerMcpServerIds: [],
+    httpTokens: {},
   });
 
   assert.doesNotMatch(prompt, /Use the Todoist MCP/);
@@ -252,6 +266,7 @@ test("buildMainAgentPrompt includes configured MCP server ids only on the initia
     isInitialTurn: true,
     skills: [],
     workerMcpServerIds: ["github", "todoist"],
+    httpTokens: {},
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["follow up"]).newVisibleEntries,
@@ -260,6 +275,7 @@ test("buildMainAgentPrompt includes configured MCP server ids only on the initia
     isInitialTurn: false,
     skills: [],
     workerMcpServerIds: ["github", "todoist"],
+    httpTokens: {},
   });
 
   assert.match(initialPrompt, /Configured MCP servers available to sub-agents:/);
@@ -276,7 +292,33 @@ test("buildMainAgentPrompt omits the MCP section when no servers are configured"
     isInitialTurn: true,
     skills: [],
     workerMcpServerIds: [],
+    httpTokens: {},
   });
 
   assert.doesNotMatch(prompt, /Configured MCP servers available to sub-agents:/);
+});
+
+test("buildMainAgentPrompt includes configured HTTP token ids and descriptions only on the initial turn", () => {
+  const initialPrompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["transcribe this video"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    isInitialTurn: true,
+    skills: [],
+    workerMcpServerIds: [],
+    httpTokens: testHttpTokens,
+  });
+  const deltaPrompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["follow up"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    isInitialTurn: false,
+    skills: [],
+    workerMcpServerIds: [],
+    httpTokens: testHttpTokens,
+  });
+
+  assert.match(initialPrompt, /Configured HTTP tokens available to sub-agents:/);
+  assert.match(initialPrompt, /vid2text: Token for the video transcription API\./);
+  assert.doesNotMatch(deltaPrompt, /Configured HTTP tokens available to sub-agents:/);
 });

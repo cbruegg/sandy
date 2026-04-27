@@ -2,7 +2,7 @@ import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SandyMcpProxyAccess } from "./proxy-access.js";
+import { ProxyAccess } from "../proxy-access.js";
 import { SandyMcpProxy } from "./proxy.js";
 import type { McpServerRegistry } from "./server-registry.js";
 
@@ -29,7 +29,7 @@ class FakeResponse extends EventEmitter {
   }
 }
 
-function createProxy(access = new SandyMcpProxyAccess("shared-secret")): SandyMcpProxy {
+function createProxy(access = new ProxyAccess("shared-secret")): SandyMcpProxy {
   return new SandyMcpProxy({
     access,
     registry: new FakeRegistry(),
@@ -74,7 +74,7 @@ test("SandyMcpProxy rejects requests without a bearer token", async () => {
 });
 
 test("SandyMcpProxy rejects task tokens used against a different task route", async () => {
-  const access = new SandyMcpProxyAccess("shared-secret");
+  const access = new ProxyAccess("shared-secret");
   const proxy = createProxy(access);
   const response = new FakeResponse();
 
@@ -90,7 +90,7 @@ test("SandyMcpProxy rejects task tokens used against a different task route", as
 });
 
 test("SandyMcpProxy accepts the same task token across different MCP server routes", async () => {
-  const access = new SandyMcpProxyAccess("shared-secret");
+  const access = new ProxyAccess("shared-secret");
   const proxy = createProxy(access);
   let handledUrl: string | null = null;
 
@@ -128,7 +128,7 @@ test("SandyMcpProxy accepts the same task token across different MCP server rout
 });
 
 test("SandyMcpProxy rejects MCP sessions that are reused on a different route", async () => {
-  const access = new SandyMcpProxyAccess("shared-secret");
+  const access = new ProxyAccess("shared-secret");
   const proxy = createProxy(access);
   (proxy as unknown as {
     sessions: Map<string, {
