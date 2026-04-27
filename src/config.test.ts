@@ -323,6 +323,7 @@ bot_token = "telegram-token"
 allowed_user = "123456"
 
 [http.tokens.api_key]
+description = "API key for api.example.com"
 value = "secret"
 
 [approvals.http.api_key]
@@ -330,11 +331,27 @@ always_allow_hosts = ["api.example.com"]
 `);
 
   assert.deepEqual(config.httpTokens, {
-    api_key: { value: "secret" },
+    api_key: { description: "API key for api.example.com", value: "secret" },
   });
   assert.deepEqual(config.persistentHttpApprovals, {
     api_key: ["api.example.com"],
   });
+});
+
+test("parseConfigToml requires descriptions for configured HTTP tokens", () => {
+  assert.throws(() => {
+    parseConfigToml(`
+[channel]
+kind = "telegram"
+
+[channel.telegram]
+bot_token = "telegram-token"
+allowed_user = "123456"
+
+[http.tokens.api_key]
+value = "secret"
+`);
+  }, /description/);
 });
 
 test("parseConfigToml parses worker preinstall config", () => {

@@ -187,6 +187,7 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
     http: z.object({
       proxy_image: z.string().min(1).default(defaultImages.httpProxyImage),
       tokens: z.record(z.string(), z.object({
+        description: z.string().trim().min(1),
         value: z.string().min(1),
       }).strict()).default({}),
     }).default({
@@ -222,6 +223,7 @@ export type McpServerConfig = {
 };
 
 export type HttpTokenConfig = {
+  description: string;
   value: string;
 };
 
@@ -404,6 +406,7 @@ export function parseConfigToml(
     ),
     httpTokens: Object.fromEntries(
       Object.entries(parsed.http.tokens).map(([identifier, token]) => [identifier, {
+        description: token.description,
         value: token.value,
       }]),
     ),

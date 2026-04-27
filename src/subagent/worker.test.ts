@@ -19,7 +19,13 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
     allowedTags: ["b", "i", "code", "pre"],
     instructions: "Use simple Telegram HTML.",
   };
-  const input = buildInitialTaskInput("Inspect the repository and leave a summary file.", "English", formatting);
+  const input = buildInitialTaskInput(
+    "Inspect the repository and leave a summary file.",
+    "English",
+    formatting,
+    [{ tokenId: "vid2text", description: "Token for the video transcription API." }],
+    "/usr/local/bin/sandy-http-proxy-exec",
+  );
 
   assert.match(input, /\/workspace\/share/);
   assert.match(input, /shared workspace is mounted/);
@@ -27,6 +33,7 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
   assert.match(input, /SANDY_SEND_FILE_TO_CHANNEL/);
   assert.match(input, /Schema:/);
   assert.match(input, /Use a tool by emitting exactly one line with no surrounding text/);
+  assert.match(input, /Emit Sandy tool calls as assistant messages, not as shell commands or file contents/);
   assert.match(input, /Never combine a Sandy tool call with user-visible text in the same assistant message/);
   assert.match(input, /send the user-visible text first and then send the Sandy tool call by itself in a following assistant message/);
   assert.match(input, /Send a file that already exists in the shared workspace back to the user through the channel adapter/);
@@ -34,6 +41,17 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
   assert.match(input, /Telegram HTML/);
   assert.match(input, /<code>/);
   assert.match(input, /Use English for user-visible replies unless the host provides a later instruction that overrides it\./);
+  assert.match(input, /Configured HTTP tokens available to this task:/);
+  assert.match(input, /vid2text: Token for the video transcription API\./);
+  assert.match(input, /SANDY_REQUEST_HTTP_TOKEN/);
+  assert.match(input, /do not ask the user in plain text/i);
+  assert.match(input, /Do not run SANDY_REQUEST_HTTP_TOKEN inside bash/i);
+  assert.match(input, /sandy-http-proxy-exec/);
+  assert.match(input, /always run it through \/usr\/local\/bin\/sandy-http-proxy-exec/i);
+  assert.match(input, /placeholder will not be injected/i);
+  assert.match(input, /not limited to curl/i);
+  assert.match(input, /any executable that respects proxy environment variables/i);
+  assert.match(input, /Example pattern: \/usr\/local\/bin\/sandy-http-proxy-exec curl/);
   assert.match(input, /leave a summary file\./);
 });
 
@@ -50,6 +68,8 @@ test("buildInitialTaskInputWithCapabilities includes package-manager guidance wh
       "Detected package manager: Homebrew.",
       "Use brew for fast-moving CLI and developer tools; the container's brew command runs under the dedicated linuxbrew user automatically.",
     ],
+    [{ tokenId: "vid2text", description: "Token for the video transcription API." }],
+    "/usr/local/bin/sandy-http-proxy-exec",
   );
 
   assert.match(input, /Detected JavaScript runtime and package manager: Bun\./);
@@ -59,6 +79,8 @@ test("buildInitialTaskInputWithCapabilities includes package-manager guidance wh
   assert.match(input, /openSUSE Tumbleweed packages/);
   assert.match(input, /Detected package manager: Homebrew\./);
   assert.match(input, /brew command runs under the dedicated linuxbrew user/);
+  assert.match(input, /HTTP_PROXY\/HTTPS_PROXY are set only for that process/);
+  assert.match(input, /must use \/usr\/local\/bin\/sandy-http-proxy-exec unless the host explicitly tells you otherwise/i);
 });
 
 test("buildPrivilegeResolutionInput explains the host privilege result to the sub-agent", () => {

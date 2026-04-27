@@ -7,7 +7,7 @@ test("ProxyAuthService resolves headers for approved requests", async () => {
   const access = new ProxyAccess("test-secret");
   const service = new ProxyAuthService({
     access,
-    httpTokens: { token_1: { value: "real-secret" } },
+    httpTokens: { token_1: { description: "Test API token.", value: "real-secret" } },
     authorizeHttpTokenUse: async () => ({ outcome: "approved", message: "ok" }),
   });
 
@@ -37,7 +37,7 @@ test("ProxyAuthService denies rejected token approvals", async () => {
   const access = new ProxyAccess("test-secret");
   const service = new ProxyAuthService({
     access,
-    httpTokens: { token_1: { value: "real-secret" } },
+    httpTokens: { token_1: { description: "Test API token.", value: "real-secret" } },
     authorizeHttpTokenUse: async () => ({ outcome: "denied", message: "not allowed" }),
   });
 
@@ -62,7 +62,7 @@ test("ProxyAuthService handles authorization errors gracefully", async () => {
   const access = new ProxyAccess("test-secret");
   const service = new ProxyAuthService({
     access,
-    httpTokens: { token_1: { value: "real-secret" } },
+    httpTokens: { token_1: { description: "Test API token.", value: "real-secret" } },
     authorizeHttpTokenUse: async () => {
       throw new Error("database down");
     },
@@ -81,7 +81,7 @@ test("ProxyAuthService handles authorization errors gracefully", async () => {
 test("ProxyAuthService denies invalid proxy auth usernames", async () => {
   const service = new ProxyAuthService({
     access: new ProxyAccess("test-secret"),
-    httpTokens: { token_1: { value: "real-secret" } },
+    httpTokens: { token_1: { description: "Test API token.", value: "real-secret" } },
     authorizeHttpTokenUse: async () => ({ outcome: "approved", message: "ok" }),
   });
 
@@ -105,7 +105,7 @@ test("ProxyAuthService denies invalid proxy auth usernames", async () => {
 test("ProxyAuthService denies invalid worker grants", async () => {
   const service = new ProxyAuthService({
     access: new ProxyAccess("test-secret"),
-    httpTokens: { token_1: { value: "real-secret" } },
+    httpTokens: { token_1: { description: "Test API token.", value: "real-secret" } },
     authorizeHttpTokenUse: async () => ({ outcome: "approved", message: "ok" }),
   });
 

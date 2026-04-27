@@ -104,6 +104,7 @@ url = "https://todoist.example/mcp"
 # proxy_image = "sandy-http-proxy:latest" # explicit override; otherwise Sandy uses a baked GHCR sha tag when present, or this local default
 
 [http.tokens.vid2text]
+# description = "Token for the Vid2Text API"
 # value = "real-api-key-or-token"
 
 [approvals.http.vid2text]
@@ -197,13 +198,13 @@ MCP OAuth behavior:
 
 HTTP token behavior:
 
-- `http.tokens.<name>` defines a named token secret with `value`. Workers use placeholder headers like `Authorization: Bearer SANDY_TOKEN_<name>` in proxied HTTP requests. The HTTP proxy replaces these placeholders with the real token value at request time, but only if the requesting task holds an active approval for that token + host.
+- `http.tokens.<name>` defines a named token secret with both `description` and `value`. Sandy includes the token ID and description in the main-agent and sub-agent prompts so they know what each token is for. Workers use placeholder headers like `Authorization: Bearer SANDY_TOKEN_<name>` in proxied HTTP requests. The HTTP proxy replaces these placeholders with the real token value at request time, but only if the requesting task holds an active approval for that token + host.
 - `approvals.http.<name>` persists `always allow` decisions for specific hosts via `always_allow_hosts`. This is persistent approval state only; new hosts can still go through the interactive approval flow and become persisted later if approved with `always allow`.
 - Workers _must_ explicitly request token use via Sandy's `request_http_token` tool before making proxied requests. This tool requires privilege escalation and follows the same approval flow as MCP tools.
 - If no approval is active when the proxy sees a placeholder token, the request is rejected immediately with HTTP 403.
-- Workers receive `HTTP_PROXY` and `HTTPS_PROXY` environment variables pointing to a per-worker Sandy HTTP proxy with embedded task credentials for automatic proxy authentication. Only tools that respect proxy environment variables are routed through the proxy; direct network access from workers is unchanged.
+- Workers do not receive global proxy environment variables anymore. Instead, Sandy tells sub-agents to run commands that need HTTP token injection through `/usr/local/bin/sandy-http-proxy-exec`, which sets `HTTP_PROXY`, `HTTPS_PROXY`, their lowercase variants, and `NO_PROXY` only for that child process while pointing at the per-worker Sandy HTTP proxy with embedded task credentials.
 - The HTTP proxy runs in its own container per worker. It shares the worker's network-guard namespace so it sees the same effective connectivity restrictions, while remaining isolated from worker process control.
-- Workers still reach the proxy as `sandy-http-proxy:8081`; Sandy injects that hostname inside the shared namespace.
+- The wrapper targets the proxy on `127.0.0.1:8081` inside the shared namespace.
 - The MCP sidecar remains separate and runs behind its own network-guard container for network isolation.
 - The host exchanges proxy authorization and header-rewrite decisions with the proxy container over the Docker stdio stream, so this bridge does not depend on Unix-domain sockets.
 - HTTPS connections are handled via TLS interception (MITM). Sandy generates a root CA at startup, mounts it into a per-worker `mitmproxy` container, and workers trust Sandy's CA for HTTPS request inspection and header rewriting.

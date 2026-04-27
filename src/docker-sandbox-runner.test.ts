@@ -558,7 +558,8 @@ test("DockerSandboxRunner mounts a writable worker Codex home from a temp path o
   assert.doesNotMatch(codexMountArg, /\/task-1\/.*:\/run\/sandy-codex-seed:ro/);
 
   const codexHomeHostPath = codexMountArg.slice(0, codexMountArg.indexOf(":/run/sandy-codex-seed:ro"));
-  assert.match(codexHomeHostPath, /sandy-worker-codex-home-/);
+  assert.match(codexHomeHostPath, /sandy-worker-launch-/);
+  assert.match(codexHomeHostPath, /\/codex-home$/);
   const configHostPath = join(codexHomeHostPath, "config.toml");
   assert.equal(await readFile(configHostPath, "utf8"), "model = \"gpt-5\"\n");
   assert.equal(dockerRunInvocation.args.at(-1), "sandy-subagent:latest");
@@ -901,6 +902,9 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
       codexConfigToml: null,
       environment: {},
     }),
+    httpTokenDescriptions: {
+      vid2text: "Token for the video transcription API.",
+    },
     httpProxyUrlFactory: () => "http://Bearer:token@sandy-http-proxy:8081",
     workerNetworkName: "sandy-mcp-net",
     httpProxyImage: "sandy-http-proxy:latest",
@@ -939,8 +943,10 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
     invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-subagent:latest");
   assert.ok(workerRunInvocation);
   assert.ok(!workerRunInvocation.args.includes("--add-host"));
-  assert.ok(workerRunInvocation.args.includes("NO_PROXY=sandy-mcp-proxy"));
-  assert.ok(!workerRunInvocation.args.includes("NO_PROXY=sandy-mcp-proxy,sandy-http-proxy"));
+  assert.ok(workerRunInvocation.args.includes("SANDY_HTTP_PROXY_URL=http://Bearer:token@sandy-http-proxy:8081"));
+  assert.ok(workerRunInvocation.args.includes("SANDY_HTTP_PROXY_WRAPPER=/usr/local/bin/sandy-http-proxy-exec"));
+  assert.ok(workerRunInvocation.args.some((arg) =>
+    arg.endsWith(":/run/sandy-http-token-descriptions.json:ro")));
   assert.ok(workerRunInvocation.args.includes("/tmp/sandy-ca.pem:/etc/pki/trust/anchors/sandy-ca.pem:ro"));
 
   const guardRunInvocation = invocations.find((invocation) =>
@@ -998,6 +1004,9 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
       codexConfigToml: null,
       environment: {},
     }),
+    httpTokenDescriptions: {
+      vid2text: "Token for the video transcription API.",
+    },
     httpProxyUrlFactory: () => "http://Bearer:token@sandy-http-proxy:8081",
     httpProxyImage: "sandy-http-proxy:latest",
     httpProxyCaCertPath: "/tmp/sandy-ca.pem",

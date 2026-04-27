@@ -3,8 +3,26 @@ import type { ChannelFormatting, PrivilegeResolutionResult } from "../types.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 import { buildWorkerProtocolInstructions } from "./worker-protocol.js";
 
-export function buildInitialTaskInput(taskBrief: string, taskLanguage: string, channelFormatting: ChannelFormatting | null): string {
-  return buildInitialTaskInputWithCapabilities(taskBrief, taskLanguage, channelFormatting, detectRuntimeCapabilities());
+type HttpTokenPromptInput = {
+  tokenId: string;
+  description: string;
+};
+
+export function buildInitialTaskInput(
+  taskBrief: string,
+  taskLanguage: string,
+  channelFormatting: ChannelFormatting | null,
+  httpTokens: HttpTokenPromptInput[] = [],
+  httpProxyWrapper: string | null = null,
+): string {
+  return buildInitialTaskInputWithCapabilities(
+    taskBrief,
+    taskLanguage,
+    channelFormatting,
+    detectRuntimeCapabilities(),
+    httpTokens,
+    httpProxyWrapper,
+  );
 }
 
 export function buildInitialTaskInputWithCapabilities(
@@ -12,6 +30,8 @@ export function buildInitialTaskInputWithCapabilities(
   taskLanguage: string,
   channelFormatting: ChannelFormatting | null,
   runtimeCapabilities: string[],
+  httpTokens: HttpTokenPromptInput[] = [],
+  httpProxyWrapper: string | null = null,
 ): string {
   const lines = [
     "You are running inside a Sandy sub-agent container.",
@@ -26,6 +46,26 @@ export function buildInitialTaskInputWithCapabilities(
 
   if (runtimeCapabilities.length > 0) {
     lines.push(...runtimeCapabilities);
+  }
+
+  if (httpTokens.length > 0) {
+    lines.push(
+      "Configured HTTP tokens available to this task:",
+      ...httpTokens.map((token) => `- ${token.tokenId}: ${token.description}`),
+      "If you need one of these tokens, do not ask the user in plain text. Emit SANDY_REQUEST_HTTP_TOKEN as a Sandy tool call first.",
+      "Do not run SANDY_REQUEST_HTTP_TOKEN inside bash or any other shell command.",
+      "After approval, use the approved token only for the approved host and only in proxied requests that include the placeholder header.",
+    );
+    if (httpProxyWrapper) {
+      lines.push(
+        `When a command should use HTTP token injection, always run it through ${httpProxyWrapper} so HTTP_PROXY/HTTPS_PROXY are set only for that process.`,
+        `If a request includes SANDY_TOKEN_<tokenId> in a header, assume you must use ${httpProxyWrapper} unless the host explicitly tells you otherwise.`,
+        `You should not make a direct curl or other direct HTTP request with a placeholder token header outside ${httpProxyWrapper}, because the placeholder will not be injected.`,
+        `The wrapper is not limited to curl. You can use ${httpProxyWrapper} with any executable that respects proxy environment variables.`,
+        "The wrapper also sets the lowercase proxy env vars and NO_PROXY/no_proxy for the MCP proxy host.",
+        `Example pattern: ${httpProxyWrapper} curl -H 'Authorization: Bearer SANDY_TOKEN_<tokenId>' https://example.test/...`,
+      );
+    }
   }
 
   if (channelFormatting) {

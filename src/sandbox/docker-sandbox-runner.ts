@@ -14,6 +14,7 @@ import {launchNetworkGuardContainer, type StartedNetworkGuard} from "./network-g
 import type {LaunchTaskRequest, SandboxHandle, SandboxRunner, ShareInspection} from "./sandbox-runner.js";
 
 const workerCodexSeedMountPath = "/run/sandy-codex-seed";
+const workerHttpTokenDescriptionsPath = "/run/sandy-http-token-descriptions.json";
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 300_000;
 
 type DockerSandboxRunnerOptions = {
@@ -32,6 +33,7 @@ type DockerSandboxRunnerOptions = {
     codexConfigToml: string | null;
     environment: Record<string, string>;
   };
+  httpTokenDescriptions?: Record<string, string>;
   httpProxyUrlFactory?: (taskId: string) => string | null;
   handshakeTimeoutMs?: number;
   spawnImpl?: typeof spawn;
@@ -81,20 +83,27 @@ export class DockerSandboxRunner implements SandboxRunner {
     const builtWorkerConfig = this.options.workerCodexConfigBuilder(request.taskId);
     const workerCodexConfig = builtWorkerConfig.codexConfigToml;
     const workerEnvironment = builtWorkerConfig.environment;
+    const httpTokenDescriptions = this.options.httpTokenDescriptions ?? {};
     const httpProxyUrl = this.options.httpProxyUrlFactory?.(request.taskId) ?? null;
     if (httpProxyUrl) {
       assertHttpProxySupportConfigured(this.options);
     }
     const workerImage = this.resolveWorkerImage();
+    let workerTempDir: string | null = null;
     let workerCodexHomeTempDir: string | null = null;
+    let workerHttpTokenDescriptionsTempPath: string | null = null;
     const needsWorkerCodexHome = Boolean(this.options.codexAuthFile || workerCodexConfig);
+    if (needsWorkerCodexHome || Object.keys(httpTokenDescriptions).length > 0) {
+      workerTempDir = await mkdtemp(join(tmpdir(), "sandy-worker-launch-"));
+    }
     if (needsWorkerCodexHome) {
-      workerCodexHomeTempDir = await mkdtemp(join(tmpdir(), "sandy-worker-codex-home-"));
+      workerCodexHomeTempDir = join(workerTempDir!, "codex-home");
+      await mkdir(workerCodexHomeTempDir, {recursive: true});
       if (this.options.codexAuthFile) {
         try {
           await copyFile(this.options.codexAuthFile, join(workerCodexHomeTempDir, "auth.json"));
         } catch (error) {
-          await rm(workerCodexHomeTempDir, {recursive: true, force: true});
+          await rm(workerTempDir!, {recursive: true, force: true});
           throw error;
         }
       }
@@ -102,9 +111,23 @@ export class DockerSandboxRunner implements SandboxRunner {
         try {
           await writeFile(join(workerCodexHomeTempDir, "config.toml"), workerCodexConfig, "utf8");
         } catch (error) {
-          await rm(workerCodexHomeTempDir, {recursive: true, force: true});
+          await rm(workerTempDir!, {recursive: true, force: true});
           throw error;
         }
+      }
+    }
+
+    if (Object.keys(httpTokenDescriptions).length > 0) {
+      workerHttpTokenDescriptionsTempPath = join(workerTempDir!, "http-token-descriptions.json");
+      try {
+        await writeFile(
+          workerHttpTokenDescriptionsTempPath,
+          JSON.stringify(httpTokenDescriptions, null, 2),
+          "utf8",
+        );
+      } catch (error) {
+        await rm(workerTempDir!, {recursive: true, force: true});
+        throw error;
       }
     }
 
@@ -118,11 +141,13 @@ export class DockerSandboxRunner implements SandboxRunner {
 
     let tempConfigCleanedUp = false;
     const cleanupWorkerCodexConfig = async (): Promise<void> => {
-      if (tempConfigCleanedUp || !workerCodexHomeTempDir) {
+      if (tempConfigCleanedUp) {
         return;
       }
       tempConfigCleanedUp = true;
-      await rm(workerCodexHomeTempDir, {recursive: true, force: true});
+      if (workerTempDir) {
+        await rm(workerTempDir, {recursive: true, force: true});
+      }
     };
 
     const containerName = `sandy-${request.taskId}`;
@@ -231,13 +256,8 @@ export class DockerSandboxRunner implements SandboxRunner {
     }
 
     if (httpProxyUrl) {
-      dockerArgs.push("-e", `HTTP_PROXY=${httpProxyUrl}`);
-      dockerArgs.push("-e", `http_proxy=${httpProxyUrl}`);
-      dockerArgs.push("-e", `HTTPS_PROXY=${httpProxyUrl}`);
-      dockerArgs.push("-e", `https_proxy=${httpProxyUrl}`);
-      dockerArgs.push("-e", `NO_PROXY=sandy-mcp-proxy`);
-      dockerArgs.push("-e", `no_proxy=sandy-mcp-proxy`);
-
+      dockerArgs.push("-e", `SANDY_HTTP_PROXY_URL=${httpProxyUrl}`);
+      dockerArgs.push("-e", "SANDY_HTTP_PROXY_WRAPPER=/usr/local/bin/sandy-http-proxy-exec");
     }
 
     if (httpProxyUrl) {
@@ -257,6 +277,13 @@ export class DockerSandboxRunner implements SandboxRunner {
       dockerArgs.push(
         "-v",
         `${workerCodexHomeTempDir}:${workerCodexSeedMountPath}:ro`,
+      );
+    }
+
+    if (workerHttpTokenDescriptionsTempPath) {
+      dockerArgs.push(
+        "-v",
+        `${workerHttpTokenDescriptionsTempPath}:${workerHttpTokenDescriptionsPath}:ro`,
       );
     }
 

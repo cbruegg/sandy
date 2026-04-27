@@ -116,6 +116,7 @@ export async function startApp(): Promise<void> {
     config.agentModel,
     config.skills,
     Object.keys(config.mcpServers),
+    config.httpTokens,
   );
 
   const workerAccess = new ProxyAccess();
@@ -164,6 +165,9 @@ export async function startApp(): Promise<void> {
       skillsDirectory: config.skillsDirectory,
       workerCodexBinaryPath,
       workerCodexConfigBuilder: (taskId) => mcpWorkerLaunchConfigBuilder.build(taskId),
+      httpTokenDescriptions: Object.fromEntries(
+        Object.entries(config.httpTokens).map(([tokenId, token]) => [tokenId, token.description]),
+      ),
       httpProxyUrlFactory: httpTokensEnabled
         ? (taskId) => {
             const jwt = workerAccess.issueWorkerGrant(taskId).bearerToken;

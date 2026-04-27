@@ -1,3 +1,4 @@
+import type { HttpTokenConfig } from "../config.js";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,6 +35,7 @@ export class CodexMainAgentController implements MainAgentController {
   private readonly model: string | null;
   private readonly skills: SkillMetadata[];
   private readonly workerMcpServerIds: string[];
+  private readonly httpTokens: Record<string, HttpTokenConfig>;
   private readonly threads = new Map<string, MainAgentThread>();
   private readonly threadDirectories = new Map<string, string>();
 
@@ -42,11 +44,13 @@ export class CodexMainAgentController implements MainAgentController {
     model: string | null = null,
     skills: SkillMetadata[] = [],
     workerMcpServerIds: string[] = [],
+    httpTokens: Record<string, HttpTokenConfig> = {},
   ) {
     this.codex = codex;
     this.model = model;
     this.skills = skills;
     this.workerMcpServerIds = [...workerMcpServerIds].sort();
+    this.httpTokens = {...httpTokens};
   }
 
   async decide(context: DecideContext): Promise<MainAgentDecision> {
@@ -64,6 +68,7 @@ export class CodexMainAgentController implements MainAgentController {
       isInitialTurn,
       skills: this.skills,
       workerMcpServerIds: this.workerMcpServerIds,
+      httpTokens: this.httpTokens,
     });
     const decision = await this.runValidatedDecision(thread, prompt, context.chatId);
     logger.info("main_agent.decision_received", {
@@ -165,6 +170,7 @@ export function buildMainAgentPrompt(input: {
   isInitialTurn: boolean;
   skills: SkillMetadata[];
   workerMcpServerIds: string[];
+  httpTokens: Record<string, HttpTokenConfig>;
 }): string {
   const intro = input.isInitialTurn
     ? [
@@ -197,6 +203,15 @@ export function buildMainAgentPrompt(input: {
       ]
     : [];
 
+  const httpTokenEntries = Object.entries(input.httpTokens);
+  const httpTokenSection = input.isInitialTurn && httpTokenEntries.length > 0
+    ? [
+        "",
+        "Configured HTTP tokens available to sub-agents:",
+        ...httpTokenEntries.map(([tokenId, token]) => `- ${tokenId}: ${token.description}`),
+      ]
+    : [];
+
   const skillDecisionRules = input.isInitialTurn && input.skills.length > 0
     ? [
         "- You know configured skills only by the name and description listed above. Do not assume any other skill content.",
@@ -209,6 +224,7 @@ export function buildMainAgentPrompt(input: {
     ...intro,
     ...configuredSkillsSection,
     ...workerMcpSection,
+    ...httpTokenSection,
     "",
     "Required JSON schema:",
     JSON.stringify(mainAgentDecisionPromptSchema, null, 2),

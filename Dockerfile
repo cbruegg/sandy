@@ -103,6 +103,7 @@ ENV PATH="${BUN_INSTALL}/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/home
 
 COPY --from=build /app/dist ./dist
 COPY scripts/worker-entrypoint.sh /usr/local/bin/sandy-worker-entrypoint
-RUN chmod 0755 /usr/local/bin/sandy-worker-entrypoint
+COPY scripts/http-proxy-exec.sh /usr/local/bin/sandy-http-proxy-exec
+RUN chmod 0755 /usr/local/bin/sandy-worker-entrypoint /usr/local/bin/sandy-http-proxy-exec
 
 ENTRYPOINT ["/usr/local/bin/sandy-worker-entrypoint"]
