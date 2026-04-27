@@ -95,7 +95,7 @@ export const messages = {
   httpTokenAlreadyConsumed: (tokenId: string, host: string): string =>
     `One-shot HTTP token grant ${tokenId} for host ${host} has already been consumed.`,
   httpTokenProxyRejected: (tokenId: string): string =>
-    `HTTP proxy rejected request for token ${tokenId} because no approval is active.`,
+    `HTTP proxy rejected request for token ${tokenId} because no approval is active. Emit SANDY_REQUEST_HTTP_TOKEN for that token and wait for host approval before retrying.`,
   httpTokenNotConfigured: (tokenId: string): string =>
     `HTTP token "${tokenId}" is not configured in Sandy's config file.`,
   httpTokenHostNotAllowed: (tokenId: string, host: string): string =>

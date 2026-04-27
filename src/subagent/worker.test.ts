@@ -1,5 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import type { Thread } from "@openai/codex-sdk";
 import { messages } from "../messages.js";
 import {
   buildInitialTaskInput,
@@ -7,6 +8,7 @@ import {
   buildPrivilegeResolutionInput,
   buildTaskSummaryInput,
   parseWorkerToolCall,
+  streamTurn,
   workerToolCallToSubAgentEvent,
 } from "./worker.js";
 import type { ChannelFormatting, PrivilegeResolutionResult } from "../types.js";
@@ -218,4 +220,112 @@ test("parseSubAgentEvent accepts task-summary events", () => {
     type: "task_summary",
     summary: "Task completed successfully",
   });
+});
+
+test("streamTurn stops after a privileged Sandy tool call", async () => {
+  const writes: string[] = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  const mockWrite: typeof process.stdout.write = (
+    chunk,
+    encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
+    callback?: (err?: Error | null) => void,
+  ) => {
+    writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    if (typeof encodingOrCallback === "function") {
+      encodingOrCallback();
+    } else {
+      callback?.();
+    }
+    return true;
+  };
+  process.stdout.write = mockWrite;
+
+  try {
+    const thread = {
+      async runStreamed() {
+        return {
+          events: (async function* () {
+            yield {
+              type: "item.completed",
+              item: {
+                type: "agent_message",
+                text: 'SANDY_REQUEST_HTTP_TOKEN {"tokenId":"vid2text","host":"api.example.com","reason":"Need the transcript API."}',
+              },
+            };
+            yield {
+              type: "item.completed",
+              item: {
+                type: "agent_message",
+                text: "This should never be forwarded after the token request.",
+              },
+            };
+          })(),
+        };
+      },
+    } as unknown as Thread;
+
+    const result = await streamTurn(thread, "Inspect the reel.", null);
+
+    assert.equal(result.sawPrivilegedToolCall, true);
+    assert.equal(result.sawTaskDone, false);
+    assert.equal(result.sawTerminalError, false);
+    assert.equal(writes.length, 1);
+    assert.deepEqual(parseSubAgentEvent(writes[0]!.trim()), {
+      type: "tool_call",
+      call: {
+        type: "request_http_token",
+        tokenId: "vid2text",
+        host: "api.example.com",
+        reason: "Need the transcript API.",
+      },
+    });
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+});
+
+test("streamTurn ignores empty assistant messages", async () => {
+  const writes: string[] = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  const mockWrite: typeof process.stdout.write = (
+    chunk,
+    encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
+    callback?: (err?: Error | null) => void,
+  ) => {
+    writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    if (typeof encodingOrCallback === "function") {
+      encodingOrCallback();
+    } else {
+      callback?.();
+    }
+    return true;
+  };
+  process.stdout.write = mockWrite;
+
+  try {
+    const thread = {
+      async runStreamed() {
+        return {
+          events: (async function* () {
+            yield {
+              type: "item.completed",
+              item: {
+                type: "agent_message",
+                text: "",
+              },
+            };
+          })(),
+        };
+      },
+    } as unknown as Thread;
+
+    const result = await streamTurn(thread, "Inspect the reel.", null);
+
+    assert.equal(result.sawPrivilegedToolCall, false);
+    assert.equal(result.sawTaskDone, false);
+    assert.equal(result.sawTerminalError, false);
+    assert.deepEqual(writes, []);
+  } finally {
+    process.stdout.write = originalWrite;
+  }
 });

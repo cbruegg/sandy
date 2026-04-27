@@ -107,6 +107,13 @@ async function streamTurn(thread: Thread, input: string, channelFormatting: Chan
     }
     sawTaskDone = disposition === "task_done" || sawTaskDone;
     sawTerminalError = disposition === "terminal_error" || sawTerminalError;
+
+    // Sandy tool calls are host-mediated turn boundaries. Stop consuming the
+    // current Codex turn immediately so the model cannot continue past a
+    // pending approval in the same turn.
+    if (disposition === "privileged_tool_call" || disposition === "task_done" || disposition === "terminal_error") {
+      break;
+    }
   }
 
   return {
@@ -133,6 +140,9 @@ function handleTaskTurnEvent(event: ThreadEvent, channelFormatting: ChannelForma
             message: toolEventResult.message,
           });
           return "terminal_error";
+        }
+        if (!event.item.text.trim()) {
+          return "none";
         }
         send({
           type: "assistant_output",
@@ -386,6 +396,9 @@ export {
   parseWorkerToolCall,
   workerToolCallToSubAgentEvent,
 } from "./worker-protocol.js";
+export {
+  streamTurn,
+};
 export {
   buildInitialTaskInput,
   buildInitialTaskInputWithCapabilities,
