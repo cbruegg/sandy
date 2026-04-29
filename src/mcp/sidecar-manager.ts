@@ -12,6 +12,7 @@ import { mcpWorkerNetworkNamePrefix } from "./worker-network-name.js";
 import {
   parseMcpSidecarToHostMessage,
   type McpSidecarAuthorizationRequestMessage,
+  type McpSidecarResourceAuthorizationRequestMessage,
   type McpSidecarLogMessage,
 } from "./sidecar-protocol.js";
 
@@ -29,6 +30,11 @@ type McpSidecarManagerOptions = {
     serverId: string;
     toolName: string;
     arguments: unknown;
+  }) => Promise<PrivilegeResolutionResult>;
+  authorizeResourceRead: (input: {
+    taskId: string;
+    serverId: string;
+    uri: string;
   }) => Promise<PrivilegeResolutionResult>;
 };
 
@@ -128,6 +134,10 @@ export class McpSidecarManager {
           }
           if (message.type === "authorization_request") {
             this.dispatchAuthorizationRequest(message);
+            return;
+          }
+          if (message.type === "resource_authorization_request") {
+            this.dispatchResourceAuthorizationRequest(message);
             return;
           }
           if (message.type === "log") {
@@ -239,6 +249,44 @@ export class McpSidecarManager {
       serverId: message.serverId,
       toolName: message.toolName,
       arguments: message.arguments,
+    });
+
+    this.sendToSidecar({
+      type: "authorization_result",
+      requestId: message.requestId,
+      result,
+    });
+  }
+
+  private dispatchResourceAuthorizationRequest(message: McpSidecarResourceAuthorizationRequestMessage): void {
+    void this.handleResourceAuthorizationRequest(message).catch((error) => {
+      const failureMessage = error instanceof Error ? error.message : "Unknown resource authorization request failure.";
+
+      logger.warn("mcp.sidecar.resource_authorization_request_failed", {
+        requestId: message.requestId,
+        taskId: message.taskId,
+        serverId: message.serverId,
+        uri: message.uri,
+        message: failureMessage,
+      });
+
+      this.sendToSidecar({
+        type: "authorization_result",
+        requestId: message.requestId,
+        result: {
+          requestId: message.requestId,
+          outcome: "failed",
+          message: failureMessage,
+        } satisfies PrivilegeResolutionResult,
+      });
+    });
+  }
+
+  private async handleResourceAuthorizationRequest(message: McpSidecarResourceAuthorizationRequestMessage): Promise<void> {
+    const result = await this.options.authorizeResourceRead({
+      taskId: message.taskId,
+      serverId: message.serverId,
+      uri: message.uri,
     });
 
     this.sendToSidecar({

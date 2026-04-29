@@ -24,6 +24,14 @@ const authorizationRequestMessageSchema = z.object({
   arguments: z.unknown(),
 });
 
+const resourceAuthorizationRequestMessageSchema = z.object({
+  type: z.literal("resource_authorization_request"),
+  requestId: z.string().min(1),
+  taskId: z.string().min(1),
+  serverId: z.string().min(1),
+  uri: z.string().min(1),
+});
+
 const authorizationResultMessageSchema = z.object({
   type: z.literal("authorization_result"),
   requestId: z.string().min(1),
@@ -55,6 +63,7 @@ export type McpSidecarBootstrapMessage = z.infer<typeof bootstrapMessageSchema> 
   mcpServers: Record<string, McpServerConfig>;
 };
 export type McpSidecarAuthorizationRequestMessage = z.infer<typeof authorizationRequestMessageSchema>;
+export type McpSidecarResourceAuthorizationRequestMessage = z.infer<typeof resourceAuthorizationRequestMessageSchema>;
 type McpSidecarAuthorizationResultMessage = z.infer<typeof authorizationResultMessageSchema>;
 type McpSidecarReadyMessage = z.infer<typeof readyMessageSchema>;
 type McpSidecarFatalErrorMessage = z.infer<typeof fatalErrorMessageSchema>;
@@ -69,6 +78,7 @@ type HostToMcpSidecarMessage =
 type McpSidecarToHostMessage =
   | McpSidecarReadyMessage
   | McpSidecarAuthorizationRequestMessage
+  | McpSidecarResourceAuthorizationRequestMessage
   | McpSidecarFatalErrorMessage
   | McpSidecarLogMessage;
 
@@ -83,6 +93,8 @@ export function parseMcpSidecarToHostMessage(raw: string): McpSidecarToHostMessa
       return readyMessageSchema.parse(parsed);
     case "authorization_request":
       return authorizationRequestMessageSchema.parse(parsed);
+    case "resource_authorization_request":
+      return resourceAuthorizationRequestMessageSchema.parse(parsed);
     case "fatal_error":
       return fatalErrorMessageSchema.parse(parsed);
     case "log":

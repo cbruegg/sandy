@@ -11,6 +11,7 @@ import {
   ListToolsRequestSchema,
   ReadResourceRequestSchema,
   type CallToolResult,
+  type ReadResourceResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import { logger } from "../logger.js";
 import { ProxyAccess } from "../proxy-access.js";
@@ -26,6 +27,11 @@ type SandyMcpProxyOptions = {
     serverId: string;
     toolName: string;
     arguments: unknown;
+  }) => Promise<PrivilegeResolutionResult>;
+  authorizeResourceRead: (input: {
+    taskId: string;
+    serverId: string;
+    uri: string;
   }) => Promise<PrivilegeResolutionResult>;
   host?: string;
   port?: number;
@@ -204,6 +210,16 @@ export class SandyMcpProxy {
       return (await getClient()).listResourceTemplates(request.params);
     });
     server.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+      const approval = await this.options.authorizeResourceRead({
+        taskId: route.taskId,
+        serverId: route.serverId,
+        uri: request.params.uri,
+      });
+
+      if (approval.outcome !== "approved") {
+        return buildResourceErrorResult(approval.message);
+      }
+
       return (await getClient()).readResource(request.params);
     });
     server.server.setRequestHandler(ListPromptsRequestSchema, async (request) => {
@@ -280,5 +296,14 @@ function buildToolErrorResult(message: string): CallToolResult {
       text: message,
     }],
     isError: true,
+  };
+}
+
+function buildResourceErrorResult(message: string): ReadResourceResult {
+  return {
+    contents: [{
+      uri: "error://sandy/denied",
+      text: message,
+    }],
   };
 }

@@ -6,6 +6,8 @@ import { normalizeParsedToml } from "../config.js";
 export interface PersistentApprovalStore {
   isAlwaysAllowed(serverId: string, toolName: string): boolean;
   allowTool(serverId: string, toolName: string): Promise<void>;
+  isResourceReadAlwaysAllowed(serverId: string, uri: string): boolean;
+  allowResourceRead(serverId: string, uri: string): Promise<void>;
   isHttpTokenAlwaysAllowed(tokenId: string, host: string): boolean;
   allowHttpToken(tokenId: string, host: string): Promise<void>;
 }
@@ -15,6 +17,7 @@ type RawApprovalsConfig = {
   approvals?: {
     mcp?: Record<string, {
       always_allow_tools?: string[];
+      always_allow_resources?: string[];
     }>;
     http?: Record<string, {
       always_allow_hosts?: string[];
@@ -24,15 +27,20 @@ type RawApprovalsConfig = {
 
 export class TomlPersistentApprovalStore implements PersistentApprovalStore {
   private readonly approvals = new Map<string, Set<string>>();
+  private readonly resourceApprovals = new Map<string, Set<string>>();
   private readonly httpApprovals = new Map<string, Set<string>>();
 
   constructor(
     private readonly configFilePath: string,
     initialApprovals: Record<string, string[]>,
     initialHttpApprovals: Record<string, string[]> = {},
+    initialResourceApprovals: Record<string, string[]> = {},
   ) {
     for (const [serverId, tools] of Object.entries(initialApprovals)) {
       this.approvals.set(serverId, new Set(tools));
+    }
+    for (const [serverId, resources] of Object.entries(initialResourceApprovals)) {
+      this.resourceApprovals.set(serverId, new Set(resources));
     }
     for (const [tokenId, hosts] of Object.entries(initialHttpApprovals)) {
       this.httpApprovals.set(tokenId, new Set(hosts));
@@ -57,6 +65,26 @@ export class TomlPersistentApprovalStore implements PersistentApprovalStore {
     const tools = this.approvals.get(serverId) ?? new Set<string>();
     tools.add(toolName);
     this.approvals.set(serverId, tools);
+  }
+
+  isResourceReadAlwaysAllowed(serverId: string, uri: string): boolean {
+    return this.resourceApprovals.get(serverId)?.has(uri) ?? false;
+  }
+
+  async allowResourceRead(serverId: string, uri: string): Promise<void> {
+    if (this.isResourceReadAlwaysAllowed(serverId, uri)) {
+      return;
+    }
+
+    const raw = await readFile(this.configFilePath, "utf8");
+    const next = applyPersistentResourceApprovalToRawToml(raw, serverId, uri);
+    const tempFilePath = join(dirname(this.configFilePath), `.tmp-${process.pid}-${Date.now()}-config.toml`);
+    await writeFile(tempFilePath, next, "utf8");
+    await rename(tempFilePath, this.configFilePath);
+
+    const resources = this.resourceApprovals.get(serverId) ?? new Set<string>();
+    resources.add(uri);
+    this.resourceApprovals.set(serverId, resources);
   }
 
   isHttpTokenAlwaysAllowed(tokenId: string, host: string): boolean {
@@ -127,6 +155,30 @@ function applyHttpPersistentApprovalToRawToml(
   const existingHosts = parsed.approvals.http[tokenId].always_allow_hosts ?? [];
   const nextHosts = Array.from(new Set([...existingHosts, host])).sort();
   parsed.approvals.http[tokenId].always_allow_hosts = nextHosts;
+
+  return toml.stringify(parsed);
+}
+
+function applyPersistentResourceApprovalToRawToml(
+  rawToml: string,
+  serverId: string,
+  uri: string,
+): string {
+  const parsed = normalizeParsedToml(toml.parse(rawToml)) as RawApprovalsConfig;
+
+  if (!parsed.approvals) {
+    parsed.approvals = {};
+  }
+  if (!parsed.approvals.mcp) {
+    parsed.approvals.mcp = {};
+  }
+  if (!parsed.approvals.mcp[serverId]) {
+    parsed.approvals.mcp[serverId] = {};
+  }
+
+  const existingResources = parsed.approvals.mcp[serverId].always_allow_resources ?? [];
+  const nextResources = Array.from(new Set([...existingResources, uri])).sort();
+  parsed.approvals.mcp[serverId].always_allow_resources = nextResources;
 
   return toml.stringify(parsed);
 }

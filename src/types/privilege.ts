@@ -17,6 +17,13 @@ type McpToolCallPrivilegeRequest = {
   arguments: unknown;
 };
 
+type McpResourceReadPrivilegeRequest = {
+  kind: "mcp_resource_read";
+  requestId: string;
+  serverId: string;
+  uri: string;
+};
+
 type HttpTokenUsePrivilegeRequest = {
   kind: "http_token_use";
   requestId: string;
@@ -25,7 +32,7 @@ type HttpTokenUsePrivilegeRequest = {
   reason: string;
 };
 
-export type PrivilegeRequest = HostOperationPrivilegeRequest | McpToolCallPrivilegeRequest | HttpTokenUsePrivilegeRequest;
+export type PrivilegeRequest = HostOperationPrivilegeRequest | McpToolCallPrivilegeRequest | McpResourceReadPrivilegeRequest | HttpTokenUsePrivilegeRequest;
 
 export const privilegeResolutionResultSchema = z.object({
   requestId: z.string().min(1),

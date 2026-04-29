@@ -197,6 +197,7 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
     approvals: z.object({
       mcp: z.record(z.string(), z.object({
         always_allow_tools: z.array(z.string()).default([]),
+        always_allow_resources: z.array(z.string()).default([]),
       }).strict()).default({}),
       http: z.record(z.string(), z.object({
         always_allow_hosts: z.array(z.string()).default([]),
@@ -286,6 +287,7 @@ export type SandyConfig = {
   mcpServers: Record<string, McpServerConfig>;
   httpTokens: Record<string, HttpTokenConfig>;
   persistentMcpApprovals: Record<string, string[]>;
+  persistentMcpResourceApprovals: Record<string, string[]>;
   persistentHttpApprovals: Record<string, string[]>;
   updateMode: SandyUpdateMode;
   // The resolved image values alone are not enough here because a user may
@@ -412,6 +414,9 @@ export function parseConfigToml(
     ),
     persistentMcpApprovals: Object.fromEntries(
       Object.entries(parsed.approvals.mcp).map(([identifier, approval]) => [identifier, approval.always_allow_tools]),
+    ),
+    persistentMcpResourceApprovals: Object.fromEntries(
+      Object.entries(parsed.approvals.mcp).map(([identifier, approval]) => [identifier, approval.always_allow_resources]),
     ),
     persistentHttpApprovals: Object.fromEntries(
       Object.entries(parsed.approvals.http).map(([identifier, approval]) => [identifier, approval.always_allow_hosts]),

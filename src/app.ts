@@ -131,6 +131,7 @@ export async function startApp(): Promise<void> {
     config.configFilePath,
     config.persistentMcpApprovals,
     config.persistentHttpApprovals,
+    config.persistentMcpResourceApprovals,
   );
   const httpTokenAuthorizer = new HttpTokenAuthorizer(
     taskRegistry,
@@ -205,6 +206,7 @@ export async function startApp(): Promise<void> {
     workerNetworkName,
     sidecarImage: config.mcpSidecarImage,
     authorizeToolCall: (input) => orchestrator.authorizeMcpToolCall(input),
+    authorizeResourceRead: (input) => orchestrator.authorizeMcpResourceRead(input),
   }, workerAccess);
 
   await sidecarManager?.start();

@@ -5,6 +5,7 @@ import type { ChannelAdapter } from "./channel/channel-adapter.js";
 import type { MainAgentController } from "./agent/main-agent-controller.js";
 import { messages } from "./messages.js";
 import type { PrivilegeBroker } from "./privilege/privilege-broker.js";
+import type { PersistentApprovalStore } from "./privilege/persistent-approval-store.js";
 import type { SandboxHandle, SandboxRunner, LaunchTaskRequest } from "./sandbox/sandbox-runner.js";
 import { SandyOrchestrator } from "./orchestrator.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
@@ -1276,6 +1277,118 @@ test("orchestrator blocks new idle input while shared workspace deletion is pend
 
   assert.equal(mainAgent.contexts.length, 1);
   assert.equal(channel.sentTexts.at(-1)?.text, messages.shareDeletionStillPending());
+});
+
+test("orchestrator authorizes mcp resource reads from persistent config", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const persistentApprovalStore: PersistentApprovalStore = {
+    isAlwaysAllowed: () => false,
+    allowTool: async () => {},
+    isResourceReadAlwaysAllowed: (_serverId, uri) => uri === "test://resource",
+    allowResourceRead: async () => {},
+    isHttpTokenAlwaysAllowed: () => false,
+    allowHttpToken: async () => {},
+  };
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Read a resource.",
+      taskName: "resource-read",
+      taskLanguage: "English",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
+    persistentApprovalStore,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-resource",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Read a resource",
+    rawText: "Read a resource",
+    attachments: [],
+  });
+
+  const taskId = runner.launches[0]?.taskId;
+  assert.ok(taskId);
+
+  const approved = await orchestrator.authorizeMcpResourceRead({
+    taskId,
+    serverId: "todoist",
+    uri: "test://resource",
+  });
+
+  assert.equal(approved.outcome, "approved");
+  assert.equal(approved.scope, "always");
+});
+
+test("orchestrator sends mcp resource read privilege request to user when not pre-approved", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Read a resource.",
+      taskName: "resource-read",
+      taskLanguage: "English",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-resource-pending",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Read a resource",
+    rawText: "Read a resource",
+    attachments: [],
+  });
+
+  const taskId = runner.launches[0]?.taskId;
+  assert.ok(taskId);
+
+  const promise = orchestrator.authorizeMcpResourceRead({
+    taskId,
+    serverId: "todoist",
+    uri: "test://resource",
+  });
+
+  await new Promise<void>((resolve) => setImmediate(() => resolve()));
+
+  assert.equal(channel.privilegeRequests.length, 1);
+  const request = channel.privilegeRequests[0]?.request;
+  assert.equal(request?.kind, "mcp_resource_read");
+  assert.equal(request?.serverId, "todoist");
+  assert.equal(request?.uri, "test://resource");
+
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-resource-pending",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    decision: "approve_worker_session",
+    requestId: request?.requestId,
+  });
+
+  const result = await promise;
+  assert.equal(result.outcome, "approved");
+  assert.equal(result.scope, "worker_session");
+
+  const session = store.getOrCreate("chat-resource-pending");
+  assert.ok(session.activeTask?.approvedMcpResourceReads.some((entry) => entry.serverId === "todoist" && entry.uri === "test://resource"));
 });
 
 

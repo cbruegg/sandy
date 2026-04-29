@@ -120,4 +120,63 @@ always_allow_tools = ["find-projects"]
     // Should be unchanged
     expect(result.trim()).toBe(originalConfig.trim());
   });
+
+  it("should persist resource read approvals separately from tool approvals", async () => {
+    const originalConfig = `[channel.telegram]
+bot_token = "test-token"
+allowed_user = "12345"
+`;
+    await writeFile(configFilePath, originalConfig, "utf8");
+
+    const store = new TomlPersistentApprovalStore(configFilePath, {});
+    await store.allowResourceRead("todoist", "test://resource");
+
+    const result = await readFile(configFilePath, "utf8");
+
+    expect(result).not.toContain("worker.image");
+    expect(result).toContain("[approvals.mcp.todoist]");
+    expect(result).toContain('always_allow_resources = [ "test://resource" ]');
+    expect(result).not.toContain("always_allow_tools");
+  });
+
+  it("should add resource read approvals without overwriting existing tool approvals", async () => {
+    const originalConfig = `[channel.telegram]
+bot_token = "test-token"
+allowed_user = "12345"
+
+[approvals.mcp.todoist]
+always_allow_tools = ["list_projects"]
+`;
+    await writeFile(configFilePath, originalConfig, "utf8");
+
+    const store = new TomlPersistentApprovalStore(configFilePath, {
+      todoist: ["list_projects"],
+    });
+    await store.allowResourceRead("todoist", "test://resource");
+
+    const result = await readFile(configFilePath, "utf8");
+
+    expect(result).toContain('always_allow_tools = [ "list_projects" ]');
+    expect(result).toContain('always_allow_resources = [ "test://resource" ]');
+  });
+
+  it("should not modify file if resource read is already allowed", async () => {
+    const originalConfig = `[channel.telegram]
+bot_token = "test-token"
+allowed_user = "12345"
+
+[approvals.mcp.todoist]
+always_allow_resources = ["test://resource"]
+`;
+    await writeFile(configFilePath, originalConfig, "utf8");
+
+    const store = new TomlPersistentApprovalStore(configFilePath, {}, {}, {
+      todoist: ["test://resource"],
+    });
+    await store.allowResourceRead("todoist", "test://resource");
+
+    const result = await readFile(configFilePath, "utf8");
+
+    expect(result.trim()).toBe(originalConfig.trim());
+  });
 });

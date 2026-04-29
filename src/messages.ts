@@ -82,6 +82,20 @@ export const messages = {
     status === "completed"
       ? `MCP ${status}: ${serverId}.${toolName} ${describeMcpToolPayload(payload)}`
       : `MCP ${status}: ${serverId}.${toolName}`,
+  unsupportedMcpResourceReadPrivilegeRequest: (serverId: string, uri: string): string =>
+    `Unsupported MCP resource read privilege request ${serverId} ${uri}.`,
+  userDeniedMcpResourceRead: (serverId: string, uri: string): string =>
+    `The user denied MCP resource read ${serverId} ${uri}.`,
+  mcpResourceReadAllowedOnce: (serverId: string, uri: string): string =>
+    `Allowed ${serverId} ${uri} once.`,
+  mcpResourceReadAllowedForWorkerSession: (serverId: string, uri: string): string =>
+    `Allowed ${serverId} ${uri} for this worker session.`,
+  mcpResourceReadAllowedFromPersistentConfig: (serverId: string, uri: string): string =>
+    `Allowed ${serverId} ${uri} from persistent config.`,
+  mcpResourceReadAllowedAndPersisted: (serverId: string, uri: string): string =>
+    `Allowed ${serverId} ${uri} and updated Sandy's config file.`,
+  mcpResourceReadProgress: (status: string, serverId: string, uri: string): string =>
+    `MCP ${status}: ${serverId} ${uri}`,
   httpTokenDenied: (tokenId: string, host: string): string =>
     `The user denied HTTP token use ${tokenId} for host ${host}.`,
   httpTokenAllowedOnce: (tokenId: string, host: string): string =>
@@ -193,6 +207,13 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
     ].join("\n");
   }
 
+  if (request.kind === "mcp_resource_read") {
+    return [
+      `mcp_resource_read: ${request.serverId}`,
+      `URI: ${request.uri}`,
+    ].join("\n");
+  }
+
   if (request.kind === "http_token_use") {
     return [
       `http_token_use: ${request.tokenId}`,
@@ -214,7 +235,7 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
 }
 
 function describePrivilegeActions(request: PrivilegeRequest): string | null {
-  if (request.kind === "mcp_tool_call" || request.kind === "http_token_use") {
+  if (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use") {
     // In this case, it's pretty clear to the user that approve/deny will approve/deny the request
     return null;
   }

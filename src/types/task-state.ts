@@ -5,6 +5,11 @@ type McpToolGrant = {
   toolName: string;
 };
 
+type McpResourceReadGrant = {
+  serverId: string;
+  uri: string;
+};
+
 type HttpTokenOnceGrant = {
   tokenId: string;
   host: string;
@@ -33,6 +38,7 @@ export type ActiveTaskState = {
   lastActivityAt: string;
   pendingPrivilegeRequest: PrivilegeRequest | null;
   approvedMcpTools: McpToolGrant[];
+  approvedMcpResourceReads: McpResourceReadGrant[];
   approvedHttpTokenSessionGrants: HttpTokenSessionGrant[];
   approvedHttpTokenOnceGrants: HttpTokenOnceGrant[];
   workerConnected: boolean;

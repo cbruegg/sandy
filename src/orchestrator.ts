@@ -55,6 +55,8 @@ export class SandyOrchestrator {
     this.persistentApprovalStore = deps.persistentApprovalStore ?? {
       isAlwaysAllowed: () => false,
       allowTool: async () => {},
+      isResourceReadAlwaysAllowed: () => false,
+      allowResourceRead: async () => {},
       isHttpTokenAlwaysAllowed: () => false,
       allowHttpToken: async () => {},
     };
@@ -385,6 +387,7 @@ export class SandyOrchestrator {
           lastActivityAt: now,
           pendingPrivilegeRequest: null,
           approvedMcpTools: [],
+          approvedMcpResourceReads: [],
           approvedHttpTokenSessionGrants: [],
           approvedHttpTokenOnceGrants: [],
           workerConnected: false,
@@ -489,6 +492,8 @@ export class SandyOrchestrator {
     let result: PrivilegeResolutionResult;
     if (request.kind === "mcp_tool_call") {
       result = await this.resolvePendingMcpPrivilegeRequest(session, request, decision);
+    } else if (request.kind === "mcp_resource_read") {
+      result = await this.resolvePendingMcpResourceReadRequest(session, request, decision);
     } else if (request.kind === "http_token_use") {
       result = await this.resolvePendingHttpTokenRequest(session, request, decision);
     } else if (decision === "deny") {
@@ -514,7 +519,7 @@ export class SandyOrchestrator {
       await this.requireHandle(activeTask.taskId).resolvePrivilege(result);
     } else if (request.kind === "http_token_use") {
       await this.requireHandle(activeTask.taskId).resolvePrivilege(result);
-    } else {
+    } else if (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read") {
       this.pendingMcpPrivilegeResolvers.get(request.requestId)?.(result);
       this.pendingMcpPrivilegeResolvers.delete(request.requestId);
     }
@@ -582,6 +587,12 @@ export class SandyOrchestrator {
           requestId: request.requestId,
           outcome: "failed",
           message: messages.unsupportedMcpPrivilegeRequest(request.serverId, request.toolName),
+        };
+      case "mcp_resource_read":
+        return {
+          requestId: request.requestId,
+          outcome: "failed",
+          message: messages.unsupportedMcpResourceReadPrivilegeRequest(request.serverId, request.uri),
         };
       case "http_token_use":
         return {
@@ -782,39 +793,83 @@ export class SandyOrchestrator {
     toolName: string;
     arguments: unknown;
   }): Promise<PrivilegeResolutionResult> {
-    const chatId = this.deps.taskRegistry.getChatId(input.taskId);
+    return this.authorizeMcpRequest(input.taskId, {
+      isTaskGrantAllowed: (task) => this.isTaskToolGrantAllowed(task, input.serverId, input.toolName),
+      isPersistentAllowed: () => this.persistentApprovalStore.isAlwaysAllowed(input.serverId, input.toolName),
+      sessionMessage: messages.mcpToolAllowedForWorkerSession(input.serverId, input.toolName),
+      persistentMessage: messages.mcpToolAllowedFromPersistentConfig(input.serverId, input.toolName),
+      buildRequest: (requestId) => ({
+        kind: "mcp_tool_call" as const,
+        requestId,
+        serverId: input.serverId,
+        toolName: input.toolName,
+        arguments: input.arguments,
+      }),
+    });
+  }
+
+  async authorizeMcpResourceRead(input: {
+    taskId: string;
+    serverId: string;
+    uri: string;
+  }): Promise<PrivilegeResolutionResult> {
+    return this.authorizeMcpRequest(input.taskId, {
+      isTaskGrantAllowed: (task) => this.isTaskResourceReadGrantAllowed(task, input.serverId, input.uri),
+      isPersistentAllowed: () => this.persistentApprovalStore.isResourceReadAlwaysAllowed(input.serverId, input.uri),
+      sessionMessage: messages.mcpResourceReadAllowedForWorkerSession(input.serverId, input.uri),
+      persistentMessage: messages.mcpResourceReadAllowedFromPersistentConfig(input.serverId, input.uri),
+      buildRequest: (requestId) => ({
+        kind: "mcp_resource_read" as const,
+        requestId,
+        serverId: input.serverId,
+        uri: input.uri,
+      }),
+    });
+  }
+
+  private async authorizeMcpRequest(
+    taskId: string,
+    options: {
+      isTaskGrantAllowed: (task: NonNullable<SessionState["activeTask"]>) => boolean;
+      isPersistentAllowed: () => boolean;
+      sessionMessage: string;
+      persistentMessage: string;
+      buildRequest: (requestId: string) => Extract<PrivilegeRequest, { kind: "mcp_tool_call" | "mcp_resource_read" }>;
+    },
+  ): Promise<PrivilegeResolutionResult> {
+    const chatId = this.deps.taskRegistry.getChatId(taskId);
     if (!chatId) {
       return {
         requestId: randomUUID(),
         outcome: "failed",
-        message: messages.taskNotActive(input.taskId),
+        message: messages.taskNotActive(taskId),
       };
     }
 
     const session = this.deps.sessionStore.getOrCreate(chatId);
     const activeTask = session.activeTask;
-    if (!activeTask || activeTask.taskId !== input.taskId) {
+    if (!activeTask || activeTask.taskId !== taskId) {
       return {
         requestId: randomUUID(),
         outcome: "failed",
-        message: messages.taskNotActive(input.taskId),
+        message: messages.taskNotActive(taskId),
       };
     }
 
-    if (this.isTaskGrantAllowed(activeTask, input.serverId, input.toolName)) {
+    if (options.isTaskGrantAllowed(activeTask)) {
       return {
         requestId: randomUUID(),
         outcome: "approved",
-        message: messages.mcpToolAllowedForWorkerSession(input.serverId, input.toolName),
+        message: options.sessionMessage,
         scope: "worker_session",
       };
     }
 
-    if (this.persistentApprovalStore.isAlwaysAllowed(input.serverId, input.toolName)) {
+    if (options.isPersistentAllowed()) {
       return {
         requestId: randomUUID(),
         outcome: "approved",
-        message: messages.mcpToolAllowedFromPersistentConfig(input.serverId, input.toolName),
+        message: options.persistentMessage,
         scope: "always",
       };
     }
@@ -827,13 +882,7 @@ export class SandyOrchestrator {
       };
     }
 
-    const request: PrivilegeRequest = {
-      kind: "mcp_tool_call",
-      requestId: randomUUID(),
-      serverId: input.serverId,
-      toolName: input.toolName,
-      arguments: input.arguments,
-    };
+    const request = options.buildRequest(randomUUID());
     activeTask.pendingPrivilegeRequest = request;
     activeTask.status = "awaiting_privilege_decision";
     this.deps.sessionStore.save(session);
@@ -849,6 +898,44 @@ export class SandyOrchestrator {
     request: Extract<PrivilegeRequest, { kind: "mcp_tool_call" }>,
     decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
   ): Promise<PrivilegeResolutionResult> {
+    return this.resolvePendingMcpRequest(session, request, decision, {
+      deniedMessage: messages.userDeniedMcpToolCall(request.serverId, request.toolName),
+      onceMessage: messages.mcpToolAllowedOnce(request.serverId, request.toolName),
+      sessionMessage: messages.mcpToolAllowedForWorkerSession(request.serverId, request.toolName),
+      alwaysMessage: messages.mcpToolAllowedAndPersisted(request.serverId, request.toolName),
+      grantAccess: (task) => this.grantTaskToolAccess(task, request.serverId, request.toolName),
+      persist: () => this.persistentApprovalStore.allowTool(request.serverId, request.toolName),
+    });
+  }
+
+  private async resolvePendingMcpResourceReadRequest(
+    session: SessionState,
+    request: Extract<PrivilegeRequest, { kind: "mcp_resource_read" }>,
+    decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
+  ): Promise<PrivilegeResolutionResult> {
+    return this.resolvePendingMcpRequest(session, request, decision, {
+      deniedMessage: messages.userDeniedMcpResourceRead(request.serverId, request.uri),
+      onceMessage: messages.mcpResourceReadAllowedOnce(request.serverId, request.uri),
+      sessionMessage: messages.mcpResourceReadAllowedForWorkerSession(request.serverId, request.uri),
+      alwaysMessage: messages.mcpResourceReadAllowedAndPersisted(request.serverId, request.uri),
+      grantAccess: (task) => this.grantTaskResourceReadAccess(task, request.serverId, request.uri),
+      persist: () => this.persistentApprovalStore.allowResourceRead(request.serverId, request.uri),
+    });
+  }
+
+  private async resolvePendingMcpRequest(
+    session: SessionState,
+    request: Extract<PrivilegeRequest, { kind: "mcp_tool_call" | "mcp_resource_read" }>,
+    decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
+    options: {
+      deniedMessage: string;
+      onceMessage: string;
+      sessionMessage: string;
+      alwaysMessage: string;
+      grantAccess: (task: NonNullable<SessionState["activeTask"]>) => void;
+      persist: () => Promise<void>;
+    },
+  ): Promise<PrivilegeResolutionResult> {
     const activeTask = session.activeTask;
     if (!activeTask) {
       return {
@@ -863,30 +950,30 @@ export class SandyOrchestrator {
         return {
           requestId: request.requestId,
           outcome: "denied",
-          message: messages.userDeniedMcpToolCall(request.serverId, request.toolName),
+          message: options.deniedMessage,
         };
       case "approve":
       case "approve_once":
         return {
           requestId: request.requestId,
           outcome: "approved",
-          message: messages.mcpToolAllowedOnce(request.serverId, request.toolName),
+          message: options.onceMessage,
           scope: "once",
         };
       case "approve_worker_session":
-        this.grantTaskToolAccess(activeTask, request.serverId, request.toolName);
+        options.grantAccess(activeTask);
         return {
           requestId: request.requestId,
           outcome: "approved",
-          message: messages.mcpToolAllowedForWorkerSession(request.serverId, request.toolName),
+          message: options.sessionMessage,
           scope: "worker_session",
         };
       case "approve_always":
-        await this.persistentApprovalStore.allowTool(request.serverId, request.toolName);
+        await options.persist();
         return {
           requestId: request.requestId,
           outcome: "approved",
-          message: messages.mcpToolAllowedAndPersisted(request.serverId, request.toolName),
+          message: options.alwaysMessage,
           scope: "always",
         };
       default:
@@ -894,7 +981,7 @@ export class SandyOrchestrator {
     }
   }
 
-  private isTaskGrantAllowed(
+  private isTaskToolGrantAllowed(
     task: NonNullable<SessionState["activeTask"]>,
     serverId: string,
     toolName: string,
@@ -907,10 +994,29 @@ export class SandyOrchestrator {
     serverId: string,
     toolName: string,
   ): void {
-    if (this.isTaskGrantAllowed(task, serverId, toolName)) {
+    if (this.isTaskToolGrantAllowed(task, serverId, toolName)) {
       return;
     }
     task.approvedMcpTools.push({ serverId, toolName });
+  }
+
+  private isTaskResourceReadGrantAllowed(
+    task: NonNullable<SessionState["activeTask"]>,
+    serverId: string,
+    uri: string,
+  ): boolean {
+    return task.approvedMcpResourceReads.some((entry) => entry.serverId === serverId && entry.uri === uri);
+  }
+
+  private grantTaskResourceReadAccess(
+    task: NonNullable<SessionState["activeTask"]>,
+    serverId: string,
+    uri: string,
+  ): void {
+    if (this.isTaskResourceReadGrantAllowed(task, serverId, uri)) {
+      return;
+    }
+    task.approvedMcpResourceReads.push({ serverId, uri });
   }
 
   private async resolvePendingHttpTokenRequest(
@@ -991,8 +1097,12 @@ function resolveRequestTypeLabel(request: PrivilegeRequest): string {
       return request.payload.type;
     case "mcp_tool_call":
       return request.toolName;
+    case "mcp_resource_read":
+      return `resource:${request.serverId}:${request.uri}`;
     case "http_token_use":
       return `http:${request.tokenId}@${request.host}`;
+    default:
+      return "unknown";
   }
 }
 

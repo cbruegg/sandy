@@ -48,6 +48,18 @@ export async function main(): Promise<void> {
         pendingAuthorization.set(requestId, resolve);
       });
     },
+    authorizeResourceRead: async (request) => {
+      const requestId = randomUUID();
+      send({
+        type: "resource_authorization_request",
+        requestId,
+        ...request,
+      });
+
+      return await new Promise<PrivilegeResolutionResult>((resolve) => {
+        pendingAuthorization.set(requestId, resolve);
+      });
+    },
   });
 
   input.on("line", (line) => {

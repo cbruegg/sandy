@@ -12,6 +12,8 @@ function createFakePersistentApprovalStore(
   return {
     isAlwaysAllowed: () => false,
     allowTool: async () => {},
+    isResourceReadAlwaysAllowed: () => false,
+    allowResourceRead: async () => {},
     isHttpTokenAlwaysAllowed: (tokenId: string, host: string) => allowed.has(`${tokenId}:${host}`),
     allowHttpToken: async () => {},
   };
@@ -40,6 +42,7 @@ test("HttpTokenAuthorizer prefers worker_session grants over once grants", async
     lastActivityAt: new Date().toISOString(),
     pendingPrivilegeRequest: null,
     approvedMcpTools: [],
+    approvedMcpResourceReads: [],
     approvedHttpTokenSessionGrants: [{ tokenId: "api-token", host: "api.example.com" }],
     approvedHttpTokenOnceGrants: [{ tokenId: "api-token", host: "api.example.com", consumed: false }],
     workerConnected: false,
@@ -88,6 +91,7 @@ test("HttpTokenAuthorizer consumes once grants without affecting session grants"
     lastActivityAt: new Date().toISOString(),
     pendingPrivilegeRequest: null,
     approvedMcpTools: [],
+    approvedMcpResourceReads: [],
     approvedHttpTokenSessionGrants: [],
     approvedHttpTokenOnceGrants: [{ tokenId: "api-token", host: "api.example.com", consumed: false }],
     workerConnected: false,

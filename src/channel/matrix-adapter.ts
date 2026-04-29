@@ -353,6 +353,9 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       case "mcp_tool_call":
         requestType = `${request.serverId}.${request.toolName}`;
         break;
+      case "mcp_resource_read":
+        requestType = `resource:${request.serverId}:${request.uri}`;
+        break;
       case "http_token_use":
         requestType = `http:${request.tokenId}@${request.host}`;
         break;
@@ -366,7 +369,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     await this.sendPoll(
       chatId,
       "Privilege request",
-      request.kind === "mcp_tool_call" || request.kind === "http_token_use"
+      request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use"
         ? [
             {
               answerId: "approve_once",

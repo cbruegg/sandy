@@ -231,6 +231,9 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       case "mcp_tool_call":
         requestType = `${request.serverId}.${request.toolName}`;
         break;
+      case "mcp_resource_read":
+        requestType = `resource:${request.serverId}:${request.uri}`;
+        break;
       case "http_token_use":
         requestType = `http:${request.tokenId}@${request.host}`;
         break;
@@ -312,7 +315,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
 }
 
 function buildPrivilegeKeyboard(request: PrivilegeRequest): Array<Array<{ text: string; callback_data: string }>> {
-  if (request.kind === "mcp_tool_call" || request.kind === "http_token_use") {
+  if (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use") {
     return [
       [
         { text: buttonLabels.approve, callback_data: `approve:${request.requestId}` },

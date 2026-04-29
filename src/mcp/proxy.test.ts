@@ -38,6 +38,11 @@ function createProxy(access = new ProxyAccess("shared-secret")): SandyMcpProxy {
       outcome: "approved",
       message: "approved",
     }),
+    authorizeResourceRead: async () => ({
+      requestId: "approval-1",
+      outcome: "approved",
+      message: "approved",
+    }),
   });
 }
 

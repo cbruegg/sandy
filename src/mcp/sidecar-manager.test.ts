@@ -66,6 +66,11 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
       outcome: "approved",
       message: "approved",
     }),
+    authorizeResourceRead: async () => ({
+      requestId: "approval-1",
+      outcome: "approved",
+      message: "approved",
+    }),
   }, access);
 
   await manager.start();
@@ -128,6 +133,9 @@ test("McpSidecarManager returns a failed authorization result when authorization
     sidecarImage: "sandy-mcp-proxy:latest",
     spawnImpl,
     authorizeToolCall: async () => {
+      throw new Error("approval service unavailable");
+    },
+    authorizeResourceRead: async () => {
       throw new Error("approval service unavailable");
     },
   }, new ProxyAccess("shared-secret"));
@@ -203,6 +211,11 @@ test("McpSidecarManager forwards structured sidecar logs through the host logger
     sidecarImage: "sandy-mcp-proxy:latest",
     spawnImpl,
     authorizeToolCall: async () => ({
+      requestId: "approval-1",
+      outcome: "approved",
+      message: "approved",
+    }),
+    authorizeResourceRead: async () => ({
       requestId: "approval-1",
       outcome: "approved",
       message: "approved",
