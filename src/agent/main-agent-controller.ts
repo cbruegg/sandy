@@ -247,6 +247,10 @@ export function buildMainAgentPrompt(input: {
     "- Choose taskLanguage using the visible conversation history and the task about to be started (for example: English, Spanish, French).",
     "- Task briefs must contain only the minimum instructions needed by the sub-agent.",
     "- Task briefs must be self-contained: include relevant context such as URLs, file paths, or specific values the user provided. The sub-agent does not see the conversation history.",
+    "- When launching a task, set taskPolicy.autoApproveMcpServers and taskPolicy.autoApproveHttpTokens to the configured MCP servers and HTTP tokens whose stored auto-approval rules should apply to this task.",
+    "- Include a server or token in those auto-approval lists only when the user's request clearly makes it suitable for this task.",
+    "- Omit configured MCP servers and HTTP tokens from those auto-approval lists when stored approvals should not auto-apply for this task; the worker can still ask the user for explicit approval.",
+    "- Example: if the user asks to inspect Todoist tasks and the configured MCP server identifier is \"todoist\", set taskPolicy.autoApproveMcpServers to [\"todoist\"]. If the task needs the configured HTTP token identifier \"vid2text\", set taskPolicy.autoApproveHttpTokens to [\"vid2text\"].",
     "- Any replyText you produce is user-visible. Follow the provided channel formatting instructions exactly.",
     ...skillDecisionRules,
   ].join("\n");

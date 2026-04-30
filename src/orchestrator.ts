@@ -11,6 +11,8 @@ import { logger } from "./logger.js";
 import { messages } from "./messages.js";
 import type {
   MainAgentDecision,
+  MainAgentTaskPolicy,
+  MainAgentTaskPolicyInput,
   NormalizedChatEvent,
   PrivilegeRequest,
   PrivilegeResolutionResult,
@@ -227,15 +229,17 @@ export class SandyOrchestrator {
           payload: call,
         });
         return;
-      case "request_http_token":
+      case "request_http_token": {
         await this.presentPrivilegeRequestToUser(chatId, session, {
           kind: "http_token_use",
           requestId: randomUUID(),
           tokenId: call.tokenId,
           host: call.host,
           reason: call.reason,
+          confirmsAutoApprovalForTask: this.shouldConfirmHttpTokenAutoApprovalForTask(session, call.tokenId, call.host),
         });
         return;
+      }
     }
 
     assertNever(call); // would fail at compile-time
@@ -378,6 +382,7 @@ export class SandyOrchestrator {
           taskId,
           taskName: decision.taskName,
         });
+        const taskPolicy = normalizeTaskPolicy(decision.taskPolicy);
         session.activeTask = {
           taskId,
           taskName: decision.taskName,
@@ -386,6 +391,7 @@ export class SandyOrchestrator {
           startedAt: now,
           lastActivityAt: now,
           pendingPrivilegeRequest: null,
+          taskPolicy,
           approvedMcpTools: [],
           approvedMcpResourceReads: [],
           approvedHttpTokenSessionGrants: [],
@@ -794,6 +800,7 @@ export class SandyOrchestrator {
     arguments: unknown;
   }): Promise<PrivilegeResolutionResult> {
     return this.authorizeMcpRequest(input.taskId, {
+      serverId: input.serverId,
       isTaskGrantAllowed: (task) => this.isTaskToolGrantAllowed(task, input.serverId, input.toolName),
       isPersistentAllowed: () => this.persistentApprovalStore.isAlwaysAllowed(input.serverId, input.toolName),
       sessionMessage: messages.mcpToolAllowedForWorkerSession(input.serverId, input.toolName),
@@ -814,6 +821,7 @@ export class SandyOrchestrator {
     uri: string;
   }): Promise<PrivilegeResolutionResult> {
     return this.authorizeMcpRequest(input.taskId, {
+      serverId: input.serverId,
       isTaskGrantAllowed: (task) => this.isTaskResourceReadGrantAllowed(task, input.serverId, input.uri),
       isPersistentAllowed: () => this.persistentApprovalStore.isResourceReadAlwaysAllowed(input.serverId, input.uri),
       sessionMessage: messages.mcpResourceReadAllowedForWorkerSession(input.serverId, input.uri),
@@ -830,6 +838,7 @@ export class SandyOrchestrator {
   private async authorizeMcpRequest(
     taskId: string,
     options: {
+      serverId: string;
       isTaskGrantAllowed: (task: NonNullable<SessionState["activeTask"]>) => boolean;
       isPersistentAllowed: () => boolean;
       sessionMessage: string;
@@ -865,7 +874,8 @@ export class SandyOrchestrator {
       };
     }
 
-    if (options.isPersistentAllowed()) {
+    const hasConfiguredAutoApproval = options.isPersistentAllowed();
+    if (isMcpAutoApprovalAllowed(activeTask, options.serverId) && hasConfiguredAutoApproval) {
       return {
         requestId: randomUUID(),
         outcome: "approved",
@@ -882,7 +892,10 @@ export class SandyOrchestrator {
       };
     }
 
-    const request = options.buildRequest(randomUUID());
+    const request = {
+      ...options.buildRequest(randomUUID()),
+      confirmsAutoApprovalForTask: hasConfiguredAutoApproval,
+    };
     activeTask.pendingPrivilegeRequest = request;
     activeTask.status = "awaiting_privilege_decision";
     this.deps.sessionStore.save(session);
@@ -903,6 +916,8 @@ export class SandyOrchestrator {
       onceMessage: messages.mcpToolAllowedOnce(request.serverId, request.toolName),
       sessionMessage: messages.mcpToolAllowedForWorkerSession(request.serverId, request.toolName),
       alwaysMessage: messages.mcpToolAllowedAndPersisted(request.serverId, request.toolName),
+      persistentMessage: messages.mcpToolAllowedFromPersistentConfig(request.serverId, request.toolName),
+      grantAutoApprovalForTask: (task) => grantMcpAutoApprovalForTask(task, request.serverId),
       grantAccess: (task) => this.grantTaskToolAccess(task, request.serverId, request.toolName),
       persist: () => this.persistentApprovalStore.allowTool(request.serverId, request.toolName),
     });
@@ -918,6 +933,8 @@ export class SandyOrchestrator {
       onceMessage: messages.mcpResourceReadAllowedOnce(request.serverId, request.uri),
       sessionMessage: messages.mcpResourceReadAllowedForWorkerSession(request.serverId, request.uri),
       alwaysMessage: messages.mcpResourceReadAllowedAndPersisted(request.serverId, request.uri),
+      persistentMessage: messages.mcpResourceReadAllowedFromPersistentConfig(request.serverId, request.uri),
+      grantAutoApprovalForTask: (task) => grantMcpAutoApprovalForTask(task, request.serverId),
       grantAccess: (task) => this.grantTaskResourceReadAccess(task, request.serverId, request.uri),
       persist: () => this.persistentApprovalStore.allowResourceRead(request.serverId, request.uri),
     });
@@ -932,6 +949,8 @@ export class SandyOrchestrator {
       onceMessage: string;
       sessionMessage: string;
       alwaysMessage: string;
+      persistentMessage: string;
+      grantAutoApprovalForTask: (task: NonNullable<SessionState["activeTask"]>) => void;
       grantAccess: (task: NonNullable<SessionState["activeTask"]>) => void;
       persist: () => Promise<void>;
     },
@@ -954,6 +973,15 @@ export class SandyOrchestrator {
         };
       case "approve":
       case "approve_once":
+        if (request.confirmsAutoApprovalForTask) {
+          options.grantAutoApprovalForTask(activeTask);
+          return {
+            requestId: request.requestId,
+            outcome: "approved",
+            message: options.persistentMessage,
+            scope: "always",
+          };
+        }
         return {
           requestId: request.requestId,
           outcome: "approved",
@@ -961,6 +989,15 @@ export class SandyOrchestrator {
           scope: "once",
         };
       case "approve_worker_session":
+        if (request.confirmsAutoApprovalForTask) {
+          options.grantAutoApprovalForTask(activeTask);
+          return {
+            requestId: request.requestId,
+            outcome: "approved",
+            message: options.persistentMessage,
+            scope: "always",
+          };
+        }
         options.grantAccess(activeTask);
         return {
           requestId: request.requestId,
@@ -970,6 +1007,7 @@ export class SandyOrchestrator {
         };
       case "approve_always":
         await options.persist();
+        options.grantAutoApprovalForTask(activeTask);
         return {
           requestId: request.requestId,
           outcome: "approved",
@@ -1042,6 +1080,15 @@ export class SandyOrchestrator {
         };
       case "approve":
       case "approve_once":
+        if (request.confirmsAutoApprovalForTask) {
+          grantHttpTokenAutoApprovalForTask(activeTask, request.tokenId);
+          return {
+            requestId: request.requestId,
+            outcome: "approved",
+            message: messages.httpTokenAllowedFromPersistentConfig(request.tokenId, request.host),
+            scope: "always",
+          };
+        }
         this.grantHttpTokenOnce(activeTask, request.tokenId, request.host);
         return {
           requestId: request.requestId,
@@ -1050,6 +1097,15 @@ export class SandyOrchestrator {
           scope: "once",
         };
       case "approve_worker_session":
+        if (request.confirmsAutoApprovalForTask) {
+          grantHttpTokenAutoApprovalForTask(activeTask, request.tokenId);
+          return {
+            requestId: request.requestId,
+            outcome: "approved",
+            message: messages.httpTokenAllowedFromPersistentConfig(request.tokenId, request.host),
+            scope: "always",
+          };
+        }
         this.grantHttpTokenSessionAccess(activeTask, request.tokenId, request.host);
         return {
           requestId: request.requestId,
@@ -1059,6 +1115,7 @@ export class SandyOrchestrator {
         };
       case "approve_always":
         await this.persistentApprovalStore.allowHttpToken(request.tokenId, request.host);
+        grantHttpTokenAutoApprovalForTask(activeTask, request.tokenId);
         return {
           requestId: request.requestId,
           outcome: "approved",
@@ -1068,6 +1125,17 @@ export class SandyOrchestrator {
       default:
         assertNever(decision);
     }
+  }
+
+  private shouldConfirmHttpTokenAutoApprovalForTask(
+    session: SessionState,
+    tokenId: string,
+    host: string,
+  ): boolean {
+    const activeTask = session.activeTask;
+    return activeTask !== null
+      && !isHttpTokenAutoApprovalAllowed(activeTask, tokenId)
+      && this.persistentApprovalStore.isHttpTokenAlwaysAllowed(tokenId, host);
   }
 
   private grantHttpTokenOnce(
@@ -1083,8 +1151,53 @@ export class SandyOrchestrator {
     tokenId: string,
     host: string,
   ): void {
+    if (task.approvedHttpTokenSessionGrants.some((entry) => entry.tokenId === tokenId && entry.host === host)) {
+      return;
+    }
     task.approvedHttpTokenSessionGrants.push({ tokenId, host });
   }
+}
+
+function normalizeTaskPolicy(policy: MainAgentTaskPolicyInput | undefined): MainAgentTaskPolicy {
+  return {
+    autoApproveMcpServers: uniqueStrings(policy?.autoApproveMcpServers ?? []),
+    autoApproveHttpTokens: uniqueStrings(policy?.autoApproveHttpTokens ?? []),
+  };
+}
+
+function uniqueStrings(entries: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const entry of entries) {
+    if (seen.has(entry)) {
+      continue;
+    }
+    seen.add(entry);
+    result.push(entry);
+  }
+  return result;
+}
+
+function isMcpAutoApprovalAllowed(task: NonNullable<SessionState["activeTask"]>, serverId: string): boolean {
+  return task.taskPolicy.autoApproveMcpServers.includes(serverId);
+}
+
+function grantMcpAutoApprovalForTask(task: NonNullable<SessionState["activeTask"]>, serverId: string): void {
+  if (isMcpAutoApprovalAllowed(task, serverId)) {
+    return;
+  }
+  task.taskPolicy.autoApproveMcpServers.push(serverId);
+}
+
+function isHttpTokenAutoApprovalAllowed(task: NonNullable<SessionState["activeTask"]>, tokenId: string): boolean {
+  return task.taskPolicy.autoApproveHttpTokens.includes(tokenId);
+}
+
+function grantHttpTokenAutoApprovalForTask(task: NonNullable<SessionState["activeTask"]>, tokenId: string): void {
+  if (isHttpTokenAutoApprovalAllowed(task, tokenId)) {
+    return;
+  }
+  task.taskPolicy.autoApproveHttpTokens.push(tokenId);
 }
 
 function assertNever(value: never): never {

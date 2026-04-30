@@ -6,6 +6,7 @@ import type { MainAgentController } from "./agent/main-agent-controller.js";
 import { messages } from "./messages.js";
 import type { PrivilegeBroker } from "./privilege/privilege-broker.js";
 import type { PersistentApprovalStore } from "./privilege/persistent-approval-store.js";
+import { HttpTokenAuthorizer } from "./http/token-authorizer.js";
 import type { SandboxHandle, SandboxRunner, LaunchTaskRequest } from "./sandbox/sandbox-runner.js";
 import { SandyOrchestrator } from "./orchestrator.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
@@ -1298,6 +1299,10 @@ test("orchestrator authorizes mcp resource reads from persistent config", async 
       taskBrief: "Read a resource.",
       taskName: "resource-read",
       taskLanguage: "English",
+      taskPolicy: {
+        autoApproveMcpServers: ["todoist"],
+        autoApproveHttpTokens: [],
+      },
     }),
     sandboxRunner: runner,
     sessionStore: store,
@@ -1327,6 +1332,250 @@ test("orchestrator authorizes mcp resource reads from persistent config", async 
 
   assert.equal(approved.outcome, "approved");
   assert.equal(approved.scope, "always");
+});
+
+test("orchestrator does not apply persistent mcp approvals when task policy omits the server", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const persistentApprovalStore: PersistentApprovalStore = {
+    isAlwaysAllowed: () => false,
+    allowTool: async () => {},
+    isResourceReadAlwaysAllowed: (_serverId, uri) => uri === "test://resource",
+    allowResourceRead: async () => {},
+    isHttpTokenAlwaysAllowed: () => false,
+    allowHttpToken: async () => {},
+  };
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Read a resource.",
+      taskName: "resource-read",
+      taskLanguage: "English",
+      taskPolicy: {
+        autoApproveMcpServers: [],
+        autoApproveHttpTokens: [],
+      },
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
+    persistentApprovalStore,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-resource-no-server-access",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Read a resource",
+    rawText: "Read a resource",
+    attachments: [],
+  });
+
+  const taskId = runner.launches[0]?.taskId;
+  assert.ok(taskId);
+
+  const promise = orchestrator.authorizeMcpResourceRead({
+    taskId,
+    serverId: "todoist",
+    uri: "test://resource",
+  });
+  await new Promise<void>((resolve) => setImmediate(() => resolve()));
+
+  const request = channel.privilegeRequests[0]?.request;
+  assert.equal(request?.kind, "mcp_resource_read");
+
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-resource-no-server-access",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    decision: "approve_once",
+    requestId: request?.requestId,
+  });
+
+  const result = await promise;
+  assert.equal(result.outcome, "approved");
+});
+
+test("orchestrator confirms persisted mcp tool approval suitability and reuses it for the task", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const persistentApprovalStore: PersistentApprovalStore = {
+    isAlwaysAllowed: (serverId, toolName) => serverId === "todoist" && toolName === "addTask",
+    allowTool: async () => {},
+    isResourceReadAlwaysAllowed: () => false,
+    allowResourceRead: async () => {},
+    isHttpTokenAlwaysAllowed: () => false,
+    allowHttpToken: async () => {},
+  };
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Add a task.",
+      taskName: "todoist-add",
+      taskLanguage: "English",
+      taskPolicy: {
+        autoApproveMcpServers: [],
+        autoApproveHttpTokens: [],
+      },
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry: new TaskRegistry(),
+    persistentApprovalStore,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-mcp-confirm",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Add a Todoist task",
+    rawText: "Add a Todoist task",
+    attachments: [],
+  });
+
+  const taskId = runner.launches[0]?.taskId;
+  assert.ok(taskId);
+
+  const promise = orchestrator.authorizeMcpToolCall({
+    taskId,
+    serverId: "todoist",
+    toolName: "addTask",
+    arguments: { content: "Buy milk" },
+  });
+  await new Promise<void>((resolve) => setImmediate(() => resolve()));
+
+  assert.equal(channel.privilegeRequests.length, 1);
+  const request = channel.privilegeRequests[0]?.request;
+  assert.equal(request?.kind, "mcp_tool_call");
+  assert.equal(request?.confirmsAutoApprovalForTask, true);
+
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-mcp-confirm",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    decision: "approve",
+    requestId: request?.requestId,
+  });
+
+  const result = await promise;
+  assert.equal(result.outcome, "approved");
+  assert.equal(result.scope, "always");
+
+  const session = store.getOrCreate("chat-mcp-confirm");
+  assert.deepEqual(session.activeTask?.taskPolicy.autoApproveMcpServers, ["todoist"]);
+
+  const second = await orchestrator.authorizeMcpToolCall({
+    taskId,
+    serverId: "todoist",
+    toolName: "addTask",
+    arguments: { content: "Buy eggs" },
+  });
+
+  assert.equal(second.outcome, "approved");
+  assert.equal(second.scope, "always");
+  assert.equal(channel.privilegeRequests.length, 1);
+});
+
+test("orchestrator confirms persisted http token suitability and enables later proxy auto-approval", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const taskRegistry = new TaskRegistry();
+  const persistentApprovalStore: PersistentApprovalStore = {
+    isAlwaysAllowed: () => false,
+    allowTool: async () => {},
+    isResourceReadAlwaysAllowed: () => false,
+    allowResourceRead: async () => {},
+    isHttpTokenAlwaysAllowed: (tokenId, host) => tokenId === "vid2text" && host === "api.example.com",
+    allowHttpToken: async () => {},
+  };
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Transcribe a video.",
+      taskName: "video-transcribe",
+      taskLanguage: "English",
+      taskPolicy: {
+        autoApproveMcpServers: [],
+        autoApproveHttpTokens: [],
+      },
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry,
+    persistentApprovalStore,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_text",
+    chatId: "chat-http-confirm",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Transcribe this video",
+    rawText: "Transcribe this video",
+    attachments: [],
+  });
+
+  const taskId = runner.launches[0]?.taskId;
+  assert.ok(taskId);
+
+  await runner.emit({
+    type: "tool_call",
+    call: {
+      type: "request_http_token",
+      tokenId: "vid2text",
+      host: "api.example.com",
+      reason: "Need the transcript API.",
+    },
+  });
+
+  assert.equal(channel.privilegeRequests.length, 1);
+  const request = channel.privilegeRequests[0]?.request;
+  assert.equal(request?.kind, "http_token_use");
+  assert.equal(request?.confirmsAutoApprovalForTask, true);
+
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-http-confirm",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    decision: "approve",
+    requestId: request?.requestId,
+  });
+
+  assert.deepEqual(runner.handle.privilegeResults, [
+    {
+      requestId: request?.requestId,
+      outcome: "approved",
+      message: messages.httpTokenAllowedFromPersistentConfig("vid2text", "api.example.com"),
+      scope: "always",
+    },
+  ]);
+
+  const session = store.getOrCreate("chat-http-confirm");
+  assert.deepEqual(session.activeTask?.taskPolicy.autoApproveHttpTokens, ["vid2text"]);
+
+  const authorizer = new HttpTokenAuthorizer(taskRegistry, store, persistentApprovalStore);
+  const proxyResult = await authorizer.authorizeHttpTokenUse({
+    taskId,
+    tokenId: "vid2text",
+    host: "api.example.com",
+  });
+
+  assert.equal(proxyResult.outcome, "approved");
+  assert.equal(proxyResult.scope, "always");
 });
 
 test("orchestrator sends mcp resource read privilege request to user when not pre-approved", async () => {
@@ -1390,5 +1639,3 @@ test("orchestrator sends mcp resource read privilege request to user when not pr
   const session = store.getOrCreate("chat-resource-pending");
   assert.ok(session.activeTask?.approvedMcpResourceReads.some((entry) => entry.serverId === "todoist" && entry.uri === "test://resource"));
 });
-
-

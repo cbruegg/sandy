@@ -48,7 +48,8 @@ export class HttpTokenAuthorizer {
       });
     }
 
-    if (this.persistentApprovalStore.isHttpTokenAlwaysAllowed(input.tokenId, input.host)) {
+    if (isHttpTokenAutoApprovalAllowed(activeTask, input.tokenId)
+      && this.persistentApprovalStore.isHttpTokenAlwaysAllowed(input.tokenId, input.host)) {
       return Promise.resolve({
         requestId: randomUUID(),
         outcome: "approved",
@@ -77,6 +78,13 @@ export class HttpTokenAuthorizer {
       message: messages.httpTokenProxyRejected(input.tokenId),
     });
   }
+}
+
+function isHttpTokenAutoApprovalAllowed(
+  task: NonNullable<SessionState["activeTask"]>,
+  tokenId: string,
+): boolean {
+  return task.taskPolicy.autoApproveHttpTokens.includes(tokenId);
 }
 
 function isHttpTokenSessionGrantAllowed(

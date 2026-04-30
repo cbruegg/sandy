@@ -369,7 +369,30 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     await this.sendPoll(
       chatId,
       "Privilege request",
-      request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use"
+      (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use") && request.confirmsAutoApprovalForTask
+        ? [
+            {
+              answerId: "approve",
+              label: buttonLabels.approve,
+              event: { kind: "approval_response", decision: "approve", requestId: request.requestId },
+            },
+            {
+              answerId: "deny",
+              label: buttonLabels.deny,
+              event: { kind: "approval_response", decision: "deny", requestId: request.requestId },
+            },
+            {
+              answerId: "report",
+              label: buttonLabels.reportDangerousOutput,
+              event: { kind: "danger_report" },
+            },
+            {
+              answerId: "cancel",
+              label: buttonLabels.abortTask,
+              event: { kind: "cancel_request" },
+            },
+          ]
+        : request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use"
         ? [
             {
               answerId: "approve_once",

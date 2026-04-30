@@ -15,6 +15,7 @@ type McpToolCallPrivilegeRequest = {
   serverId: string;
   toolName: string;
   arguments: unknown;
+  confirmsAutoApprovalForTask?: boolean;
 };
 
 type McpResourceReadPrivilegeRequest = {
@@ -22,6 +23,7 @@ type McpResourceReadPrivilegeRequest = {
   requestId: string;
   serverId: string;
   uri: string;
+  confirmsAutoApprovalForTask?: boolean;
 };
 
 type HttpTokenUsePrivilegeRequest = {
@@ -30,6 +32,7 @@ type HttpTokenUsePrivilegeRequest = {
   tokenId: string;
   host: string;
   reason: string;
+  confirmsAutoApprovalForTask?: boolean;
 };
 
 export type PrivilegeRequest = HostOperationPrivilegeRequest | McpToolCallPrivilegeRequest | McpResourceReadPrivilegeRequest | HttpTokenUsePrivilegeRequest;

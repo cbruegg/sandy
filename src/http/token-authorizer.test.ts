@@ -41,6 +41,7 @@ test("HttpTokenAuthorizer prefers worker_session grants over once grants", async
     startedAt: new Date().toISOString(),
     lastActivityAt: new Date().toISOString(),
     pendingPrivilegeRequest: null,
+    taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
     approvedMcpTools: [],
     approvedMcpResourceReads: [],
     approvedHttpTokenSessionGrants: [{ tokenId: "api-token", host: "api.example.com" }],
@@ -90,6 +91,7 @@ test("HttpTokenAuthorizer consumes once grants without affecting session grants"
     startedAt: new Date().toISOString(),
     lastActivityAt: new Date().toISOString(),
     pendingPrivilegeRequest: null,
+    taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
     approvedMcpTools: [],
     approvedMcpResourceReads: [],
     approvedHttpTokenSessionGrants: [],
@@ -130,4 +132,53 @@ test("HttpTokenAuthorizer returns failed when task is not registered", async () 
   });
 
   assert.equal(result.outcome, "failed");
+});
+
+test("HttpTokenAuthorizer applies persistent approvals only when task policy enables token auto-approval", async () => {
+  const taskRegistry = new TaskRegistry();
+  const sessionStore = new InMemorySessionStore();
+  const authorizer = new HttpTokenAuthorizer(
+    taskRegistry,
+    sessionStore,
+    createFakePersistentApprovalStore([{ tokenId: "api-token", host: "api.example.com" }]),
+  );
+
+  const chatId = "chat-1";
+  const taskId = "task-1";
+  taskRegistry.register(taskId, chatId);
+
+  const session = sessionStore.getOrCreate(chatId);
+  session.activeTask = {
+    taskId,
+    taskName: "test",
+    taskBrief: "test brief",
+    status: "running",
+    startedAt: new Date().toISOString(),
+    lastActivityAt: new Date().toISOString(),
+    pendingPrivilegeRequest: null,
+    taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
+    approvedMcpTools: [],
+    approvedMcpResourceReads: [],
+    approvedHttpTokenSessionGrants: [],
+    approvedHttpTokenOnceGrants: [],
+    workerConnected: false,
+    hasReportableOutput: false,
+    taskSummary: null,
+  };
+
+  const beforeAccess = await authorizer.authorizeHttpTokenUse({
+    taskId,
+    tokenId: "api-token",
+    host: "api.example.com",
+  });
+  session.activeTask.taskPolicy.autoApproveHttpTokens.push("api-token");
+  const afterAccess = await authorizer.authorizeHttpTokenUse({
+    taskId,
+    tokenId: "api-token",
+    host: "api.example.com",
+  });
+
+  assert.equal(beforeAccess.outcome, "denied");
+  assert.equal(afterAccess.outcome, "approved");
+  assert.equal(afterAccess.scope, "always");
 });

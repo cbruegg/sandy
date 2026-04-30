@@ -76,3 +76,27 @@ test("McpWorkerLaunchConfigBuilder builds worker TOML and env from access data",
     bearerToken: launchConfig.environment[workerProxyTokenEnvVar],
   }), { ok: true });
 });
+
+test("McpWorkerLaunchConfigBuilder exposes all configured MCP servers", async () => {
+  const mcpServers: Record<string, McpServerConfig> = {
+    todoist: {
+      transport: "streamable_http",
+      url: "https://todoist.example/mcp",
+      oauthScopes: [],
+    },
+    github: {
+      transport: "streamable_http",
+      url: "https://github.example/mcp",
+      oauthScopes: [],
+    },
+  };
+  const builder = new McpWorkerLaunchConfigBuilder(mcpServers, new ProxyAccess(), true);
+  const launchConfig = builder.build("task-1");
+
+  assert.ok(launchConfig.codexConfigToml);
+  const parsed = toml.parse(launchConfig.codexConfigToml) as {
+    mcp_servers: Record<string, unknown>;
+  };
+
+  assert.deepEqual(Object.keys(parsed.mcp_servers).sort(), ["github", "todoist"]);
+});

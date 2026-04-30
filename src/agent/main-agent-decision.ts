@@ -1,18 +1,5 @@
 import { z } from "zod";
-import type { MainAgentDecision } from "../types.js";
-
-const mainAgentDecisionSchema = z.discriminatedUnion("action", [
-  z.object({
-    action: z.literal("reply"),
-    replyText: z.string(),
-  }).strict(),
-  z.object({
-    action: z.literal("launch_task"),
-    taskBrief: z.string(),
-    taskName: z.string(),
-    taskLanguage: z.string().min(1),
-  }).strict(),
-]);
+import { mainAgentDecisionSchema, type MainAgentDecision } from "../types.js";
 
 export const mainAgentDecisionPromptSchema = z.toJSONSchema(mainAgentDecisionSchema);
 

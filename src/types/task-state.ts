@@ -1,4 +1,5 @@
 import type { PrivilegeRequest } from "./privilege.js";
+import type { MainAgentTaskPolicy } from "./main-agent.js";
 
 type McpToolGrant = {
   serverId: string;
@@ -37,6 +38,7 @@ export type ActiveTaskState = {
   startedAt: string;
   lastActivityAt: string;
   pendingPrivilegeRequest: PrivilegeRequest | null;
+  taskPolicy: MainAgentTaskPolicy;
   approvedMcpTools: McpToolGrant[];
   approvedMcpResourceReads: McpResourceReadGrant[];
   approvedHttpTokenSessionGrants: HttpTokenSessionGrant[];

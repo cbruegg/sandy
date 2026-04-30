@@ -97,6 +97,7 @@ url = "https://todoist.example/mcp"
 
 [approvals.mcp.todoist]
 # always_allow_tools = []
+# always_allow_resources = []
 
 # Optional HTTP token injection for proxied worker requests:
 
@@ -198,8 +199,8 @@ MCP OAuth behavior:
 
 HTTP token behavior:
 
-- `http.tokens.<name>` defines a named token secret with both `description` and `value`. Sandy includes the token ID and description in the main-agent and sub-agent prompts so they know what each token is for. Workers use placeholder headers like `Authorization: Bearer SANDY_TOKEN_<name>` in proxied HTTP requests. The HTTP proxy replaces these placeholders with the real token value at request time, but only if the requesting task holds an active approval for that token + host.
-- `approvals.http.<name>` persists `always allow` decisions for specific hosts via `always_allow_hosts`. This is persistent approval state only; new hosts can still go through the interactive approval flow and become persisted later if approved with `always allow`.
+- `http.tokens.<name>` defines a named token secret with both `description` and `value`. Sandy includes token IDs and descriptions in the main-agent and sub-agent prompts so they know what each token is for. Workers use placeholder headers like `Authorization: Bearer SANDY_TOKEN_<name>` in proxied HTTP requests. The HTTP proxy replaces these placeholders with the real token value at request time, but only if the requesting task holds an active approval for that token + host.
+- `approvals.http.<name>` persists `auto-allow for suitable tasks` decisions for specific hosts via `always_allow_hosts`. This is persistent approval state only; it does not make the token globally available to every future task. A persisted host approval auto-applies only when the main agent marks that token's configured auto-approvals as suitable for the task. New hosts can still go through the interactive approval flow and become persisted later if approved with `auto-allow for suitable tasks`.
 - Workers _must_ explicitly request token use via Sandy's `request_http_token` tool before making proxied requests. This tool requires privilege escalation and follows the same approval flow as MCP tools.
 - If no approval is active when the proxy sees a placeholder token, the request is rejected immediately with HTTP 403.
 - Workers do not receive global proxy environment variables anymore. Instead, Sandy tells sub-agents to run commands that need HTTP token injection through `/usr/local/bin/sandy-http-proxy-exec`, which sets `HTTP_PROXY`, `HTTPS_PROXY`, their lowercase variants, and `NO_PROXY` only for that child process while pointing at the per-worker Sandy HTTP proxy with embedded task credentials.
@@ -435,7 +436,7 @@ Sub-agents may request access to additional resources from the user, such as:
 - Certain host files to be copied in and out of the shared volume.
 - Read-only mount access to a specific directory on the host machine.
 - Read-write mount access to a specific directory on the host machine.
-- MCP tools exposed through Sandy's host-side MCP proxy.
+- MCP tool calls and resource reads exposed through Sandy's host-side MCP proxy.
 - Tools to send authenticated HTTP requests through Sandy's HTTP token proxy,
   [similar to NanoClaw](https://docs.nanoclaw.dev/concepts/security#6-credential-handling).
 
@@ -444,10 +445,15 @@ As such, these requests from the sub-agent must use a special message type on th
 *not* forwarded to the main agent, but instead directly to the user.
 
 For MCP, Sandy exposes configured upstream servers to workers through an app-wide Docker sidecar on a dedicated Docker
-network. The worker receives Codex MCP configuration pointing at that sidecar plus a Sandy-issued JWT bearer token
-valid for one day. Upstream OAuth credentials stay in the host's Sandy config directory and are mounted into the
-sidecar. By default, each MCP tool call is treated as a privilege request, and the user can approve it once, for the
-current worker session, or permanently. Permanent approvals are written back to Sandy's TOML config file automatically.
+network. Upstream OAuth credentials stay in the host's Sandy config directory and are mounted into the sidecar. The
+worker receives Codex MCP configuration for the configured servers, plus a Sandy-issued JWT bearer token valid for one
+day.
+
+MCP `callTool` and `readResource` operations are privilege-managed independently. The user can approve one operation
+once, for the current worker session, or as `auto-allow for suitable tasks`; persisted approvals are written back to
+Sandy's TOML config file automatically. A persisted MCP tool or resource approval does not auto-apply to every future
+task. It auto-applies only when the main agent marks that MCP server's configured auto-approvals as suitable for the
+task. Otherwise, the worker can still ask the user for explicit approval of individual MCP tool calls or resource reads.
 
 Channel-native file transfer is separate from privilege evaluation. User uploads go straight into the shared workspace,
 and sub-agent requests to send files back to the user through the channel do not require approval as long as the file

@@ -6,7 +6,7 @@ export const buttonLabels = {
   markAsFinished: "Mark as finished",
   approve: "Approve once",
   approveWorkerSession: "Allow in task",
-  approveAlways: "Always allow",
+  approveAlways: "Auto-allow for suitable tasks",
   deny: "Deny",
 } as const;
 
@@ -75,9 +75,9 @@ export const messages = {
   mcpToolAllowedForWorkerSession: (serverId: string, toolName: string): string =>
     `Allowed ${serverId}.${toolName} for this worker session.`,
   mcpToolAllowedFromPersistentConfig: (serverId: string, toolName: string): string =>
-    `Allowed ${serverId}.${toolName} from persistent config.`,
+    `Allowed ${serverId}.${toolName} from persistent config for this task.`,
   mcpToolAllowedAndPersisted: (serverId: string, toolName: string): string =>
-    `Allowed ${serverId}.${toolName} and updated Sandy's config file.`,
+    `Allowed ${serverId}.${toolName} and updated Sandy's config file for future suitable tasks.`,
   mcpToolProgress: (status: string, serverId: string, toolName: string, payload: unknown): string =>
     status === "completed"
       ? `MCP ${status}: ${serverId}.${toolName} ${describeMcpToolPayload(payload)}`
@@ -91,9 +91,9 @@ export const messages = {
   mcpResourceReadAllowedForWorkerSession: (serverId: string, uri: string): string =>
     `Allowed ${serverId} ${uri} for this worker session.`,
   mcpResourceReadAllowedFromPersistentConfig: (serverId: string, uri: string): string =>
-    `Allowed ${serverId} ${uri} from persistent config.`,
+    `Allowed ${serverId} ${uri} from persistent config for this task.`,
   mcpResourceReadAllowedAndPersisted: (serverId: string, uri: string): string =>
-    `Allowed ${serverId} ${uri} and updated Sandy's config file.`,
+    `Allowed ${serverId} ${uri} and updated Sandy's config file for future suitable tasks.`,
   mcpResourceReadProgress: (status: string, serverId: string, uri: string): string =>
     `MCP ${status}: ${serverId} ${uri}`,
   httpTokenDenied: (tokenId: string, host: string): string =>
@@ -103,9 +103,9 @@ export const messages = {
   httpTokenAllowedForWorkerSession: (tokenId: string, host: string): string =>
     `Allowed HTTP token ${tokenId} for host ${host} for this worker session.`,
   httpTokenAllowedFromPersistentConfig: (tokenId: string, host: string): string =>
-    `Allowed HTTP token ${tokenId} for host ${host} from persistent config.`,
+    `Allowed HTTP token ${tokenId} for host ${host} from persistent config for this task.`,
   httpTokenAllowedAndPersisted: (tokenId: string, host: string): string =>
-    `Allowed HTTP token ${tokenId} for host ${host} and updated Sandy's config file.`,
+    `Allowed HTTP token ${tokenId} for host ${host} and updated Sandy's config file for future suitable tasks.`,
   httpTokenAlreadyConsumed: (tokenId: string, host: string): string =>
     `One-shot HTTP token grant ${tokenId} for host ${host} has already been consumed.`,
   httpTokenProxyRejected: (tokenId: string): string =>
@@ -201,6 +201,13 @@ export const matrixAdminMessages = {
 
 function describePrivilegeRequest(request: PrivilegeRequest): string {
   if (request.kind === "mcp_tool_call") {
+    if (request.confirmsAutoApprovalForTask) {
+      return [
+        `Previously auto-allowed for suitable tasks: ${request.serverId}.${request.toolName}`,
+        "Apply that auto-approval to this task?",
+        `Arguments: ${JSON.stringify(request.arguments)}`,
+      ].join("\n");
+    }
     return [
       `mcp_tool_call: ${request.serverId}.${request.toolName}`,
       `Arguments: ${JSON.stringify(request.arguments)}`,
@@ -208,6 +215,13 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
   }
 
   if (request.kind === "mcp_resource_read") {
+    if (request.confirmsAutoApprovalForTask) {
+      return [
+        `Previously auto-allowed for suitable tasks: ${request.serverId} resource`,
+        "Apply that auto-approval to this task?",
+        `URI: ${request.uri}`,
+      ].join("\n");
+    }
     return [
       `mcp_resource_read: ${request.serverId}`,
       `URI: ${request.uri}`,
@@ -215,6 +229,13 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
   }
 
   if (request.kind === "http_token_use") {
+    if (request.confirmsAutoApprovalForTask) {
+      return [
+        `Previously auto-allowed for suitable tasks: HTTP token ${request.tokenId} for ${request.host}`,
+        "Apply that auto-approval to this task?",
+        `Reason: ${request.reason}`,
+      ].join("\n");
+    }
     return [
       `http_token_use: ${request.tokenId}`,
       `Host: ${request.host}`,
