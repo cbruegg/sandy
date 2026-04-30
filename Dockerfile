@@ -32,7 +32,7 @@ CMD ["bun", "dist/entrypoint-mcp-proxy.js"]
 # HTTP proxy runtime built on mitmproxy.
 # Use a glibc-based Python image so arm64 can consume mitmproxy's prebuilt wheels
 # instead of trying to compile mitmproxy-rs from source on musl.
-FROM python:3.13-slim AS http-proxy-runtime
+FROM python:3.14-slim AS http-proxy-runtime
 WORKDIR /app
 RUN apt-get update \
   && apt-get install -y --no-install-recommends tini \
