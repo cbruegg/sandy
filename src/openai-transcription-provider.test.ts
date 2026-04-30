@@ -41,7 +41,7 @@ test("OpenAiTranscriptionProvider uses the default OpenAI endpoint and model", a
   assert.equal(body.get("model"), "gpt-4o-mini-transcribe");
   assert.equal(
     body.get("prompt"),
-    "Transcribe verbatim. Do not translate anything. Preserve all foreign words, names, and terms in their original language.",
+    "Transcribe verbatim. Do not translate anything. Preserve all foreign words, names, and terms in their original language and script, even within a sentence of different language.",
   );
 });
 
