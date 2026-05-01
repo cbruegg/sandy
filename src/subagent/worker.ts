@@ -3,7 +3,7 @@ import {pathToFileURL} from "node:url";
 import { existsSync, readFileSync } from "node:fs";
 import {type Thread, type ThreadEvent, type TodoListItem,} from "@openai/codex-sdk";
 import { createCodexClient } from "../codex-client.js";
-import { configureLogger } from "../logger.js";
+import { configureLogger, logger } from "../logger.js";
 import {channelFormattingSchema, type ChannelFormatting, type HostCommand, type SubAgentEvent,} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {
@@ -91,6 +91,7 @@ async function streamTurn(thread: Thread, input: string, channelFormatting: Chan
   const { events } = await thread.runStreamed(input);
 
   for await (const event of events) {
+    logger.debug("Received thread event", { eventType: event.type, event });
     const disposition = mode === "summary"
       ? handleSummaryTurnEvent(event, summaryChunks)
       : handleTaskTurnEvent(event, channelFormatting);
