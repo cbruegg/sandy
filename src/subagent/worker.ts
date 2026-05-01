@@ -3,7 +3,7 @@ import {pathToFileURL} from "node:url";
 import { existsSync, readFileSync } from "node:fs";
 import {type Thread, type ThreadEvent, type TodoListItem,} from "@openai/codex-sdk";
 import { createCodexClient } from "../codex-client.js";
-import { configureLogger, logger, type LogLevel } from "../logger.js";
+import { configureLogger, logger } from "../logger.js";
 import {channelFormattingSchema, type ChannelFormatting, type HostCommand, type SubAgentEvent,} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {
@@ -42,18 +42,6 @@ function getOptionalEnv(name: string): string | null {
     return null;
   }
   return value;
-}
-
-function parseLogLevel(raw: string | null): LogLevel {
-  switch (raw) {
-    case "debug":
-    case "info":
-    case "warn":
-    case "error":
-      return raw;
-    default:
-      return "info";
-  }
 }
 
 function parseChannelFormatting(raw: string | null): ChannelFormatting | null {
@@ -280,12 +268,15 @@ function classifyToolEventDisposition(
 }
 
 export async function main(): Promise<void> {
-  // Reserve stdout for structured host protocol events; send worker logs to stderr
-  // so they cannot be misparsed as channel-facing progress updates.
-  const logLevel = parseLogLevel(getOptionalEnv("SANDY_LOG_LEVEL"));
   configureLogger({
-    minLevel: logLevel,
-    outputMode: "stderr",
+    forwardLog: (payload) => {
+      send({
+        type: "worker_log",
+        level: payload.level,
+        event: payload.event,
+        data: payload.data,
+      });
+    },
   });
 
   const taskBrief = getRequiredEnv("SANDY_TASK_BRIEF");

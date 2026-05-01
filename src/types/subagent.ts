@@ -49,6 +49,13 @@ type WorkerDisconnectedEvent = {
   message: string;
 };
 
+type WorkerLogEvent = {
+  type: "worker_log";
+  level: "debug" | "info" | "warn" | "error";
+  event: string;
+  data?: Record<string, unknown>;
+};
+
 export type SubAgentEvent =
   | ProgressEvent
   | AssistantOutputEvent
@@ -58,7 +65,8 @@ export type SubAgentEvent =
   | TaskDoneEvent
   | TaskErrorEvent
   | WorkerConnectedEvent
-  | WorkerDisconnectedEvent;
+  | WorkerDisconnectedEvent
+  | WorkerLogEvent;
 
 export type HostCommand =
   | {
@@ -111,6 +119,12 @@ const subAgentEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("worker_disconnected"),
     message: z.string(),
+  }).strict(),
+  z.object({
+    type: z.literal("worker_log"),
+    level: z.enum(["debug", "info", "warn", "error"]),
+    event: z.string(),
+    data: z.record(z.string(), z.unknown()).optional(),
   }).strict(),
 ]);
 

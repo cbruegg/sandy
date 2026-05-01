@@ -772,6 +772,10 @@ export class DockerSandboxRunner implements SandboxRunner {
             text: event.text,
           });
         }
+         if (event.type === "worker_log") {
+           this.forwardContainerLog(event.level, event.event, event.data);
+           return;
+         }
         onEvent(event);
       } catch {
         logger.warn("sandbox.stdout_non_json", {
@@ -853,10 +857,10 @@ export class DockerSandboxRunner implements SandboxRunner {
       proxyStdout.on("line", (line) => {
         try {
           const message = parseHttpProxyContainerMessage(line.trim());
-          if (message.type === "log") {
-            this.forwardHttpProxyLog(containerName, message.level, message.event, message.data);
-            return;
-          }
+           if (message.type === "log") {
+             this.forwardContainerLog(message.level, message.event, message.data, { containerName, source: "http_proxy_container" });
+             return;
+           }
           if (message.type === "auth_request") {
             void this.handleHttpProxyAuthRequest(proxyChild, resolveHttpProxyRequest, message);
             return;
@@ -945,15 +949,15 @@ export class DockerSandboxRunner implements SandboxRunner {
     });
   }
 
-  private forwardHttpProxyLog(
-    containerName: string,
+  private forwardContainerLog(
     level: "debug" | "info" | "warn" | "error",
     event: string,
     data?: Record<string, unknown>,
+    extraFields?: Record<string, unknown>,
   ): void {
     const payload = {
-      containerName,
-      source: "http_proxy_container",
+      source: "worker",
+      ...extraFields,
       ...(data ?? {}),
     };
     switch (level) {
