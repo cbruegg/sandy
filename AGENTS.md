@@ -63,7 +63,7 @@ Use strict TypeScript with ES modules and 2-space indentation. Prefer small modu
 
 Keep all user-facing strings in `messages.ts` instead of scattering literals through runtime logic. This includes any text the user can see through a channel such as Telegram task updates, prompts, status messages, errors, summaries, and button labels. Add new channel-visible strings there so future i18n work stays localized.
 
-There is no formatter or linter configured yet, so keep style consistent with the existing code and avoid unrelated reformatting.
+There is no formatter or linter configured yet, so keep style consistent with the existing code and avoid unrelated reformatting, especially w.r.t. to indentation.
 
 ## Testing Guidelines
 
