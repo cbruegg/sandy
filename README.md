@@ -377,15 +377,13 @@ do with it:
   - Sandy assigns the sub-agent a unique name, ideally based on the command being executed.
   - Sandy then immediately responds to the user with a message indicating that the command is being executed,
     and that they will receive updates on the progress.
-  - Responses from the sub-agent are sent back to the main agent, which then forwards them to the user as updates on
-    the command execution.
+  - Responses from the sub-agent are sent back to the host runtime over its container control channel, which then forwards them
+    to the user as updates on the command execution.
     - To prevent prompt injection, by default the main agent is not allowed to see the responses from the sub-agent.
-      Instead, the sub-agent sends them to the host runtime over its container control channel, which then forwards them
-      to the user.
-    - When the user sees a dangerous response, they can report it to the main agent. Depending on the channel,
+      Instead, the sub-agent sends them directly to the host runtime, which forwards them to the user.
+    - When the user sees a dangerous response in the completion summary, they can report it. Depending on the channel,
       this can either be through channel-native controls such as Telegram buttons or Matrix polls.
-      The main agent then immediately terminates the sub-agent, discards its responses and notifies the user of the
-      termination.
+      The host runtime then discards the pending summary and notifies the user.
     - If the user's message after a response is not a report, Sandy may expose that response to the main agent on a
       later decision turn once it is no longer quarantined.
   - Sub-agents determine their own completion and notify Sandy when they are done, at which point Sandy sends a final
