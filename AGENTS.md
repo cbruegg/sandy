@@ -28,7 +28,7 @@ Sandy is a TypeScript project with the application code under `src/`.
 - `./scripts/run-local-dev.sh`: build both local runtime images and start Sandy. By default it derives a temporary local-test config from `config/config.toml`, overrides the channel to `local_test`, and prints the derived config plus inbox/outbox paths. Pass `--channel telegram` to use `config/config.toml` directly.
 - `./scripts/run-local-test-cli.sh ...`: helper CLI for the local-test channel. Prefer this over hand-writing inbox/outbox files so protocol details stay conformant.
 
-Run both `bun run build` and `bun run test` before committing changes that affect TypeScript or runtime logic. The explicit build step matters even when tests pass, because it verifies the full project still type-checks and bundles cleanly under Bun.
+Run both `bun run build` and `bun run test` after making changes that affect TypeScript or runtime logic, and always before committing such changes. The explicit build step matters even when tests pass, because it verifies the full project still type-checks and bundles cleanly under Bun.
 Do not run `bun run build` and `bun run test` in parallel: `bun run test` already invokes `bun run build`, and running them concurrently can race on the shared `dist/` output.
 
 ## Autonomous Testing
