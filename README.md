@@ -377,7 +377,7 @@ do with it:
   - Sandy assigns the sub-agent a unique name, ideally based on the command being executed.
   - Sandy then immediately responds to the user with a message indicating that the command is being executed,
     and that they will receive updates on the progress.
-  - Responses from the sub-agent are sent back to the host runtime over its container control channel, which then forwards them
+  - Responses from the sub-agent are sent back to the host runtime, which then forwards them
     to the user as updates on the command execution.
     - To prevent prompt injection, by default the main agent is not allowed to see the responses from the sub-agent.
       Instead, the sub-agent sends them directly to the host runtime, which forwards them to the user.
