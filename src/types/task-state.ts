@@ -44,7 +44,6 @@ export type ActiveTaskState = {
   approvedHttpTokenSessionGrants: HttpTokenSessionGrant[];
   approvedHttpTokenOnceGrants: HttpTokenOnceGrant[];
   workerConnected: boolean;
-  hasReportableOutput: boolean;
   taskSummary: string | null;
 };
 

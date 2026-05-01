@@ -41,6 +41,7 @@ export function buildInitialTaskInputWithCapabilities(
     "Inside this container you may use the filesystem, internet, and installed tools freely.",
     `If you need the host to copy files into or out of ${sharedWorkspaceMountPath}, do not ask the user directly.`,
     `Use ${taskLanguage} for user-visible replies unless the host provides a later instruction that overrides it.`,
+    "Keep user-visible progress updates minimal and concise. Only report meaningful milestones, not every shell command completion.",
     ...buildWorkerProtocolInstructions(),
   ];
 

@@ -197,10 +197,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: buttonLabels.reportDangerousOutput, callback_data: "report" },
             { text: buttonLabels.abortTask, callback_data: "cancel" },
-          ],
-          [
             { text: buttonLabels.markAsFinished, callback_data: "mark_finished" },
           ],
         ],

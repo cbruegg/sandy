@@ -264,7 +264,7 @@ test("streamTurn stops after a privileged Sandy tool call", async () => {
       },
     } as unknown as Thread;
 
-    const result = await streamTurn(thread, "Inspect the reel.", null);
+    const result = await streamTurn(thread, "Inspect the reel.");
 
     assert.equal(result.sawPrivilegedToolCall, true);
     assert.equal(result.sawTaskDone, false);
@@ -319,7 +319,7 @@ test("streamTurn ignores empty assistant messages", async () => {
       },
     } as unknown as Thread;
 
-    const result = await streamTurn(thread, "Inspect the reel.", null);
+    const result = await streamTurn(thread, "Inspect the reel.");
 
     assert.equal(result.sawPrivilegedToolCall, false);
     assert.equal(result.sawTaskDone, false);

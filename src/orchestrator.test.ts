@@ -195,59 +195,6 @@ class FakePrivilegeBroker implements PrivilegeBroker {
   }
 }
 
-test("orchestrator launches a task and discards pending output on danger report", async () => {
-  const channel = new RecordingChannel();
-  const runner = new FakeSandboxRunner();
-  const store = new InMemorySessionStore();
-  const mainAgent = new StubMainAgent({
-    action: "launch_task",
-    taskBrief: "Inspect the repository.",
-    taskName: "repo-inspect",
-  taskLanguage: "English",
-  });
-  const orchestrator = new SandyOrchestrator({
-    channel,
-    mainAgent,
-    sandboxRunner: runner,
-    sessionStore: store,
-    privilegeBroker: new FakePrivilegeBroker(),
-    taskRegistry: new TaskRegistry(),
-  });
-
-  await orchestrator.handleChatEvent({
-    kind: "user_text",
-    chatId: "chat-1",
-    messageId: "1",
-    timestamp: "2026-04-01T00:00:00.000Z",
-    text: "Inspect the repository",
-    rawText: "Inspect the repository",
-    attachments: [],
-  });
-
-  await runner.emit({
-    type: "assistant_output",
-    text: "Potentially dangerous hidden output",
-  });
-
-  await orchestrator.handleChatEvent({
-    kind: "danger_report",
-    chatId: "chat-1",
-    messageId: "2",
-    timestamp: "2026-04-01T00:00:10.000Z",
-  });
-
-  assert.equal(runner.handle.cancellations.length, 1);
-  assert.equal(channel.sentTexts.at(-1)?.text, messages.taskTerminatedAndDiscarded("repo-inspect"));
-  assert.deepEqual(runner.launches[0]?.channelFormatting, testFormatting);
-  assert.equal(runner.launches[0]?.taskLanguage, "English");
-
-  const session = store.getOrCreate("chat-1");
-  assert.equal(session.activeTask, null);
-  assert.equal(session.pendingTaskSummary, null);
-  const firstContext = expectDefined(mainAgent.contexts[0], "Expected main-agent context.");
-  assert.deepEqual(contextTexts(firstContext), ["Inspect the repository"]);
-  assert.deepEqual(firstContext.channelFormatting, testFormatting);
-});
 
 test("orchestrator accepts active-task output without storing host-side history", async () => {
   const channel = new RecordingChannel();
@@ -457,57 +404,6 @@ test("orchestrator applies supported privilege requests deterministically and ou
   assert.ok(requestId);
 });
 
-test("orchestrator terminates the task when the user reports a pending privilege request as dangerous", async () => {
-  const channel = new RecordingChannel();
-  const runner = new FakeSandboxRunner();
-  const store = new InMemorySessionStore();
-  const orchestrator = new SandyOrchestrator({
-    channel,
-    mainAgent: new StubMainAgent({
-      action: "launch_task",
-      taskBrief: "Need a host file copied into the share.",
-      taskName: "copy-in",
-    taskLanguage: "English",
-    }),
-    sandboxRunner: runner,
-    sessionStore: store,
-    privilegeBroker: new FakePrivilegeBroker(),
-    taskRegistry: new TaskRegistry(),
-  });
-
-  await orchestrator.handleChatEvent({
-    kind: "user_text",
-    chatId: "chat-danger-privilege",
-    messageId: "1",
-    timestamp: "2026-04-01T00:00:00.000Z",
-    text: "Copy a host file into the shared workspace",
-    rawText: "Copy a host file into the shared workspace",
-    attachments: [],
-  });
-
-  await runner.emit({
-    type: "tool_call",
-    call: {
-      type: "copy_into_share",
-      sourcePath: "/Users/test/input.txt",
-      targetPath: "/workspace/share/input.txt",
-      reason: "Need a local fixture file.",
-    },
-  });
-
-  await orchestrator.handleChatEvent({
-    kind: "danger_report",
-    chatId: "chat-danger-privilege",
-    messageId: "2",
-    timestamp: "2026-04-01T00:00:10.000Z",
-  });
-
-  assert.equal(runner.handle.cancellations.length, 1);
-  assert.equal(
-    channel.sentTexts.at(-1)?.text,
-    messages.taskTerminatedAfterDangerousPrivilegeRequest("copy-in"),
-  );
-});
 
 test("orchestrator keeps completed-task summary pending until the user sends another message", async () => {
   const channel = new RecordingChannel();

@@ -616,10 +616,7 @@ test("TelegramBotApiAdapter sends task updates with abort and mark-finished cont
       reply_markup: {
         inline_keyboard: [
           [
-            { text: "Report dangerous output", callback_data: "report" },
             { text: "Abort task", callback_data: "cancel" },
-          ],
-          [
             { text: "Mark as finished", callback_data: "mark_finished" },
           ],
         ],

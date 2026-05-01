@@ -156,7 +156,6 @@ export class SandyOrchestrator {
            break;
          }
         case "assistant_output":
-          session.activeTask.hasReportableOutput = true;
           await this.deps.channel.sendTaskUpdate(chatId, event.text);
           break;
         case "task_summary":
@@ -166,7 +165,6 @@ export class SandyOrchestrator {
           await this.routeWorkerToolCall(chatId, session, event.call);
           break;
         case "final_result":
-          session.activeTask.hasReportableOutput = true;
           this.recordTaskSummary(session, [
             `Summary: ${event.text}`,
             "Artifacts: none",
@@ -319,17 +317,11 @@ export class SandyOrchestrator {
         await this.requireHandle(activeTask.taskId).markFinished();
         return;
       case "danger_report":
-        if (activeTask.pendingPrivilegeRequest) {
-          await this.cancelActiveTask(session, "Cancelled after the user reported a dangerous privilege request.");
-          await this.deps.channel.sendText(event.chatId, messages.taskTerminatedAfterDangerousPrivilegeRequest(activeTask.taskName));
-          return;
-        }
-        if (!activeTask.hasReportableOutput) {
-          await this.deps.channel.sendText(event.chatId, messages.noPendingOutputToReport());
-          return;
-        }
-        await this.cancelActiveTask(session, "Cancelled after the user reported dangerous output.");
-        await this.deps.channel.sendText(event.chatId, messages.taskTerminatedAndDiscarded(activeTask.taskName));
+        logger.error("chat.unexpected_danger_report", {
+          chatId: event.chatId,
+          message: "Received danger_report during active task - this should only come from summary reports",
+        });
+        await this.deps.channel.sendText(event.chatId, messages.noPendingOutputToReport());
         return;
       case "approval_response":
         if (!activeTask.pendingPrivilegeRequest) {
@@ -347,7 +339,6 @@ export class SandyOrchestrator {
           await this.deps.channel.sendText(event.chatId, messages.privilegeRequestStillPending());
           return;
         }
-        activeTask.hasReportableOutput = false;
         await this.requireHandle(activeTask.taskId).sendUserMessage(
           buildWorkerFollowUpInput(event.text, await this.stageAttachments(event.chatId, event.messageId, event.attachments, activeTask.taskId)),
         );
@@ -392,7 +383,6 @@ export class SandyOrchestrator {
           approvedHttpTokenSessionGrants: [],
           approvedHttpTokenOnceGrants: [],
           workerConnected: false,
-          hasReportableOutput: false,
           taskSummary: null,
         };
 

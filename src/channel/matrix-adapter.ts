@@ -313,11 +313,6 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     await this.sendNotice(chatId, text);
     await this.sendPoll(chatId, "Task controls", [
       {
-        answerId: "report",
-        label: buttonLabels.reportDangerousOutput,
-        event: { kind: "danger_report" },
-      },
-      {
         answerId: "cancel",
         label: buttonLabels.abortTask,
         event: { kind: "cancel_request" },
