@@ -9,9 +9,6 @@ type HostMediatedWorkerToolPayload = Exclude<WorkerToolPayload, { type: "complet
 type ProgressEvent = {
   type: "progress";
   message: string;
-  /** When true, this is a completion message that should not include task-control buttons.
-   * As of writing this comment, this applies (only) to completed MCP tool calls (not full task completion). */
-  isCompletion?: boolean;
 };
 
 type AssistantOutputEvent = {
@@ -84,7 +81,6 @@ const subAgentEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("progress"),
     message: z.string(),
-    isCompletion: z.boolean().optional(),
   }).strict(),
   z.object({
     type: z.literal("assistant_output"),

@@ -149,17 +149,12 @@ export class SandyOrchestrator {
         case "worker_disconnected":
           await this.failTaskAfterWorkerDisconnect(session, event.message);
           break;
-        case "progress": {
-          const message = event.message.trim();
-          if (!message) break;
-          // MCP completed messages don't need task-control buttons.
-          if (event.isCompletion) {
-            await this.deps.channel.sendText(chatId, message);
-          } else {
-            await this.deps.channel.sendTaskUpdate(chatId, message);
-          }
-          break;
-        }
+         case "progress": {
+           const message = event.message.trim();
+           if (!message) break;
+           await this.deps.channel.sendTaskUpdate(chatId, message);
+           break;
+         }
         case "assistant_output":
           session.activeTask.hasReportableOutput = true;
           await this.deps.channel.sendTaskUpdate(chatId, event.text);
