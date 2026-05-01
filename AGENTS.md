@@ -68,6 +68,7 @@ There is no formatter or linter configured yet, so keep style consistent with th
 ## Testing Guidelines
 
 Tests use Bun's test runner via `bun test`. Place tests next to the related code as `*.test.ts`. High test coverage is expected for orchestration behavior, normalization, privilege routing, and failure handling. Prefer small fakes over networked or Docker-backed integration in unit tests.
+Do not commit without asking, unless the user specifically requested it.
 
 ## Maintenance
 
