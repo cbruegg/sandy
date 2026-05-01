@@ -91,7 +91,7 @@ async function streamTurn(thread: Thread, input: string, channelFormatting: Chan
   const { events } = await thread.runStreamed(input);
 
   for await (const event of events) {
-    logger.debug("Received thread event", { eventType: event.type, event });
+    logger.debug("thread.event_received", { eventType: event.type, event });
     const disposition = mode === "summary"
       ? handleSummaryTurnEvent(event, summaryChunks)
       : handleTaskTurnEvent(event, channelFormatting);
