@@ -156,39 +156,40 @@ export async function startApp(): Promise<void> {
   );
 
   const sandboxRunner = new DockerSandboxRunner(
-    {
-      workerImage: config.workerImage,
-      resolveWorkerImage: () => workerImageManager.getLaunchImage(),
-      shareRoot: config.shareRoot,
-      codexModel: config.agentModel,
-      openAiApiKey: config.authMode.mode === "api_key" ? config.authMode.openAiApiKey : null,
-      codexAuthFile: config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthFile : null,
-      skillsDirectory: config.skillsDirectory,
-      workerCodexBinaryPath,
-      workerCodexConfigBuilder: (taskId) => mcpWorkerLaunchConfigBuilder.build(taskId),
-      httpTokenDescriptions: Object.fromEntries(
-        Object.entries(config.httpTokens).map(([tokenId, token]) => [tokenId, token.description]),
-      ),
-      httpProxyUrlFactory: httpTokensEnabled
-        ? (taskId) => {
-            const jwt = workerAccess.issueWorkerGrant(taskId).bearerToken;
-            const encodedJwt = encodeURIComponent(jwt);
-            // The worker container shares the network namespace with the proxy
-            // sidecar, so the proxy is reachable on localhost from the worker.
-            return `http://Bearer:${encodedJwt}@127.0.0.1:8081`;
-          }
-        : undefined,
-      networkGuardImage: config.networkGuardImage,
-      workerNetwork: config.workerNetwork,
-      workerNetworkName,
-      httpProxyCaCertPath: certificateAuthority?.certPath ?? null,
-      httpProxyConfDirPath: certificateAuthority?.confDirPath ?? null,
-      httpProxyImage: httpTokensEnabled ? config.httpProxyImage : null,
-      resolveHttpProxyRequest: proxyAuthService
-        ? async (request) => await proxyAuthService.resolveProxyRequest(request)
-        : undefined,
-    },
-  );
+      {
+        workerImage: config.workerImage,
+        resolveWorkerImage: () => workerImageManager.getLaunchImage(),
+        shareRoot: config.shareRoot,
+        codexModel: config.agentModel,
+        openAiApiKey: config.authMode.mode === "api_key" ? config.authMode.openAiApiKey : null,
+        codexAuthFile: config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthFile : null,
+        skillsDirectory: config.skillsDirectory,
+        workerCodexBinaryPath,
+        workerCodexConfigBuilder: (taskId) => mcpWorkerLaunchConfigBuilder.build(taskId),
+        httpTokenDescriptions: Object.fromEntries(
+            Object.entries(config.httpTokens).map(([tokenId, token]) => [tokenId, token.description]),
+        ),
+        httpProxyUrlFactory: httpTokensEnabled
+            ? (taskId) => {
+              const jwt = workerAccess.issueWorkerGrant(taskId).bearerToken;
+              const encodedJwt = encodeURIComponent(jwt);
+              // The worker container shares the network namespace with the proxy
+              // sidecar, so the proxy is reachable on localhost from the worker.
+              return `http://Bearer:${encodedJwt}@127.0.0.1:8081`;
+            }
+            : undefined,
+        networkGuardImage: config.networkGuardImage,
+        workerNetwork: config.workerNetwork,
+        workerNetworkName,
+        httpProxyCaCertPath: certificateAuthority?.certPath ?? null,
+        httpProxyConfDirPath: certificateAuthority?.confDirPath ?? null,
+        httpProxyImage: httpTokensEnabled ? config.httpProxyImage : null,
+        resolveHttpProxyRequest: proxyAuthService
+            ? async (request) => await proxyAuthService.resolveProxyRequest(request)
+            : undefined,
+        logLevel: config.logLevel,
+      }
+   );
 
   const orchestrator = new SandyOrchestrator({
     channel,

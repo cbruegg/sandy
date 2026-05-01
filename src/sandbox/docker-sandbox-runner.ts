@@ -4,7 +4,7 @@ import {tmpdir} from "node:os";
 import {join, relative, resolve} from "node:path";
 import {createInterface} from "node:readline";
 import type {WorkerNetworkConfig} from "../config.js";
-import {logger} from "../logger.js";
+import {logger, type LogLevel} from "../logger.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {workerSkillsPath} from "../subagent/worker-codex-config.js";
 import type {HostCommand, PrivilegeResolutionResult, SubAgentEvent} from "../types.js";
@@ -36,6 +36,7 @@ type DockerSandboxRunnerOptions = {
   httpTokenDescriptions?: Record<string, string>;
   httpProxyUrlFactory?: (taskId: string) => string | null;
   handshakeTimeoutMs?: number;
+  logLevel?: LogLevel;
   spawnImpl?: typeof spawn;
   setTimeoutImpl?: typeof setTimeout;
   clearTimeoutImpl?: typeof clearTimeout;
@@ -238,6 +239,10 @@ export class DockerSandboxRunner implements SandboxRunner {
       "-e",
       `SANDY_CHANNEL_FORMATTING=${JSON.stringify(request.channelFormatting)}`,
     ];
+
+    if (this.options.logLevel) {
+      dockerArgs.push("-e", `SANDY_LOG_LEVEL=${this.options.logLevel}`);
+    }
 
     if (this.options.codexModel) {
       dockerArgs.push("-e", `SANDY_CODEX_MODEL=${this.options.codexModel}`);
