@@ -271,6 +271,7 @@ export async function main(): Promise<void> {
   // Reserve stdout for structured host protocol events; send worker logs to stderr
   // so they cannot be misparsed as channel-facing progress updates.
   configureLogger({
+    minLevel: "debug",
     outputMode: "stderr",
   });
 
