@@ -35,7 +35,7 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
   assert.match(input, /SANDY_SEND_FILE_TO_CHANNEL/);
   assert.match(input, /Schema:/);
   assert.match(input, /Use a tool by emitting exactly one line with no surrounding text/);
-  assert.match(input, /Emit Sandy tool calls as assistant messages, not as shell commands or file contents/);
+  assert.match(input, /Emit Sandy tool calls as raw text output in assistant messages, NOT as shell commands/);
   assert.match(input, /Never combine a Sandy tool call with user-visible text in the same assistant message/);
   assert.match(input, /send the user-visible text first and then send the Sandy tool call by itself in a following assistant message/);
   assert.match(input, /Send a file that already exists in the shared workspace back to the user through the channel adapter/);
