@@ -364,7 +364,7 @@ export class SandyOrchestrator {
         const now = new Date().toISOString();
         const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskId);
         const taskBrief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
-        const initialInput = buildTaskInputPayload(decision.taskBrief, stagedAttachments);
+        const initialInput = buildTaskInputPayload(stagedAttachments);
         logger.info("task.launching", {
           chatId: event.chatId,
           taskId,

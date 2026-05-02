@@ -274,6 +274,11 @@ function buildCodexInputWithImages(text: string, images: ImageAttachment[]): Inp
   return inputs;
 }
 
+function joinTaskSections(taskBrief: string, text: string): string {
+  const sections = [taskBrief.trim(), text.trim()].filter((section) => section.length > 0);
+  return sections.join("\n\n");
+}
+
 export async function main(): Promise<void> {
   configureLogger({
     forwardLog: (payload) => {
@@ -376,7 +381,7 @@ export async function main(): Promise<void> {
           }
           taskStarted = true;
           enqueueTurn(buildInitialTaskInput(
-            command.input.text,
+            joinTaskSections(command.taskBrief, command.input.text),
             command.taskLanguage,
             channelFormatting,
             httpTokens,

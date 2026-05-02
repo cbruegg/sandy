@@ -77,6 +77,7 @@ export type TaskInputPayload = {
 export type HostCommand =
   | {
       type: "start_task";
+      taskBrief: string;
       input: TaskInputPayload;
       taskLanguage: string;
     }

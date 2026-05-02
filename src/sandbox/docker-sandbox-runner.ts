@@ -372,6 +372,7 @@ export class DockerSandboxRunner implements SandboxRunner {
         try {
           await this.sendToWorker(child, {
             type: "start_task",
+            taskBrief: request.taskBrief,
             input: request.initialInput,
             taskLanguage: request.taskLanguage,
           });

@@ -52,17 +52,12 @@ export function buildTaskBriefWithAttachments(taskBrief: string, attachments: Sh
   return sections.join("\n\n");
 }
 
-export function buildTaskInputPayload(taskBrief: string, attachments: SharedAttachment[]): TaskInputPayload {
+export function buildTaskInputPayload(attachments: SharedAttachment[]): TaskInputPayload {
   const imageAttachments = attachments.filter(attachment => attachment.kind === "image");
   const fileDescription = buildFileAttachmentDescription(attachments);
-  
-  const textSections = [taskBrief];
-  if (fileDescription) {
-    textSections.push(fileDescription);
-  }
-  
+
   return {
-    text: textSections.join("\n\n"),
+    text: fileDescription,
     images: imageAttachments.map(img => ({ 
       sharePath: img.sharePath, 
       fileName: img.fileName 
