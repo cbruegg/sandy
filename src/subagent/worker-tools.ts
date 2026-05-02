@@ -72,43 +72,41 @@ const requestHttpTokenSchema = z.object({
   reason: z.string(),
 }).strict();
 
-const workerToolDefinitions = {
-  [copyIntoShareToolName]: defineWorkerTool(
+export const workerToolEntries = [
+  defineWorkerTool(
     copyIntoShareToolName,
     "Ask the host to copy a file or directory from an absolute host path into the shared workspace.",
     true,
     copyIntoShareSchema,
   ),
-  [copyOutOfShareToolName]: defineWorkerTool(
+  defineWorkerTool(
     copyOutOfShareToolName,
     "Ask the host to copy a file or directory from the shared workspace to an absolute host path.",
     true,
     copyOutOfShareSchema,
   ),
-  [sendFileToChannelToolName]: defineWorkerTool(
+  defineWorkerTool(
     sendFileToChannelToolName,
     "Send a file that already exists in the shared workspace back to the user through the channel adapter.",
     false,
     sendFileToChannelSchema,
   ),
-  [completeTaskToolName]: defineWorkerTool(
+  defineWorkerTool(
     completeTaskToolName,
     "Signal to the host that the tasks the user stated so far are fully complete. You *must* emit this at the very end.",
     false,
     completeTaskSchema,
   ),
-  [requestHttpTokenToolName]: defineWorkerTool(
+  defineWorkerTool(
     requestHttpTokenToolName,
     "Ask the host for permission to use a preconfigured HTTP token. Emit this tool call directly instead of asking the user in plain text. You must request approval before making HTTP requests that use placeholder headers like 'Authorization: Bearer SANDY_TOKEN_<tokenId>'. The host will inject the real token value into proxied HTTP requests if approved.",
     true,
     requestHttpTokenSchema,
   ),
-} as const satisfies Record<string, WorkerToolDefinition>;
+] as const satisfies readonly WorkerToolDefinition[];
 
 // Public API
 
-type WorkerToolDefinitions = typeof workerToolDefinitions;
-type WorkerToolName = keyof WorkerToolDefinitions;
 export type WorkerToolPayload =
   | z.infer<typeof copyIntoShareSchema>
   | z.infer<typeof copyOutOfShareSchema>
@@ -119,19 +117,9 @@ export type PrivilegedWorkerToolPayload =
   | z.infer<typeof copyIntoShareSchema>
   | z.infer<typeof copyOutOfShareSchema>
   | z.infer<typeof requestHttpTokenSchema>;
-type WorkerToolEntry<TName extends WorkerToolName = WorkerToolName> = {
-  name: TName;
-  definition: WorkerToolDefinitions[TName];
-};
-
-export const workerToolEntries = Object.entries(workerToolDefinitions)
-  .map(([name, definition]) => ({
-    name,
-    definition,
-  })) as WorkerToolEntry[];
 
 export function parseWorkerToolPayload(name: string, argumentsValue: unknown): WorkerToolPayload {
-  const definition = workerToolDefinitions[name as WorkerToolName];
+  const definition = workerToolEntries.find((entry) => entry.name === name);
   if (!definition) {
     throw new Error(`Unsupported Sandy tool ${name}.`);
   }

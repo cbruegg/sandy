@@ -337,7 +337,7 @@ function buildToolTextResult(message: string, isError: boolean): CallToolResult 
 
 function buildNativeToolListResult() {
   return {
-    tools: workerToolEntries.map(({ definition }) => ({
+    tools: workerToolEntries.map((definition) => ({
       name: definition.name,
       description: definition.description,
       inputSchema: definition.inputSchema,
