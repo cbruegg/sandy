@@ -7,7 +7,7 @@ import type {WorkerNetworkConfig} from "../config.js";
 import {logger, type LogLevel} from "../logger.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {workerSkillsPath} from "../subagent/worker-codex-config.js";
-import type {HostCommand, PrivilegeResolutionResult, SubAgentEvent} from "../types.js";
+import type {HostCommand, PrivilegeResolutionResult, SubAgentEvent, TaskInputPayload} from "../types.js";
 import {parseSubAgentEvent, serializeHostCommand} from "../types.js";
 import { parseHttpProxyContainerMessage, serializeHttpProxyHostMessage, type HttpProxyAuthRequestMessage, type HttpProxyAuthResponseMessage } from "../http/http-proxy-protocol.js";
 import {launchNetworkGuardContainer, type StartedNetworkGuard} from "./network-guard.js";
@@ -233,10 +233,6 @@ export class DockerSandboxRunner implements SandboxRunner {
       "-e",
       `SANDY_TASK_ID=${request.taskId}`,
       "-e",
-      `SANDY_TASK_BRIEF=${request.taskBrief}`,
-      "-e",
-      `SANDY_TASK_LANGUAGE=${request.taskLanguage}`,
-      "-e",
       `SANDY_CHANNEL_FORMATTING=${JSON.stringify(request.channelFormatting)}`,
     ];
 
@@ -365,15 +361,24 @@ export class DockerSandboxRunner implements SandboxRunner {
     };
 
     const emitEvent = async (event: SubAgentEvent): Promise<void> => {
-      if (event.type === "worker_connected") {
-        workerConnected = true;
-        clearHandshakeTimer();
-      }
+      await onEvent(event);
       if (event.type === "task_done" || event.type === "final_result" || event.type === "task_error") {
         terminalEventSeen = true;
         clearHandshakeTimer();
       }
-      await onEvent(event);
+      if (event.type === "worker_connected") {
+        workerConnected = true;
+        clearHandshakeTimer();
+        try {
+          await this.sendToWorker(child, {
+            type: "start_task",
+            input: request.initialInput,
+            taskLanguage: request.taskLanguage,
+          });
+        } catch (error) {
+          await reportDisconnect(this.describeWriteFailure(error));
+        }
+      }
     };
 
     const handleEventDeliveryFailure = async (event: SubAgentEvent, error: unknown): Promise<void> => {
@@ -533,15 +538,16 @@ export class DockerSandboxRunner implements SandboxRunner {
     });
 
     return {
-      sendUserMessage: async (text: string) => {
+      sendUserMessage: async (input: TaskInputPayload) => {
         logger.debugContent("sandbox.user_message", {
           taskId: request.taskId,
-          text,
+          text: input.text,
+          imageCount: input.images.length,
         });
         try {
           await this.sendToWorker(child, {
             type: "user_message",
-            text,
+            input,
           });
         } catch (error) {
           await reportDisconnect(this.describeWriteFailure(error));

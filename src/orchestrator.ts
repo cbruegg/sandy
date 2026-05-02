@@ -23,6 +23,7 @@ import type {
 import { resolveTaskShareHostPath } from "./shared-workspace.js";
 import {
   buildTaskBriefWithAttachments,
+  buildTaskInputPayload,
   buildWorkerFollowUpInput,
   describeUserMessageForMainAgent,
 } from "./orchestrator-worker-input.js";
@@ -363,6 +364,7 @@ export class SandyOrchestrator {
         const now = new Date().toISOString();
         const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskId);
         const taskBrief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
+        const initialInput = buildTaskInputPayload(decision.taskBrief, stagedAttachments);
         logger.info("task.launching", {
           chatId: event.chatId,
           taskId,
@@ -394,6 +396,7 @@ export class SandyOrchestrator {
             taskBrief: taskBrief,
             taskLanguage: decision.taskLanguage,
             channelFormatting: this.channelFormatting,
+            initialInput,
           },
           async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
         );

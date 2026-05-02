@@ -151,6 +151,7 @@ async function launchRunnerWithChild(
       taskLanguage: "English",
       taskBrief: "Inspect the environment.",
       channelFormatting: testFormatting,
+      initialInput: { text: "Inspect the environment.", images: [] },
     },
     onEvent,
   );
@@ -206,10 +207,6 @@ test("DockerSandboxRunner passes channel formatting as a docker environment vari
 
   const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
   assert.ok(dockerRunInvocation);
-  const taskLanguageIndex = dockerRunInvocation.args.findIndex((arg) =>
-    arg.startsWith("SANDY_TASK_LANGUAGE="));
-  assert.notEqual(taskLanguageIndex, -1);
-  assert.equal(dockerRunInvocation.args[taskLanguageIndex - 1], "-e");
   const channelFormattingIndex = dockerRunInvocation.args.findIndex((arg) =>
     arg.startsWith("SANDY_CHANNEL_FORMATTING="));
   assert.notEqual(channelFormattingIndex, -1);
@@ -258,6 +255,7 @@ test("DockerSandboxRunner passes the configured Codex model into the worker cont
     taskLanguage: "English",
     taskBrief: "Inspect the environment.",
     channelFormatting: testFormatting,
+    initialInput: { text: "Inspect the environment.", images: [] },
   }, async () => {});
 
   const dockerRunInvocation = invocationsWithModel.find((invocation) => invocation.args[0] === "run");
@@ -338,7 +336,7 @@ test("DockerSandboxRunner reports a disconnect when writing to the worker stdin 
   await flushEvents();
 
   taskChild.stdin.failNextWrite = true;
-  await handle.sendUserMessage("hello");
+  await handle.sendUserMessage({ text: "hello", images: [] });
   await flushEvents();
 
   assert.deepEqual(events, [
@@ -480,10 +478,11 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
   await runner.launchTask({
     chatId: "chat-1",
     taskId: "task-1",
-    taskName: "test-task-1",
+    taskName: "test-task",
     taskLanguage: "English",
     taskBrief: "Inspect the environment.",
     channelFormatting: testFormatting,
+    initialInput: { text: "Inspect the environment.", images: [] },
   }, async () => {});
 
   await runner.launchTask({
@@ -493,6 +492,7 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
     taskLanguage: "English",
     taskBrief: "Inspect the environment again.",
     channelFormatting: testFormatting,
+    initialInput: { text: "Inspect the environment again.", images: [] },
   }, async () => {});
 
   await runner.shutdown();
@@ -729,6 +729,7 @@ test("DockerSandboxRunner launches a network guard and shares its network namesp
     taskLanguage: "English",
     taskBrief: "Inspect the environment.",
     channelFormatting: testFormatting,
+    initialInput: { text: "Inspect the environment.", images: [] },
   }, async () => {});
 
   const guardRunInvocation = invocations.find((invocation) =>
@@ -804,6 +805,7 @@ test("DockerSandboxRunner reports a disconnect when the network guard exits mid-
     taskLanguage: "English",
     taskBrief: "Inspect the environment.",
     channelFormatting: testFormatting,
+    initialInput: { text: "Inspect the environment.", images: [] },
   }, async (event) => {
     events.push(event);
   });
@@ -823,17 +825,6 @@ test("DockerSandboxRunner reports a disconnect when the network guard exits mid-
   ]);
   assert.deepEqual(taskChild.killSignals, ["SIGTERM"]);
   assert.equal(invocations.filter((invocation) => invocation.args[0] === "rm").length, 2);
-});
-
-test("DockerSandboxRunner resolves the worker image at launch time", async () => {
-  const taskChild = new FakeChildProcess();
-  const { invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
-    resolveWorkerImage: () => "sandy-worker-overlay:test",
-  });
-
-  const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
-  assert.ok(dockerRunInvocation);
-  assert.equal(dockerRunInvocation.args.at(-1), "sandy-worker-overlay:test");
 });
 
 test("DockerSandboxRunner rejects share inspection outside the configured share root", async () => {
@@ -979,6 +970,7 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
     taskLanguage: "English",
     taskBrief: "Inspect the environment.",
     channelFormatting: testFormatting,
+    initialInput: { text: "Inspect the environment.", images: [] },
   }, async () => {});
 
   const proxyRunInvocation = invocations.find((invocation) =>
@@ -1080,6 +1072,7 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
     taskLanguage: "English",
     taskBrief: "Inspect the environment.",
     channelFormatting: testFormatting,
+    initialInput: { text: "Inspect the environment.", images: [] },
   }, async () => {});
 
   const guardRunInvocation = invocations.find((invocation) =>

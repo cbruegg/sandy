@@ -1,18 +1,20 @@
 import {createInterface} from "node:readline";
 import {pathToFileURL} from "node:url";
-import { existsSync, readFileSync } from "node:fs";
-import {type Thread, type ThreadEvent, type TodoListItem, type Input, type UserInput} from "@openai/codex-sdk";
-import { createCodexClient } from "../codex-client.js";
-import { configureLogger, logger } from "../logger.js";
-import {channelFormattingSchema, type ChannelFormatting, type HostCommand, type SubAgentEvent,} from "../types.js";
+import {existsSync, readFileSync} from "node:fs";
+import {type Input, type Thread, type ThreadEvent, type TodoListItem, type UserInput} from "@openai/codex-sdk";
+import {createCodexClient} from "../codex-client.js";
+import {configureLogger, logger} from "../logger.js";
+import {type ChannelFormatting, channelFormattingSchema, type HostCommand, type SubAgentEvent,} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
-import {
-  applyWorkerCodexConfigPatch,
-  buildWorkerCodexEnvironment,
-} from "./worker-codex-config.js";
+import {applyWorkerCodexConfigPatch, buildWorkerCodexEnvironment,} from "./worker-codex-config.js";
 import {workerToolDefinitions} from "./worker-tools.js";
 import {parseWorkerToolCall, workerToolCallToSubAgentEvent,} from "./worker-protocol.js";
-import {buildInitialTaskInput, buildPrivilegeResolutionInput, buildTaskSummaryInput, type ImageAttachment,} from "./worker-prompt.js";
+import {
+  buildInitialTaskInput,
+  buildPrivilegeResolutionInput,
+  buildTaskSummaryInput,
+  type ImageAttachment,
+} from "./worker-prompt.js";
 import {messages} from "../messages.js";
 
 type ThreadEventDisposition = "none" | "privileged_tool_call" | "send_file_to_channel" | "task_done" | "terminal_error";
@@ -27,14 +29,6 @@ type WorkerToolEventParseResult =
   | { kind: "none" }
   | { kind: "parsed"; event: Extract<SubAgentEvent, { type: "tool_call" }> | Extract<SubAgentEvent, { type: "task_done" }> }
   | { kind: "invalid"; message: string };
-
-function getRequiredEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-  return value;
-}
 
 function getOptionalEnv(name: string): string | null {
   const value = process.env[name];
@@ -262,65 +256,6 @@ function classifyToolEventDisposition(
   return workerToolDefinitions[toolType].requiresPrivilegeEscalation ? "privileged_tool_call" : "none";
 }
 
-type TaskInputWithImages = {
-  text: string;
-  images: ImageAttachment[];
-};
-
-function parseInputForImages(input: string): TaskInputWithImages {
-  const images: ImageAttachment[] = [];
-  let text = input;
-  
-  // Look for structured image attachments
-  const imagePattern = /SANDY_IMAGE_ATTACHMENTS:(\[[^\]]*\])/;
-  const match = input.match(imagePattern);
-  
-  if (match && match[1]) {
-    try {
-      const imageData = JSON.parse(match[1]) as Array<{ sharePath: string; fileName: string }>;
-      if (Array.isArray(imageData)) {
-        for (const img of imageData) {
-          if (typeof img.sharePath === "string" && typeof img.fileName === "string") {
-            images.push({ 
-              sharePath: img.sharePath, 
-              fileName: img.fileName 
-            });
-          }
-        }
-      }
-      // Remove the structured data from the text
-      text = input.replace(match[0], "").trim();
-    } catch (_e) {
-      // If JSON parsing fails, fall back to text parsing
-      console.warn("Failed to parse image attachments JSON, falling back to text parsing");
-    }
-  }
-  
-  // Fallback: look for image attachments in the old text format
-  const oldImagePattern = /(?:Files attached by the user are already available in the shared workspace|The user attached additional files to the shared workspace):\n((?:- [^:\n]+: \/workspace\/share[^\n]+\n)*)Using these files does not require privilege escalation\./g;
-  const oldMatch = text.match(oldImagePattern);
-  
-  if (oldMatch && oldMatch[1]) {
-    const imageLines = oldMatch[1].trim().split("\n");
-    
-    for (const line of imageLines) {
-      const fileMatch = line.match(/^- ([^:]+): (\/workspace\/share[^\s]+)/);
-      if (fileMatch && fileMatch[1] && fileMatch[2]) {
-        const fileName = fileMatch[1];
-        const sharePath = fileMatch[2];
-        images.push({ sharePath, fileName });
-      }
-    }
-    text = text.replace(oldMatch[0], "").trim();
-  }
-  
-  return { text, images };
-}
-
-function parseTaskBriefForImages(taskBrief: string): TaskInputWithImages {
-  return parseInputForImages(taskBrief);
-}
-
 function buildCodexInputWithImages(text: string, images: ImageAttachment[]): Input {
   if (images.length === 0) {
     return text;
@@ -351,8 +286,6 @@ export async function main(): Promise<void> {
     },
   });
 
-  const taskBrief = getRequiredEnv("SANDY_TASK_BRIEF");
-  const taskLanguage = getOptionalEnv("SANDY_TASK_LANGUAGE") ?? "English";
   const apiKey = getOptionalEnv("OPENAI_API_KEY");
   const codexModel = getOptionalEnv("SANDY_CODEX_MODEL");
   const channelFormatting = parseChannelFormatting(getOptionalEnv("SANDY_CHANNEL_FORMATTING"));
@@ -373,11 +306,9 @@ export async function main(): Promise<void> {
     networkAccessEnabled: true,
   });
 
-  // Parse task brief for image attachments
-  const { text: initialText, images: initialImages } = parseTaskBriefForImages(taskBrief);
-
   let currentAbort: AbortController | null = null;
   let queue: Promise<void> = Promise.resolve();
+  let taskStarted = false;
 
   const enqueueTurn = (input: Input) => {
     queue = queue.then(async () => {
@@ -430,7 +361,6 @@ export async function main(): Promise<void> {
   process.stdin.resume();
 
   send({ type: "worker_connected" });
-  enqueueTurn(buildInitialTaskInput(initialText, taskLanguage, channelFormatting, httpTokens, httpProxyWrapper, initialImages));
 
   input.on("line", (line) => {
     const trimmed = line.trim();
@@ -440,11 +370,24 @@ export async function main(): Promise<void> {
     try {
       const command = parseHostCommand(trimmed);
       switch (command.type) {
-        case "user_message": {
-          const { text: userText, images: userImages } = parseInputForImages(command.text);
-          enqueueTurn(buildCodexInputWithImages(userText, userImages));
+        case "start_task": {
+          if (taskStarted) {
+            throw new Error("start_task command received after task already started");
+          }
+          taskStarted = true;
+          enqueueTurn(buildInitialTaskInput(
+            command.input.text,
+            command.taskLanguage,
+            channelFormatting,
+            httpTokens,
+            httpProxyWrapper,
+            command.input.images,
+          ));
           break;
         }
+        case "user_message":
+          enqueueTurn(buildCodexInputWithImages(command.input.text, command.input.images));
+          break;
         case "privilege_result":
           enqueueTurn(buildPrivilegeResolutionInput(command.result));
           break;

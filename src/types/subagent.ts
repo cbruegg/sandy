@@ -2,6 +2,7 @@ import {z} from "zod";
 import type {WorkerToolPayload} from "../subagent/worker-tool-registry.js";
 import {createWorkerToolPayloadSchema} from "../subagent/worker-tool-registry.js";
 import type {PrivilegeResolutionResult} from "./privilege.js";
+import type {ImageAttachment} from "../subagent/worker-prompt.js";
 
 const workerToolCallSchema = createWorkerToolPayloadSchema((entry) => entry.name !== "complete_task");
 type HostMediatedWorkerToolPayload = Exclude<WorkerToolPayload, { type: "complete_task" }>;
@@ -68,10 +69,20 @@ export type SubAgentEvent =
   | WorkerDisconnectedEvent
   | WorkerLogEvent;
 
+export type TaskInputPayload = {
+  text: string;
+  images: ImageAttachment[];
+};
+
 export type HostCommand =
   | {
+      type: "start_task";
+      input: TaskInputPayload;
+      taskLanguage: string;
+    }
+  | {
       type: "user_message";
-      text: string;
+      input: TaskInputPayload;
     }
   | {
       type: "privilege_result";

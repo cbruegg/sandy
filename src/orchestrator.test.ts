@@ -8,6 +8,7 @@ import type { PrivilegeBroker } from "./privilege/privilege-broker.js";
 import type { PersistentApprovalStore } from "./privilege/persistent-approval-store.js";
 import { HttpTokenAuthorizer } from "./http/token-authorizer.js";
 import type { SandboxHandle, SandboxRunner, LaunchTaskRequest } from "./sandbox/sandbox-runner.js";
+import type { TaskInputPayload } from "./types.js";
 import { SandyOrchestrator } from "./orchestrator.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
 import { TaskRegistry } from "./task-registry.js";
@@ -123,14 +124,14 @@ function contextTexts(context: DecideContext): string[] {
 }
 
 class FakeSandboxHandle implements SandboxHandle {
-  public readonly userMessages: string[] = [];
+  public readonly userMessages: TaskInputPayload[] = [];
   public readonly privilegeResults: PrivilegeResolutionResult[] = [];
   public markFinishedCalls = 0;
   public closeCalls = 0;
   public readonly cancellations: string[] = [];
 
-  async sendUserMessage(text: string): Promise<void> {
-    this.userMessages.push(text);
+  async sendUserMessage(input: TaskInputPayload): Promise<void> {
+    this.userMessages.push(input);
   }
 
   async resolvePrivilege(result: PrivilegeResolutionResult): Promise<void> {
@@ -242,7 +243,7 @@ test("orchestrator accepts active-task output without storing host-side history"
 
   const session = store.getOrCreate("chat-2");
   assert.equal(session.pendingTaskSummary, null);
-  assert.match(runner.handle.userMessages[0] ?? "", /Use the main branch\./);
+  assert.match(runner.handle.userMessages[0]?.text ?? "", /Use the main branch\./);
   assert.equal(mainAgent.contexts.length, 1);
 });
 
@@ -331,8 +332,8 @@ test("orchestrator stages attached files into the active task share and notifies
   });
 
   assert.equal(channel.savedAttachments.length, 1);
-  assert.match(runner.handle.userMessages[0] ?? "", /The user attached additional files to the shared workspace/);
-  assert.match(runner.handle.userMessages[0] ?? "", /\/workspace\/share\/inbox\/message_2\/1-followup\.txt/);
+  assert.match(runner.handle.userMessages[0]?.text ?? "", /The user attached additional files to the shared workspace/);
+  assert.match(runner.handle.userMessages[0]?.text ?? "", /\/workspace\/share\/inbox\/message_2\/1-followup\.txt/);
 });
 
 test("orchestrator applies supported privilege requests deterministically and outside the main agent path", async () => {
