@@ -151,7 +151,6 @@ export async function startApp(): Promise<void> {
   const mcpWorkerLaunchConfigBuilder = new McpWorkerLaunchConfigBuilder(
     config.mcpServers,
     workerAccess,
-    true,
   );
 
   const sandboxRunner = new DockerSandboxRunner(

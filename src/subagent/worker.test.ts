@@ -31,13 +31,7 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
   const inputText: string = typeof input === "string" ? input : (Array.isArray(input) && input[0]?.type === "text" ? input[0].text : "");
   assert.match(inputText, /\/workspace\/share/);
   assert.match(inputText, /shared workspace is mounted/);
-  assert.match(inputText, /built-in server "sandy"/);
-  assert.match(inputText, /Use those MCP tools directly/);
-  assert.match(inputText, /Tool "sandy\.copy_into_share"/);
-  assert.match(inputText, /Tool "sandy\.send_file_to_channel"/);
-  assert.match(inputText, /Input schema:/);
-  assert.match(inputText, /Send a file that already exists in the shared workspace back to the user through the channel adapter/);
-  assert.match(inputText, /sandy\.complete_task/);
+  assert.match(inputText, /send the user-visible text first and then call the tool separately/i);
   assert.match(inputText, /Telegram HTML/);
   assert.match(inputText, /<code>/);
   assert.match(inputText, /Use English for user-visible replies unless the host provides a later instruction that overrides it\./);
@@ -45,7 +39,6 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
   assert.match(inputText, /vid2text: Token for the video transcription API\./);
   assert.match(inputText, /sandy\.request_http_token/);
   assert.match(inputText, /do not ask the user in plain text/i);
-  assert.match(inputText, /Do not call sandy\.request_http_token from inside bash/i);
   assert.match(inputText, /sandy-http-proxy-exec/);
   assert.match(inputText, /always run it through \/usr\/local\/bin\/sandy-http-proxy-exec/i);
   assert.match(inputText, /placeholder will not be injected/i);

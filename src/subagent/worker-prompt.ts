@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import type { ChannelFormatting, PrivilegeResolutionResult } from "../types.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 import type { Input, UserInput } from "@openai/codex-sdk";
-import { buildWorkerToolInputSchema, sandyMcpServerId, workerToolEntries } from "./worker-tools.js";
+import { sandyMcpServerId } from "./worker-tools.js";
 
 type HttpTokenPromptInput = {
   tokenId: string;
@@ -65,7 +65,7 @@ export function buildInitialTaskInputWithCapabilities(
     `If you need the host to copy files into or out of ${sharedWorkspaceMountPath}, do not ask the user directly.`,
     `Use ${taskLanguage} for user-visible replies unless the host provides a later instruction that overrides it.`,
     "Keep user-visible progress updates minimal and concise. Only report meaningful milestones, not every shell command completion.",
-    ...buildWorkerMcpInstructions(),
+    "If you need to show text to the user and also call a Sandy MCP tool, send the user-visible text first and then call the tool separately.",
   ];
 
   if (runtimeCapabilities.length > 0) {
@@ -77,7 +77,6 @@ export function buildInitialTaskInputWithCapabilities(
       "Configured HTTP tokens available to this task:",
       ...httpTokens.map((token) => `- ${token.tokenId}: ${token.description}`),
       `If you need one of these tokens, do not ask the user in plain text. Call ${sandyMcpServerId}.request_http_token first.`,
-      `Do not call ${sandyMcpServerId}.request_http_token from inside bash or any other shell command.`,
       "After approval, use the approved token only for the approved host and only in proxied requests that include the placeholder header.",
     );
     if (httpProxyWrapper) {
@@ -163,16 +162,4 @@ function detectRuntimeCapabilities(): string[] {
   }
 
   return capabilities;
-}
-
-function buildWorkerMcpInstructions(): string[] {
-  return [
-    `Host-mediated actions are exposed as MCP tools on the built-in server "${sandyMcpServerId}".`,
-    `Use those MCP tools directly instead of emitting raw Sandy protocol lines or shell commands.`,
-    `If you need to show text to the user and also call a Sandy MCP tool, send the user-visible text first and then call the tool separately.`,
-    ...workerToolEntries.flatMap((entry) => [
-      `Tool "${sandyMcpServerId}.${entry.name}": ${entry.definition.description}`,
-      `Input schema: ${JSON.stringify(buildWorkerToolInputSchema(entry.name))}`,
-    ]),
-  ];
 }

@@ -7,21 +7,10 @@ import { sandyMcpServerId } from "../subagent/worker-tools.js";
 import { mcpProxyWorkerBaseUrl, workerProxyTokenEnvVar } from "./proxy-access.js";
 import { McpWorkerLaunchConfigBuilder } from "./worker-launch-config-builder.js";
 
-test("McpWorkerLaunchConfigBuilder throws when the MCP sidecar runtime is unavailable", async () => {
-  const builder = new McpWorkerLaunchConfigBuilder(
-    {},
-    new ProxyAccess(),
-    false,
-  );
-
-  assert.throws(() => builder.build("task-1"), /MCP sidecar runtime is not configured/);
-});
-
 test("McpWorkerLaunchConfigBuilder always exposes Sandy's built-in MCP server", async () => {
   const builder = new McpWorkerLaunchConfigBuilder(
     {},
     new ProxyAccess(),
-    true,
   );
   const launchConfig = builder.build("task-1");
 
@@ -52,7 +41,7 @@ test("McpWorkerLaunchConfigBuilder builds worker TOML and env from access data",
     },
   };
   const access = new ProxyAccess();
-  const builder = new McpWorkerLaunchConfigBuilder(mcpServers, access, true);
+  const builder = new McpWorkerLaunchConfigBuilder(mcpServers, access);
   const launchConfig = builder.build("task-1");
 
   assert.ok(launchConfig.codexConfigToml);
@@ -88,7 +77,7 @@ test("McpWorkerLaunchConfigBuilder exposes built-in and configured MCP servers",
       oauthScopes: [],
     },
   };
-  const builder = new McpWorkerLaunchConfigBuilder(mcpServers, new ProxyAccess(), true);
+  const builder = new McpWorkerLaunchConfigBuilder(mcpServers, new ProxyAccess());
   const launchConfig = builder.build("task-1");
 
   assert.ok(launchConfig.codexConfigToml);

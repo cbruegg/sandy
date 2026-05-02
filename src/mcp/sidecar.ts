@@ -5,6 +5,7 @@ import { SandyMcpProxy } from "./proxy.js";
 import { ProxyAccess } from "../proxy-access.js";
 import { McpServerRegistryImpl } from "./server-registry.js";
 import { parseHostToMcpSidecarMessage, type McpSidecarBootstrapMessage } from "./sidecar-protocol.js";
+import type { NativeToolCallResult } from "./proxy-contract.js";
 import type { PrivilegeResolutionResult } from "../types.js";
 
 function send(message: object): void {
@@ -30,7 +31,7 @@ export async function main(): Promise<void> {
   const access = new ProxyAccess(bootstrap.workerProxyTokenSecret);
   const registry = new McpServerRegistryImpl(bootstrap.oauthStateDirectory, bootstrap.mcpServers);
   const pendingAuthorization = new Map<string, (result: PrivilegeResolutionResult) => void>();
-  const pendingNativeToolCalls = new Map<string, (result: { isError: boolean; message: string }) => void>();
+  const pendingNativeToolCalls = new Map<string, (result: NativeToolCallResult) => void>();
   let shuttingDown = false;
 
   const proxy = new SandyMcpProxy({
@@ -69,7 +70,7 @@ export async function main(): Promise<void> {
         ...request,
       });
 
-      return await new Promise<{ isError: boolean; message: string }>((resolve) => {
+      return await new Promise<NativeToolCallResult>((resolve) => {
         pendingNativeToolCalls.set(requestId, resolve);
       });
     },

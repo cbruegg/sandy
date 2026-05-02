@@ -217,7 +217,7 @@ export class SandyOrchestrator {
         return {
           requestId: randomUUID(),
           outcome: "approved",
-          message: `Sent ${call.path} to the user.`,
+          message: messages.sharedFileSentToUser(call.path),
         };
       case "copy_into_share":
       case "copy_out_of_share":
@@ -240,7 +240,7 @@ export class SandyOrchestrator {
         return {
           requestId: randomUUID(),
           outcome: "approved",
-          message: "Task completion acknowledged.",
+          message: messages.taskCompletionAcknowledged(),
         };
       }
     }

@@ -16,15 +16,11 @@ export class McpWorkerLaunchConfigBuilder {
   constructor(
     mcpServers: Record<string, McpServerConfig>,
     private readonly access: ProxyAccess,
-    private readonly sidecarEnabled: boolean,
   ) {
     this.serverIds = Object.keys(mcpServers);
   }
 
   build(taskId: string): McpWorkerLaunchConfig {
-    if (!this.sidecarEnabled) {
-      throw new Error("MCP sidecar runtime is not configured.");
-    }
     const serverIds = [sandyMcpServerId, ...this.serverIds];
     const config = {
       mcp_servers: Object.fromEntries(
