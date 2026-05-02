@@ -24,6 +24,7 @@ import { createRetryingChannelAdapter } from "./channel/retrying-channel-adapter
 import { SelfUpdateCoordinator } from "./update/self-update.js";
 import { WorkerImageManager } from "./worker-image-manager.js";
 import { validateMatrixAuthStateForStartup, resolveMatrixAccessToken } from "./matrix/startup-validator.js";
+import { CodexTokenBroker, type TokenBroker } from "./auth/token-broker.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -106,6 +107,10 @@ export async function startApp(): Promise<void> {
     workerImageManager.start(),
   ]);
 
+  const tokenBroker: TokenBroker | null = config.authMode.mode === "codex_auth_file"
+    ? new CodexTokenBroker(config.authMode.codexAuthFile)
+    : null;
+
   logger.info("worker_image.ready", {
     baseImage: config.workerImage,
     launchImage: initialWorkerImage,
@@ -160,7 +165,6 @@ export async function startApp(): Promise<void> {
         workerImage: config.workerImage,
         resolveWorkerImage: () => workerImageManager.getLaunchImage(),
         shareRoot: config.shareRoot,
-        codexAuthFile: config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthFile : null,
         skillsDirectory: config.skillsDirectory,
         workerCodexBinaryPath,
         workerCodexConfigBuilder: (taskId) => mcpWorkerLaunchConfigBuilder.build(taskId),
@@ -190,16 +194,40 @@ export async function startApp(): Promise<void> {
     channel,
     mainAgent,
     sandboxRunner,
-    buildWorkerStartConfig: () => ({
-      openAiApiKey: config.authMode.mode === "api_key" ? config.authMode.openAiApiKey : null,
-      codexModel: config.agentModel,
-      channelFormatting: channel.getFormatting(),
-      httpTokens: Object.entries(config.httpTokens).map(([tokenId, token]) => ({
-        tokenId,
-        description: token.description,
-      })),
-      httpProxyWrapper: httpTokensEnabled ? "/usr/local/bin/sandy-http-proxy-exec" : null,
-    }),
+    buildWorkerStartConfig: async () => {
+      let chatgptExternalTokens = null;
+      if (tokenBroker) {
+        try {
+          chatgptExternalTokens = await tokenBroker.getInitialTokens();
+        } catch (error) {
+          logger.error("token_broker.initial_tokens_failed", {
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+        }
+      }
+      return {
+        openAiApiKey: config.authMode.mode === "api_key" ? config.authMode.openAiApiKey : null,
+        codexModel: config.agentModel,
+        channelFormatting: channel.getFormatting(),
+        httpTokens: Object.entries(config.httpTokens).map(([tokenId, token]) => ({
+          tokenId,
+          description: token.description,
+        })),
+        httpProxyWrapper: httpTokensEnabled ? "/usr/local/bin/sandy-http-proxy-exec" : null,
+        chatgptExternalTokens,
+      };
+    },
+    refreshChatgptTokens: async (_taskId: string, previousAccountId: string | null) => {
+      if (!tokenBroker) return null;
+      try {
+        return await tokenBroker.refreshTokens(previousAccountId);
+      } catch (error) {
+        logger.error("token_broker.refresh_failed", {
+          message: error instanceof Error ? error.message : "Unknown error",
+        });
+        return null;
+      }
+    },
     sessionStore,
     privilegeBroker: new PrivilegeBrokerImpl(),
     taskRegistry,

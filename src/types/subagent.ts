@@ -58,6 +58,11 @@ type WorkerLogEvent = {
   data?: Record<string, unknown>;
 };
 
+type ChatgptAuthRefreshRequestEvent = {
+  type: "chatgpt_auth_refresh_request";
+  previousAccountId: string | null;
+};
+
 export type SubAgentEvent =
   | ProgressEvent
   | AssistantOutputEvent
@@ -68,11 +73,18 @@ export type SubAgentEvent =
   | TaskErrorEvent
   | WorkerConnectedEvent
   | WorkerDisconnectedEvent
-  | WorkerLogEvent;
+  | WorkerLogEvent
+  | ChatgptAuthRefreshRequestEvent;
 
 export type TaskInputPayload = {
   text: string;
   images: ImageAttachment[];
+};
+
+export type ChatGPTExternalTokens = {
+  accessToken: string;
+  chatgptAccountId: string;
+  chatgptPlanType: string | null;
 };
 
 export type WorkerStartConfig = {
@@ -84,6 +96,7 @@ export type WorkerStartConfig = {
     description: string;
   }>;
   httpProxyWrapper: string | null;
+  chatgptExternalTokens: ChatGPTExternalTokens | null;
 };
 
 export type HostCommand =
@@ -108,6 +121,11 @@ export type HostCommand =
     }
   | {
       type: "mark_finished";
+    }
+  | {
+      type: "chatgpt_auth_refresh_result";
+      tokens: ChatGPTExternalTokens | null;
+      error: string | null;
     };
 
 const subAgentEventSchema = z.discriminatedUnion("type", [
@@ -150,6 +168,10 @@ const subAgentEventSchema = z.discriminatedUnion("type", [
     level: z.enum(["debug", "info", "warn", "error"]),
     event: z.string(),
     data: z.record(z.string(), z.unknown()).optional(),
+  }).strict(),
+  z.object({
+    type: z.literal("chatgpt_auth_refresh_request"),
+    previousAccountId: z.string().nullable(),
   }).strict(),
 ]);
 

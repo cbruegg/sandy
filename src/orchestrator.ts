@@ -20,6 +20,7 @@ import type {
   SubAgentEvent,
   TranscriptEntry,
   WorkerStartConfig,
+  ChatGPTExternalTokens,
 } from "./types.js";
 import { resolveTaskShareHostPath } from "./shared-workspace.js";
 import {
@@ -42,7 +43,8 @@ type SandyOrchestratorDependencies = {
   channel: ChannelAdapter;
   mainAgent: MainAgentController;
   sandboxRunner: SandboxRunner;
-  buildWorkerStartConfig?: () => WorkerStartConfig;
+  buildWorkerStartConfig?: () => WorkerStartConfig | Promise<WorkerStartConfig>;
+  refreshChatgptTokens?: (taskId: string, previousAccountId: string | null) => Promise<ChatGPTExternalTokens | null>;
   sessionStore: SessionStore;
   privilegeBroker: PrivilegeBroker;
   taskRegistry: TaskRegistry;
@@ -191,6 +193,11 @@ export class SandyOrchestrator {
           await this.deps.channel.sendText(chatId, messages.taskFailed(event.message));
           await this.finishActiveTask(session, "failed");
           break;
+        case "chatgpt_auth_refresh_request": {
+          const tokens = await this.deps.refreshChatgptTokens?.(taskId, event.previousAccountId) ?? null;
+          await this.requireHandle(taskId).resolveAuthRefresh?.(tokens);
+          break;
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown sub-agent event handling failure.";
@@ -397,13 +404,14 @@ export class SandyOrchestrator {
             taskLanguage: decision.taskLanguage,
             channelFormatting: this.channelFormatting,
             initialInput,
-            workerStartConfig: this.deps.buildWorkerStartConfig?.() ?? {
+            workerStartConfig: await (this.deps.buildWorkerStartConfig?.() ?? Promise.resolve({
               openAiApiKey: null,
               codexModel: null,
               channelFormatting: this.channelFormatting,
               httpTokens: [],
               httpProxyWrapper: null,
-            },
+              chatgptExternalTokens: null,
+            })),
           },
           async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
         );

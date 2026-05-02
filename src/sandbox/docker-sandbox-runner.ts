@@ -1,4 +1,4 @@
-import {copyFile, mkdir, mkdtemp, readdir, rm, writeFile} from "node:fs/promises";
+import {mkdir, mkdtemp, readdir, rm, writeFile} from "node:fs/promises";
 import {type ChildProcessWithoutNullStreams, spawn} from "node:child_process";
 import {tmpdir} from "node:os";
 import {join, relative, resolve} from "node:path";
@@ -7,7 +7,7 @@ import type {WorkerNetworkConfig} from "../config.js";
 import {logger, type LogLevel} from "../logger.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {workerSkillsPath} from "../subagent/worker-codex-config.js";
-import type {HostCommand, PrivilegeResolutionResult, SubAgentEvent, TaskInputPayload} from "../types.js";
+import type {ChatGPTExternalTokens, HostCommand, PrivilegeResolutionResult, SubAgentEvent, TaskInputPayload} from "../types.js";
 import {parseSubAgentEvent, serializeHostCommand} from "../types.js";
 import { parseHttpProxyContainerMessage, serializeHttpProxyHostMessage, type HttpProxyAuthRequestMessage, type HttpProxyAuthResponseMessage } from "../http/http-proxy-protocol.js";
 import {launchNetworkGuardContainer, type StartedNetworkGuard} from "./network-guard.js";
@@ -21,7 +21,6 @@ type DockerSandboxRunnerOptions = {
   resolveWorkerImage?: () => string;
   networkGuardImage?: string;
   shareRoot: string;
-  codexAuthFile: string | null;
   skillsDirectory: string | null;
   workerCodexBinaryPath?: string | null;
   workerNetworkName?: string | null;
@@ -87,21 +86,13 @@ export class DockerSandboxRunner implements SandboxRunner {
     const workerImage = this.resolveWorkerImage();
     let workerTempDir: string | null = null;
     let workerCodexHomeTempDir: string | null = null;
-    const needsWorkerCodexHome = Boolean(this.options.codexAuthFile || workerCodexConfig);
+    const needsWorkerCodexHome = Boolean(workerCodexConfig);
     if (needsWorkerCodexHome) {
       workerTempDir = await mkdtemp(join(tmpdir(), "sandy-worker-launch-"));
     }
     if (needsWorkerCodexHome) {
       workerCodexHomeTempDir = join(workerTempDir!, "codex-home");
       await mkdir(workerCodexHomeTempDir, {recursive: true});
-      if (this.options.codexAuthFile) {
-        try {
-          await copyFile(this.options.codexAuthFile, join(workerCodexHomeTempDir, "auth.json"));
-        } catch (error) {
-          await rm(workerTempDir!, {recursive: true, force: true});
-          throw error;
-        }
-      }
       if (workerCodexConfig) {
         try {
           await writeFile(join(workerCodexHomeTempDir, "config.toml"), workerCodexConfig, "utf8");
@@ -589,6 +580,24 @@ export class DockerSandboxRunner implements SandboxRunner {
         });
         child.kill("SIGTERM");
         await cleanupTaskContainers();
+      },
+      resolveAuthRefresh: async (tokens: ChatGPTExternalTokens | null) => {
+        logger.info("sandbox.auth_refresh", {
+          taskId: request.taskId,
+          hasTokens: tokens !== null,
+        });
+        try {
+          await this.sendToWorker(child, {
+            type: "chatgpt_auth_refresh_result",
+            tokens,
+            error: tokens ? null : "Token refresh failed.",
+          });
+        } catch (error) {
+          logger.error("sandbox.auth_refresh_write_failed", {
+            taskId: request.taskId,
+            message: this.describeWriteFailure(error),
+          });
+        }
       },
     };
   }
