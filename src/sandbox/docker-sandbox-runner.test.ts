@@ -7,8 +7,8 @@ import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import { DockerSandboxRunner } from "./sandbox/docker-sandbox-runner.js";
-import type { ChannelFormatting, SubAgentEvent } from "./types.js";
+import { DockerSandboxRunner } from "./docker-sandbox-runner.js";
+import type { ChannelFormatting, SubAgentEvent } from "../types.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
