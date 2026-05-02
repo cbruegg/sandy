@@ -49,6 +49,7 @@ FROM opensuse/tumbleweed:latest AS network-guard-runtime
 WORKDIR /app
 
 RUN zypper --non-interactive refresh \
+  && zypper --non-interactive dist-upgrade \
   && zypper --non-interactive install --no-recommends \
     gawk \
     grep \
@@ -66,6 +67,7 @@ FROM opensuse/tumbleweed:latest AS worker-runtime
 WORKDIR /workspace
 
 RUN zypper --non-interactive refresh \
+  && zypper --non-interactive dist-upgrade \
   && zypper --non-interactive install --no-recommends \
     ca-certificates \
     curl \
@@ -77,8 +79,8 @@ RUN zypper --non-interactive refresh \
     git \
     gzip \
     make \
-    nodejs \
-    npm \
+    nodejs24 \
+    npm24 \
     procps \
     shadow \
     sudo \
