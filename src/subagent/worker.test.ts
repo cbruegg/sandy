@@ -7,12 +7,11 @@ import {
   buildInitialTaskInputWithCapabilities,
   buildPrivilegeResolutionInput,
   buildTaskSummaryInput,
-  parseWorkerToolCall,
   streamTurn,
-  workerToolCallToSubAgentEvent,
 } from "./worker.js";
 import type { ChannelFormatting, PrivilegeResolutionResult } from "../types.js";
 import { parseSubAgentEvent } from "../types.js";
+import { parseWorkerToolPayload, sandyMcpServerId } from "./worker-tools.js";
 
 test("buildInitialTaskInput tells the sub-agent where the shared workspace is", () => {
   const formatting: ChannelFormatting = {
@@ -32,23 +31,21 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
   const inputText: string = typeof input === "string" ? input : (Array.isArray(input) && input[0]?.type === "text" ? input[0].text : "");
   assert.match(inputText, /\/workspace\/share/);
   assert.match(inputText, /shared workspace is mounted/);
-  assert.match(inputText, /SANDY_COPY_INTO_SHARE/);
-  assert.match(inputText, /SANDY_SEND_FILE_TO_CHANNEL/);
-  assert.match(inputText, /Schema:/);
-  assert.match(inputText, /Use a tool by emitting exactly one line with no surrounding text/);
-  assert.match(inputText, /Emit Sandy tool calls as raw text output in assistant messages, NOT as shell commands/);
-  assert.match(inputText, /Never combine a Sandy tool call with user-visible text in the same assistant message/);
-  assert.match(inputText, /send the user-visible text first and then send the Sandy tool call by itself in a following assistant message/);
+  assert.match(inputText, /built-in server "sandy"/);
+  assert.match(inputText, /Use those MCP tools directly/);
+  assert.match(inputText, /Tool "sandy\.copy_into_share"/);
+  assert.match(inputText, /Tool "sandy\.send_file_to_channel"/);
+  assert.match(inputText, /Input schema:/);
   assert.match(inputText, /Send a file that already exists in the shared workspace back to the user through the channel adapter/);
-  assert.match(inputText, /SANDY_COMPLETE_TASK/);
+  assert.match(inputText, /sandy\.complete_task/);
   assert.match(inputText, /Telegram HTML/);
   assert.match(inputText, /<code>/);
   assert.match(inputText, /Use English for user-visible replies unless the host provides a later instruction that overrides it\./);
   assert.match(inputText, /Configured HTTP tokens available to this task:/);
   assert.match(inputText, /vid2text: Token for the video transcription API\./);
-  assert.match(inputText, /SANDY_REQUEST_HTTP_TOKEN/);
+  assert.match(inputText, /sandy\.request_http_token/);
   assert.match(inputText, /do not ask the user in plain text/i);
-  assert.match(inputText, /Do not run SANDY_REQUEST_HTTP_TOKEN inside bash/i);
+  assert.match(inputText, /Do not call sandy\.request_http_token from inside bash/i);
   assert.match(inputText, /sandy-http-proxy-exec/);
   assert.match(inputText, /always run it through \/usr\/local\/bin\/sandy-http-proxy-exec/i);
   assert.match(inputText, /placeholder will not be injected/i);
@@ -130,14 +127,14 @@ test("nextPlannedStep formats todo-list progress updates", () => {
   );
 });
 
-test("parseWorkerToolCall parses privilege-escalated worker tools", () => {
-  const call = parseWorkerToolCall(
-    'SANDY_COPY_OUT_OF_SHARE {"sourcePath":"/workspace/share/random_numbers.txt","targetPath":"~/Downloads/random_numbers.txt","reason":"Deliver the generated file."}',
-  );
+test("parseWorkerToolPayload parses privilege-escalated worker tools", () => {
+  const payload = parseWorkerToolPayload("copy_out_of_share", {
+    sourcePath: "/workspace/share/random_numbers.txt",
+    targetPath: "~/Downloads/random_numbers.txt",
+    reason: "Deliver the generated file.",
+  });
 
-  assert.equal(call?.tool, "copy_out_of_share");
-  assert.equal(call?.definition.requiresPrivilegeEscalation, true);
-  assert.deepEqual(call?.payload, {
+  assert.deepEqual(payload, {
     type: "copy_out_of_share",
     sourcePath: "/workspace/share/random_numbers.txt",
     targetPath: "~/Downloads/random_numbers.txt",
@@ -145,73 +142,14 @@ test("parseWorkerToolCall parses privilege-escalated worker tools", () => {
   });
 });
 
-test("parseWorkerToolCall throws a helpful error for invalid payloads", () => {
+test("parseWorkerToolPayload throws a helpful error for invalid payloads", () => {
   assert.throws(
-    () => parseWorkerToolCall(
-      'SANDY_COPY_OUT_OF_SHARE {"source":"random_numbers.txt","destinationPath":"~/Downloads/random_numbers.txt"}',
-    ),
-    /Invalid copy_out_of_share tool payload|Payload:/,
+    () => parseWorkerToolPayload("copy_out_of_share", {
+      source: "random_numbers.txt",
+      destinationPath: "~/Downloads/random_numbers.txt",
+    }),
+    /sourcePath|targetPath/,
   );
-});
-
-test("workerToolCallToSubAgentEvent converts non-privileged tools generically", () => {
-  const call = parseWorkerToolCall(
-    'SANDY_SEND_FILE_TO_CHANNEL {"path":"/workspace/share/result.txt","caption":"Generated result file."}',
-  );
-
-  const event = workerToolCallToSubAgentEvent(call!);
-
-  assert.deepEqual(event, {
-    type: "tool_call",
-    call: {
-      type: "send_file_to_channel",
-      path: "/workspace/share/result.txt",
-      caption: "Generated result file.",
-    },
-  });
-});
-
-test("workerToolCallToSubAgentEvent converts privileged tools into tool-call events", () => {
-  const call = parseWorkerToolCall(
-    'SANDY_COPY_OUT_OF_SHARE {"sourcePath":"/workspace/share/result.txt","targetPath":"~/Downloads/result.txt","reason":"Deliver the generated file."}',
-  );
-
-  const event = workerToolCallToSubAgentEvent(call!);
-
-  assert.deepEqual(event, {
-    type: "tool_call",
-    call: {
-      type: "copy_out_of_share",
-      sourcePath: "/workspace/share/result.txt",
-      targetPath: "~/Downloads/result.txt",
-      reason: "Deliver the generated file.",
-    },
-  });
-});
-
-test("workerToolCallToSubAgentEvent converts explicit completion signals into task_done events", () => {
-  const call = parseWorkerToolCall("SANDY_COMPLETE_TASK {}");
-
-  const event = workerToolCallToSubAgentEvent(call!);
-
-  assert.deepEqual(event, {
-    type: "task_done",
-  });
-});
-
-test("parseSubAgentEvent accepts tool-call events", () => {
-  const event = parseSubAgentEvent(
-    '{"type":"tool_call","call":{"type":"send_file_to_channel","path":"/workspace/share/result.txt","caption":"Generated result file."}}',
-  );
-
-  assert.deepEqual(event, {
-    type: "tool_call",
-    call: {
-      type: "send_file_to_channel",
-      path: "/workspace/share/result.txt",
-      caption: "Generated result file.",
-    },
-  });
 });
 
 test("parseSubAgentEvent accepts task-summary events", () => {
@@ -223,7 +161,7 @@ test("parseSubAgentEvent accepts task-summary events", () => {
   });
 });
 
-test("streamTurn stops after a privileged Sandy tool call", async () => {
+test("streamTurn stops after sandy.complete_task finishes", async () => {
   const writes: string[] = [];
   const originalWrite = process.stdout.write.bind(process.stdout);
   const mockWrite: typeof process.stdout.write = (
@@ -247,17 +185,20 @@ test("streamTurn stops after a privileged Sandy tool call", async () => {
         return {
           events: (async function* () {
             yield {
-              type: "item.completed",
+              type: "item.updated",
               item: {
-                type: "agent_message",
-                text: 'SANDY_REQUEST_HTTP_TOKEN {"tokenId":"vid2text","host":"api.example.com","reason":"Need the transcript API."}',
+                type: "mcp_tool_call",
+                server: sandyMcpServerId,
+                tool: "complete_task",
+                status: "completed",
+                arguments: {},
               },
             };
             yield {
               type: "item.completed",
               item: {
                 type: "agent_message",
-                text: "This should never be forwarded after the token request.",
+                text: "This should never be forwarded after completion.",
               },
             };
           })(),
@@ -267,18 +208,12 @@ test("streamTurn stops after a privileged Sandy tool call", async () => {
 
     const result = await streamTurn(thread, "Inspect the reel.");
 
-    assert.equal(result.sawPrivilegedToolCall, true);
-    assert.equal(result.sawTaskDone, false);
+    assert.equal(result.sawTaskDone, true);
     assert.equal(result.sawTerminalError, false);
     assert.equal(writes.length, 1);
     assert.deepEqual(parseSubAgentEvent(writes[0]!.trim()), {
-      type: "tool_call",
-      call: {
-        type: "request_http_token",
-        tokenId: "vid2text",
-        host: "api.example.com",
-        reason: "Need the transcript API.",
-      },
+      type: "progress",
+      message: "MCP completed: sandy.complete_task {}",
     });
   } finally {
     process.stdout.write = originalWrite;
@@ -322,7 +257,6 @@ test("streamTurn ignores empty assistant messages", async () => {
 
     const result = await streamTurn(thread, "Inspect the reel.");
 
-    assert.equal(result.sawPrivilegedToolCall, false);
     assert.equal(result.sawTaskDone, false);
     assert.equal(result.sawTerminalError, false);
     assert.deepEqual(writes, []);

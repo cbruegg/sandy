@@ -2,7 +2,7 @@ import {cp, mkdir} from "node:fs/promises";
 import {dirname, isAbsolute, resolve} from "node:path";
 import {resolveHomeDirectory} from "../home-directory.js";
 import {resolveTaskShareHostPath} from "../shared-workspace.js";
-import type {PrivilegedWorkerToolPayload} from "../subagent/worker-tool-registry.js";
+import type {PrivilegedWorkerToolPayload} from "../subagent/worker-tools.js";
 
 type PrivilegeContext = {
   taskId: string;

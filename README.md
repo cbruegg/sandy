@@ -193,6 +193,8 @@ Codex auth behavior:
 
 MCP OAuth behavior:
 
+- Every worker also gets a built-in MCP server named `sandy`. It exposes Sandy's host-mediated tools such as shared-workspace copy operations, file send-back, task completion, and HTTP token requests.
+- `mcp.servers.sandy` is reserved for that built-in server and must not be configured by users.
 - `mcp.servers.<name>.oauth_scopes` optionally sets OAuth scopes to request during `sandy mcp login <name>`.
 - Sandy runs upstream MCP connections from an MCP sidecar container, not from the host process directly.
 - If an MCP server runs on the same host as Sandy, use `http://host.docker.internal:<port>/...` when configuring `mcp.servers.<name>.url`.
@@ -201,7 +203,7 @@ HTTP token behavior:
 
 - `http.tokens.<name>` defines a named token secret with both `description` and `value`. Sandy includes token IDs and descriptions in the main-agent and sub-agent prompts so they know what each token is for. Workers use placeholder headers like `Authorization: Bearer SANDY_TOKEN_<name>` in proxied HTTP requests. The HTTP proxy replaces these placeholders with the real token value at request time, but only if the requesting task holds an active approval for that token + host.
 - `approvals.http.<name>` persists `auto-allow for suitable tasks` decisions for specific hosts via `always_allow_hosts`. This is persistent approval state only; it does not make the token globally available to every future task. A persisted host approval auto-applies only when the main agent marks that token's configured auto-approvals as suitable for the task. New hosts can still go through the interactive approval flow and become persisted later if approved with `auto-allow for suitable tasks`.
-- Workers _must_ explicitly request token use via Sandy's `request_http_token` tool before making proxied requests. This tool requires privilege escalation and follows the same approval flow as MCP tools.
+- Workers _must_ explicitly request token use via the built-in `sandy.request_http_token` MCP tool before making proxied requests. This tool requires privilege escalation and follows the same approval flow as other sensitive host-mediated tools.
 - If no approval is active when the proxy sees a placeholder token, the request is rejected immediately with HTTP 403.
 - Workers do not receive global proxy environment variables anymore. Instead, Sandy tells sub-agents to run commands that need HTTP token injection through `/usr/local/bin/sandy-http-proxy-exec`, which sets `HTTP_PROXY`, `HTTPS_PROXY`, their lowercase variants, and `NO_PROXY` only for that child process while pointing at the per-worker Sandy HTTP proxy with embedded task credentials.
 - The HTTP proxy runs in its own container per worker. It shares the worker's network-guard namespace so it sees the same effective connectivity restrictions, while remaining isolated from worker process control.

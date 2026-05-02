@@ -3,36 +3,39 @@ import assert from "node:assert/strict";
 import * as toml from "@iarna/toml";
 import type { McpServerConfig } from "../config.js";
 import { ProxyAccess } from "../proxy-access.js";
+import { sandyMcpServerId } from "../subagent/worker-tools.js";
 import { mcpProxyWorkerBaseUrl, workerProxyTokenEnvVar } from "./proxy-access.js";
 import { McpWorkerLaunchConfigBuilder } from "./worker-launch-config-builder.js";
 
-test("McpWorkerLaunchConfigBuilder returns an empty config when no MCP servers are enabled", async () => {
+test("McpWorkerLaunchConfigBuilder throws when the MCP sidecar runtime is unavailable", async () => {
   const builder = new McpWorkerLaunchConfigBuilder(
     {},
     new ProxyAccess(),
     false,
   );
 
-  assert.deepEqual(builder.build("task-1"), {
-    codexConfigToml: null,
-    environment: {},
-  });
+  assert.throws(() => builder.build("task-1"), /MCP sidecar runtime is not configured/);
 });
 
-test("McpWorkerLaunchConfigBuilder throws when MCP servers are enabled without a sidecar", async () => {
+test("McpWorkerLaunchConfigBuilder always exposes Sandy's built-in MCP server", async () => {
   const builder = new McpWorkerLaunchConfigBuilder(
-    {
-      todoist: {
-        transport: "streamable_http",
-        url: "https://todoist.example/mcp",
-        oauthScopes: [],
-      },
-    },
+    {},
     new ProxyAccess(),
-    false,
+    true,
   );
+  const launchConfig = builder.build("task-1");
 
-  assert.throws(() => builder.build("task-1"), /MCP sidecar runtime is not configured/);
+  assert.ok(launchConfig.codexConfigToml);
+  const parsed = toml.parse(launchConfig.codexConfigToml) as {
+    mcp_servers: Record<string, {
+      url: string;
+      bearer_token_env_var: string;
+    }>;
+  };
+
+  assert.deepEqual(Object.keys(parsed.mcp_servers), [sandyMcpServerId]);
+  assert.equal(parsed.mcp_servers[sandyMcpServerId]?.url, `${mcpProxyWorkerBaseUrl}/mcp/tasks/task-1/servers/${sandyMcpServerId}`);
+  assert.equal(parsed.mcp_servers[sandyMcpServerId]?.bearer_token_env_var, workerProxyTokenEnvVar);
 });
 
 test("McpWorkerLaunchConfigBuilder builds worker TOML and env from access data", async () => {
@@ -54,22 +57,17 @@ test("McpWorkerLaunchConfigBuilder builds worker TOML and env from access data",
 
   assert.ok(launchConfig.codexConfigToml);
   const parsed = toml.parse(launchConfig.codexConfigToml) as {
-    mcp_servers: {
-      todoist: {
-        url: string;
-        bearer_token_env_var: string;
-      };
-      github: {
-        url: string;
-        bearer_token_env_var: string;
-      };
-    };
+    mcp_servers: Record<string, {
+      url: string;
+      bearer_token_env_var: string;
+    }>;
   };
 
-  assert.equal(parsed.mcp_servers.todoist.url, `${mcpProxyWorkerBaseUrl}/mcp/tasks/task-1/servers/todoist`);
-  assert.equal(parsed.mcp_servers.todoist.bearer_token_env_var, workerProxyTokenEnvVar);
-  assert.equal(parsed.mcp_servers.github.url, `${mcpProxyWorkerBaseUrl}/mcp/tasks/task-1/servers/github`);
-  assert.equal(parsed.mcp_servers.github.bearer_token_env_var, workerProxyTokenEnvVar);
+  assert.equal(parsed.mcp_servers["todoist"]?.url, `${mcpProxyWorkerBaseUrl}/mcp/tasks/task-1/servers/todoist`);
+  assert.equal(parsed.mcp_servers["todoist"]?.bearer_token_env_var, workerProxyTokenEnvVar);
+  assert.equal(parsed.mcp_servers["github"]?.url, `${mcpProxyWorkerBaseUrl}/mcp/tasks/task-1/servers/github`);
+  assert.equal(parsed.mcp_servers["github"]?.bearer_token_env_var, workerProxyTokenEnvVar);
+  assert.equal(parsed.mcp_servers[sandyMcpServerId]?.url, `${mcpProxyWorkerBaseUrl}/mcp/tasks/task-1/servers/${sandyMcpServerId}`);
   assert.ok(launchConfig.environment[workerProxyTokenEnvVar]);
   assert.deepEqual(access.validateWorkerGrant({
     taskId: "task-1",
@@ -77,7 +75,7 @@ test("McpWorkerLaunchConfigBuilder builds worker TOML and env from access data",
   }), { ok: true });
 });
 
-test("McpWorkerLaunchConfigBuilder exposes all configured MCP servers", async () => {
+test("McpWorkerLaunchConfigBuilder exposes built-in and configured MCP servers", async () => {
   const mcpServers: Record<string, McpServerConfig> = {
     todoist: {
       transport: "streamable_http",
@@ -98,5 +96,5 @@ test("McpWorkerLaunchConfigBuilder exposes all configured MCP servers", async ()
     mcp_servers: Record<string, unknown>;
   };
 
-  assert.deepEqual(Object.keys(parsed.mcp_servers).sort(), ["github", "todoist"]);
+  assert.deepEqual(Object.keys(parsed.mcp_servers).sort(), ["github", sandyMcpServerId, "todoist"]);
 });

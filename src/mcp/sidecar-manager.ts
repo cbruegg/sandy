@@ -12,6 +12,7 @@ import { mcpWorkerNetworkNamePrefix } from "./worker-network-name.js";
 import {
   parseMcpSidecarToHostMessage,
   type McpSidecarAuthorizationRequestMessage,
+  type McpSidecarNativeToolCallRequestMessage,
   type McpSidecarResourceAuthorizationRequestMessage,
   type McpSidecarLogMessage,
 } from "./sidecar-protocol.js";
@@ -36,6 +37,11 @@ type McpSidecarManagerOptions = {
     serverId: string;
     uri: string;
   }) => Promise<PrivilegeResolutionResult>;
+  executeNativeToolCall: (input: {
+    taskId: string;
+    toolName: string;
+    arguments: unknown;
+  }) => Promise<{ isError: boolean; message: string }>;
 };
 
 export class McpSidecarManager {
@@ -60,7 +66,7 @@ export class McpSidecarManager {
   }
 
   async start(): Promise<void> {
-    if (this.started || Object.keys(this.options.mcpServers).length === 0) {
+    if (this.started) {
       return;
     }
 
@@ -138,6 +144,10 @@ export class McpSidecarManager {
           }
           if (message.type === "resource_authorization_request") {
             this.dispatchResourceAuthorizationRequest(message);
+            return;
+          }
+          if (message.type === "native_tool_call_request") {
+            this.dispatchNativeToolCallRequest(message);
             return;
           }
           if (message.type === "log") {
@@ -240,7 +250,8 @@ export class McpSidecarManager {
           outcome: "failed",
           message: failureMessage,
         } satisfies PrivilegeResolutionResult,
-      })    });
+      });
+    });
   }
 
   private async handleAuthorizationRequest(message: McpSidecarAuthorizationRequestMessage): Promise<void> {
@@ -293,6 +304,41 @@ export class McpSidecarManager {
       type: "authorization_result",
       requestId: message.requestId,
       result,
+    });
+  }
+
+  private dispatchNativeToolCallRequest(message: McpSidecarNativeToolCallRequestMessage): void {
+    void this.handleNativeToolCallRequest(message).catch((error) => {
+      const failureMessage = error instanceof Error ? error.message : "Unknown native tool call failure.";
+
+      logger.warn("mcp.sidecar.native_tool_call_failed", {
+        requestId: message.requestId,
+        taskId: message.taskId,
+        toolName: message.toolName,
+        message: failureMessage,
+      });
+
+      this.sendToSidecar({
+        type: "native_tool_call_result",
+        requestId: message.requestId,
+        isError: true,
+        message: failureMessage,
+      });
+    });
+  }
+
+  private async handleNativeToolCallRequest(message: McpSidecarNativeToolCallRequestMessage): Promise<void> {
+    const result = await this.options.executeNativeToolCall({
+      taskId: message.taskId,
+      toolName: message.toolName,
+      arguments: message.arguments,
+    });
+
+    this.sendToSidecar({
+      type: "native_tool_call_result",
+      requestId: message.requestId,
+      isError: result.isError,
+      message: result.message,
     });
   }
 

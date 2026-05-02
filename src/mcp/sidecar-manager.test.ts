@@ -71,6 +71,10 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
       outcome: "approved",
       message: "approved",
     }),
+    executeNativeToolCall: async () => ({
+      isError: false,
+      message: "ok",
+    }),
   }, access);
 
   await manager.start();
@@ -138,6 +142,10 @@ test("McpSidecarManager returns a failed authorization result when authorization
     authorizeResourceRead: async () => {
       throw new Error("approval service unavailable");
     },
+    executeNativeToolCall: async () => ({
+      isError: false,
+      message: "ok",
+    }),
   }, new ProxyAccess("shared-secret"));
 
   await manager.start();
@@ -220,6 +228,10 @@ test("McpSidecarManager forwards structured sidecar logs through the host logger
       outcome: "approved",
       message: "approved",
     }),
+    executeNativeToolCall: async () => ({
+      isError: false,
+      message: "ok",
+    }),
   }, new ProxyAccess("shared-secret"));
 
   await manager.start();
@@ -246,4 +258,70 @@ test("McpSidecarManager forwards structured sidecar logs through the host logger
       serverId: "homeassistant",
     },
   }]);
+});
+
+test("McpSidecarManager answers native Sandy tool calls over the control channel", async () => {
+  const sidecarChild = new FakeChildProcess();
+  let stdinContent = "";
+  sidecarChild.stdin.on("data", (chunk: Buffer | string) => {
+    stdinContent += String(chunk);
+  });
+
+  const spawnImpl = ((_command: string, args: readonly string[]) => {
+    const child = new FakeChildProcess();
+    if (args[0] === "network" && args[1] === "ls") {
+      queueMicrotask(() => {
+        child.emit("exit", 0, null);
+      });
+      return child as unknown as ChildProcessWithoutNullStreams;
+    }
+    if (args[0] === "run") {
+      sidecarChild.stdout.write('{"type":"ready"}\n');
+      return sidecarChild as unknown as ChildProcessWithoutNullStreams;
+    }
+    queueMicrotask(() => {
+      child.emit("exit", 0, null);
+    });
+    return child as unknown as ChildProcessWithoutNullStreams;
+  }) as typeof import("node:child_process").spawn;
+
+  const manager = new McpSidecarManager({
+    configDirectory: "/tmp/sandy-config",
+    mcpServers: {},
+    workerNetworkName: createMcpWorkerNetworkName(),
+    sidecarImage: "sandy-mcp-proxy:latest",
+    spawnImpl,
+    authorizeToolCall: async () => ({
+      requestId: "approval-1",
+      outcome: "approved",
+      message: "approved",
+    }),
+    authorizeResourceRead: async () => ({
+      requestId: "approval-1",
+      outcome: "approved",
+      message: "approved",
+    }),
+    executeNativeToolCall: async () => ({
+      isError: false,
+      message: "native-ok",
+    }),
+  }, new ProxyAccess("shared-secret"));
+
+  await manager.start();
+  sidecarChild.stdout.write(
+    JSON.stringify({
+      type: "native_tool_call_request",
+      requestId: "request-1",
+      taskId: "task-1",
+      toolName: "complete_task",
+      arguments: {},
+    }) + "\n",
+  );
+  await new Promise<void>((resolve) => setImmediateCallback(resolve));
+  await manager.stop();
+
+  assert.match(stdinContent, /"type":"native_tool_call_result"/);
+  assert.match(stdinContent, /"requestId":"request-1"/);
+  assert.match(stdinContent, /"isError":false/);
+  assert.match(stdinContent, /native-ok/);
 });

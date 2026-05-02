@@ -120,9 +120,8 @@ export async function startApp(): Promise<void> {
   );
 
   const workerAccess = new ProxyAccess();
-  const mcpEnabled = Object.keys(config.mcpServers).length > 0;
   const httpTokensEnabled = Object.keys(config.httpTokens).length > 0;
-  const workerNetworkName = mcpEnabled ? createMcpWorkerNetworkName() : null;
+  const workerNetworkName = createMcpWorkerNetworkName();
 
   const certificateAuthority = httpTokensEnabled ? await createCertificateAuthority() : null;
   const taskRegistry = new TaskRegistry();
@@ -152,7 +151,7 @@ export async function startApp(): Promise<void> {
   const mcpWorkerLaunchConfigBuilder = new McpWorkerLaunchConfigBuilder(
     config.mcpServers,
     workerAccess,
-    mcpEnabled,
+    true,
   );
 
   const sandboxRunner = new DockerSandboxRunner(
@@ -206,14 +205,15 @@ export async function startApp(): Promise<void> {
     persistentApprovalStore,
   });
 
-  const sidecarManager = !mcpEnabled || !workerNetworkName ? null : new McpSidecarManager({
-    configDirectory: config.configDirectory,
-    mcpServers: config.mcpServers,
-    workerNetworkName,
-    sidecarImage: config.mcpSidecarImage,
-    authorizeToolCall: (input) => orchestrator.authorizeMcpToolCall(input),
-    authorizeResourceRead: (input) => orchestrator.authorizeMcpResourceRead(input),
-  }, workerAccess);
+   const sidecarManager = new McpSidecarManager({
+     configDirectory: config.configDirectory,
+     mcpServers: config.mcpServers,
+     workerNetworkName,
+     sidecarImage: config.mcpSidecarImage,
+     authorizeToolCall: (input) => orchestrator.authorizeMcpToolCall(input),
+     authorizeResourceRead: (input) => orchestrator.authorizeMcpResourceRead(input),
+     executeNativeToolCall: (input) => orchestrator.executeNativeWorkerToolCall(input),
+   }, workerAccess);
 
   await sidecarManager?.start();
 

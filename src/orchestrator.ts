@@ -29,6 +29,8 @@ import {
   describeUserMessageForMainAgent,
 } from "./orchestrator-worker-input.js";
 import { stageSharedAttachments } from "./orchestrator-task-share.js";
+import type { WorkerToolPayload } from "./subagent/worker-tools.js";
+import { parseWorkerToolPayload } from "./subagent/worker-tools.js";
 
 type ActiveHandleRecord = {
   handle: SandboxHandle;
@@ -52,6 +54,7 @@ type SandyOrchestratorDependencies = {
 export class SandyOrchestrator {
   private readonly handles = new Map<string, ActiveHandleRecord>();
   private readonly pendingMcpPrivilegeResolvers = new Map<string, (result: PrivilegeResolutionResult) => void>();
+  private readonly pendingNativeToolResolvers = new Map<string, (result: PrivilegeResolutionResult) => void>();
   private readonly channelFormatting: ReturnType<ChannelAdapter["getFormatting"]>;
   private readonly persistentApprovalStore: PersistentApprovalStore;
 
@@ -164,9 +167,6 @@ export class SandyOrchestrator {
         case "task_summary":
           this.recordTaskSummary(session, event.summary);
           break;
-        case "tool_call":
-          await this.routeWorkerToolCall(chatId, session, event.call);
-          break;
         case "final_result":
           this.recordTaskSummary(session, [
             `Summary: ${event.text}`,
@@ -206,25 +206,28 @@ export class SandyOrchestrator {
     this.deps.sessionStore.save(session);
   }
 
-  private async routeWorkerToolCall(
+  private async executeWorkerToolCall(
     chatId: string,
     session: SessionState,
-    call: Extract<SubAgentEvent, { type: "tool_call" }>["call"],
-  ): Promise<void> {
+    call: WorkerToolPayload,
+  ): Promise<PrivilegeResolutionResult> {
     switch (call.type) {
       case "send_file_to_channel":
         await this.sendSharedFileToUser(chatId, session, call.path, call.caption);
-        return;
+        return {
+          requestId: randomUUID(),
+          outcome: "approved",
+          message: `Sent ${call.path} to the user.`,
+        };
       case "copy_into_share":
       case "copy_out_of_share":
-        await this.presentPrivilegeRequestToUser(chatId, session, {
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
           kind: "host_operation",
           requestId: randomUUID(),
           payload: call,
         });
-        return;
       case "request_http_token": {
-        await this.presentPrivilegeRequestToUser(chatId, session, {
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
           kind: "http_token_use",
           requestId: randomUUID(),
           tokenId: call.tokenId,
@@ -232,11 +235,72 @@ export class SandyOrchestrator {
           reason: call.reason,
           confirmsAutoApprovalForTask: this.shouldConfirmHttpTokenAutoApprovalForTask(session, call.tokenId, call.host),
         });
-        return;
+      }
+      case "complete_task": {
+        return {
+          requestId: randomUUID(),
+          outcome: "approved",
+          message: "Task completion acknowledged.",
+        };
       }
     }
 
     assertNever(call); // would fail at compile-time
+  }
+
+  async executeNativeWorkerToolCall(input: {
+    taskId: string;
+    toolName: string;
+    arguments: unknown;
+  }): Promise<{ isError: boolean; message: string }> {
+    const chatId = this.deps.taskRegistry.getChatId(input.taskId);
+    if (!chatId) {
+      return {
+        isError: true,
+        message: messages.taskNotActive(input.taskId),
+      };
+    }
+
+    const session = this.deps.sessionStore.getOrCreate(chatId);
+    const activeTask = session.activeTask;
+    if (!activeTask || activeTask.taskId !== input.taskId) {
+      return {
+        isError: true,
+        message: messages.taskNotActive(input.taskId),
+      };
+    }
+
+    let call: WorkerToolPayload;
+    try {
+      call = parseWorkerToolPayload(input.toolName, input.arguments);
+    } catch (error) {
+      return {
+        isError: true,
+        message: error instanceof Error ? error.message : "Invalid Sandy tool payload.",
+      };
+    }
+
+    try {
+      const result = await this.executeWorkerToolCall(chatId, session, call);
+      this.deps.sessionStore.save(session);
+      return {
+        isError: result.outcome !== "approved",
+        message: result.message,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown native tool execution failure.";
+      logger.error("task.native_tool_handler_failed", {
+        chatId,
+        taskId: input.taskId,
+        toolName: input.toolName,
+        message,
+      });
+      await this.failActiveTaskFromEventHandling(session, input.taskId, message);
+      return {
+        isError: true,
+        message,
+      };
+    }
   }
 
   private async routeIdleChatEvent(session: SessionState, event: SupportedChatEvent): Promise<void> {
@@ -516,10 +580,14 @@ export class SandyOrchestrator {
       };
     }
 
-    if (request.kind === "host_operation") {
-      await this.requireHandle(activeTask.taskId).resolvePrivilege(result);
-    } else if (request.kind === "http_token_use") {
-      await this.requireHandle(activeTask.taskId).resolvePrivilege(result);
+    if (request.kind === "host_operation" || request.kind === "http_token_use") {
+      const nativeResolver = this.pendingNativeToolResolvers.get(request.requestId);
+      if (nativeResolver) {
+        nativeResolver(result);
+        this.pendingNativeToolResolvers.delete(request.requestId);
+      } else {
+        await this.requireHandle(activeTask.taskId).resolvePrivilege(result);
+      }
     } else if (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read") {
       this.pendingMcpPrivilegeResolvers.get(request.requestId)?.(result);
       this.pendingMcpPrivilegeResolvers.delete(request.requestId);
@@ -528,33 +596,6 @@ export class SandyOrchestrator {
 
     activeTask.pendingPrivilegeRequest = null;
     activeTask.status = "running";
-  }
-
-  private async presentPrivilegeRequestToUser(chatId: string, session: SessionState, request: PrivilegeRequest): Promise<void> {
-    const activeTask = session.activeTask;
-    if (!activeTask) {
-      return;
-    }
-
-    const requestType = resolveRequestTypeLabel(request);
-
-    logger.info("task.privilege_requested", {
-      chatId,
-      taskId: activeTask.taskId,
-      requestId: request.requestId,
-      requestType,
-    });
-
-    if (request.kind === "host_operation" && !isSupportedPrivilegeRequest(request.payload)) {
-      const result = this.buildUnsupportedPrivilegeResult(request);
-      await this.requireHandle(activeTask.taskId).resolvePrivilege(result);
-      await this.sendPrivilegeResolutionMessage(chatId, activeTask.taskId, result);
-      return;
-    }
-
-    activeTask.pendingPrivilegeRequest = request;
-    activeTask.status = "awaiting_privilege_decision";
-    await this.deps.channel.sendPrivilegeRequest(chatId, request);
   }
 
   private async sendSharedFileToUser(
@@ -573,6 +614,49 @@ export class SandyOrchestrator {
       resolveTaskShareHostPath(this.deps.sandboxRunner.getTaskSharePath(activeTask.taskId), sharePath, "send_file_to_channel path"),
       caption,
     );
+  }
+
+  private async awaitNativeToolPrivilegeResolution(
+    chatId: string,
+    session: SessionState,
+    request: Extract<PrivilegeRequest, { kind: "host_operation" | "http_token_use" }>,
+  ): Promise<PrivilegeResolutionResult> {
+    const activeTask = session.activeTask;
+    if (!activeTask) {
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: messages.taskNoLongerActive(chatId),
+      };
+    }
+
+    if (request.kind === "host_operation" && !isSupportedPrivilegeRequest(request.payload)) {
+      return this.buildUnsupportedPrivilegeResult(request);
+    }
+
+    if (request.kind === "http_token_use") {
+      const immediateTokenResult = this.tryAuthorizeNativeHttpTokenUse(session, request);
+      if (immediateTokenResult) {
+        return immediateTokenResult;
+      }
+    }
+
+    if (activeTask.pendingPrivilegeRequest) {
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: messages.anotherPrivilegeRequestPendingForTask(),
+      };
+    }
+
+    activeTask.pendingPrivilegeRequest = request;
+    activeTask.status = "awaiting_privilege_decision";
+    this.deps.sessionStore.save(session);
+    await this.deps.channel.sendPrivilegeRequest(chatId, request);
+
+    return await new Promise<PrivilegeResolutionResult>((resolve) => {
+      this.pendingNativeToolResolvers.set(request.requestId, resolve);
+    });
   }
 
   private buildUnsupportedPrivilegeResult(request: PrivilegeRequest): PrivilegeResolutionResult {
@@ -677,16 +761,23 @@ export class SandyOrchestrator {
       taskId: task.taskId,
       status: task.status,
     });
-    if (task.pendingPrivilegeRequest?.kind === "mcp_tool_call") {
-      this.pendingMcpPrivilegeResolvers.get(task.pendingPrivilegeRequest.requestId)?.({
+    if (task.pendingPrivilegeRequest) {
+      const failedResult = {
         requestId: task.pendingPrivilegeRequest.requestId,
-        outcome: "failed",
+        outcome: "failed" as const,
         message: messages.taskEndedBeforePrivilegeRequestResolved(
           task.taskId,
           task.pendingPrivilegeRequest.requestId,
         ),
-      });
-      this.pendingMcpPrivilegeResolvers.delete(task.pendingPrivilegeRequest.requestId);
+      };
+      if (task.pendingPrivilegeRequest.kind === "mcp_tool_call" || task.pendingPrivilegeRequest.kind === "mcp_resource_read") {
+        this.pendingMcpPrivilegeResolvers.get(task.pendingPrivilegeRequest.requestId)?.(failedResult);
+        this.pendingMcpPrivilegeResolvers.delete(task.pendingPrivilegeRequest.requestId);
+      }
+      if (task.pendingPrivilegeRequest.kind === "host_operation" || task.pendingPrivilegeRequest.kind === "http_token_use") {
+        this.pendingNativeToolResolvers.get(task.pendingPrivilegeRequest.requestId)?.(failedResult);
+        this.pendingNativeToolResolvers.delete(task.pendingPrivilegeRequest.requestId);
+      }
     }
     this.handles.delete(task.taskId);
     this.deps.taskRegistry.unregister(task.taskId);
@@ -1122,6 +1213,55 @@ export class SandyOrchestrator {
     }
   }
 
+  private tryAuthorizeNativeHttpTokenUse(
+    session: SessionState,
+    request: Extract<PrivilegeRequest, { kind: "http_token_use" }>,
+  ): PrivilegeResolutionResult | null {
+    const activeTask = session.activeTask;
+    if (!activeTask) {
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: messages.taskNoLongerActive(session.chatId),
+      };
+    }
+
+    if (activeTask.approvedHttpTokenSessionGrants.some((entry) => entry.tokenId === request.tokenId && entry.host === request.host)) {
+      return {
+        requestId: request.requestId,
+        outcome: "approved",
+        message: messages.httpTokenAllowedForWorkerSession(request.tokenId, request.host),
+        scope: "worker_session",
+      };
+    }
+
+    if (isHttpTokenAutoApprovalAllowed(activeTask, request.tokenId)
+      && this.persistentApprovalStore.isHttpTokenAlwaysAllowed(request.tokenId, request.host)) {
+      return {
+        requestId: request.requestId,
+        outcome: "approved",
+        message: messages.httpTokenAllowedFromPersistentConfig(request.tokenId, request.host),
+        scope: "always",
+      };
+    }
+
+    const onceGrant = activeTask.approvedHttpTokenOnceGrants.find(
+      (entry) => entry.tokenId === request.tokenId && entry.host === request.host && !entry.consumed,
+    );
+    if (!onceGrant) {
+      return null;
+    }
+
+    onceGrant.consumed = true;
+    this.deps.sessionStore.save(session);
+    return {
+      requestId: request.requestId,
+      outcome: "approved",
+      message: messages.httpTokenAllowedOnce(request.tokenId, request.host),
+      scope: "once",
+    };
+  }
+
   private shouldConfirmHttpTokenAutoApprovalForTask(
     session: SessionState,
     tokenId: string,
@@ -1197,21 +1337,6 @@ function grantHttpTokenAutoApprovalForTask(task: NonNullable<SessionState["activ
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled main agent decision: ${JSON.stringify(value)}`);
-}
-
-function resolveRequestTypeLabel(request: PrivilegeRequest): string {
-  switch (request.kind) {
-    case "host_operation":
-      return request.payload.type;
-    case "mcp_tool_call":
-      return request.toolName;
-    case "mcp_resource_read":
-      return `resource:${request.serverId}:${request.uri}`;
-    case "http_token_use":
-      return `http:${request.tokenId}@${request.host}`;
-    default:
-      return "unknown";
-  }
 }
 
 function mapApprovalDecisionToBoolean(

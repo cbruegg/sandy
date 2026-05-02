@@ -30,6 +30,7 @@ export async function main(): Promise<void> {
   const access = new ProxyAccess(bootstrap.workerProxyTokenSecret);
   const registry = new McpServerRegistryImpl(bootstrap.oauthStateDirectory, bootstrap.mcpServers);
   const pendingAuthorization = new Map<string, (result: PrivilegeResolutionResult) => void>();
+  const pendingNativeToolCalls = new Map<string, (result: { isError: boolean; message: string }) => void>();
   let shuttingDown = false;
 
   const proxy = new SandyMcpProxy({
@@ -60,6 +61,18 @@ export async function main(): Promise<void> {
         pendingAuthorization.set(requestId, resolve);
       });
     },
+    executeNativeToolCall: async (request) => {
+      const requestId = randomUUID();
+      send({
+        type: "native_tool_call_request",
+        requestId,
+        ...request,
+      });
+
+      return await new Promise<{ isError: boolean; message: string }>((resolve) => {
+        pendingNativeToolCalls.set(requestId, resolve);
+      });
+    },
   });
 
   input.on("line", (line) => {
@@ -73,6 +86,14 @@ export async function main(): Promise<void> {
       if (message.type === "authorization_result") {
         pendingAuthorization.get(message.requestId)?.(message.result);
         pendingAuthorization.delete(message.requestId);
+        return;
+      }
+      if (message.type === "native_tool_call_result") {
+        pendingNativeToolCalls.get(message.requestId)?.({
+          isError: message.isError,
+          message: message.message,
+        });
+        pendingNativeToolCalls.delete(message.requestId);
         return;
       }
       if (message.type === "shutdown") {

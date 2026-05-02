@@ -6,8 +6,7 @@ import {configureLogger, logger} from "../logger.js";
 import {type HostCommand, type SubAgentEvent,} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {applyWorkerCodexConfigPatch, buildWorkerCodexEnvironment,} from "./worker-codex-config.js";
-import {workerToolDefinitions} from "./worker-tools.js";
-import {parseWorkerToolCall, workerToolCallToSubAgentEvent,} from "./worker-protocol.js";
+import {sandyMcpServerId} from "./worker-tools.js";
 import {
   buildInitialTaskInput,
   buildPrivilegeResolutionInput,
@@ -16,18 +15,13 @@ import {
 } from "./worker-prompt.js";
 import {messages} from "../messages.js";
 
-type ThreadEventDisposition = "none" | "privileged_tool_call" | "send_file_to_channel" | "task_done" | "terminal_error";
+type ThreadEventDisposition = "none" | "task_done" | "terminal_error";
 type TurnMode = "task" | "summary";
 type StreamTurnResult = {
-  sawPrivilegedToolCall: boolean;
   sawTaskDone: boolean;
   sawTerminalError: boolean;
   summaryText: string | null;
 };
-type WorkerToolEventParseResult =
-  | { kind: "none" }
-  | { kind: "parsed"; event: Extract<SubAgentEvent, { type: "tool_call" }> | Extract<SubAgentEvent, { type: "task_done" }> }
-  | { kind: "invalid"; message: string };
 
 function send(event: SubAgentEvent): void {
   process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -56,8 +50,6 @@ function progressFromTodoList(item: TodoListItem): string | null {
 }
 
 async function streamTurn(thread: Thread, input: Input, mode: TurnMode = "task"): Promise<StreamTurnResult> {
-  let sawPrivilegedToolCall = false;
-  let sawSendFileToChannel = false;
   let sawTaskDone = false;
   let sawTerminalError = false;
   const summaryChunks: string[] = [];
@@ -65,33 +57,21 @@ async function streamTurn(thread: Thread, input: Input, mode: TurnMode = "task")
 
   for await (const event of events) {
     logger.debug("thread.event_received", { eventType: event.type, event });
-      const disposition = mode === "summary"
-        ? handleSummaryTurnEvent(event, summaryChunks)
-        : handleTaskTurnEvent(event);
-    if (disposition === "privileged_tool_call" && sawPrivilegedToolCall) {
-      throw new Error("Only one privileged tool call is allowed per turn.");
-    }
-    sawPrivilegedToolCall = disposition === "privileged_tool_call" || sawPrivilegedToolCall;
-    if (disposition === "send_file_to_channel" && sawSendFileToChannel) {
-      throw new Error("Only one channel file send request is allowed per turn.");
-    }
-    sawSendFileToChannel = disposition === "send_file_to_channel" || sawSendFileToChannel;
+    const disposition = mode === "summary"
+      ? handleSummaryTurnEvent(event, summaryChunks)
+      : handleTaskTurnEvent(event);
     if (disposition === "task_done" && sawTaskDone) {
       throw new Error("Only one task completion signal is allowed per turn.");
     }
     sawTaskDone = disposition === "task_done" || sawTaskDone;
     sawTerminalError = disposition === "terminal_error" || sawTerminalError;
 
-    // Sandy tool calls are host-mediated turn boundaries. Stop consuming the
-    // current Codex turn immediately so the model cannot continue past a
-    // pending approval in the same turn.
-    if (disposition === "privileged_tool_call" || disposition === "task_done" || disposition === "terminal_error") {
+    if (disposition === "task_done" || disposition === "terminal_error") {
       break;
     }
   }
 
   return {
-    sawPrivilegedToolCall,
     sawTaskDone,
     sawTerminalError,
     summaryText: mode === "summary" ? normalizeSummaryText(summaryChunks) : null,
@@ -103,18 +83,6 @@ function handleTaskTurnEvent(event: ThreadEvent): ThreadEventDisposition {
     case "item.completed":
     case "item.updated":
       if (event.item.type === "agent_message" && event.type === "item.completed") {
-        const toolEventResult = tryParseWorkerToolEvent(event.item.text);
-        if (toolEventResult.kind === "parsed") {
-          send(toolEventResult.event);
-          return classifyToolEventDisposition(toolEventResult.event);
-        }
-        if (toolEventResult.kind === "invalid") {
-          send({
-            type: "task_error",
-            message: toolEventResult.message,
-          });
-          return "terminal_error";
-        }
         if (!event.item.text.trim()) {
           return "none";
         }
@@ -138,6 +106,11 @@ function handleTaskTurnEvent(event: ThreadEvent): ThreadEventDisposition {
           type: "progress",
           message: messages.mcpToolProgress(event.item.status, event.item.server, event.item.tool, event.item.arguments),
         });
+        if (event.item.server === sandyMcpServerId
+          && event.item.tool === "complete_task"
+          && event.item.status === "completed") {
+          return "task_done";
+        }
       }
       return "none";
     case "turn.completed":
@@ -166,10 +139,6 @@ function handleSummaryTurnEvent(event: ThreadEvent, summaryChunks: string[]): Th
     case "item.completed":
     case "item.updated":
       if (event.item.type === "agent_message" && event.type === "item.completed") {
-        const toolEventResult = tryParseWorkerToolEvent(event.item.text);
-        if (toolEventResult.kind !== "none") {
-          return "terminal_error";
-        }
         summaryChunks.push(event.item.text);
       }
       return "none";
@@ -192,7 +161,7 @@ function normalizeSummaryText(chunks: string[]): string | null {
 
 async function emitTaskSummary(thread: Thread): Promise<void> {
   const result = await streamTurn(thread, buildTaskSummaryInput(), "summary");
-  if (result.sawPrivilegedToolCall || result.sawTerminalError || !result.summaryText) {
+  if (result.sawTerminalError || !result.summaryText) {
     return;
   }
 
@@ -200,39 +169,6 @@ async function emitTaskSummary(thread: Thread): Promise<void> {
     type: "task_summary",
     summary: result.summaryText,
   });
-}
-
-function tryParseWorkerToolEvent(text: string): WorkerToolEventParseResult {
-  try {
-    const call = parseWorkerToolCall(text);
-    if (!call) {
-      return { kind: "none" };
-    }
-    return {
-      kind: "parsed",
-      event: workerToolCallToSubAgentEvent(call),
-    };
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "Unknown worker tool parse failure.";
-    return {
-      kind: "invalid",
-      message: `Invalid worker tool payload: ${detail}`,
-    };
-  }
-}
-
-function classifyToolEventDisposition(
-  event: Extract<SubAgentEvent, { type: "tool_call" }> | Extract<SubAgentEvent, { type: "task_done" }>,
-): ThreadEventDisposition {
-  if (event.type === "task_done") {
-    return "task_done";
-  }
-
-  const toolType = event.call.type;
-  if (toolType === "send_file_to_channel") {
-    return "send_file_to_channel";
-  }
-  return workerToolDefinitions[toolType].requiresPrivilegeEscalation ? "privileged_tool_call" : "none";
 }
 
 function buildCodexInputWithImages(text: string, images: ImageAttachment[]): Input {
@@ -410,10 +346,6 @@ export async function main(): Promise<void> {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   await main();
 }
-export {
-  parseWorkerToolCall,
-  workerToolCallToSubAgentEvent,
-} from "./worker-protocol.js";
 export {
   streamTurn,
 };

@@ -18,6 +18,12 @@ import { ProxyAccess } from "../proxy-access.js";
 import { parseMcpProxyPath, type McpProxyRoute } from "./proxy-route.js";
 import type { McpServerRegistry } from "./server-registry.js";
 import type { PrivilegeResolutionResult } from "../types.js";
+import {
+  buildWorkerToolInputSchema,
+  parseWorkerToolPayload,
+  sandyMcpServerId,
+  workerToolEntries,
+} from "../subagent/worker-tools.js";
 
 type SandyMcpProxyOptions = {
   access: ProxyAccess;
@@ -33,6 +39,11 @@ type SandyMcpProxyOptions = {
     serverId: string;
     uri: string;
   }) => Promise<PrivilegeResolutionResult>;
+  executeNativeToolCall: (input: {
+    taskId: string;
+    toolName: string;
+    arguments: unknown;
+  }) => Promise<{ isError: boolean; message: string }>;
   host?: string;
   port?: number;
 };
@@ -200,6 +211,33 @@ export class SandyMcpProxy {
 
     const getClient = async () => this.options.registry.getClient(route.serverId);
 
+    if (route.serverId === sandyMcpServerId) {
+      server.server.setRequestHandler(ListToolsRequestSchema, () => Promise.resolve(buildNativeToolListResult()));
+      server.server.setRequestHandler(ListResourcesRequestSchema, () => Promise.resolve({ resources: [] }));
+      server.server.setRequestHandler(ListResourceTemplatesRequestSchema, () => Promise.resolve({ resourceTemplates: [] }));
+      server.server.setRequestHandler(ListPromptsRequestSchema, () => Promise.resolve({ prompts: [] }));
+      server.server.setRequestHandler(GetPromptRequestSchema, () => {
+        throw new Error(`MCP server ${sandyMcpServerId} does not expose prompts.`);
+      });
+      server.server.setRequestHandler(ReadResourceRequestSchema, () => Promise.resolve(buildResourceErrorResult(`MCP server ${sandyMcpServerId} does not expose resources.`)));
+      server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+        try {
+          parseWorkerToolPayload(request.params.name, request.params.arguments ?? {});
+        } catch (error) {
+          return buildToolErrorResult(error instanceof Error ? error.message : "Invalid Sandy tool arguments.");
+        }
+
+        const result = await this.options.executeNativeToolCall({
+          taskId: route.taskId,
+          toolName: request.params.name,
+          arguments: request.params.arguments ?? {},
+        });
+
+        return buildToolTextResult(result.message, result.isError);
+      });
+      return server;
+    }
+
     server.server.setRequestHandler(ListToolsRequestSchema, async (request) => {
       return (await getClient()).listTools(request.params);
     });
@@ -290,12 +328,26 @@ function sameRoute(left: McpProxyRoute, right: McpProxyRoute): boolean {
 }
 
 function buildToolErrorResult(message: string): CallToolResult {
+  return buildToolTextResult(message, true);
+}
+
+function buildToolTextResult(message: string, isError: boolean): CallToolResult {
   return {
     content: [{
       type: "text",
       text: message,
     }],
-    isError: true,
+    isError,
+  };
+}
+
+function buildNativeToolListResult() {
+  return {
+    tools: workerToolEntries.map((entry) => ({
+      name: entry.name,
+      description: entry.definition.description,
+      inputSchema: buildWorkerToolInputSchema(entry.name),
+    })),
   };
 }
 
