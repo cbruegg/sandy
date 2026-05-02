@@ -8,6 +8,7 @@ import type { PrivilegeBroker } from "./privilege/privilege-broker.js";
 import type { PersistentApprovalStore } from "./privilege/persistent-approval-store.js";
 import { HttpTokenAuthorizer } from "./http/token-authorizer.js";
 import type { SandboxHandle, SandboxRunner, LaunchTaskRequest } from "./sandbox/sandbox-runner.js";
+import type { TaskInputPayload } from "./types.js";
 import { SandyOrchestrator } from "./orchestrator.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
 import { TaskRegistry } from "./task-registry.js";
@@ -123,14 +124,14 @@ function contextTexts(context: DecideContext): string[] {
 }
 
 class FakeSandboxHandle implements SandboxHandle {
-  public readonly userMessages: string[] = [];
+  public readonly userMessages: TaskInputPayload[] = [];
   public readonly privilegeResults: PrivilegeResolutionResult[] = [];
   public markFinishedCalls = 0;
   public closeCalls = 0;
   public readonly cancellations: string[] = [];
 
-  async sendUserMessage(text: string): Promise<void> {
-    this.userMessages.push(text);
+  async sendUserMessage(input: TaskInputPayload): Promise<void> {
+    this.userMessages.push(input);
   }
 
   async resolvePrivilege(result: PrivilegeResolutionResult): Promise<void> {
@@ -216,7 +217,7 @@ test("orchestrator accepts active-task output without storing host-side history"
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-2",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -231,7 +232,7 @@ test("orchestrator accepts active-task output without storing host-side history"
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-2",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -242,7 +243,7 @@ test("orchestrator accepts active-task output without storing host-side history"
 
   const session = store.getOrCreate("chat-2");
   assert.equal(session.pendingTaskSummary, null);
-  assert.match(runner.handle.userMessages[0] ?? "", /Use the main branch\./);
+  assert.match(runner.handle.userMessages[0]?.text ?? "", /Use the main branch\./);
   assert.equal(mainAgent.contexts.length, 1);
 });
 
@@ -266,7 +267,7 @@ test("orchestrator stages attached files into the task share before launching th
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-file-launch",
     messageId: "message/1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -307,7 +308,7 @@ test("orchestrator stages attached files into the active task share and notifies
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-file-active",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -317,7 +318,7 @@ test("orchestrator stages attached files into the active task share and notifies
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-file-active",
     messageId: "message/2",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -331,8 +332,8 @@ test("orchestrator stages attached files into the active task share and notifies
   });
 
   assert.equal(channel.savedAttachments.length, 1);
-  assert.match(runner.handle.userMessages[0] ?? "", /The user attached additional files to the shared workspace/);
-  assert.match(runner.handle.userMessages[0] ?? "", /\/workspace\/share\/inbox\/message_2\/1-followup\.txt/);
+  assert.match(runner.handle.userMessages[0]?.text ?? "", /The user attached additional files to the shared workspace/);
+  assert.match(runner.handle.userMessages[0]?.text ?? "", /\/workspace\/share\/inbox\/message_2\/1-followup\.txt/);
 });
 
 test("orchestrator applies supported privilege requests deterministically and outside the main agent path", async () => {
@@ -355,7 +356,7 @@ test("orchestrator applies supported privilege requests deterministically and ou
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-3",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -424,7 +425,7 @@ test("orchestrator keeps completed-task summary pending until the user sends ano
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-4",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -482,7 +483,7 @@ test("orchestrator sends worker-requested shared files back through the channel"
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-file-out",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -527,7 +528,7 @@ test("orchestrator closes the sandbox handle on normal task completion", async (
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-close",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -562,7 +563,7 @@ test("orchestrator asks the worker to finalize when the user marks the task as f
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-mark-finished",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -624,7 +625,7 @@ test("orchestrator uses the task name in task_done completion messages", async (
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-task-name",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -676,7 +677,7 @@ test("orchestrator releases completed-task output only when the user continues n
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-5",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -704,7 +705,7 @@ test("orchestrator releases completed-task output only when the user continues n
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-5",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -739,7 +740,7 @@ test("orchestrator discards completed-task output when the user sends a danger r
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-5",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -805,7 +806,7 @@ test("orchestrator keeps final_result output pending until the user continues no
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-6",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -842,7 +843,7 @@ test("orchestrator keeps final_result output pending until the user continues no
   );
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-6",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -877,7 +878,7 @@ test("orchestrator marks worker disconnects as task failure and clears the task"
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-7",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -916,7 +917,7 @@ test("orchestrator fails the active task if channel file delivery fails", async 
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-file-failure",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -957,7 +958,7 @@ test("orchestrator reports top-level chat event failures back to the user", asyn
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-top-level-error",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -992,7 +993,7 @@ test("orchestrator prompts before deleting a non-empty shared workspace", async 
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-8",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -1046,7 +1047,7 @@ test("orchestrator deletes or preserves a finished task share based on user conf
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-9",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -1081,7 +1082,7 @@ test("orchestrator deletes or preserves a finished task share based on user conf
   assert.equal(channel.sentTexts.at(-1)?.text, messages.shareDeleted("fs-inspect"));
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-9",
     messageId: "3",
     timestamp: "2026-04-01T00:00:20.000Z",
@@ -1142,7 +1143,7 @@ test("orchestrator blocks new idle input while shared workspace deletion is pend
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-10",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -1163,7 +1164,7 @@ test("orchestrator blocks new idle input while shared workspace deletion is pend
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-10",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -1208,7 +1209,7 @@ test("orchestrator authorizes mcp resource reads from persistent config", async 
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-resource",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -1262,7 +1263,7 @@ test("orchestrator does not apply persistent mcp approvals when task policy omit
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-resource-no-server-access",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -1329,7 +1330,7 @@ test("orchestrator confirms persisted mcp tool approval suitability and reuses i
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-mcp-confirm",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -1415,7 +1416,7 @@ test("orchestrator confirms persisted http token suitability and enables later p
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-http-confirm",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",
@@ -1493,7 +1494,7 @@ test("orchestrator sends mcp resource read privilege request to user when not pr
   });
 
   await orchestrator.handleChatEvent({
-    kind: "user_text",
+    kind: "user_message",
     chatId: "chat-resource-pending",
     messageId: "1",
     timestamp: "2026-04-01T00:00:00.000Z",

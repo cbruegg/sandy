@@ -1,18 +1,20 @@
 import {createInterface} from "node:readline";
 import {pathToFileURL} from "node:url";
-import { existsSync, readFileSync } from "node:fs";
-import {type Thread, type ThreadEvent, type TodoListItem,} from "@openai/codex-sdk";
-import { createCodexClient } from "../codex-client.js";
-import { configureLogger, logger } from "../logger.js";
-import {channelFormattingSchema, type ChannelFormatting, type HostCommand, type SubAgentEvent,} from "../types.js";
+import {existsSync, readFileSync} from "node:fs";
+import {type Input, type Thread, type ThreadEvent, type TodoListItem, type UserInput} from "@openai/codex-sdk";
+import {createCodexClient} from "../codex-client.js";
+import {configureLogger, logger} from "../logger.js";
+import {type ChannelFormatting, channelFormattingSchema, type HostCommand, type SubAgentEvent,} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
-import {
-  applyWorkerCodexConfigPatch,
-  buildWorkerCodexEnvironment,
-} from "./worker-codex-config.js";
+import {applyWorkerCodexConfigPatch, buildWorkerCodexEnvironment,} from "./worker-codex-config.js";
 import {workerToolDefinitions} from "./worker-tools.js";
 import {parseWorkerToolCall, workerToolCallToSubAgentEvent,} from "./worker-protocol.js";
-import {buildInitialTaskInput, buildPrivilegeResolutionInput, buildTaskSummaryInput,} from "./worker-prompt.js";
+import {
+  buildInitialTaskInput,
+  buildPrivilegeResolutionInput,
+  buildTaskSummaryInput,
+  type ImageAttachment,
+} from "./worker-prompt.js";
 import {messages} from "../messages.js";
 
 type ThreadEventDisposition = "none" | "privileged_tool_call" | "send_file_to_channel" | "task_done" | "terminal_error";
@@ -27,14 +29,6 @@ type WorkerToolEventParseResult =
   | { kind: "none" }
   | { kind: "parsed"; event: Extract<SubAgentEvent, { type: "tool_call" }> | Extract<SubAgentEvent, { type: "task_done" }> }
   | { kind: "invalid"; message: string };
-
-function getRequiredEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`);
-  }
-  return value;
-}
 
 function getOptionalEnv(name: string): string | null {
   const value = process.env[name];
@@ -74,6 +68,12 @@ function parseHostCommand(raw: string): HostCommand {
   return parsed;
 }
 
+function assertTaskStarted(taskStarted: boolean, commandType: HostCommand["type"]): void {
+  if (!taskStarted) {
+    throw new Error(`${commandType} command received before start_task`);
+  }
+}
+
 function progressFromTodoList(item: TodoListItem): string | null {
   const next = item.items.find((entry) => !entry.completed);
   if (!next) {
@@ -82,7 +82,7 @@ function progressFromTodoList(item: TodoListItem): string | null {
   return messages.nextPlannedStep(next.text);
 }
 
-async function streamTurn(thread: Thread, input: string, mode: TurnMode = "task"): Promise<StreamTurnResult> {
+async function streamTurn(thread: Thread, input: Input, mode: TurnMode = "task"): Promise<StreamTurnResult> {
   let sawPrivilegedToolCall = false;
   let sawSendFileToChannel = false;
   let sawTaskDone = false;
@@ -262,6 +262,29 @@ function classifyToolEventDisposition(
   return workerToolDefinitions[toolType].requiresPrivilegeEscalation ? "privileged_tool_call" : "none";
 }
 
+function buildCodexInputWithImages(text: string, images: ImageAttachment[]): Input {
+  if (images.length === 0) {
+    return text;
+  }
+  
+  const inputs: UserInput[] = [];
+  
+  if (text.trim()) {
+    inputs.push({ type: "text", text: text.trim() });
+  }
+  
+  for (const image of images) {
+    inputs.push({ type: "local_image", path: image.sharePath });
+  }
+  
+  return inputs;
+}
+
+function joinTaskSections(taskBrief: string, text: string): string {
+  const sections = [taskBrief.trim(), text.trim()].filter((section) => section.length > 0);
+  return sections.join("\n\n");
+}
+
 export async function main(): Promise<void> {
   configureLogger({
     forwardLog: (payload) => {
@@ -274,8 +297,6 @@ export async function main(): Promise<void> {
     },
   });
 
-  const taskBrief = getRequiredEnv("SANDY_TASK_BRIEF");
-  const taskLanguage = getOptionalEnv("SANDY_TASK_LANGUAGE") ?? "English";
   const apiKey = getOptionalEnv("OPENAI_API_KEY");
   const codexModel = getOptionalEnv("SANDY_CODEX_MODEL");
   const channelFormatting = parseChannelFormatting(getOptionalEnv("SANDY_CHANNEL_FORMATTING"));
@@ -298,8 +319,9 @@ export async function main(): Promise<void> {
 
   let currentAbort: AbortController | null = null;
   let queue: Promise<void> = Promise.resolve();
+  let taskStarted = false;
 
-  const enqueueTurn = (input: string) => {
+  const enqueueTurn = (input: Input) => {
     queue = queue.then(async () => {
       currentAbort = new AbortController();
       try {
@@ -350,7 +372,6 @@ export async function main(): Promise<void> {
   process.stdin.resume();
 
   send({ type: "worker_connected" });
-  enqueueTurn(buildInitialTaskInput(taskBrief, taskLanguage, channelFormatting, httpTokens, httpProxyWrapper));
 
   input.on("line", (line) => {
     const trimmed = line.trim();
@@ -360,13 +381,31 @@ export async function main(): Promise<void> {
     try {
       const command = parseHostCommand(trimmed);
       switch (command.type) {
+        case "start_task": {
+          if (taskStarted) {
+            throw new Error("start_task command received after task already started");
+          }
+          taskStarted = true;
+          enqueueTurn(buildInitialTaskInput(
+            joinTaskSections(command.taskBrief, command.input.text),
+            command.taskLanguage,
+            channelFormatting,
+            httpTokens,
+            httpProxyWrapper,
+            command.input.images,
+          ));
+          break;
+        }
         case "user_message":
-          enqueueTurn(command.text);
+          assertTaskStarted(taskStarted, command.type);
+          enqueueTurn(buildCodexInputWithImages(command.input.text, command.input.images));
           break;
         case "privilege_result":
+          assertTaskStarted(taskStarted, command.type);
           enqueueTurn(buildPrivilegeResolutionInput(command.result));
           break;
         case "mark_finished":
+          assertTaskStarted(taskStarted, command.type);
           enqueueMarkedFinish();
           break;
         case "cancel":

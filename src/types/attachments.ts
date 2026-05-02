@@ -1,4 +1,4 @@
-type AttachmentKind = "file";
+type AttachmentKind = "file" | "image";
 
 export type MessageAttachment = {
   attachmentId: string;

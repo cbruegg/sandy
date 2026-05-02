@@ -95,7 +95,7 @@ test("normalizeMatrixRoomMessage maps text, encrypted file, and audio events", a
   });
 
   assert.deepEqual(textEvent, {
-    kind: "user_text",
+    kind: "user_message",
     chatId: ROOM_ID,
     messageId: "$text",
     senderUserId: OWNER_ID,
@@ -145,7 +145,7 @@ test("normalizeMatrixRoomMessage maps text, encrypted file, and audio events", a
     },
   });
 
-  assert.equal(fileEvent?.kind, "user_text");
+  assert.equal(fileEvent?.kind, "user_message");
   assert.equal(fileEvent?.attachments.length, 1);
   assert.equal(fileEvent?.attachments[0]?.fileName, "report.txt");
   assert.equal(savedRefs.size, 1);
@@ -179,7 +179,7 @@ test("normalizeMatrixRoomMessage maps text, encrypted file, and audio events", a
   });
 
   assert.deepEqual(audioEvent, {
-    kind: "user_text",
+    kind: "user_message",
     chatId: ROOM_ID,
     messageId: "$audio",
     senderUserId: OWNER_ID,
@@ -400,7 +400,7 @@ test("MatrixChannelAdapter catches handler failures and continues processing lat
     });
 
     assert.deepEqual(received, [{
-      kind: "user_text",
+      kind: "user_message",
       chatId: ROOM_ID,
       messageId: "$second",
       senderUserId: OWNER_ID,
@@ -608,7 +608,7 @@ test("MatrixChannelAdapter saves encrypted attachments and sends encrypted files
       },
     });
 
-    assert.equal(received[0]?.kind, "user_text");
+    assert.equal(received[0]?.kind, "user_message");
     const saved = await adapter.saveAttachments(ROOM_ID, received[0]?.attachments ?? [], join(root, "saved"));
     assert.equal(saved.length, 1);
     assert.equal(await readFile(saved[0]!.hostPath, "utf8"), "hello from matrix");

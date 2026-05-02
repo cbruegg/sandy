@@ -13,14 +13,14 @@ const inboxEventSchema = z.object({
   decision: z.string().optional(),
 }).passthrough();
 
-test("local-test CLI writes conformant user_text events", async () => {
+test("local-test CLI writes conformant user_message events", async () => {
   const root = await mkdtemp(join(tmpdir(), "sandy-local-cli-"));
   try {
     await runLocalTestCli(["send", "--spool-root", root, "--text", "hello"]);
     const files = await readdir(join(root, "inbox"));
     assert.equal(files.length, 1);
     const event = inboxEventSchema.parse(JSON.parse(await readFile(join(root, "inbox", files[0]!), "utf8")) as unknown);
-    assert.equal(event.kind, "user_text");
+    assert.equal(event.kind, "user_message");
     assert.equal(event.chatId, undefined);
     assert.equal(event.text, "hello");
   } finally {

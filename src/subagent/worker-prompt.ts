@@ -2,10 +2,16 @@ import { spawnSync } from "node:child_process";
 import type { ChannelFormatting, PrivilegeResolutionResult } from "../types.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 import { buildWorkerProtocolInstructions } from "./worker-protocol.js";
+import type { Input, UserInput } from "@openai/codex-sdk";
 
 type HttpTokenPromptInput = {
   tokenId: string;
   description: string;
+};
+
+export type ImageAttachment = {
+  sharePath: string;
+  fileName: string;
 };
 
 export function buildInitialTaskInput(
@@ -14,8 +20,9 @@ export function buildInitialTaskInput(
   channelFormatting: ChannelFormatting | null,
   httpTokens: HttpTokenPromptInput[] = [],
   httpProxyWrapper: string | null = null,
-): string {
-  return buildInitialTaskInputWithCapabilities(
+  images: ImageAttachment[] = [],
+): Input {
+  const textInput = buildInitialTaskInputWithCapabilities(
     taskBrief,
     taskLanguage,
     channelFormatting,
@@ -23,6 +30,22 @@ export function buildInitialTaskInput(
     httpTokens,
     httpProxyWrapper,
   );
+  
+  if (images.length === 0) {
+    return textInput;
+  }
+  
+  const inputs: UserInput[] = [];
+  
+  if (textInput.trim()) {
+    inputs.push({ type: "text", text: textInput.trim() });
+  }
+  
+  for (const image of images) {
+    inputs.push({ type: "local_image", path: image.sharePath });
+  }
+  
+  return inputs;
 }
 
 export function buildInitialTaskInputWithCapabilities(

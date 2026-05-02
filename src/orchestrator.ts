@@ -23,6 +23,7 @@ import type {
 import { resolveTaskShareHostPath } from "./shared-workspace.js";
 import {
   buildTaskBriefWithAttachments,
+  buildTaskInputPayload,
   buildWorkerFollowUpInput,
   describeUserMessageForMainAgent,
 } from "./orchestrator-worker-input.js";
@@ -33,7 +34,7 @@ type ActiveHandleRecord = {
 };
 
 type SupportedChatEvent = Exclude<NormalizedChatEvent, { kind: "unsupported_input" }>;
-type UserTextEvent = Extract<NormalizedChatEvent, { kind: "user_text" }>;
+type UserMessageEvent = Extract<NormalizedChatEvent, { kind: "user_message" }>;
 type ActiveTaskStatus = NonNullable<SessionState["activeTask"]>["status"];
 
 type SandyOrchestratorDependencies = {
@@ -72,7 +73,7 @@ export class SandyOrchestrator {
         kind: event.kind,
         hasActiveTask: session.activeTask !== null,
       });
-      if (event.kind === "user_text") {
+      if (event.kind === "user_message") {
         logger.debugContent("chat.user_message", {
           chatId: event.chatId,
           messageId: event.messageId,
@@ -265,7 +266,7 @@ export class SandyOrchestrator {
         session.pendingTaskSummary = null;
         await this.deps.channel.sendText(event.chatId, messages.discardedPendingOutput());
         return;
-      case "user_text":
+      case "user_message":
         if (session.pendingShareDeletion) {
           await this.deps.channel.sendText(event.chatId, messages.shareDeletionStillPending());
           return;
@@ -275,7 +276,7 @@ export class SandyOrchestrator {
             ...this.releasePendingTaskSummaries(session),
             {
               role: "user" as const,
-              kind: "user_text",
+              kind: "user_message",
               timestamp: event.timestamp,
               text: describeUserMessageForMainAgent(event.text, event.attachments),
             },
@@ -334,7 +335,7 @@ export class SandyOrchestrator {
         }
         await this.resolvePendingPrivilegeRequest(session, activeTask.pendingPrivilegeRequest, event.decision);
         return;
-      case "user_text":
+      case "user_message":
         if (activeTask.pendingPrivilegeRequest) {
           await this.deps.channel.sendText(event.chatId, messages.privilegeRequestStillPending());
           return;
@@ -348,7 +349,7 @@ export class SandyOrchestrator {
 
   private async executeMainAgentDecision(
     session: SessionState,
-    event: UserTextEvent,
+    event: UserMessageEvent,
     decision: MainAgentDecision,
   ): Promise<void> {
     switch (decision.action) {
@@ -363,6 +364,7 @@ export class SandyOrchestrator {
         const now = new Date().toISOString();
         const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskId);
         const taskBrief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
+        const initialInput = buildTaskInputPayload(stagedAttachments);
         logger.info("task.launching", {
           chatId: event.chatId,
           taskId,
@@ -394,6 +396,7 @@ export class SandyOrchestrator {
             taskBrief: taskBrief,
             taskLanguage: decision.taskLanguage,
             channelFormatting: this.channelFormatting,
+            initialInput,
           },
           async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
         );
@@ -732,7 +735,7 @@ export class SandyOrchestrator {
   private async stageAttachments(
     chatId: string,
     messageId: string,
-    attachments: Extract<NormalizedChatEvent, { kind: "user_text" }>["attachments"],
+    attachments: Extract<NormalizedChatEvent, { kind: "user_message" }>["attachments"],
     taskId: string,
   ) {
     return stageSharedAttachments({

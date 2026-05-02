@@ -1,4 +1,4 @@
-import type { ChannelFormatting, PrivilegeResolutionResult, SubAgentEvent } from "../types.js";
+import type { ChannelFormatting, PrivilegeResolutionResult, SubAgentEvent, TaskInputPayload } from "../types.js";
 
 export type LaunchTaskRequest = {
   chatId: string;
@@ -7,6 +7,7 @@ export type LaunchTaskRequest = {
   taskBrief: string;
   taskLanguage: string;
   channelFormatting: ChannelFormatting;
+  initialInput: TaskInputPayload;
 };
 
 export type ShareInspection = {
@@ -15,7 +16,7 @@ export type ShareInspection = {
 };
 
 export interface SandboxHandle {
-  sendUserMessage(text: string): Promise<void>;
+  sendUserMessage(input: TaskInputPayload): Promise<void>;
   resolvePrivilege(result: PrivilegeResolutionResult): Promise<void>;
   markFinished(): Promise<void>;
   close(): Promise<void>;

@@ -85,7 +85,7 @@ test("normalizeTelegramUpdate maps text input and unsupported media deterministi
   } satisfies Update);
 
   assert.deepEqual(textEvent, {
-    kind: "user_text",
+    kind: "user_message",
     chatId: "99",
     chatType: "private",
     messageId: "5",
@@ -142,7 +142,7 @@ test("normalizeTelegramUpdate maps text input and unsupported media deterministi
   } satisfies Update);
 
   assert.deepEqual(documentEvent, {
-    kind: "user_text",
+    kind: "user_message",
     chatId: "99",
     chatType: "private",
     messageId: "7",
@@ -156,6 +156,39 @@ test("normalizeTelegramUpdate maps text input and unsupported media deterministi
       kind: "file",
       fileName: "input_data.csv",
       mimeType: "text/csv",
+    }],
+  });
+
+  const photoEvent = await normalizeTelegramUpdate({
+    update_id: 5,
+    message: {
+      message_id: 8,
+      date: 1_700_000_040,
+      chat: { id: 99, type: "private", first_name: "Private" },
+      from: { id: 5, is_bot: false, first_name: "Owner", username: "cbruegg" },
+      caption: "what's in this image?",
+      photo: [
+        { file_id: "photo-small", file_unique_id: "photo-small-u", width: 320, height: 240, file_size: 12_000 },
+        { file_id: "photo-large", file_unique_id: "photo-large-u", width: 1280, height: 960, file_size: 45_000 },
+      ],
+    },
+  } satisfies Update);
+
+  assert.deepEqual(photoEvent, {
+    kind: "user_message",
+    chatId: "99",
+    chatType: "private",
+    messageId: "8",
+    senderUserId: "5",
+    senderUsername: "cbruegg",
+    timestamp: "2023-11-14T22:14:00.000Z",
+    text: "what's in this image?",
+    rawText: "what's in this image?",
+    attachments: [{
+      attachmentId: "photo-large",
+      kind: "image",
+      fileName: "photo_8.jpg",
+      mimeType: "image/jpeg",
     }],
   });
 });
@@ -278,7 +311,7 @@ test("TelegramBotApiAdapter transcribes voice messages into normal text events",
   await adapter.stop();
 
   assert.deepEqual(handlerEvents, [{
-    kind: "user_text",
+    kind: "user_message",
     chatId: "99",
     chatType: "private",
     messageId: "8",
@@ -328,7 +361,7 @@ test("TelegramBotApiAdapter keeps transcribed voice command text as plain user t
   await adapter.stop();
 
   assert.deepEqual(handlerEvents, [{
-    kind: "user_text",
+    kind: "user_message",
     chatId: "99",
     chatType: "private",
     messageId: "9",
