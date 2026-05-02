@@ -3,6 +3,13 @@ import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 
 export const sandyMcpServerId = "sandy";
 
+// Infrastructure
+
+type WorkerToolDefinition = Tool & {
+  requiresPrivilegeEscalation: boolean;
+  schema: z.ZodObject<z.core.$ZodLooseShape>;
+};
+
 function withoutTypeField(schema: z.ZodObject<z.core.$ZodLooseShape>): z.ZodObject<z.core.$ZodLooseShape> {
   const shape = {
     ...schema.shape,
@@ -26,72 +33,79 @@ function defineWorkerTool<TName extends string, TSchema extends z.ZodObject<z.co
   };
 }
 
+// Tool definitions
+
+const copyIntoShareToolName = "copy_into_share";
+const copyOutOfShareToolName = "copy_out_of_share";
+const sendFileToChannelToolName = "send_file_to_channel";
+const completeTaskToolName = "complete_task";
+const requestHttpTokenToolName = "request_http_token";
+
 const copyIntoShareSchema = z.object({
-  type: z.literal("copy_into_share"),
+  type: z.literal(copyIntoShareToolName),
   sourcePath: z.string(),
   targetPath: z.string(),
   reason: z.string(),
 }).strict();
 
 const copyOutOfShareSchema = z.object({
-  type: z.literal("copy_out_of_share"),
+  type: z.literal(copyOutOfShareToolName),
   sourcePath: z.string(),
   targetPath: z.string(),
   reason: z.string(),
 }).strict();
 
 const sendFileToChannelSchema = z.object({
-  type: z.literal("send_file_to_channel"),
+  type: z.literal(sendFileToChannelToolName),
   path: z.string(),
   caption: z.string().optional(),
 }).strict();
 
 const completeTaskSchema = z.object({
-  type: z.literal("complete_task"),
+  type: z.literal(completeTaskToolName),
 }).strict();
 
 const requestHttpTokenSchema = z.object({
-  type: z.literal("request_http_token"),
+  type: z.literal(requestHttpTokenToolName),
   tokenId: z.string(),
   host: z.string(),
   reason: z.string(),
 }).strict();
 
 const workerToolDefinitions = {
-  copy_into_share: defineWorkerTool(
-    "copy_into_share",
+  [copyIntoShareToolName]: defineWorkerTool(
+    copyIntoShareToolName,
     "Ask the host to copy a file or directory from an absolute host path into the shared workspace.",
     true,
     copyIntoShareSchema,
   ),
-  copy_out_of_share: defineWorkerTool(
-    "copy_out_of_share",
+  [copyOutOfShareToolName]: defineWorkerTool(
+    copyOutOfShareToolName,
     "Ask the host to copy a file or directory from the shared workspace to an absolute host path.",
     true,
     copyOutOfShareSchema,
   ),
-  send_file_to_channel: defineWorkerTool(
-    "send_file_to_channel",
+  [sendFileToChannelToolName]: defineWorkerTool(
+    sendFileToChannelToolName,
     "Send a file that already exists in the shared workspace back to the user through the channel adapter.",
     false,
     sendFileToChannelSchema,
   ),
-  complete_task: defineWorkerTool(
-    "complete_task",
+  [completeTaskToolName]: defineWorkerTool(
+    completeTaskToolName,
     "Signal to the host that the tasks the user stated so far are fully complete. You *must* emit this at the very end.",
     false,
     completeTaskSchema,
   ),
-  request_http_token: defineWorkerTool(
-    "request_http_token",
+  [requestHttpTokenToolName]: defineWorkerTool(
+    requestHttpTokenToolName,
     "Ask the host for permission to use a preconfigured HTTP token. Emit this tool call directly instead of asking the user in plain text. You must request approval before making HTTP requests that use placeholder headers like 'Authorization: Bearer SANDY_TOKEN_<tokenId>'. The host will inject the real token value into proxied HTTP requests if approved.",
     true,
     requestHttpTokenSchema,
   ),
-} as const satisfies Record<string, Tool & {
-  requiresPrivilegeEscalation: boolean;
-  schema: z.ZodObject<z.core.$ZodLooseShape>;
-}>;
+} as const satisfies Record<string, WorkerToolDefinition>;
+
+// Public API
 
 type WorkerToolDefinitions = typeof workerToolDefinitions;
 type WorkerToolName = keyof WorkerToolDefinitions;
