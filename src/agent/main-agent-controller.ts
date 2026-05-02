@@ -241,6 +241,7 @@ export function buildMainAgentPrompt(input: {
     "Decision rules:",
     "- Choose between replying directly and launching a task based on the user's likely intent and the current conversation state.",
     "- It is acceptable to launch a task proactively when that is the best way for Sandy to investigate, inspect, or execute something for the user.",
+    "- If you cannot handle a task yourself, try to launch a task to let a sub-agent try.",
     "- Reply directly for purely conversational requests or when no sub-agent work is useful.",
     "- Task names must be short, stable, and descriptive.",
     "- When launching a task, set taskLanguage to the language the sub-agent should use for user-facing output.",
