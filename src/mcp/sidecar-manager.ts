@@ -300,7 +300,23 @@ export class McpSidecarManager {
   }
 
   private dispatchNativeToolCallRequest(message: McpSidecarNativeToolCallRequestMessage): void {
-    void this.handleNativeToolCallRequest(message);
+    void this.handleNativeToolCallRequest(message).catch((error) => {
+      const failureMessage = error instanceof Error ? error.message : "Unknown native tool call request failure.";
+
+      logger.warn("mcp.sidecar.native_tool_call_request_failed", {
+        requestId: message.requestId,
+        taskId: message.taskId,
+        toolName: message.toolName,
+        message: failureMessage,
+      });
+
+      this.sendToSidecar({
+        type: "native_tool_call_result",
+        requestId: message.requestId,
+        isError: true,
+        message: failureMessage,
+      });
+    });
   }
 
   private async handleNativeToolCallRequest(message: McpSidecarNativeToolCallRequestMessage): Promise<void> {
