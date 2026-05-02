@@ -5,9 +5,11 @@ import {join} from "node:path";
 import {type Input, type Thread, type ThreadEvent, type TodoListItem, type UserInput} from "@openai/codex-sdk";
 import {createCodexClient} from "../codex-client.js";
 import {configureLogger, logger} from "../logger.js";
-import {type HostCommand, type SubAgentEvent,} from "../types.js";
+import {type HostCommand, type SubAgentEvent, type ChatGPTExternalTokens} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {applyWorkerCodexConfigPatch, buildWorkerCodexEnvironment, workerCodexHomePath,} from "./worker-codex-config.js";
+import {workerToolDefinitions} from "./worker-tools.js";
+import {parseWorkerToolCall, workerToolCallToSubAgentEvent,} from "./worker-protocol.js";
 
 import {
   buildInitialTaskInput,
@@ -15,16 +17,28 @@ import {
   buildTaskSummaryInput,
   type ImageAttachment,
 } from "./worker-prompt.js";
-import { formatDateTimePrefix } from "../datetime-prefix.js";
+import {CodexAppServerClient} from "./app-server-client.js";
 import {messages} from "../messages.js";
 
-type ThreadEventDisposition = "none" | "task_done" | "terminal_error";
+type ThreadEventDisposition = "none" | "privileged_tool_call" | "send_file_to_channel" | "task_done" | "terminal_error";
 type TurnMode = "task" | "summary";
 type StreamTurnResult = {
+  sawPrivilegedToolCall: boolean;
   sawTaskDone: boolean;
   sawTerminalError: boolean;
   summaryText: string | null;
 };
+type WorkerToolEventParseResult =
+  | { kind: "none" }
+  | { kind: "parsed"; event: Extract<SubAgentEvent, { type: "tool_call" }> | Extract<SubAgentEvent, { type: "task_done" }> }
+  | { kind: "invalid"; message: string };
+
+type WorkerAuthMode = { kind: "api_key"; apiKey: string | null } | { kind: "chatgpt_appserver" };
+
+// Auth refresh plumbing: when the worker needs fresh tokens from the host,
+// it sends a chatgpt_auth_refresh_request event and waits for the host to
+// respond with a chatgpt_auth_refresh_result command via stdin.
+let pendingAuthRefreshResolver: ((tokens: ChatGPTExternalTokens | null) => void) | null = null;
 
 function send(event: SubAgentEvent): void {
   process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -86,7 +100,34 @@ function truncateEventForLogging(event: ThreadEvent): ThreadEvent {
   return cloned;
 }
 
+function buildCodexInputWithImages(text: string, images: ImageAttachment[]): Input {
+  if (images.length === 0) {
+    return text;
+  }
+
+  const inputs: UserInput[] = [];
+
+  if (text.trim()) {
+    inputs.push({ type: "text", text: text.trim() });
+  }
+
+  for (const image of images) {
+    inputs.push({ type: "local_image", path: image.sharePath });
+  }
+
+  return inputs;
+}
+
+function joinTaskSections(taskBrief: string, text: string): string {
+  const sections = [taskBrief.trim(), text.trim()].filter((section) => section.length > 0);
+  return sections.join("\n\n");
+}
+
+// ---- codex exec helpers ----
+
 async function streamTurn(thread: Thread, input: Input, mode: TurnMode = "task"): Promise<StreamTurnResult> {
+  let sawPrivilegedToolCall = false;
+  let sawSendFileToChannel = false;
   let sawTaskDone = false;
   let sawTerminalError = false;
   const summaryChunks: string[] = [];
@@ -97,18 +138,27 @@ async function streamTurn(thread: Thread, input: Input, mode: TurnMode = "task")
     const disposition = mode === "summary"
       ? handleSummaryTurnEvent(event, summaryChunks)
       : handleTaskTurnEvent(event);
+    if (disposition === "privileged_tool_call" && sawPrivilegedToolCall) {
+      throw new Error("Only one privileged tool call is allowed per turn.");
+    }
+    sawPrivilegedToolCall = disposition === "privileged_tool_call" || sawPrivilegedToolCall;
+    if (disposition === "send_file_to_channel" && sawSendFileToChannel) {
+      throw new Error("Only one channel file send request is allowed per turn.");
+    }
+    sawSendFileToChannel = disposition === "send_file_to_channel" || sawSendFileToChannel;
     if (disposition === "task_done" && sawTaskDone) {
       throw new Error("Only one task completion signal is allowed per turn.");
     }
     sawTaskDone = disposition === "task_done" || sawTaskDone;
     sawTerminalError = disposition === "terminal_error" || sawTerminalError;
 
-    if (disposition === "task_done" || disposition === "terminal_error") {
+    if (disposition === "privileged_tool_call" || disposition === "task_done" || disposition === "terminal_error") {
       break;
     }
   }
 
   return {
+    sawPrivilegedToolCall,
     sawTaskDone,
     sawTerminalError,
     summaryText: mode === "summary" ? normalizeSummaryText(summaryChunks) : null,
@@ -120,6 +170,18 @@ function handleTaskTurnEvent(event: ThreadEvent): ThreadEventDisposition {
     case "item.completed":
     case "item.updated":
       if (event.item.type === "agent_message" && event.type === "item.completed") {
+        const toolEventResult = tryParseWorkerToolEvent(event.item.text);
+        if (toolEventResult.kind === "parsed") {
+          send(toolEventResult.event);
+          return classifyToolEventDisposition(toolEventResult.event);
+        }
+        if (toolEventResult.kind === "invalid") {
+          send({
+            type: "task_error",
+            message: toolEventResult.message,
+          });
+          return "terminal_error";
+        }
         if (!event.item.text.trim()) {
           return "none";
         }
@@ -171,6 +233,10 @@ function handleSummaryTurnEvent(event: ThreadEvent, summaryChunks: string[]): Th
     case "item.completed":
     case "item.updated":
       if (event.item.type === "agent_message" && event.type === "item.completed") {
+        const toolEventResult = tryParseWorkerToolEvent(event.item.text);
+        if (toolEventResult.kind !== "none") {
+          return "terminal_error";
+        }
         summaryChunks.push(event.item.text);
       }
       return "none";
@@ -193,7 +259,7 @@ function normalizeSummaryText(chunks: string[]): string | null {
 
 async function emitTaskSummary(thread: Thread, sendEvent: (event: SubAgentEvent) => void = send): Promise<void> {
   const result = await streamTurn(thread, buildTaskSummaryInput(), "summary");
-  if (result.sawTerminalError || !result.summaryText) {
+  if (result.sawPrivilegedToolCall || result.sawTerminalError || !result.summaryText) {
     return;
   }
 
@@ -203,26 +269,189 @@ async function emitTaskSummary(thread: Thread, sendEvent: (event: SubAgentEvent)
   });
 }
 
-function buildCodexInputWithImages(text: string, images: ImageAttachment[]): Input {
-  if (images.length === 0) {
-    return text;
+// ---- app-server helpers ----
+
+function createAuthRefreshCallback(): (previousAccountId: string | null) => Promise<{
+  accessToken: string;
+  chatgptAccountId: string;
+  chatgptPlanType: string | null;
+}> {
+  return async (previousAccountId: string | null) => {
+    send({
+      type: "chatgpt_auth_refresh_request",
+      previousAccountId,
+    });
+
+    const tokens: ChatGPTExternalTokens | null = await new Promise((resolve) => {
+      pendingAuthRefreshResolver = resolve;
+    });
+
+    pendingAuthRefreshResolver = null;
+
+    if (!tokens) {
+      throw new Error("Auth refresh failed: host did not provide new tokens.");
+    }
+
+    return {
+      accessToken: tokens.accessToken,
+      chatgptAccountId: tokens.chatgptAccountId,
+      chatgptPlanType: tokens.chatgptPlanType,
+    };
+  };
+}
+
+function classifyAppServerToolEventDisposition(
+  event: Extract<SubAgentEvent, { type: "tool_call" }> | Extract<SubAgentEvent, { type: "task_done" }>,
+): ThreadEventDisposition {
+  if (event.type === "task_done") return "task_done";
+  const toolType = event.call.type;
+  if (toolType === "send_file_to_channel") return "send_file_to_channel";
+  return workerToolDefinitions[toolType].requiresPrivilegeEscalation ? "privileged_tool_call" : "none";
+}
+
+async function* streamAppServerTurn(
+  appServer: CodexAppServerClient,
+  threadId: string,
+  input: string,
+  mode: TurnMode = "task",
+  abortSignal?: AbortSignal,
+): AsyncGenerator<{
+  result: StreamTurnResult;
+  events: SubAgentEvent[];
+}> {
+  let sawPrivilegedToolCall = false;
+  let sawTaskDone = false;
+  let sawTerminalError = false;
+  const summaryChunks: string[] = [];
+
+  try {
+    for await (const event of appServer.streamTurn(threadId, input, createAuthRefreshCallback(), abortSignal)) {
+      logger.debug("appserver.event_received", { eventType: event.type, event });
+
+      switch (event.type) {
+        case "agent_message": {
+          if (mode === "summary") {
+            summaryChunks.push(event.text);
+            break;
+          }
+
+          const toolEventResult = tryParseWorkerToolEvent(event.text);
+          if (toolEventResult.kind === "parsed") {
+            const disposition = classifyAppServerToolEventDisposition(toolEventResult.event);
+            send(toolEventResult.event);
+            sawPrivilegedToolCall = disposition === "privileged_tool_call" || sawPrivilegedToolCall;
+            sawTaskDone = disposition === "task_done" || sawTaskDone;
+            if (sawPrivilegedToolCall || sawTaskDone) {
+              yield {
+                result: { sawPrivilegedToolCall, sawTaskDone, sawTerminalError, summaryText: null },
+                events: [],
+              };
+              return;
+            }
+          } else if (toolEventResult.kind === "invalid") {
+            send({ type: "task_error", message: toolEventResult.message });
+            sawTerminalError = true;
+            yield {
+              result: { sawPrivilegedToolCall: false, sawTaskDone: false, sawTerminalError: true, summaryText: null },
+              events: [],
+            };
+            return;
+          } else if (event.text.trim()) {
+            send({ type: "assistant_output", text: event.text });
+          }
+          break;
+        }
+
+        case "turn_completed":
+          break;
+
+        case "turn_failed":
+          send({ type: "task_error", message: event.error });
+          sawTerminalError = true;
+          yield {
+            result: { sawPrivilegedToolCall: false, sawTaskDone: false, sawTerminalError: true, summaryText: null },
+            events: [],
+          };
+          return;
+
+        case "error":
+          send({ type: "task_error", message: event.message });
+          sawTerminalError = true;
+          yield {
+            result: { sawPrivilegedToolCall: false, sawTaskDone: false, sawTerminalError: true, summaryText: null },
+            events: [],
+          };
+          return;
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "App-server turn failed.";
+    send({ type: "task_error", message });
+    sawTerminalError = true;
   }
-  
-  const inputs: UserInput[] = [];
-  
-  if (text.trim()) {
-    inputs.push({ type: "text", text: text.trim() });
+
+  yield {
+    result: {
+      sawPrivilegedToolCall,
+      sawTaskDone,
+      sawTerminalError,
+      summaryText: mode === "summary" ? normalizeSummaryText(summaryChunks) : null,
+    },
+    events: [],
+  };
+}
+
+async function emitAppServerTaskSummary(
+  appServer: CodexAppServerClient,
+  threadId: string,
+): Promise<void> {
+  for await (const { result } of streamAppServerTurn(appServer, threadId, buildTaskSummaryInput(), "summary")) {
+    if (result.sawPrivilegedToolCall || result.sawTerminalError || !result.summaryText) {
+      return;
+    }
+    send({ type: "task_summary", summary: result.summaryText });
+    return;
   }
-  
-  for (const image of images) {
-    inputs.push({ type: "local_image", path: image.sharePath });
+}
+
+function tryParseWorkerToolEvent(text: string): WorkerToolEventParseResult {
+  try {
+    const call = parseWorkerToolCall(text);
+    if (!call) {
+      return { kind: "none" };
+    }
+    return {
+      kind: "parsed",
+      event: workerToolCallToSubAgentEvent(call),
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Unknown worker tool parse failure.";
+    return {
+      kind: "invalid",
+      message: `Invalid worker tool payload: ${detail}`,
+    };
   }
-  
-  return inputs;
+}
+
+function classifyToolEventDisposition(
+  event: Extract<SubAgentEvent, { type: "tool_call" }> | Extract<SubAgentEvent, { type: "task_done" }>,
+): ThreadEventDisposition {
+  if (event.type === "task_done") {
+    return "task_done";
+  }
+
+  const toolType = event.call.type;
+  if (toolType === "send_file_to_channel") {
+    return "send_file_to_channel";
+  }
+  return workerToolDefinitions[toolType].requiresPrivilegeEscalation ? "privileged_tool_call" : "none";
 }
 
 function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): WorkerCommandProcessor {
   let thread: Thread | null = null;
+  let appServer: CodexAppServerClient | null = null;
+  let appServerThreadId: string | null = null;
+  let authMode: WorkerAuthMode | null = null;
   let currentAbort: AbortController | null = null;
   let turnQueue: Promise<void> = Promise.resolve();
   let commandQueue: Promise<void> = Promise.resolve();
@@ -235,7 +464,17 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
     return thread;
   };
 
-  const enqueueTurn = (input: Input) => {
+  const requireAppServer = (): CodexAppServerClient => {
+    if (!appServer) throw new Error("App-server has not been initialized.");
+    return appServer;
+  };
+
+  const requireAppServerThreadId = (): string => {
+    if (!appServerThreadId) throw new Error("App-server thread has not been started.");
+    return appServerThreadId;
+  };
+
+  const enqueueCodexExecTurn = (input: Input) => {
     turnQueue = turnQueue.then(async () => {
       currentAbort = new AbortController();
       try {
@@ -255,7 +494,7 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
     });
   };
 
-  const enqueueMarkedFinish = () => {
+  const enqueueCodexExecMarkedFinish = () => {
     turnQueue = turnQueue.then(async () => {
       currentAbort = new AbortController();
       try {
@@ -266,6 +505,50 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
       }
     }).catch((error) => {
       options.sendEvent({
+        type: "task_error",
+        message: error instanceof Error ? error.message : "Sub-agent worker finalization failed.",
+      });
+    });
+  };
+
+  const enqueueAppServerTurn = (inputText: string, mode: TurnMode = "task") => {
+    turnQueue = turnQueue.then(async () => {
+      currentAbort = new AbortController();
+      try {
+        for await (const { result } of streamAppServerTurn(
+          requireAppServer(),
+          requireAppServerThreadId(),
+          inputText,
+          mode,
+          currentAbort.signal,
+        )) {
+          if (result.sawTaskDone && !result.sawTerminalError) {
+            await emitAppServerTaskSummary(requireAppServer(), requireAppServerThreadId());
+            send({ type: "task_done" });
+          }
+        }
+      } finally {
+        currentAbort = null;
+      }
+    }).catch((error) => {
+      send({
+        type: "task_error",
+        message: error instanceof Error ? error.message : "Sub-agent worker turn failed.",
+      });
+    });
+  };
+
+  const enqueueAppServerMarkedFinish = () => {
+    turnQueue = turnQueue.then(async () => {
+      currentAbort = new AbortController();
+      try {
+        await emitAppServerTaskSummary(requireAppServer(), requireAppServerThreadId());
+        send({ type: "task_done" });
+      } finally {
+        currentAbort = null;
+      }
+    }).catch((error) => {
+      send({
         type: "task_error",
         message: error instanceof Error ? error.message : "Sub-agent worker finalization failed.",
       });
@@ -296,47 +579,99 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
           }
           await options.applyWorkerCodexConfigPatch();
           const workerCodexEnvironment = options.buildWorkerCodexEnvironment();
-          const codex = command.config.openAiApiKey
-            ? await options.createCodexClient({ apiKey: command.config.openAiApiKey, env: workerCodexEnvironment })
-            : await options.createCodexClient({ env: workerCodexEnvironment });
-          thread = codex.startThread({
-            model: command.config.codexModel ?? undefined,
-            workingDirectory: sharedWorkspaceMountPath,
-            skipGitRepoCheck: true,
-            // Docker is the actual isolation boundary for sub-agents; avoid nested bwrap sandboxing in-container.
-            sandboxMode: "danger-full-access",
-            networkAccessEnabled: true,
-          });
-          taskStarted = true;
-          enqueueTurn(buildInitialTaskInput(
-            joinTaskSections(command.taskBrief, command.input.text),
-            command.taskLanguage,
-            command.config.channelFormatting,
-            command.config.httpTokens,
-            command.config.httpProxyWrapper,
-            command.input.images,
-          ));
+
+          if (command.config.chatgptExternalTokens) {
+            const tokens = command.config.chatgptExternalTokens;
+            authMode = { kind: "chatgpt_appserver" };
+
+            const codexPath = process.env["SANDY_CODEX_PATH"]?.trim() || "codex";
+            appServer = new CodexAppServerClient(codexPath);
+            await appServer.initialize();
+            await appServer.loginWithTokens(tokens);
+
+            const model = command.config.codexModel ?? undefined;
+            appServerThreadId = await appServer.startThread(model);
+
+            taskStarted = true;
+            const initialInput = buildInitialTaskInput(
+              joinTaskSections(command.taskBrief, command.input.text),
+              command.taskLanguage,
+              command.config.channelFormatting,
+              command.config.httpTokens,
+              command.config.httpProxyWrapper,
+              command.input.images,
+            );
+            const inputText = typeof initialInput === "string" ? initialInput : joinTaskSections(command.taskBrief, command.input.text);
+            enqueueAppServerTurn(inputText);
+          } else {
+            authMode = { kind: "api_key", apiKey: command.config.openAiApiKey };
+
+            const codex = command.config.openAiApiKey
+              ? await options.createCodexClient({ apiKey: command.config.openAiApiKey, env: workerCodexEnvironment })
+              : await options.createCodexClient({ env: workerCodexEnvironment });
+            thread = codex.startThread({
+              model: command.config.codexModel ?? undefined,
+              workingDirectory: sharedWorkspaceMountPath,
+              skipGitRepoCheck: true,
+              // Docker is the actual isolation boundary for sub-agents; avoid nested bwrap sandboxing in-container.
+              sandboxMode: "danger-full-access",
+              networkAccessEnabled: true,
+            });
+            taskStarted = true;
+            enqueueCodexExecTurn(buildInitialTaskInput(
+              joinTaskSections(command.taskBrief, command.input.text),
+              command.taskLanguage,
+              command.config.channelFormatting,
+              command.config.httpTokens,
+              command.config.httpProxyWrapper,
+              command.input.images,
+            ));
+          }
           break;
         }
         case "user_message":
           assertTaskStarted(taskStarted, command.type);
-          enqueueTurn(buildCodexInputWithImages(
-            `${formatDateTimePrefix()}\n\n${command.input.text}`,
-            command.input.images,
-          ));
+
+          if (authMode?.kind === "chatgpt_appserver") {
+            enqueueAppServerTurn(command.input.text);
+          } else {
+            enqueueCodexExecTurn(buildCodexInputWithImages(command.input.text, command.input.images));
+          }
           break;
         case "privilege_result":
           assertTaskStarted(taskStarted, command.type);
-          enqueueTurn(buildPrivilegeResolutionInput(command.result));
+
+          if (authMode?.kind === "chatgpt_appserver") {
+            enqueueAppServerTurn(buildPrivilegeResolutionInput(command.result));
+          } else {
+            enqueueCodexExecTurn(buildPrivilegeResolutionInput(command.result));
+          }
           break;
         case "mark_finished":
           assertTaskStarted(taskStarted, command.type);
-          enqueueMarkedFinish();
+
+          if (authMode?.kind === "chatgpt_appserver") {
+            enqueueAppServerMarkedFinish();
+          } else {
+            enqueueCodexExecMarkedFinish();
+          }
           break;
         case "cancel":
           currentAbort?.abort();
+          if (pendingAuthRefreshResolver) {
+            pendingAuthRefreshResolver(null);
+            pendingAuthRefreshResolver = null;
+          }
+          void appServer?.close();
           options.onShutdown();
           break;
+        case "chatgpt_auth_refresh_result": {
+          if (pendingAuthRefreshResolver) {
+            pendingAuthRefreshResolver(command.tokens);
+            pendingAuthRefreshResolver = null;
+          }
+          break;
+        }
       }
     } catch (error) {
       options.sendEvent({
@@ -356,11 +691,6 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
       return commandQueue;
     },
   };
-}
-
-function joinTaskSections(taskBrief: string, text: string): string {
-  const sections = [taskBrief.trim(), text.trim()].filter((section) => section.length > 0);
-  return sections.join("\n\n");
 }
 
 export async function main(): Promise<void> {

@@ -11,6 +11,7 @@ import { OrchestratorRuntimeState } from "./runtime-state.js";
 import type { ActiveTaskStatus, SandyOrchestratorDependencies, UserMessageEvent } from "./shared.js";
 import type {
   ChannelFormatting,
+  ChatGPTExternalTokens,
   MainAgentDecision,
   MainAgentTaskPolicy,
   MainAgentTaskPolicyInput,
@@ -94,6 +95,9 @@ export class OrchestratorTaskLifecycle {
           break;
         case "worker_log":
           break;
+        case "chatgpt_auth_refresh_request":
+          await this.handleAuthRefresh(taskId, event.previousAccountId);
+          break;
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown sub-agent event handling failure.";
@@ -159,7 +163,7 @@ export class OrchestratorTaskLifecycle {
             taskLanguage: decision.taskLanguage,
             channelFormatting: this.channelFormatting,
             initialInput,
-            workerStartConfig: this.deps.buildWorkerStartConfig(),
+            workerStartConfig: await this.deps.buildWorkerStartConfig(),
           },
           async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
         );
@@ -375,6 +379,11 @@ export class OrchestratorTaskLifecycle {
     ) {
       this.runtimeState.resolvePendingNativeTool(task.pendingPrivilegeRequest.requestId, failedResult);
     }
+  }
+
+  private async handleAuthRefresh(taskId: string, previousAccountId: string | null): Promise<void> {
+    const tokens = await this.deps.refreshChatgptTokens?.(taskId, previousAccountId) ?? null;
+    await this.runtimeState.getHandle(taskId)?.resolveAuthRefresh?.(tokens);
   }
 
   private async promptForShareDeletionIfNeeded(session: SessionState, taskId: string, taskName: string): Promise<void> {

@@ -26,6 +26,7 @@ const defaultWorkerStartConfig: WorkerStartConfig = {
   channelFormatting: testFormatting,
   httpTokens: [],
   httpProxyWrapper: null,
+  chatgptExternalTokens: null,
 };
 
 class FakeStdin {
@@ -155,7 +156,6 @@ async function launchRunnerWithChild(
     resolveWorkerImage: options?.resolveWorkerImage,
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: options?.shareRoot ?? "/tmp/sandy-test-shares",
-    codexAuthFile: null,
     skillsDirectory: options?.skillsDirectory ?? null,
     workerCodexBinaryPath: options?.workerCodexBinaryPath,
     workerNetworkName: options?.workerNetworkName,
@@ -276,7 +276,6 @@ test("DockerSandboxRunner passes the configured Codex model in the start_task pa
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
-    codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
     workerNetwork: {
@@ -547,7 +546,6 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
-    codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
     workerNetwork: {
@@ -609,7 +607,6 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
-    codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
     workerNetwork: {
@@ -672,7 +669,6 @@ test("DockerSandboxRunner falls back to a root Docker container when host rm fai
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
-    codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
     workerNetwork: {
@@ -829,7 +825,6 @@ test("DockerSandboxRunner launches a network guard and shares its network namesp
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
-    codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
     workerNetworkName: "sandy-mcp-net",
@@ -921,7 +916,6 @@ test("DockerSandboxRunner reports a disconnect when the network guard exits mid-
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
-    codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
     workerNetwork: {
@@ -983,7 +977,6 @@ test("DockerSandboxRunner rejects share inspection for unknown tasks", async () 
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
-    codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
     workerNetwork: {
@@ -1020,7 +1013,6 @@ test("DockerSandboxRunner rejects share deletion for unknown tasks", async () =>
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
-    codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
     workerNetwork: {
@@ -1088,7 +1080,6 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
-    codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
     workerNetworkName: "sandy-mcp-net",
@@ -1212,7 +1203,6 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
-    codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
     workerNetwork: {
