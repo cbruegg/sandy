@@ -9,7 +9,7 @@ type HttpTokenPromptInput = {
   description: string;
 };
 
-type ImageAttachment = {
+export type ImageAttachment = {
   sharePath: string;
   fileName: string;
 };

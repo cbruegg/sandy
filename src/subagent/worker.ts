@@ -12,7 +12,7 @@ import {
 } from "./worker-codex-config.js";
 import {workerToolDefinitions} from "./worker-tools.js";
 import {parseWorkerToolCall, workerToolCallToSubAgentEvent,} from "./worker-protocol.js";
-import {buildInitialTaskInput, buildPrivilegeResolutionInput, buildTaskSummaryInput,} from "./worker-prompt.js";
+import {buildInitialTaskInput, buildPrivilegeResolutionInput, buildTaskSummaryInput, type ImageAttachment,} from "./worker-prompt.js";
 import {messages} from "../messages.js";
 
 type ThreadEventDisposition = "none" | "privileged_tool_call" | "send_file_to_channel" | "task_done" | "terminal_error";
@@ -261,11 +261,6 @@ function classifyToolEventDisposition(
   }
   return workerToolDefinitions[toolType].requiresPrivilegeEscalation ? "privileged_tool_call" : "none";
 }
-
-type ImageAttachment = {
-  sharePath: string;
-  fileName: string;
-};
 
 type TaskInputWithImages = {
   text: string;
