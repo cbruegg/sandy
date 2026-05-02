@@ -61,11 +61,12 @@ export async function normalizeTelegramUpdate(
     const photo = update.message.photo;
     const fileId = photo[photo.length - 1]?.file_id ?? "";
     const fileName = `photo_${update.message.message_id}.jpg`;
+    const caption = typeof update.message.caption === "string" ? update.message.caption : "";
     return {
       ...base,
       kind: "user_message",
-      text: "",
-      rawText: "",
+      text: caption,
+      rawText: caption,
       attachments: [{
         attachmentId: fileId,
         kind: "image",
