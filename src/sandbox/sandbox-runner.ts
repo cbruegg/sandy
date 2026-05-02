@@ -1,4 +1,10 @@
-import type { ChannelFormatting, PrivilegeResolutionResult, SubAgentEvent, TaskInputPayload } from "../types.js";
+import type {
+  ChannelFormatting,
+  PrivilegeResolutionResult,
+  SubAgentEvent,
+  TaskInputPayload,
+  WorkerStartConfig,
+} from "../types.js";
 
 export type LaunchTaskRequest = {
   chatId: string;
@@ -8,6 +14,7 @@ export type LaunchTaskRequest = {
   taskLanguage: string;
   channelFormatting: ChannelFormatting;
   initialInput: TaskInputPayload;
+  workerStartConfig: WorkerStartConfig;
 };
 
 export type ShareInspection = {

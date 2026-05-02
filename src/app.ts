@@ -160,15 +160,10 @@ export async function startApp(): Promise<void> {
         workerImage: config.workerImage,
         resolveWorkerImage: () => workerImageManager.getLaunchImage(),
         shareRoot: config.shareRoot,
-        codexModel: config.agentModel,
-        openAiApiKey: config.authMode.mode === "api_key" ? config.authMode.openAiApiKey : null,
         codexAuthFile: config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthFile : null,
         skillsDirectory: config.skillsDirectory,
         workerCodexBinaryPath,
         workerCodexConfigBuilder: (taskId) => mcpWorkerLaunchConfigBuilder.build(taskId),
-        httpTokenDescriptions: Object.fromEntries(
-            Object.entries(config.httpTokens).map(([tokenId, token]) => [tokenId, token.description]),
-        ),
         httpProxyUrlFactory: httpTokensEnabled
             ? (taskId) => {
               const jwt = workerAccess.issueWorkerGrant(taskId).bearerToken;
@@ -195,6 +190,16 @@ export async function startApp(): Promise<void> {
     channel,
     mainAgent,
     sandboxRunner,
+    buildWorkerStartConfig: () => ({
+      openAiApiKey: config.authMode.mode === "api_key" ? config.authMode.openAiApiKey : null,
+      codexModel: config.agentModel,
+      channelFormatting: channel.getFormatting(),
+      httpTokens: Object.entries(config.httpTokens).map(([tokenId, token]) => ({
+        tokenId,
+        description: token.description,
+      })),
+      httpProxyWrapper: httpTokensEnabled ? "/usr/local/bin/sandy-http-proxy-exec" : null,
+    }),
     sessionStore,
     privilegeBroker: new PrivilegeBrokerImpl(),
     taskRegistry,

@@ -1,10 +1,9 @@
 import {createInterface} from "node:readline";
 import {pathToFileURL} from "node:url";
-import {existsSync, readFileSync} from "node:fs";
 import {type Input, type Thread, type ThreadEvent, type TodoListItem, type UserInput} from "@openai/codex-sdk";
 import {createCodexClient} from "../codex-client.js";
 import {configureLogger, logger} from "../logger.js";
-import {type ChannelFormatting, channelFormattingSchema, type HostCommand, type SubAgentEvent,} from "../types.js";
+import {type HostCommand, type SubAgentEvent,} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {applyWorkerCodexConfigPatch, buildWorkerCodexEnvironment,} from "./worker-codex-config.js";
 import {workerToolDefinitions} from "./worker-tools.js";
@@ -29,32 +28,6 @@ type WorkerToolEventParseResult =
   | { kind: "none" }
   | { kind: "parsed"; event: Extract<SubAgentEvent, { type: "tool_call" }> | Extract<SubAgentEvent, { type: "task_done" }> }
   | { kind: "invalid"; message: string };
-
-function getOptionalEnv(name: string): string | null {
-  const value = process.env[name];
-  if (!value) {
-    return null;
-  }
-  return value;
-}
-
-function parseChannelFormatting(raw: string | null): ChannelFormatting | null {
-  if (!raw) {
-    return null;
-  }
-  return channelFormattingSchema.parse(JSON.parse(raw));
-}
-
-const httpTokenDescriptionsPath = "/run/sandy-http-token-descriptions.json";
-
-function loadHttpTokenPromptInput(): Array<{ tokenId: string; description: string }> {
-  if (!existsSync(httpTokenDescriptionsPath)) {
-    return [];
-  }
-  const parsed = JSON.parse(readFileSync(httpTokenDescriptionsPath, "utf8")) as Record<string, string>;
-  return Object.entries(parsed)
-    .map(([tokenId, description]) => ({ tokenId, description }));
-}
 
 function send(event: SubAgentEvent): void {
   process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -297,37 +270,28 @@ export async function main(): Promise<void> {
     },
   });
 
-  const apiKey = getOptionalEnv("OPENAI_API_KEY");
-  const codexModel = getOptionalEnv("SANDY_CODEX_MODEL");
-  const channelFormatting = parseChannelFormatting(getOptionalEnv("SANDY_CHANNEL_FORMATTING"));
-  const httpTokens = loadHttpTokenPromptInput();
-  const httpProxyWrapper = getOptionalEnv("SANDY_HTTP_PROXY_WRAPPER");
-
   await applyWorkerCodexConfigPatch();
   const workerCodexEnvironment = buildWorkerCodexEnvironment();
-  const codex = apiKey
-    ? await createCodexClient({ apiKey, env: workerCodexEnvironment })
-    : await createCodexClient({ env: workerCodexEnvironment });
-  const thread = codex.startThread({
-    model: codexModel ?? undefined,
-    workingDirectory: sharedWorkspaceMountPath,
-    skipGitRepoCheck: true,
-    // Docker is the actual isolation boundary for sub-agents; avoid nested bwrap sandboxing in-container.
-    sandboxMode: "danger-full-access",
-    networkAccessEnabled: true,
-  });
+  let thread: Thread | null = null;
 
   let currentAbort: AbortController | null = null;
   let queue: Promise<void> = Promise.resolve();
   let taskStarted = false;
 
+  const requireThread = (): Thread => {
+    if (!thread) {
+      throw new Error("Task thread has not been initialized.");
+    }
+    return thread;
+  };
+
   const enqueueTurn = (input: Input) => {
     queue = queue.then(async () => {
       currentAbort = new AbortController();
       try {
-        const result = await streamTurn(thread, input);
+        const result = await streamTurn(requireThread(), input);
         if (result.sawTaskDone && !result.sawTerminalError) {
-          await emitTaskSummary(thread);
+          await emitTaskSummary(requireThread());
           send({ type: "task_done" });
         }
       } finally {
@@ -345,7 +309,7 @@ export async function main(): Promise<void> {
     queue = queue.then(async () => {
       currentAbort = new AbortController();
       try {
-        await emitTaskSummary(thread);
+        await emitTaskSummary(requireThread());
         send({ type: "task_done" });
       } finally {
         currentAbort = null;
@@ -373,7 +337,7 @@ export async function main(): Promise<void> {
 
   send({ type: "worker_connected" });
 
-  input.on("line", (line) => {
+  const handleLine = async (line: string): Promise<void> => {
     const trimmed = line.trim();
     if (!trimmed) {
       return;
@@ -385,13 +349,24 @@ export async function main(): Promise<void> {
           if (taskStarted) {
             throw new Error("start_task command received after task already started");
           }
+          const codex = command.config.openAiApiKey
+            ? await createCodexClient({ apiKey: command.config.openAiApiKey, env: workerCodexEnvironment })
+            : await createCodexClient({ env: workerCodexEnvironment });
+          thread = codex.startThread({
+            model: command.config.codexModel ?? undefined,
+            workingDirectory: sharedWorkspaceMountPath,
+            skipGitRepoCheck: true,
+            // Docker is the actual isolation boundary for sub-agents; avoid nested bwrap sandboxing in-container.
+            sandboxMode: "danger-full-access",
+            networkAccessEnabled: true,
+          });
           taskStarted = true;
           enqueueTurn(buildInitialTaskInput(
             joinTaskSections(command.taskBrief, command.input.text),
             command.taskLanguage,
-            channelFormatting,
-            httpTokens,
-            httpProxyWrapper,
+            command.config.channelFormatting,
+            command.config.httpTokens,
+            command.config.httpProxyWrapper,
             command.input.images,
           ));
           break;
@@ -412,13 +387,17 @@ export async function main(): Promise<void> {
           currentAbort?.abort();
           shutdownResolver?.();
           process.exit(0);
-      }
+        }
     } catch (error) {
       send({
         type: "task_error",
         message: error instanceof Error ? error.message : "Failed to parse host command.",
       });
     }
+  };
+
+  input.on("line", (line) => {
+    void handleLine(line);
   });
 
   input.on("close", () => {

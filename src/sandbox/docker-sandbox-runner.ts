@@ -14,7 +14,6 @@ import {launchNetworkGuardContainer, type StartedNetworkGuard} from "./network-g
 import type {LaunchTaskRequest, SandboxHandle, SandboxRunner, ShareInspection} from "./sandbox-runner.js";
 
 const workerCodexSeedMountPath = "/run/sandy-codex-seed";
-const workerHttpTokenDescriptionsPath = "/run/sandy-http-token-descriptions.json";
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 300_000;
 
 type DockerSandboxRunnerOptions = {
@@ -22,8 +21,6 @@ type DockerSandboxRunnerOptions = {
   resolveWorkerImage?: () => string;
   networkGuardImage?: string;
   shareRoot: string;
-  codexModel?: string | null;
-  openAiApiKey: string | null;
   codexAuthFile: string | null;
   skillsDirectory: string | null;
   workerCodexBinaryPath?: string | null;
@@ -33,7 +30,6 @@ type DockerSandboxRunnerOptions = {
     codexConfigToml: string | null;
     environment: Record<string, string>;
   };
-  httpTokenDescriptions?: Record<string, string>;
   httpProxyUrlFactory?: (taskId: string) => string | null;
   handshakeTimeoutMs?: number;
   logLevel?: LogLevel;
@@ -84,7 +80,6 @@ export class DockerSandboxRunner implements SandboxRunner {
     const builtWorkerConfig = this.options.workerCodexConfigBuilder(request.taskId);
     const workerCodexConfig = builtWorkerConfig.codexConfigToml;
     const workerEnvironment = builtWorkerConfig.environment;
-    const httpTokenDescriptions = this.options.httpTokenDescriptions ?? {};
     const httpProxyUrl = this.options.httpProxyUrlFactory?.(request.taskId) ?? null;
     if (httpProxyUrl) {
       assertHttpProxySupportConfigured(this.options);
@@ -92,9 +87,8 @@ export class DockerSandboxRunner implements SandboxRunner {
     const workerImage = this.resolveWorkerImage();
     let workerTempDir: string | null = null;
     let workerCodexHomeTempDir: string | null = null;
-    let workerHttpTokenDescriptionsTempPath: string | null = null;
     const needsWorkerCodexHome = Boolean(this.options.codexAuthFile || workerCodexConfig);
-    if (needsWorkerCodexHome || Object.keys(httpTokenDescriptions).length > 0) {
+    if (needsWorkerCodexHome) {
       workerTempDir = await mkdtemp(join(tmpdir(), "sandy-worker-launch-"));
     }
     if (needsWorkerCodexHome) {
@@ -115,20 +109,6 @@ export class DockerSandboxRunner implements SandboxRunner {
           await rm(workerTempDir!, {recursive: true, force: true});
           throw error;
         }
-      }
-    }
-
-    if (Object.keys(httpTokenDescriptions).length > 0) {
-      workerHttpTokenDescriptionsTempPath = join(workerTempDir!, "http-token-descriptions.json");
-      try {
-        await writeFile(
-          workerHttpTokenDescriptionsTempPath,
-          JSON.stringify(httpTokenDescriptions, null, 2),
-          "utf8",
-        );
-      } catch (error) {
-        await rm(workerTempDir!, {recursive: true, force: true});
-        throw error;
       }
     }
 
@@ -242,20 +222,10 @@ export class DockerSandboxRunner implements SandboxRunner {
       "NET_RAW",
       "-e",
       `SANDY_TASK_ID=${request.taskId}`,
-      "-e",
-      `SANDY_CHANNEL_FORMATTING=${JSON.stringify(request.channelFormatting)}`,
     ];
 
     if (this.options.logLevel) {
       dockerArgs.push("-e", `SANDY_LOG_LEVEL=${this.options.logLevel}`);
-    }
-
-    if (this.options.codexModel) {
-      dockerArgs.push("-e", `SANDY_CODEX_MODEL=${this.options.codexModel}`);
-    }
-
-    if (this.options.openAiApiKey) {
-      dockerArgs.push("-e", `OPENAI_API_KEY=${this.options.openAiApiKey}`);
     }
 
     if (this.options.workerCodexBinaryPath) {
@@ -268,7 +238,6 @@ export class DockerSandboxRunner implements SandboxRunner {
 
     if (httpProxyUrl) {
       dockerArgs.push("-e", `SANDY_HTTP_PROXY_URL=${httpProxyUrl}`);
-      dockerArgs.push("-e", "SANDY_HTTP_PROXY_WRAPPER=/usr/local/bin/sandy-http-proxy-exec");
     }
 
     if (httpProxyUrl) {
@@ -288,13 +257,6 @@ export class DockerSandboxRunner implements SandboxRunner {
       dockerArgs.push(
         "-v",
         `${workerCodexHomeTempDir}:${workerCodexSeedMountPath}:ro`,
-      );
-    }
-
-    if (workerHttpTokenDescriptionsTempPath) {
-      dockerArgs.push(
-        "-v",
-        `${workerHttpTokenDescriptionsTempPath}:${workerHttpTokenDescriptionsPath}:ro`,
       );
     }
 
@@ -385,6 +347,7 @@ export class DockerSandboxRunner implements SandboxRunner {
             taskBrief: request.taskBrief,
             input: request.initialInput,
             taskLanguage: request.taskLanguage,
+            config: request.workerStartConfig,
           });
           taskInitialized = true;
           resolveTaskInitialized?.();

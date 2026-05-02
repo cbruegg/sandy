@@ -2,6 +2,7 @@ import {z} from "zod";
 import type {WorkerToolPayload} from "../subagent/worker-tool-registry.js";
 import {createWorkerToolPayloadSchema} from "../subagent/worker-tool-registry.js";
 import type {PrivilegeResolutionResult} from "./privilege.js";
+import type {ChannelFormatting} from "./channel.js";
 import type {ImageAttachment} from "../subagent/worker-prompt.js";
 
 const workerToolCallSchema = createWorkerToolPayloadSchema((entry) => entry.name !== "complete_task");
@@ -74,12 +75,24 @@ export type TaskInputPayload = {
   images: ImageAttachment[];
 };
 
+export type WorkerStartConfig = {
+  openAiApiKey: string | null;
+  codexModel: string | null;
+  channelFormatting: ChannelFormatting | null;
+  httpTokens: Array<{
+    tokenId: string;
+    description: string;
+  }>;
+  httpProxyWrapper: string | null;
+};
+
 export type HostCommand =
   | {
       type: "start_task";
       taskBrief: string;
       input: TaskInputPayload;
       taskLanguage: string;
+      config: WorkerStartConfig;
     }
   | {
       type: "user_message";

@@ -8,13 +8,21 @@ import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { DockerSandboxRunner } from "./docker-sandbox-runner.js";
-import type { ChannelFormatting, SubAgentEvent } from "../types.js";
+import type { ChannelFormatting, HostCommand, SubAgentEvent, WorkerStartConfig } from "../types.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
   markup: "telegram_html",
   allowedTags: ["b", "i", "code", "pre"],
   instructions: "Use simple Telegram HTML.",
+};
+
+const defaultWorkerStartConfig: WorkerStartConfig = {
+  openAiApiKey: null,
+  codexModel: null,
+  channelFormatting: testFormatting,
+  httpTokens: [],
+  httpProxyWrapper: null,
 };
 
 class FakeStdin {
@@ -120,11 +128,11 @@ async function launchRunnerWithChild(
     handshakeTimeoutMs?: number;
     shareRoot?: string;
     builtWorkerCodexConfigToml?: string | null;
-    codexModel?: string | null;
     skillsDirectory?: string | null;
     workerCodexBinaryPath?: string | null;
     workerNetworkName?: string | null;
     resolveWorkerImage?: () => string;
+    workerStartConfig?: Partial<WorkerStartConfig>;
   },
 ) {
   const timers = createTimerController();
@@ -134,8 +142,6 @@ async function launchRunnerWithChild(
     resolveWorkerImage: options?.resolveWorkerImage,
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: options?.shareRoot ?? "/tmp/sandy-test-shares",
-    codexModel: options?.codexModel,
-    openAiApiKey: null,
     codexAuthFile: null,
     skillsDirectory: options?.skillsDirectory ?? null,
     workerCodexBinaryPath: options?.workerCodexBinaryPath,
@@ -163,6 +169,10 @@ async function launchRunnerWithChild(
       taskBrief: "Inspect the environment.",
       channelFormatting: testFormatting,
       initialInput: { text: "Inspect the environment.", images: [] },
+      workerStartConfig: {
+        ...defaultWorkerStartConfig,
+        ...options?.workerStartConfig,
+      },
     },
     onEvent,
   );
@@ -178,6 +188,12 @@ function flushEvents(): Promise<void> {
   return new Promise((resolve) => {
     setImmediate(resolve);
   });
+}
+
+function parseFirstStartTaskWrite(taskChild: FakeChildProcess): Extract<HostCommand, { type: "start_task" }> {
+  const firstWrite = taskChild.stdin.writes[0];
+  assert.ok(firstWrite);
+  return JSON.parse(firstWrite) as Extract<HostCommand, { type: "start_task" }>;
 }
 
 async function waitFor(check: () => Promise<void>, attempts = 10): Promise<void> {
@@ -211,20 +227,18 @@ test("DockerSandboxRunner waits for an explicit worker_connected handshake", asy
   assert.deepEqual(events, [{ type: "worker_connected" }]);
 });
 
-test("DockerSandboxRunner passes channel formatting as a docker environment variable", async () => {
+test("DockerSandboxRunner passes channel formatting in the start_task payload", async () => {
   const taskChild = new FakeChildProcess();
 
-  const { invocations } = await launchRunnerWithChild(taskChild, async () => {});
+  await launchRunnerWithChild(taskChild, async () => {});
 
-  const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
-  assert.ok(dockerRunInvocation);
-  const channelFormattingIndex = dockerRunInvocation.args.findIndex((arg) =>
-    arg.startsWith("SANDY_CHANNEL_FORMATTING="));
-  assert.notEqual(channelFormattingIndex, -1);
-  assert.equal(dockerRunInvocation.args[channelFormattingIndex - 1], "-e");
+  taskChild.stdout.write('{"type":"worker_connected"}\n');
+  await flushEvents();
+
+  assert.deepEqual(parseFirstStartTaskWrite(taskChild).config.channelFormatting, testFormatting);
 });
 
-test("DockerSandboxRunner passes the configured Codex model into the worker container", async () => {
+test("DockerSandboxRunner passes the configured Codex model in the start_task payload", async () => {
   const taskChild = new FakeChildProcess();
   const invocationsWithModel: Array<{ command: string; args: string[] }> = [];
   const spawnImpl = ((command: string, args: readonly string[]) => {
@@ -243,8 +257,6 @@ test("DockerSandboxRunner passes the configured Codex model into the worker cont
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
-    codexModel: "gpt-5.4-mini",
-    openAiApiKey: null,
     codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
@@ -267,11 +279,17 @@ test("DockerSandboxRunner passes the configured Codex model into the worker cont
     taskBrief: "Inspect the environment.",
     channelFormatting: testFormatting,
     initialInput: { text: "Inspect the environment.", images: [] },
+    workerStartConfig: {
+      ...defaultWorkerStartConfig,
+      codexModel: "gpt-5.4-mini",
+    },
   }, async () => {});
 
-  const dockerRunInvocation = invocationsWithModel.find((invocation) => invocation.args[0] === "run");
-  assert.ok(dockerRunInvocation);
-  assert.ok(dockerRunInvocation.args.includes("SANDY_CODEX_MODEL=gpt-5.4-mini"));
+  taskChild.stdout.write('{"type":"worker_connected"}\n');
+  await flushEvents();
+
+  assert.equal(parseFirstStartTaskWrite(taskChild).config.codexModel, "gpt-5.4-mini");
+  assert.ok(invocationsWithModel.some((invocation) => invocation.args[0] === "run"));
 });
 
 test("DockerSandboxRunner reports a disconnect when the handshake times out", async () => {
@@ -498,7 +516,6 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
-    openAiApiKey: null,
     codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
@@ -521,6 +538,7 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
     taskBrief: "Inspect the environment.",
     channelFormatting: testFormatting,
     initialInput: { text: "Inspect the environment.", images: [] },
+    workerStartConfig: defaultWorkerStartConfig,
   }, async () => {});
 
   await runner.launchTask({
@@ -531,6 +549,7 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
     taskBrief: "Inspect the environment again.",
     channelFormatting: testFormatting,
     initialInput: { text: "Inspect the environment again.", images: [] },
+    workerStartConfig: defaultWorkerStartConfig,
   }, async () => {});
 
   await runner.shutdown();
@@ -547,7 +566,6 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
-    openAiApiKey: null,
     codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
@@ -599,7 +617,6 @@ test("DockerSandboxRunner falls back to a root Docker container when host rm fai
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
-    openAiApiKey: null,
     codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
@@ -744,7 +761,6 @@ test("DockerSandboxRunner launches a network guard and shares its network namesp
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
-    openAiApiKey: null,
     codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
@@ -768,6 +784,7 @@ test("DockerSandboxRunner launches a network guard and shares its network namesp
     taskBrief: "Inspect the environment.",
     channelFormatting: testFormatting,
     initialInput: { text: "Inspect the environment.", images: [] },
+    workerStartConfig: defaultWorkerStartConfig,
   }, async () => {});
 
   const guardRunInvocation = invocations.find((invocation) =>
@@ -821,7 +838,6 @@ test("DockerSandboxRunner reports a disconnect when the network guard exits mid-
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
-    openAiApiKey: null,
     codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
@@ -844,6 +860,7 @@ test("DockerSandboxRunner reports a disconnect when the network guard exits mid-
     taskBrief: "Inspect the environment.",
     channelFormatting: testFormatting,
     initialInput: { text: "Inspect the environment.", images: [] },
+    workerStartConfig: defaultWorkerStartConfig,
   }, async (event) => {
     events.push(event);
   });
@@ -873,7 +890,6 @@ test("DockerSandboxRunner rejects share inspection outside the configured share 
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
-    openAiApiKey: null,
     codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
@@ -908,7 +924,6 @@ test("DockerSandboxRunner rejects share deletion outside the configured share ro
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
-    openAiApiKey: null,
     codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
@@ -972,7 +987,6 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
-    openAiApiKey: null,
     codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
@@ -984,9 +998,6 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
       codexConfigToml: null,
       environment: {},
     }),
-    httpTokenDescriptions: {
-      vid2text: "Token for the video transcription API.",
-    },
     httpProxyUrlFactory: () => "http://Bearer:token@sandy-http-proxy:8081",
     workerNetworkName: "sandy-mcp-net",
     httpProxyImage: "sandy-http-proxy:latest",
@@ -1009,6 +1020,11 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
     taskBrief: "Inspect the environment.",
     channelFormatting: testFormatting,
     initialInput: { text: "Inspect the environment.", images: [] },
+    workerStartConfig: {
+      ...defaultWorkerStartConfig,
+      httpTokens: [{ tokenId: "vid2text", description: "Token for the video transcription API." }],
+      httpProxyWrapper: "/usr/local/bin/sandy-http-proxy-exec",
+    },
   }, async () => {});
 
   const proxyRunInvocation = invocations.find((invocation) =>
@@ -1027,10 +1043,18 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
   assert.ok(workerRunInvocation);
   assert.ok(!workerRunInvocation.args.includes("--add-host"));
   assert.ok(workerRunInvocation.args.includes("SANDY_HTTP_PROXY_URL=http://Bearer:token@sandy-http-proxy:8081"));
-  assert.ok(workerRunInvocation.args.includes("SANDY_HTTP_PROXY_WRAPPER=/usr/local/bin/sandy-http-proxy-exec"));
-  assert.ok(workerRunInvocation.args.some((arg) =>
+  assert.ok(!workerRunInvocation.args.includes("SANDY_HTTP_PROXY_WRAPPER=/usr/local/bin/sandy-http-proxy-exec"));
+  assert.ok(!workerRunInvocation.args.some((arg) =>
     arg.endsWith(":/run/sandy-http-token-descriptions.json:ro")));
   assert.ok(workerRunInvocation.args.includes("/tmp/sandy-ca.pem:/etc/pki/trust/anchors/sandy-ca.pem:ro"));
+
+  taskChild.stdout.write('{"type":"worker_connected"}\n');
+  await flushEvents();
+
+  assert.deepEqual(parseFirstStartTaskWrite(taskChild).config.httpTokens, [
+    { tokenId: "vid2text", description: "Token for the video transcription API." },
+  ]);
+  assert.equal(parseFirstStartTaskWrite(taskChild).config.httpProxyWrapper, "/usr/local/bin/sandy-http-proxy-exec");
 
   const guardRunInvocation = invocations.find((invocation) =>
     invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-network-guard:latest");
@@ -1075,7 +1099,6 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
-    openAiApiKey: null,
     codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
@@ -1087,9 +1110,6 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
       codexConfigToml: null,
       environment: {},
     }),
-    httpTokenDescriptions: {
-      vid2text: "Token for the video transcription API.",
-    },
     httpProxyUrlFactory: () => "http://Bearer:token@sandy-http-proxy:8081",
     httpProxyImage: "sandy-http-proxy:latest",
     httpProxyCaCertPath: "/tmp/sandy-ca.pem",
@@ -1111,6 +1131,11 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
     taskBrief: "Inspect the environment.",
     channelFormatting: testFormatting,
     initialInput: { text: "Inspect the environment.", images: [] },
+    workerStartConfig: {
+      ...defaultWorkerStartConfig,
+      httpTokens: [{ tokenId: "vid2text", description: "Token for the video transcription API." }],
+      httpProxyWrapper: "/usr/local/bin/sandy-http-proxy-exec",
+    },
   }, async () => {});
 
   const guardRunInvocation = invocations.find((invocation) =>

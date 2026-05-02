@@ -19,6 +19,7 @@ import type {
   SessionState,
   SubAgentEvent,
   TranscriptEntry,
+  WorkerStartConfig,
 } from "./types.js";
 import { resolveTaskShareHostPath } from "./shared-workspace.js";
 import {
@@ -41,6 +42,7 @@ type SandyOrchestratorDependencies = {
   channel: ChannelAdapter;
   mainAgent: MainAgentController;
   sandboxRunner: SandboxRunner;
+  buildWorkerStartConfig?: () => WorkerStartConfig;
   sessionStore: SessionStore;
   privilegeBroker: PrivilegeBroker;
   taskRegistry: TaskRegistry;
@@ -395,6 +397,13 @@ export class SandyOrchestrator {
             taskLanguage: decision.taskLanguage,
             channelFormatting: this.channelFormatting,
             initialInput,
+            workerStartConfig: this.deps.buildWorkerStartConfig?.() ?? {
+              openAiApiKey: null,
+              codexModel: null,
+              channelFormatting: this.channelFormatting,
+              httpTokens: [],
+              httpProxyWrapper: null,
+            },
           },
           async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
         );
