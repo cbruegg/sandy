@@ -215,8 +215,6 @@ export class SandyOrchestrator {
         return;
       case "copy_into_share":
       case "copy_out_of_share":
-      case "mount_ro":
-      case "mount_rw":
         await this.presentPrivilegeRequestToUser(chatId, session, {
           kind: "host_operation",
           requestId: randomUUID(),

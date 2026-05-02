@@ -22,26 +22,6 @@ export const workerToolDefinitions = {
       reason: z.string(),
     }).strict(),
   },
-  mount_ro: {
-    description: "Ask the host to mount an absolute host path into the workspace as read-only.",
-    requiresPrivilegeEscalation: true,
-    schema: z.object({
-      type: z.literal("mount_ro"),
-      hostPath: z.string(),
-      targetPath: z.string(),
-      reason: z.string(),
-    }).strict(),
-  },
-  mount_rw: {
-    description: "Ask the host to mount an absolute host path into the workspace as read-write.",
-    requiresPrivilegeEscalation: true,
-    schema: z.object({
-      type: z.literal("mount_rw"),
-      hostPath: z.string(),
-      targetPath: z.string(),
-      reason: z.string(),
-    }).strict(),
-  },
   send_file_to_channel: {
     description: "Send a file that already exists in the shared workspace back to the user through the channel adapter.",
     requiresPrivilegeEscalation: false,

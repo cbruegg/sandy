@@ -247,9 +247,6 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
     case "copy_into_share":
     case "copy_out_of_share":
       return `${request.payload.type}: ${request.payload.sourcePath} -> ${request.payload.targetPath}\nReason: ${request.payload.reason}`;
-    case "mount_ro":
-    case "mount_rw":
-      return `${request.payload.type}: ${request.payload.hostPath} -> ${request.payload.targetPath}\nReason: ${request.payload.reason}`;
     default:
       return `host_operation: ${request.payload.type}`;
   }
