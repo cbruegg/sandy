@@ -270,6 +270,12 @@ export class SandyOrchestrator {
       };
     }
 
+    logger.info("task.native_tool_call_executing", {
+      chatId,
+      taskId: input.taskId,
+      toolName: input.toolName,
+    });
+
     let call: WorkerToolPayload;
     try {
       call = parseWorkerToolPayload(input.toolName, input.arguments);
@@ -283,6 +289,12 @@ export class SandyOrchestrator {
     try {
       const result = await this.executeWorkerToolCall(chatId, session, call);
       this.deps.sessionStore.save(session);
+      logger.info("task.native_tool_call_executed", {
+        chatId,
+        taskId: input.taskId,
+        toolName: input.toolName,
+        outcome: result.outcome,
+      });
       return {
         isError: result.outcome !== "approved",
         message: result.message,

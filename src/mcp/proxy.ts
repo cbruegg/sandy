@@ -262,6 +262,12 @@ export class SandyMcpProxy {
     });
     server.server.setRequestHandler(ReadResourceRequestSchema, () => Promise.resolve(buildResourceErrorResult(`MCP server ${sandyMcpServerId} does not expose resources.`)));
     server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      logger.debug("mcp.proxy.native_tool_call_received", {
+        taskId: route.taskId,
+        toolName: request.params.name,
+        arguments: request.params.arguments ?? {},
+      });
+
       try {
         parseWorkerToolPayload(request.params.name, request.params.arguments ?? {});
       } catch (error) {
@@ -272,6 +278,12 @@ export class SandyMcpProxy {
         taskId: route.taskId,
         toolName: request.params.name,
         arguments: request.params.arguments ?? {},
+      });
+
+      logger.debug("mcp.proxy.native_tool_call_executed", {
+        taskId: route.taskId,
+        toolName: request.params.name,
+        isError: result.isError,
       });
 
       return buildToolTextResult(result.message, result.isError);

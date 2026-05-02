@@ -304,11 +304,25 @@ export class McpSidecarManager {
   }
 
   private async handleNativeToolCallRequest(message: McpSidecarNativeToolCallRequestMessage): Promise<void> {
+    logger.debug("mcp.sidecar.native_tool_call_executing", {
+      requestId: message.requestId,
+      taskId: message.taskId,
+      toolName: message.toolName,
+      arguments: message.arguments,
+    });
+
     try {
       const result = await this.options.executeNativeToolCall({
         taskId: message.taskId,
         toolName: message.toolName,
         arguments: message.arguments,
+      });
+
+      logger.debug("mcp.sidecar.native_tool_call_executed", {
+        requestId: message.requestId,
+        taskId: message.taskId,
+        toolName: message.toolName,
+        isError: result.isError,
       });
 
       this.sendToSidecar({

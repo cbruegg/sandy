@@ -32,6 +32,8 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
   assert.match(inputText, /\/workspace\/share/);
   assert.match(inputText, /shared workspace is mounted/);
   assert.match(inputText, /send the user-visible text first and then call the tool separately/i);
+  assert.match(inputText, /MCP server "sandy" exposes additional host-integration tools/i);
+  assert.match(inputText, /Use MCP tool discovery to list its tools/i);
   assert.match(inputText, /Telegram HTML/);
   assert.match(inputText, /<code>/);
   assert.match(inputText, /Use English for user-visible replies unless the host provides a later instruction that overrides it\./);

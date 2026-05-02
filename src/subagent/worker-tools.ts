@@ -87,7 +87,7 @@ export const workerToolEntries = [
   ),
   defineWorkerTool(
     sendFileToChannelToolName,
-    "Send a file that already exists in the shared workspace back to the user through the channel adapter.",
+    "Send a file from the shared workspace to the user as a chat attachment. Use this when the user asks you to send, share, or upload a file.",
     false,
     sendFileToChannelSchema,
   ),
