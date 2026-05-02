@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ProxyAccess } from "../proxy-access.js";
+import { sandyMcpServerId } from "../subagent/worker-tools.js";
 import { SandyMcpProxy } from "./proxy.js";
 import type { McpServerRegistry } from "./server-registry.js";
 
@@ -60,6 +61,10 @@ function createProxy(access = new ProxyAccess("shared-secret")): SandyMcpProxy {
       requestId: "approval-1",
       outcome: "approved",
       message: "approved",
+    }),
+    executeNativeToolCall: async () => ({
+      isError: false,
+      message: "ok",
     }),
   });
 }
@@ -209,6 +214,10 @@ test("SandyMcpProxy forwards readResource when authorization approves it", async
       outcome: "approved",
       message: "approved",
     }),
+    executeNativeToolCall: async () => ({
+      isError: false,
+      message: "ok",
+    }),
   });
 
   const server = (proxy as unknown as {
@@ -253,6 +262,10 @@ test("SandyMcpProxy blocks readResource when authorization denies it", async () 
       outcome: "denied",
       message: "denied by test",
     }),
+    executeNativeToolCall: async () => ({
+      isError: false,
+      message: "ok",
+    }),
   });
 
   const server = (proxy as unknown as {
@@ -275,4 +288,61 @@ test("SandyMcpProxy blocks readResource when authorization denies it", async () 
       text: "denied by test",
     }],
   });
+});
+
+test("SandyMcpProxy exposes native Sandy tools without external authorization", async () => {
+  const executeCalls: Array<{ taskId: string; toolName: string; arguments: unknown }> = [];
+  const authorizationCalls: string[] = [];
+  const proxy = new SandyMcpProxy({
+    access: new ProxyAccess("shared-secret"),
+    registry: new FakeRegistry(),
+    authorizeToolCall: async (input) => {
+      authorizationCalls.push(`${input.serverId}.${input.toolName}`);
+      return {
+        requestId: "approval-tool",
+        outcome: "approved",
+        message: "approved",
+      };
+    },
+    authorizeResourceRead: async () => ({
+      requestId: "approval-resource",
+      outcome: "approved",
+      message: "approved",
+    }),
+    executeNativeToolCall: async (input) => {
+      executeCalls.push(input);
+      return {
+        isError: false,
+        message: "native tool ok",
+      };
+    },
+  });
+
+  const server = (proxy as unknown as {
+    createServer: (route: { taskId: string; serverId: string }) => McpServer;
+  }).createServer({ taskId: "task-1", serverId: sandyMcpServerId });
+  const listHandler = getRequestHandler(server, "tools/list");
+  const callHandler = getRequestHandler(server, "tools/call");
+
+  const listResult = await listHandler?.({ method: "tools/list", params: {} }, undefined) as {
+    tools: Array<{ name: string }>;
+  };
+  assert.ok(listResult.tools.some((tool) => tool.name === "complete_task"));
+
+  const callResult = await callHandler?.({
+    method: "tools/call",
+    params: {
+      name: "complete_task",
+      arguments: {},
+    },
+  }, undefined) as { isError?: boolean; content: Array<{ text: string }> };
+
+  assert.deepEqual(executeCalls, [{
+    taskId: "task-1",
+    toolName: "complete_task",
+    arguments: {},
+  }]);
+  assert.deepEqual(authorizationCalls, []);
+  assert.equal(callResult.isError, false);
+  assert.equal(callResult.content[0]?.text, "native tool ok");
 });

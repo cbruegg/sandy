@@ -12,6 +12,7 @@ import {
   mainAgentDecisionPromptSchema,
   parseMainAgentDecision,
 } from "./main-agent-decision.js";
+import {sandyMcpServerId, workerToolEntries} from "../subagent/worker-tools.js";
 
 export interface MainAgentController {
   decide(context: DecideContext): Promise<MainAgentDecision>;
@@ -163,6 +164,16 @@ export function buildMainAgentThreadOptions(workingDirectory: string, model: str
   };
 }
 
+function buildSandyToolsPromptSection(): string {
+  const lines = [
+    `The MCP server "${sandyMcpServerId}" available to the worker/sub-agent exposes these host-integration tools:`,
+    ...workerToolEntries.map((tool) => {
+      return `- ${tool.name}: ${tool.description}`;
+    }),
+  ];
+  return lines.join("\n");
+}
+
 export function buildMainAgentPrompt(input: {
   newVisibleEntries: DecideContext["newVisibleEntries"];
   activeTask: DecideContext["activeTask"];
@@ -212,6 +223,13 @@ export function buildMainAgentPrompt(input: {
       ]
     : [];
 
+  const sandyToolsSection = input.isInitialTurn
+    ? [
+        "",
+        buildSandyToolsPromptSection(),
+      ]
+    : [];
+
   const skillDecisionRules = input.isInitialTurn && input.skills.length > 0
     ? [
         "- You know configured skills only by the name and description listed above. Do not assume any other skill content.",
@@ -225,6 +243,7 @@ export function buildMainAgentPrompt(input: {
     ...configuredSkillsSection,
     ...workerMcpSection,
     ...httpTokenSection,
+    ...sandyToolsSection,
     "",
     "Required JSON schema:",
     JSON.stringify(mainAgentDecisionPromptSchema, null, 2),

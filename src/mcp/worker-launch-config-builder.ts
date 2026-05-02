@@ -3,6 +3,7 @@ import type { McpServerConfig } from "../config.js";
 import { ProxyAccess } from "../proxy-access.js";
 import { mcpProxyWorkerBaseUrl, workerProxyTokenEnvVar } from "./proxy-access.js";
 import { buildMcpProxyWorkerUrl } from "./proxy-route.js";
+import { sandyMcpServerId } from "../subagent/worker-tools.js";
 
 type McpWorkerLaunchConfig = {
   codexConfigToml: string | null;
@@ -15,25 +16,15 @@ export class McpWorkerLaunchConfigBuilder {
   constructor(
     mcpServers: Record<string, McpServerConfig>,
     private readonly access: ProxyAccess,
-    private readonly sidecarEnabled: boolean,
   ) {
     this.serverIds = Object.keys(mcpServers);
   }
 
   build(taskId: string): McpWorkerLaunchConfig {
-    if (this.serverIds.length === 0) {
-      return {
-        codexConfigToml: null,
-        environment: {},
-      };
-    }
-
-    if (!this.sidecarEnabled) {
-      throw new Error("MCP sidecar runtime is not configured.");
-    }
+    const serverIds = [sandyMcpServerId, ...this.serverIds];
     const config = {
       mcp_servers: Object.fromEntries(
-        this.serverIds.map((serverId) => [serverId, {
+        serverIds.map((serverId) => [serverId, {
           url: buildMcpProxyWorkerUrl({ taskId, serverId }, mcpProxyWorkerBaseUrl),
           bearer_token_env_var: workerProxyTokenEnvVar,
         }]),

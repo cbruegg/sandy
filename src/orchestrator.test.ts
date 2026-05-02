@@ -365,10 +365,11 @@ test("orchestrator applies supported privilege requests deterministically and ou
     attachments: [],
   });
 
-  await runner.emit({
-    type: "tool_call",
-    call: {
-      type: "copy_into_share",
+  const taskId = expectDefined(runner.launches[0], "Expected launch.").taskId;
+  const toolCallPromise = orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "copy_into_share",
+    arguments: {
       sourcePath: "/Users/test/input.txt",
       targetPath: "/workspace/share/input.txt",
       reason: "Need a local fixture file.",
@@ -394,14 +395,13 @@ test("orchestrator applies supported privilege requests deterministically and ou
       targetPath: "/workspace/share/input.txt",
       reason: "Need a local fixture file.",
     },
-    taskId: expectDefined(runner.launches[0], "Expected launch.").taskId,
-    taskSharePath: `/tmp/${expectDefined(runner.launches[0], "Expected launch.").taskId}`,
+    taskId,
+    taskSharePath: `/tmp/${taskId}`,
   }]);
-  assert.deepEqual(runner.handle.privilegeResults, [{
-    requestId,
-    outcome: "approved",
+  assert.deepEqual(await toolCallPromise, {
+    isError: false,
     message: "Applied copy_into_share.",
-  }]);
+  });
   assert.ok(requestId);
 });
 
@@ -492,10 +492,10 @@ test("orchestrator sends worker-requested shared files back through the channel"
     attachments: [],
   });
 
-  await runner.emit({
-    type: "tool_call",
-    call: {
-      type: "send_file_to_channel",
+  await orchestrator.executeNativeWorkerToolCall({
+    taskId: expectDefined(runner.launches[0], "Expected launch.").taskId,
+    toolName: "send_file_to_channel",
+    arguments: {
       path: "/workspace/share/results/output.txt",
       caption: "Generated output",
     },
@@ -926,10 +926,10 @@ test("orchestrator fails the active task if channel file delivery fails", async 
     attachments: [],
   });
 
-  await runner.emit({
-    type: "tool_call",
-    call: {
-      type: "send_file_to_channel",
+  const toolResult = await orchestrator.executeNativeWorkerToolCall({
+    taskId: expectDefined(runner.launches[0], "Expected launch.").taskId,
+    toolName: "send_file_to_channel",
+    arguments: {
       path: "/workspace/share/result.txt",
       caption: "Result",
     },
@@ -939,6 +939,10 @@ test("orchestrator fails the active task if channel file delivery fails", async 
   assert.equal(session.activeTask, null);
   assert.equal(channel.sentTexts.at(-1)?.text, messages.taskFailed("Telegram upload failed."));
   assert.equal(runner.handle.closeCalls, 1);
+  assert.deepEqual(toolResult, {
+    isError: true,
+    message: "Telegram upload failed.",
+  });
 });
 
 test("orchestrator reports top-level chat event failures back to the user", async () => {
@@ -1428,10 +1432,10 @@ test("orchestrator confirms persisted http token suitability and enables later p
   const taskId = runner.launches[0]?.taskId;
   assert.ok(taskId);
 
-  await runner.emit({
-    type: "tool_call",
-    call: {
-      type: "request_http_token",
+  const toolCallPromise = orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "request_http_token",
+    arguments: {
       tokenId: "vid2text",
       host: "api.example.com",
       reason: "Need the transcript API.",
@@ -1452,14 +1456,10 @@ test("orchestrator confirms persisted http token suitability and enables later p
     requestId: request?.requestId,
   });
 
-  assert.deepEqual(runner.handle.privilegeResults, [
-    {
-      requestId: request?.requestId,
-      outcome: "approved",
-      message: messages.httpTokenAllowedFromPersistentConfig("vid2text", "api.example.com"),
-      scope: "always",
-    },
-  ]);
+  assert.deepEqual(await toolCallPromise, {
+    isError: false,
+    message: messages.httpTokenAllowedFromPersistentConfig("vid2text", "api.example.com"),
+  });
 
   const session = store.getOrCreate("chat-http-confirm");
   assert.deepEqual(session.activeTask?.taskPolicy.autoApproveHttpTokens, ["vid2text"]);

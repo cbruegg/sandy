@@ -1,8 +1,8 @@
 import { spawnSync } from "node:child_process";
 import type { ChannelFormatting, PrivilegeResolutionResult } from "../types.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
-import { buildWorkerProtocolInstructions } from "./worker-protocol.js";
 import type { Input, UserInput } from "@openai/codex-sdk";
+import { sandyMcpServerId } from "./worker-tools.js";
 
 type HttpTokenPromptInput = {
   tokenId: string;
@@ -65,7 +65,8 @@ export function buildInitialTaskInputWithCapabilities(
     `If you need the host to copy files into or out of ${sharedWorkspaceMountPath}, do not ask the user directly.`,
     `Use ${taskLanguage} for user-visible replies unless the host provides a later instruction that overrides it.`,
     "Keep user-visible progress updates minimal and concise. Only report meaningful milestones, not every shell command completion.",
-    ...buildWorkerProtocolInstructions(),
+    "If you need to show text to the user and also call a Sandy MCP tool, send the user-visible text first and then call the tool separately.",
+    `The MCP server "${sandyMcpServerId}" exposes additional host-integration tools. Use MCP tool discovery to list its tools ahead of working on a task.`,
   ];
 
   if (runtimeCapabilities.length > 0) {
@@ -76,8 +77,7 @@ export function buildInitialTaskInputWithCapabilities(
     lines.push(
       "Configured HTTP tokens available to this task:",
       ...httpTokens.map((token) => `- ${token.tokenId}: ${token.description}`),
-      "If you need one of these tokens, do not ask the user in plain text. Emit SANDY_REQUEST_HTTP_TOKEN as a Sandy tool call first.",
-      "Do not run SANDY_REQUEST_HTTP_TOKEN inside bash or any other shell command.",
+      `If you need one of these tokens, do not ask the user in plain text. Call ${sandyMcpServerId}.request_http_token first.`,
       "After approval, use the approved token only for the approved host and only in proxied requests that include the placeholder header.",
     );
     if (httpProxyWrapper) {

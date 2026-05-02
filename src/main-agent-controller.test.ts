@@ -325,3 +325,29 @@ test("buildMainAgentPrompt includes configured HTTP token ids and descriptions o
   assert.match(initialPrompt, /vid2text: Token for the video transcription API\./);
   assert.doesNotMatch(deltaPrompt, /Configured HTTP tokens available to sub-agents:/);
 });
+
+test("buildMainAgentPrompt includes Sandy host-integration tools only on the initial turn", () => {
+  const initialPrompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["send me a file"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    isInitialTurn: true,
+    skills: [],
+    workerMcpServerIds: [],
+    httpTokens: {},
+  });
+  const deltaPrompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["follow up"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    isInitialTurn: false,
+    skills: [],
+    workerMcpServerIds: [],
+    httpTokens: {},
+  });
+
+  assert.match(initialPrompt, /MCP server "sandy" available to the worker\/sub-agent exposes these host-integration tools:/);
+  assert.match(initialPrompt, /send_file_to_channel/);
+  assert.match(initialPrompt, /complete_task/);
+  assert.doesNotMatch(deltaPrompt, /MCP server "sandy" exposes these host-integration tools:/);
+});

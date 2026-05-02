@@ -6,6 +6,7 @@ import {z} from "zod";
 import { resolveDefaultImageReferences, type SandyBuildMetadata, type SandyImageDefaults } from "./build-metadata.js";
 import {resolveHomeDirectory} from "./home-directory.js";
 import {discoverSkills, type SkillMetadata} from "./skills.js";
+import { sandyMcpServerId } from "./subagent/worker-tools.js";
 
 const logLevelSchema = z.enum(["debug", "info", "warn", "error"]);
 const mcpTransportSchema = z.literal("streamable_http");
@@ -361,6 +362,10 @@ export function parseConfigToml(
     : rawApiKey
       ? { mode: "api_key", openAiApiKey: rawApiKey }
       : { mode: "ambient_codex_auth" };
+
+  if (parsed.mcp.servers[sandyMcpServerId]) {
+    throw new Error(`mcp.servers.${sandyMcpServerId} is reserved for Sandy's built-in worker tools.`);
+  }
 
   if (parsed.updates.mode !== "disabled"
     && (

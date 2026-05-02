@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { PrivilegedWorkerToolPayload } from "../subagent/worker-tool-registry.js";
+import type { PrivilegedWorkerToolPayload } from "../subagent/worker-tools.js";
 
 const privilegeApprovalScopeSchema = z.enum(["once", "worker_session", "always"]);
 

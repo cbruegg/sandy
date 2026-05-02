@@ -38,6 +38,21 @@ const authorizationResultMessageSchema = z.object({
   result: privilegeResolutionResultSchema,
 });
 
+const nativeToolCallRequestMessageSchema = z.object({
+  type: z.literal("native_tool_call_request"),
+  requestId: z.string().min(1),
+  taskId: z.string().min(1),
+  toolName: z.string().min(1),
+  arguments: z.unknown(),
+});
+
+const nativeToolCallResultMessageSchema = z.object({
+  type: z.literal("native_tool_call_result"),
+  requestId: z.string().min(1),
+  isError: z.boolean(),
+  message: z.string(),
+});
+
 const readyMessageSchema = z.object({
   type: z.literal("ready"),
 });
@@ -64,7 +79,9 @@ export type McpSidecarBootstrapMessage = z.infer<typeof bootstrapMessageSchema> 
 };
 export type McpSidecarAuthorizationRequestMessage = z.infer<typeof authorizationRequestMessageSchema>;
 export type McpSidecarResourceAuthorizationRequestMessage = z.infer<typeof resourceAuthorizationRequestMessageSchema>;
+export type McpSidecarNativeToolCallRequestMessage = z.infer<typeof nativeToolCallRequestMessageSchema>;
 type McpSidecarAuthorizationResultMessage = z.infer<typeof authorizationResultMessageSchema>;
+type McpSidecarNativeToolCallResultMessage = z.infer<typeof nativeToolCallResultMessageSchema>;
 type McpSidecarReadyMessage = z.infer<typeof readyMessageSchema>;
 type McpSidecarFatalErrorMessage = z.infer<typeof fatalErrorMessageSchema>;
 export type McpSidecarLogMessage = z.infer<typeof logMessageSchema>;
@@ -73,12 +90,14 @@ type McpSidecarShutdownMessage = z.infer<typeof shutdownMessageSchema>;
 type HostToMcpSidecarMessage =
   | McpSidecarBootstrapMessage
   | McpSidecarAuthorizationResultMessage
+  | McpSidecarNativeToolCallResultMessage
   | McpSidecarShutdownMessage;
 
 type McpSidecarToHostMessage =
   | McpSidecarReadyMessage
   | McpSidecarAuthorizationRequestMessage
   | McpSidecarResourceAuthorizationRequestMessage
+  | McpSidecarNativeToolCallRequestMessage
   | McpSidecarFatalErrorMessage
   | McpSidecarLogMessage;
 
@@ -95,6 +114,8 @@ export function parseMcpSidecarToHostMessage(raw: string): McpSidecarToHostMessa
       return authorizationRequestMessageSchema.parse(parsed);
     case "resource_authorization_request":
       return resourceAuthorizationRequestMessageSchema.parse(parsed);
+    case "native_tool_call_request":
+      return nativeToolCallRequestMessageSchema.parse(parsed);
     case "fatal_error":
       return fatalErrorMessageSchema.parse(parsed);
     case "log":
@@ -115,6 +136,8 @@ export function parseHostToMcpSidecarMessage(raw: string): HostToMcpSidecarMessa
       return bootstrapMessageSchema.parse(parsed);
     case "authorization_result":
       return authorizationResultMessageSchema.parse(parsed);
+    case "native_tool_call_result":
+      return nativeToolCallResultMessageSchema.parse(parsed);
     case "shutdown":
       return shutdownMessageSchema.parse(parsed);
     default:
