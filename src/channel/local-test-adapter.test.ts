@@ -33,7 +33,7 @@ test("LocalTestChannelAdapter forwards inbox events and writes outbound records"
 
     const inboxPath = join(root, "inbox", "message-1.json");
     await writeFile(inboxPath, `${JSON.stringify({
-      kind: "user_text",
+      kind: "user_message",
       messageId: "1",
       timestamp: "2026-04-14T10:00:00.000Z",
       text: "Inspect this",
@@ -41,7 +41,7 @@ test("LocalTestChannelAdapter forwards inbox events and writes outbound records"
     })}\n`, "utf8");
 
     await waitFor(async () => received.length, (count) => count === 1);
-    assert.equal(received[0]?.kind, "user_text");
+    assert.equal(received[0]?.kind, "user_message");
 
     await adapter.sendTaskUpdate("local-test", "Working");
     const outbox = await waitFor(
@@ -75,7 +75,7 @@ test("LocalTestChannelAdapter copies declared attachment files into the target d
     });
 
     await writeFile(join(root, "inbox", "message-2.json"), `${JSON.stringify({
-      kind: "user_text",
+      kind: "user_message",
       messageId: "2",
       timestamp: "2026-04-14T10:00:00.000Z",
       text: "use file",
@@ -87,7 +87,7 @@ test("LocalTestChannelAdapter copies declared attachment files into the target d
 
     await waitFor(async () => received.length, (count) => count === 1);
     const event = received[0];
-    assert.equal(event?.kind, "user_text");
+    assert.equal(event?.kind, "user_message");
     assert.equal(event?.attachments.length, 1);
     const targetDirectory = join(root, "saved");
     const saved = await adapter.saveAttachments("local-test", event?.attachments ?? [], targetDirectory);
@@ -144,14 +144,14 @@ test("LocalTestChannelAdapter quarantines failing inbox entries and continues pr
 
   try {
     await adapter.start(async (event) => {
-      if (event.kind === "user_text" && event.text === "break") {
+      if (event.kind === "user_message" && event.text === "break") {
         throw new Error("synthetic handler failure");
       }
       received.push(event);
     });
 
     await writeFile(join(root, "inbox", "message-1.json"), `${JSON.stringify({
-      kind: "user_text",
+      kind: "user_message",
       messageId: "1",
       timestamp: "2026-04-14T10:00:00.000Z",
       text: "break",
@@ -159,7 +159,7 @@ test("LocalTestChannelAdapter quarantines failing inbox entries and continues pr
     })}\n`, "utf8");
 
     await writeFile(join(root, "inbox", "message-2.json"), `${JSON.stringify({
-      kind: "user_text",
+      kind: "user_message",
       messageId: "2",
       timestamp: "2026-04-14T10:00:01.000Z",
       text: "continue",
@@ -167,7 +167,7 @@ test("LocalTestChannelAdapter quarantines failing inbox entries and continues pr
     })}\n`, "utf8");
 
     await waitFor(
-      async () => received.map((event) => event.kind === "user_text" ? event.text : ""),
+      async () => received.map((event) => event.kind === "user_message" ? event.text : ""),
       (texts) => texts.includes("continue"),
     );
 

@@ -690,7 +690,7 @@ export async function normalizeMatrixRoomMessage(
   if (msgtype === "m.text" || msgtype === "m.notice" || msgtype === "m.emote") {
     const body = asOptionalString((content as MatrixMessageContent)["body"]) ?? "";
     return {
-      kind: "user_text",
+      kind: "user_message",
       ...base,
       text: body,
       rawText: body,
@@ -713,7 +713,7 @@ export async function normalizeMatrixRoomMessage(
     deps.saveAttachmentRef(attachmentId, attachmentRef);
     const attachmentKind = msgtype === "m.image" ? "image" : "file";
     return {
-      kind: "user_text",
+      kind: "user_message",
       ...base,
       text: "",
       rawText: "",
@@ -812,7 +812,7 @@ async function normalizeMatrixAudioMessage(
       mimeType: attachment.mimeType,
     });
     return {
-      kind: "user_text",
+      kind: "user_message",
       ...base,
       text: transcript,
       rawText: transcript,

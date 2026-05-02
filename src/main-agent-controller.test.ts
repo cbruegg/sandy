@@ -70,7 +70,7 @@ function makeContext(texts: string[], chatId = "chat-1"): DecideContext {
     chatId,
     newVisibleEntries: texts.map((text, index) => ({
       role: index % 2 === 0 ? "user" : "assistant",
-      kind: index % 2 === 0 ? "user_text" : "main_agent_reply",
+      kind: index % 2 === 0 ? "user_message" : "main_agent_reply",
       timestamp: `2026-04-02T10:00:0${index}.000Z`,
       text,
     })),

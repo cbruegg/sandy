@@ -6,8 +6,8 @@ type ChatEventBase = {
   timestamp: string;
 };
 
-export type UserTextEvent = ChatEventBase & {
-  kind: "user_text";
+export type UserMessageEvent = ChatEventBase & {
+  kind: "user_message";
   text: string;
   rawText: string;
   attachments: MessageAttachment[];
@@ -37,7 +37,7 @@ type UnsupportedInputEvent = ChatEventBase & {
 };
 
 export type NormalizedChatEvent =
-  | UserTextEvent
+  | UserMessageEvent
   | CancelRequestEvent
   | MarkFinishedRequestEvent
   | ApprovalResponseEvent

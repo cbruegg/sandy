@@ -85,7 +85,7 @@ test("normalizeTelegramUpdate maps text input and unsupported media deterministi
   } satisfies Update);
 
   assert.deepEqual(textEvent, {
-    kind: "user_text",
+    kind: "user_message",
     chatId: "99",
     chatType: "private",
     messageId: "5",
@@ -142,7 +142,7 @@ test("normalizeTelegramUpdate maps text input and unsupported media deterministi
   } satisfies Update);
 
   assert.deepEqual(documentEvent, {
-    kind: "user_text",
+    kind: "user_message",
     chatId: "99",
     chatType: "private",
     messageId: "7",
@@ -278,7 +278,7 @@ test("TelegramBotApiAdapter transcribes voice messages into normal text events",
   await adapter.stop();
 
   assert.deepEqual(handlerEvents, [{
-    kind: "user_text",
+    kind: "user_message",
     chatId: "99",
     chatType: "private",
     messageId: "8",
@@ -328,7 +328,7 @@ test("TelegramBotApiAdapter keeps transcribed voice command text as plain user t
   await adapter.stop();
 
   assert.deepEqual(handlerEvents, [{
-    kind: "user_text",
+    kind: "user_message",
     chatId: "99",
     chatType: "private",
     messageId: "9",

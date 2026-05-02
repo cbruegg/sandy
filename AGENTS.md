@@ -48,7 +48,7 @@ The local-test channel supports exactly one implicit chat, so agents do not need
 Typical flow:
 
 - Run `./scripts/run-local-dev.sh`
-- Use the printed helper CLI command shape to send a `user_text` event
+- Use the printed helper CLI command shape to send a `user_message` event
 - Wait for `send_privilege_request` or `send_task_update` via `./scripts/run-local-test-cli.sh wait-for ...`
 - Reply with `./scripts/run-local-test-cli.sh approve ...` or `deny ...`
 - Verify the final `send_text` or `send_file` event through `wait-for`, `tail`, or `list-events`

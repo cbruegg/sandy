@@ -38,7 +38,7 @@ export async function runLocalTestCli(args: string[], io: CliIo = {
   switch (command) {
     case "send":
       await writeInboxEvent(spoolRoot, {
-        kind: "user_text",
+        kind: "user_message",
         messageId: options["message-id"] ?? createIdentifier("message"),
         timestamp: new Date().toISOString(),
         text: resolveRequiredOption(options, "text"),
@@ -50,7 +50,7 @@ export async function runLocalTestCli(args: string[], io: CliIo = {
       {
         const messageId = resolveStringOption(options, "message-id") ?? createIdentifier("message");
       await writeInboxEvent(spoolRoot, {
-        kind: "user_text",
+        kind: "user_message",
         messageId,
         timestamp: new Date().toISOString(),
         text: options["text"] ?? "",

@@ -1,7 +1,7 @@
 import type { Update } from "grammy/types";
 import type {
   NormalizedChatEvent,
-  UserTextEvent,
+  UserMessageEvent,
 } from "../types.js";
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
@@ -63,7 +63,7 @@ export async function normalizeTelegramUpdate(
     const fileName = `photo_${update.message.message_id}.jpg`;
     return {
       ...base,
-      kind: "user_text",
+      kind: "user_message",
       text: "",
       rawText: "",
       attachments: [{
@@ -80,7 +80,7 @@ export async function normalizeTelegramUpdate(
     const caption = typeof update.message.caption === "string" ? update.message.caption : "";
     return {
       ...base,
-      kind: "user_text",
+      kind: "user_message",
       text: caption,
       rawText: caption,
       attachments: [{
@@ -114,7 +114,7 @@ export function extractTelegramUpdateMetadata(update: Update): TelegramUpdateMet
   };
 
   if ("text" in update.message && typeof update.message.text === "string") {
-    return { ...base, kind: "user_text" };
+    return { ...base, kind: "user_message" };
   }
 
   if ("voice" in update.message && update.message.voice) {
@@ -122,23 +122,23 @@ export function extractTelegramUpdateMetadata(update: Update): TelegramUpdateMet
   }
 
   if ("photo" in update.message && update.message.photo) {
-    return { ...base, kind: "user_text" };
+    return { ...base, kind: "user_message" };
   }
 
   if ("document" in update.message && update.message.document) {
-    return { ...base, kind: "user_text" };
+    return { ...base, kind: "user_message" };
   }
 
   return { ...base, kind: "unknown" };
 }
 
 function normalizeTelegramTextInput(
-  base: Pick<UserTextEvent, "chatId" | "messageId" | "timestamp"> & TelegramEventMetadata,
+  base: Pick<UserMessageEvent, "chatId" | "messageId" | "timestamp"> & TelegramEventMetadata,
   rawText: string,
 ): TelegramNormalizedChatEvent {
   return {
     ...base,
-    kind: "user_text",
+    kind: "user_message",
     text: rawText,
     rawText,
     attachments: [],
@@ -264,7 +264,7 @@ function normalizeCallbackQuery(update: Update): TelegramNormalizedChatEvent | n
 }
 
 async function normalizeVoiceMessage(
-  base: Pick<UserTextEvent, "chatId" | "messageId" | "timestamp"> & TelegramEventMetadata,
+  base: Pick<UserMessageEvent, "chatId" | "messageId" | "timestamp"> & TelegramEventMetadata,
   voice: { file_id: string; mime_type?: string },
   deps?: VoiceNormalizationDeps,
 ): Promise<TelegramNormalizedChatEvent | null> {

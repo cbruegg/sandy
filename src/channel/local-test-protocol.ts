@@ -12,7 +12,7 @@ const localTestAttachmentSchema = z.object({
 }).strict();
 
 const localTestUserTextInputSchema = z.object({
-  kind: z.literal("user_text"),
+  kind: z.literal("user_message"),
   messageId: z.string().min(1).optional(),
   timestamp: z.string().min(1).optional(),
   text: z.string().default(""),
@@ -131,7 +131,7 @@ export function parseLocalTestInboundEvent(raw: string): {
   const messageId = parsed.messageId ?? createIdentifier("message");
   const attachmentsById = new Map<string, string>();
 
-  if (parsed.kind === "user_text") {
+  if (parsed.kind === "user_message") {
     const attachments: MessageAttachment[] = parsed.attachments.map((attachment, index) => {
       const attachmentId = attachment.attachmentId ?? `${messageId}-attachment-${index + 1}`;
       attachmentsById.set(attachmentId, attachment.hostPath);
@@ -144,7 +144,7 @@ export function parseLocalTestInboundEvent(raw: string): {
     });
     return {
       event: {
-        kind: "user_text",
+        kind: "user_message",
         chatId: localTestChatId,
         messageId,
         timestamp,
