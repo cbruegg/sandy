@@ -6,7 +6,6 @@ Sandy's external MCP integration and HTTP token proxy are implemented in the cur
 README.md already documents the operator-facing configuration and runtime behavior. This document keeps only the implementation notes and remaining follow-up work that are not already explained there.
 
 ## Remaining Work
-- Add explicit `src/mcp/proxy.test.ts` coverage that proves `readResource` is forwarded when authorization approves it and blocked when authorization denies it.
 - Convert Sandy's native worker tools into MCP server tools in a future follow-up. V1 still uses the native worker protocol for shared-workspace copy operations, channel file send-back, task completion, and HTTP token requests.
 
 ## Technical Overview
