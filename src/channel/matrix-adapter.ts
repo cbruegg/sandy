@@ -711,6 +711,7 @@ export async function normalizeMatrixRoomMessage(
       return null;
     }
     deps.saveAttachmentRef(attachmentId, attachmentRef);
+    const attachmentKind = msgtype === "m.image" ? "image" : "file";
     return {
       kind: "user_text",
       ...base,
@@ -718,7 +719,7 @@ export async function normalizeMatrixRoomMessage(
       rawText: "",
       attachments: [{
         attachmentId,
-        kind: "file",
+        kind: attachmentKind,
         fileName,
         mimeType: attachmentRef.mimeType,
       }],

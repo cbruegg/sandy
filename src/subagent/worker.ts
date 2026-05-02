@@ -1,7 +1,7 @@
 import {createInterface} from "node:readline";
 import {pathToFileURL} from "node:url";
 import { existsSync, readFileSync } from "node:fs";
-import {type Thread, type ThreadEvent, type TodoListItem,} from "@openai/codex-sdk";
+import {type Thread, type ThreadEvent, type TodoListItem, type Input, type UserInput} from "@openai/codex-sdk";
 import { createCodexClient } from "../codex-client.js";
 import { configureLogger, logger } from "../logger.js";
 import {channelFormattingSchema, type ChannelFormatting, type HostCommand, type SubAgentEvent,} from "../types.js";
@@ -82,7 +82,7 @@ function progressFromTodoList(item: TodoListItem): string | null {
   return messages.nextPlannedStep(next.text);
 }
 
-async function streamTurn(thread: Thread, input: string, mode: TurnMode = "task"): Promise<StreamTurnResult> {
+async function streamTurn(thread: Thread, input: Input, mode: TurnMode = "task"): Promise<StreamTurnResult> {
   let sawPrivilegedToolCall = false;
   let sawSendFileToChannel = false;
   let sawTaskDone = false;
@@ -262,6 +262,88 @@ function classifyToolEventDisposition(
   return workerToolDefinitions[toolType].requiresPrivilegeEscalation ? "privileged_tool_call" : "none";
 }
 
+type ImageAttachment = {
+  sharePath: string;
+  fileName: string;
+};
+
+type TaskInputWithImages = {
+  text: string;
+  images: ImageAttachment[];
+};
+
+function parseInputForImages(input: string): TaskInputWithImages {
+  const images: ImageAttachment[] = [];
+  let text = input;
+  
+  // Look for structured image attachments
+  const imagePattern = /SANDY_IMAGE_ATTACHMENTS:(\[[^\]]*\])/;
+  const match = input.match(imagePattern);
+  
+  if (match && match[1]) {
+    try {
+      const imageData = JSON.parse(match[1]) as Array<{ sharePath: string; fileName: string }>;
+      if (Array.isArray(imageData)) {
+        for (const img of imageData) {
+          if (typeof img.sharePath === "string" && typeof img.fileName === "string") {
+            images.push({ 
+              sharePath: img.sharePath, 
+              fileName: img.fileName 
+            });
+          }
+        }
+      }
+      // Remove the structured data from the text
+      text = input.replace(match[0], "").trim();
+    } catch (_e) {
+      // If JSON parsing fails, fall back to text parsing
+      console.warn("Failed to parse image attachments JSON, falling back to text parsing");
+    }
+  }
+  
+  // Fallback: look for image attachments in the old text format
+  const oldImagePattern = /(?:Files attached by the user are already available in the shared workspace|The user attached additional files to the shared workspace):\n((?:- [^:\n]+: \/workspace\/share[^\n]+\n)*)Using these files does not require privilege escalation\./g;
+  const oldMatch = text.match(oldImagePattern);
+  
+  if (oldMatch && oldMatch[1]) {
+    const imageLines = oldMatch[1].trim().split("\n");
+    
+    for (const line of imageLines) {
+      const fileMatch = line.match(/^- ([^:]+): (\/workspace\/share[^\s]+)/);
+      if (fileMatch && fileMatch[1] && fileMatch[2]) {
+        const fileName = fileMatch[1];
+        const sharePath = fileMatch[2];
+        images.push({ sharePath, fileName });
+      }
+    }
+    text = text.replace(oldMatch[0], "").trim();
+  }
+  
+  return { text, images };
+}
+
+function parseTaskBriefForImages(taskBrief: string): TaskInputWithImages {
+  return parseInputForImages(taskBrief);
+}
+
+function buildCodexInputWithImages(text: string, images: ImageAttachment[]): Input {
+  if (images.length === 0) {
+    return text;
+  }
+  
+  const inputs: UserInput[] = [];
+  
+  if (text.trim()) {
+    inputs.push({ type: "text", text: text.trim() });
+  }
+  
+  for (const image of images) {
+    inputs.push({ type: "local_image", path: image.sharePath });
+  }
+  
+  return inputs;
+}
+
 export async function main(): Promise<void> {
   configureLogger({
     forwardLog: (payload) => {
@@ -296,10 +378,13 @@ export async function main(): Promise<void> {
     networkAccessEnabled: true,
   });
 
+  // Parse task brief for image attachments
+  const { text: initialText, images: initialImages } = parseTaskBriefForImages(taskBrief);
+
   let currentAbort: AbortController | null = null;
   let queue: Promise<void> = Promise.resolve();
 
-  const enqueueTurn = (input: string) => {
+  const enqueueTurn = (input: Input) => {
     queue = queue.then(async () => {
       currentAbort = new AbortController();
       try {
@@ -350,7 +435,7 @@ export async function main(): Promise<void> {
   process.stdin.resume();
 
   send({ type: "worker_connected" });
-  enqueueTurn(buildInitialTaskInput(taskBrief, taskLanguage, channelFormatting, httpTokens, httpProxyWrapper));
+  enqueueTurn(buildInitialTaskInput(initialText, taskLanguage, channelFormatting, httpTokens, httpProxyWrapper, initialImages));
 
   input.on("line", (line) => {
     const trimmed = line.trim();
@@ -360,9 +445,11 @@ export async function main(): Promise<void> {
     try {
       const command = parseHostCommand(trimmed);
       switch (command.type) {
-        case "user_message":
-          enqueueTurn(command.text);
+        case "user_message": {
+          const { text: userText, images: userImages } = parseInputForImages(command.text);
+          enqueueTurn(buildCodexInputWithImages(userText, userImages));
           break;
+        }
         case "privilege_result":
           enqueueTurn(buildPrivilegeResolutionInput(command.result));
           break;

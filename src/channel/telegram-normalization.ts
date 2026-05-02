@@ -58,7 +58,21 @@ export async function normalizeTelegramUpdate(
   }
 
   if ("photo" in update.message && update.message.photo) {
-    return { ...base, kind: "unsupported_input", inputType: "image" };
+    const photo = update.message.photo;
+    const fileId = photo[photo.length - 1]?.file_id ?? "";
+    const fileName = `photo_${update.message.message_id}.jpg`;
+    return {
+      ...base,
+      kind: "user_text",
+      text: "",
+      rawText: "",
+      attachments: [{
+        attachmentId: fileId,
+        kind: "image",
+        fileName,
+        mimeType: "image/jpeg",
+      }],
+    };
   }
 
   if ("document" in update.message && update.message.document) {
@@ -108,7 +122,7 @@ export function extractTelegramUpdateMetadata(update: Update): TelegramUpdateMet
   }
 
   if ("photo" in update.message && update.message.photo) {
-    return { ...base, kind: "unsupported_input" };
+    return { ...base, kind: "user_text" };
   }
 
   if ("document" in update.message && update.message.document) {

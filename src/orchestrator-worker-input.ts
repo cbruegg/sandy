@@ -14,10 +14,20 @@ export function describeUserMessageForMainAgent(text: string, attachments: Messa
 
 export function buildTaskBriefWithAttachments(taskBrief: string, attachments: SharedAttachment[]): string {
   const sections = [taskBrief];
-  if (attachments.length > 0) {
+  const imageAttachments = attachments.filter(attachment => attachment.kind === "image");
+  const fileAttachments = attachments.filter(attachment => attachment.kind === "file");
+  
+  if (imageAttachments.length > 0) {
+    sections.push(`SANDY_IMAGE_ATTACHMENTS:${JSON.stringify(imageAttachments.map(img => ({ 
+      sharePath: img.sharePath, 
+      fileName: img.fileName 
+    })))}`);
+  }
+  
+  if (fileAttachments.length > 0) {
     sections.push([
       "Files attached by the user are already available in the shared workspace:",
-      ...attachments.map((attachment) => `- ${attachment.fileName}: ${attachment.sharePath}`),
+      ...fileAttachments.map((attachment) => `- ${attachment.fileName}: ${attachment.sharePath}`),
       "Using these files does not require privilege escalation.",
     ].join("\n"));
   }
@@ -27,10 +37,20 @@ export function buildTaskBriefWithAttachments(taskBrief: string, attachments: Sh
 
 export function buildWorkerFollowUpInput(text: string, attachments: SharedAttachment[]): string {
   const sections = [text.trim()].filter((section) => section.length > 0);
-  if (attachments.length > 0) {
+  const imageAttachments = attachments.filter(attachment => attachment.kind === "image");
+  const fileAttachments = attachments.filter(attachment => attachment.kind === "file");
+  
+  if (imageAttachments.length > 0) {
+    sections.push(`SANDY_IMAGE_ATTACHMENTS:${JSON.stringify(imageAttachments.map(img => ({ 
+      sharePath: img.sharePath, 
+      fileName: img.fileName 
+    })))}`);
+  }
+  
+  if (fileAttachments.length > 0) {
     sections.push([
       "The user attached additional files to the shared workspace:",
-      ...attachments.map((attachment) => `- ${attachment.fileName}: ${attachment.sharePath}`),
+      ...fileAttachments.map((attachment) => `- ${attachment.fileName}: ${attachment.sharePath}`),
       "Using these files does not require privilege escalation.",
     ].join("\n"));
   }
