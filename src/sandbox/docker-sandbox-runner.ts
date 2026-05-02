@@ -154,9 +154,19 @@ export class DockerSandboxRunner implements SandboxRunner {
     const containerName = `sandy-${request.taskId}`;
     let finished = false;
     let workerConnected = false;
+    let taskInitialized = false;
     let terminalEventSeen = false;
     let shutdownRequested = false;
     let disconnectReported = false;
+    let resolveTaskInitialized: (() => void) | null = null;
+    let rejectTaskInitialized: ((error: Error) => void) | null = null;
+    const taskInitializedBarrier = new Promise<void>((resolve, reject) => {
+      resolveTaskInitialized = resolve;
+      rejectTaskInitialized = (error: Error) => {
+        reject(error);
+      };
+    });
+    void taskInitializedBarrier.catch(() => {});
     logger.info("sandbox.launching", {
       chatId: request.chatId,
       taskId: request.taskId,
@@ -376,7 +386,10 @@ export class DockerSandboxRunner implements SandboxRunner {
             input: request.initialInput,
             taskLanguage: request.taskLanguage,
           });
+          taskInitialized = true;
+          resolveTaskInitialized?.();
         } catch (error) {
+          rejectTaskInitialized?.(new Error(this.describeWriteFailure(error)));
           await reportDisconnect(this.describeWriteFailure(error));
         }
       }
@@ -409,6 +422,7 @@ export class DockerSandboxRunner implements SandboxRunner {
         return;
       }
       disconnectReported = true;
+      rejectTaskInitialized?.(new Error(message));
       clearHandshakeTimer();
       logger.error("sandbox.worker_disconnected", {
         taskId: request.taskId,
@@ -546,6 +560,9 @@ export class DockerSandboxRunner implements SandboxRunner {
           imageCount: input.images.length,
         });
         try {
+          if (!taskInitialized) {
+            await taskInitializedBarrier;
+          }
           await this.sendToWorker(child, {
             type: "user_message",
             input,

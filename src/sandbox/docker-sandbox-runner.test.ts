@@ -20,10 +20,16 @@ const testFormatting: ChannelFormatting = {
 class FakeStdin {
   public readonly writes: string[] = [];
   public failNextWrite = false;
+  public holdWrites = false;
   public endCalls = 0;
+  private readonly pendingCallbacks: Array<(error?: Error | null) => void> = [];
 
   write(chunk: Buffer | string, callback: (error?: Error | null) => void): boolean {
     this.writes.push(String(chunk));
+    if (this.holdWrites) {
+      this.pendingCallbacks.push(callback);
+      return true;
+    }
     if (this.failNextWrite) {
       this.failNextWrite = false;
       callback(new Error("broken pipe"));
@@ -35,6 +41,11 @@ class FakeStdin {
 
   end(): void {
     this.endCalls += 1;
+  }
+
+  releaseNextWrite(error: Error | null = null): void {
+    const callback = this.pendingCallbacks.shift();
+    callback?.(error);
   }
 }
 
@@ -346,6 +357,33 @@ test("DockerSandboxRunner reports a disconnect when writing to the worker stdin 
       message: "Sub-agent control channel write failed: broken pipe",
     },
   ]);
+});
+
+test("DockerSandboxRunner waits for start_task delivery before sending follow-up user messages", async () => {
+  const taskChild = new FakeChildProcess();
+  taskChild.stdin.holdWrites = true;
+  const events: SubAgentEvent[] = [];
+  const { handle } = await launchRunnerWithChild(taskChild, async (event) => {
+    events.push(event);
+  });
+
+  taskChild.stdout.write('{"type":"worker_connected"}\n');
+  await flushEvents();
+
+  const sendPromise = handle.sendUserMessage({ text: "hello", images: [] });
+  await flushEvents();
+
+  assert.deepEqual(events, [{ type: "worker_connected" }]);
+  assert.equal(taskChild.stdin.writes.length, 1);
+  assert.match(taskChild.stdin.writes[0] ?? "", /"type":"start_task"/);
+
+  taskChild.stdin.holdWrites = false;
+  taskChild.stdin.releaseNextWrite();
+  await flushEvents();
+  await sendPromise;
+
+  assert.equal(taskChild.stdin.writes.length, 2);
+  assert.match(taskChild.stdin.writes[1] ?? "", /"type":"user_message"/);
 });
 
 test("DockerSandboxRunner terminates the container if event delivery rejects", async () => {

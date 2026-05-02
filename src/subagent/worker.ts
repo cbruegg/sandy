@@ -68,6 +68,12 @@ function parseHostCommand(raw: string): HostCommand {
   return parsed;
 }
 
+function assertTaskStarted(taskStarted: boolean, commandType: HostCommand["type"]): void {
+  if (!taskStarted) {
+    throw new Error(`${commandType} command received before start_task`);
+  }
+}
+
 function progressFromTodoList(item: TodoListItem): string | null {
   const next = item.items.find((entry) => !entry.completed);
   if (!next) {
@@ -391,12 +397,15 @@ export async function main(): Promise<void> {
           break;
         }
         case "user_message":
+          assertTaskStarted(taskStarted, command.type);
           enqueueTurn(buildCodexInputWithImages(command.input.text, command.input.images));
           break;
         case "privilege_result":
+          assertTaskStarted(taskStarted, command.type);
           enqueueTurn(buildPrivilegeResolutionInput(command.result));
           break;
         case "mark_finished":
+          assertTaskStarted(taskStarted, command.type);
           enqueueMarkedFinish();
           break;
         case "cancel":
