@@ -93,7 +93,7 @@ export const workerToolEntries = [
   ),
   defineWorkerTool(
     completeTaskToolName,
-    "Signal to the host that the tasks the user stated so far are fully complete. You *must* emit this at the very end.",
+    "Signal to the host that the tasks the user stated so far are fully complete. You *must* emit this at the very end, but only after you have emitted the last user-facing message.",
     false,
     completeTaskSchema,
   ),
