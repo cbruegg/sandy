@@ -41,7 +41,7 @@ test("SandyMcpAdminService lists stdio servers without OAuth state", () => {
       transport: "stdio",
       command: "node",
       args: ["build/index.js"],
-      cwd: "/tmp/spotify",
+      workingDirectory: "/tmp/spotify",
       env: {
         SPOTIFY_CLIENT_ID: "client-id",
       },
@@ -53,7 +53,7 @@ test("SandyMcpAdminService lists stdio servers without OAuth state", () => {
     transport: "stdio",
     command: "node",
     args: ["build/index.js"],
-    cwd: "/tmp/spotify",
+    workingDirectory: "/tmp/spotify",
     envKeys: ["SPOTIFY_CLIENT_ID"],
     oauthConfigured: false,
   }]);
@@ -65,7 +65,7 @@ test("SandyMcpAdminService rejects OAuth login for stdio servers", async () => {
       transport: "stdio",
       command: "node",
       args: ["build/index.js"],
-      cwd: "/tmp/spotify",
+      workingDirectory: "/tmp/spotify",
       env: {},
     },
   });

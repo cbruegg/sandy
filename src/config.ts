@@ -184,6 +184,7 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
           transport: mcpStdioTransportSchema,
           command: z.string().min(1),
           args: z.array(z.string()).default([]),
+          working_directory: z.string().min(1).optional(),
           cwd: z.string().min(1).optional(),
           env: z.record(z.string(), z.string()).default({}),
         }).strict(),
@@ -235,7 +236,7 @@ export type McpServerConfig =
     transport: "stdio";
     command: string;
     args: string[];
-    cwd: string | null;
+    workingDirectory: string | null;
     env: Record<string, string>;
   };
 
@@ -351,7 +352,7 @@ function resolveCodexAuthFile(configuredPath: string | null | undefined): string
 function resolveMcpWorkingDirectory(configuredPath: string): string {
   const expandedPath = expandHomeShorthand(configuredPath);
   if (!isAbsolute(expandedPath)) {
-    throw new Error('mcp.servers.<name>.cwd must be an absolute path or start with "~".');
+    throw new Error('mcp.servers.<name>.working_directory must be an absolute path or start with "~".');
   }
   return resolve(expandedPath);
 }
@@ -369,7 +370,11 @@ function normalizeMcpServerConfig(config: SandyConfigFile["mcp"]["servers"][stri
     transport: config.transport,
     command: config.command,
     args: config.args,
-    cwd: config.cwd ? resolveMcpWorkingDirectory(config.cwd) : null,
+    workingDirectory: config.working_directory
+      ? resolveMcpWorkingDirectory(config.working_directory)
+      : config.cwd
+        ? resolveMcpWorkingDirectory(config.cwd)
+        : null,
     env: config.env,
   };
 }

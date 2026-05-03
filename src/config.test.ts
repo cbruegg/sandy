@@ -593,7 +593,7 @@ allowed_user = "123456"
 transport = "stdio"
 command = "node"
 args = ["build/index.js"]
-cwd = "${localMcpDirectory}"
+working_directory = "${localMcpDirectory}"
 
 [mcp.servers.local.env]
 FOO = "bar"
@@ -603,7 +603,7 @@ FOO = "bar"
       transport: "stdio",
       command: "node",
       args: ["build/index.js"],
-      cwd: localMcpDirectory,
+      workingDirectory: localMcpDirectory,
       env: {
         FOO: "bar",
       },
@@ -613,7 +613,7 @@ FOO = "bar"
   }
 });
 
-test("parseConfigToml expands tilde-prefixed stdio cwd values", async () => {
+test("parseConfigToml expands tilde-prefixed stdio working_directory values", async () => {
   const root = await mkdtemp(join(tmpdir(), "sandy-config-"));
   const fakeHome = await mkdtemp(join(root, "home-"));
   const workingDirectory = join(fakeHome, "mcp", "spotify");
@@ -633,14 +633,14 @@ allowed_user = "123456"
 [mcp.servers.spotify]
 transport = "stdio"
 command = "node"
-cwd = "~/mcp/spotify"
+working_directory = "~/mcp/spotify"
 `);
 
     assert.deepEqual(config.mcpServers["spotify"], {
       transport: "stdio",
       command: "node",
       args: [],
-      cwd: workingDirectory,
+      workingDirectory,
       env: {},
     });
   } finally {
@@ -653,7 +653,7 @@ cwd = "~/mcp/spotify"
   }
 });
 
-test("parseConfigToml rejects relative stdio cwd values", () => {
+test("parseConfigToml rejects relative stdio working_directory values", () => {
   assert.throws(() => {
     parseConfigToml(`
 [channel]
@@ -666,9 +666,41 @@ allowed_user = "123456"
 [mcp.servers.local]
 transport = "stdio"
 command = "node"
-cwd = "./tools/local-mcp"
+working_directory = "./tools/local-mcp"
 `);
-  }, /cwd must be an absolute path/);
+  }, /working_directory must be an absolute path/);
+});
+
+test("parseConfigToml accepts legacy stdio cwd values", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sandy-config-"));
+  const configFilePath = join(root, "config.toml");
+  const localMcpDirectory = join(root, "tools", "local-mcp");
+
+  try {
+    const config = parseConfigToml(`
+[channel]
+kind = "telegram"
+
+[channel.telegram]
+bot_token = "telegram-token"
+allowed_user = "123456"
+
+[mcp.servers.local]
+transport = "stdio"
+command = "node"
+cwd = "${localMcpDirectory}"
+`, configFilePath);
+
+    assert.deepEqual(config.mcpServers["local"], {
+      transport: "stdio",
+      command: "node",
+      args: [],
+      workingDirectory: localMcpDirectory,
+      env: {},
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("parseConfigToml rejects a missing telegram allowed_user", () => {

@@ -26,7 +26,7 @@ type McpServerStatus =
     transport: "stdio";
     command: string;
     args: string[];
-    cwd: string | null;
+    workingDirectory: string | null;
     envKeys: string[];
     oauthConfigured: false;
   };
@@ -53,7 +53,7 @@ export class SandyMcpAdminService {
         transport: config.transport,
         command: config.command,
         args: config.args,
-        cwd: config.cwd,
+        workingDirectory: config.workingDirectory,
         envKeys: Object.keys(config.env).sort(),
         oauthConfigured: false,
       };
@@ -69,7 +69,7 @@ export class SandyMcpAdminService {
           transport: config.transport,
           command: config.command,
           args: config.args,
-          cwd: config.cwd,
+          workingDirectory: config.workingDirectory,
           envKeys: Object.keys(config.env).sort(),
           oauthConfigured: false,
         },

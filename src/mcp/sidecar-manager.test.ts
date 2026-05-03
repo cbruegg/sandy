@@ -431,7 +431,7 @@ test("McpSidecarManager forwards stdio MCP requests to the host registry", async
         transport: "stdio",
         command: "node",
         args: ["build/index.js"],
-        cwd: "/tmp/spotify",
+        workingDirectory: "/tmp/spotify",
         env: {},
       },
     },

@@ -12,7 +12,7 @@ const stdioServerSchema = z.object({
   transport: z.literal("stdio"),
   command: z.string().min(1),
   args: z.array(z.string()),
-  cwd: z.string().min(1).nullable(),
+  workingDirectory: z.string().min(1).nullable(),
   env: z.record(z.string(), z.string()),
 });
 

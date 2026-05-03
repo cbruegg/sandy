@@ -94,7 +94,7 @@ export class HostMcpServerRegistry {
       taskId,
       serverId,
       command: config.command,
-      cwd: config.cwd,
+      workingDirectory: config.workingDirectory,
     });
 
     const client = this.options.clientFactory?.() ?? new Client({
@@ -104,7 +104,7 @@ export class HostMcpServerRegistry {
     const transport = this.options.transportFactory?.(config) ?? new StdioClientTransport({
       command: config.command,
       args: config.args,
-      cwd: config.cwd ?? undefined,
+      cwd: config.workingDirectory ?? undefined,
       env: buildStdioEnvironment(config.env),
     });
 
@@ -117,7 +117,7 @@ export class HostMcpServerRegistry {
       taskId,
       serverId,
       command: config.command,
-      cwd: config.cwd,
+      workingDirectory: config.workingDirectory,
     });
 
     return client;

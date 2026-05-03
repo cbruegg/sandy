@@ -86,7 +86,7 @@ test("validateOAuthStateFilesForStartup ignores stdio MCP servers", async () => 
         transport: "stdio",
         command: "node",
         args: ["build/index.js"],
-        cwd: null,
+        workingDirectory: null,
         env: {},
       },
     });

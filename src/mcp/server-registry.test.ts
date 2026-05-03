@@ -10,7 +10,7 @@ test("McpServerRegistryImpl releases task-scoped stdio servers when a task ends"
         transport: "stdio",
         command: "node",
         args: ["build/index.js"],
-        cwd: null,
+        workingDirectory: null,
         env: {},
       },
     },
