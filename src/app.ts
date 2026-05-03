@@ -157,6 +157,10 @@ export async function startApp(): Promise<void> {
   );
 
   const codexAuthFile = config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthFile : null;
+  const resolveHttpProxyRequest = proxyAuthService
+      ? async (request: HttpProxyAuthRequestMessage) =>
+          await proxyAuthService.resolveProxyRequest(request)
+      : undefined;
   const sandboxRunnerOptions: DockerSandboxRunnerOptions = {
     workerImage: config.workerImage,
     shareRoot: config.shareRoot,
@@ -173,6 +177,15 @@ export async function startApp(): Promise<void> {
           return `http://Bearer:${encodedJwt}@127.0.0.1:8081`;
         }
         : undefined,
+      resolveWorkerImage: () => workerImageManager.getLaunchImage(),
+      workerCodexBinaryPath,
+      networkGuardImage: config.networkGuardImage,
+      workerNetworkName,
+      httpProxyCaCertPath: certificateAuthority?.certPath ?? null,
+      httpProxyConfDirPath: certificateAuthority?.confDirPath ?? null,
+      httpProxyImage: httpTokensEnabled ? config.httpProxyImage : null,
+      resolveHttpProxyRequest,
+      logLevel: config.logLevel,
   }
   const taskBundleLauncherOptions: TaskBundleLauncherOptions = {
     workerImage: config.workerImage,
@@ -187,10 +200,7 @@ export async function startApp(): Promise<void> {
     httpProxyCaCertPath: certificateAuthority?.certPath ?? null,
     httpProxyConfDirPath: certificateAuthority?.confDirPath ?? null,
     httpProxyImage: httpTokensEnabled ? config.httpProxyImage : null,
-    resolveHttpProxyRequest: proxyAuthService
-      ? async (request: HttpProxyAuthRequestMessage) =>
-        await proxyAuthService.resolveProxyRequest(request)
-      : undefined,
+    resolveHttpProxyRequest,
     logLevel: config.logLevel,
   };
   const taskBundleLauncher = new TaskBundleLauncherImpl(taskBundleLauncherOptions);
