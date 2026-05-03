@@ -5,10 +5,10 @@ import {
   buildMainAgentPrompt,
   buildMainAgentThreadOptions,
   CodexMainAgentController,
-} from "./agent/main-agent-controller.js";
-import type { SkillMetadata } from "./skills.js";
-import type { ChannelFormatting, DecideContext } from "./types.js";
-import type { HttpTokenConfig } from "./config.js";
+} from "./main-agent-controller.js";
+import type { SkillMetadata } from "../skills.js";
+import type { ChannelFormatting, DecideContext } from "../types.js";
+import type { HttpTokenConfig } from "../config.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
