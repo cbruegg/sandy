@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { access, chmod, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -179,6 +179,7 @@ async function launchRunnerWithChild(
 
   return {
     handle,
+    runner,
     timers,
     invocations: harness.invocations,
   };
@@ -194,20 +195,6 @@ function parseFirstStartTaskWrite(taskChild: FakeChildProcess): Extract<HostComm
   const firstWrite = taskChild.stdin.writes[0];
   assert.ok(firstWrite);
   return JSON.parse(firstWrite) as Extract<HostCommand, { type: "start_task" }>;
-}
-
-async function waitFor(check: () => Promise<void>, attempts = 10): Promise<void> {
-  let lastError: unknown = null;
-  for (let index = 0; index < attempts; index += 1) {
-    try {
-      await check();
-      return;
-    } catch (error) {
-      lastError = error;
-      await flushEvents();
-    }
-  }
-  throw lastError;
 }
 
 test("DockerSandboxRunner waits for an explicit worker_connected handshake", async () => {
@@ -647,35 +634,33 @@ test("DockerSandboxRunner falls back to a root Docker container when host rm fai
   assert.ok(dockerRun.args.includes("/target"));
 });
 
-test("DockerSandboxRunner mounts a writable worker Codex home from a temp path outside the task share", async () => {
+test("DockerSandboxRunner sends codex config TOML in start_task instead of mounting it", async () => {
   const shareRoot = mkdtempSync(join(tmpdir(), "sandy-share-config-"));
   const taskChild = new FakeChildProcess();
 
-  const { invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
+  const { runner, invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
     shareRoot,
     builtWorkerCodexConfigToml: "model = \"gpt-5\"\n",
   });
 
-  const taskShare = join(shareRoot, "task-1");
+  const taskShare = runner.getTaskSharePath("task-1");
+  assert.ok(taskShare.includes("bundle-"));
   assert.deepEqual(await readdir(taskShare), []);
 
-  const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
+  const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-subagent:latest");
   assert.ok(dockerRunInvocation);
-  const codexMountArg = dockerRunInvocation.args.find((arg) => arg.endsWith(":/run/sandy-codex-seed:ro"));
-  assert.ok(codexMountArg);
-  assert.doesNotMatch(codexMountArg, /\/task-1\/.*:\/run\/sandy-codex-seed:ro/);
-
-  const codexHomeHostPath = codexMountArg.slice(0, codexMountArg.indexOf(":/run/sandy-codex-seed:ro"));
-  assert.match(codexHomeHostPath, /sandy-worker-launch-/);
-  assert.match(codexHomeHostPath, /\/codex-home$/);
-  const configHostPath = join(codexHomeHostPath, "config.toml");
-  assert.equal(await readFile(configHostPath, "utf8"), "model = \"gpt-5\"\n");
+  assert.ok(!dockerRunInvocation.args.some((arg) => arg.endsWith(":/run/sandy-codex-seed:ro")));
   assert.equal(dockerRunInvocation.args.at(-1), "sandy-subagent:latest");
   assert.ok(!dockerRunInvocation.args.includes("--entrypoint"));
   assert.ok(!dockerRunInvocation.args.includes("--user"));
 
+  taskChild.stdout.write('{"type":"worker_connected"}\n');
+  await flushEvents();
+
+  const startTask = parseFirstStartTaskWrite(taskChild);
+  assert.equal(startTask.codexConfigToml, "model = \"gpt-5\"\n");
+
   taskChild.emit("exit", 0, null);
-  await waitFor(() => assert.rejects(access(codexHomeHostPath)));
   await rm(shareRoot, { recursive: true, force: true });
 });
 
@@ -797,11 +782,14 @@ test("DockerSandboxRunner launches a network guard and shares its network namesp
   assert.ok(guardRunInvocation.args.includes("SANDY_NETWORK_GUARD_ALLOWED_LOCAL_CIDRS=192.168.178.0/24,fd00::/8"));
   assert.ok(guardRunInvocation.args.includes(`SANDY_NETWORK_GUARD_ALLOWED_HOSTS=${"sandy-mcp-proxy"}`));
 
+  const guardContainerName = guardRunInvocation.args.find((arg) => arg.startsWith("sandy-netguard-"));
+  assert.ok(guardContainerName);
+
   const workerRunInvocation = invocations.find((invocation) =>
     invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-subagent:latest");
   assert.ok(workerRunInvocation);
   assert.ok(workerRunInvocation.args.includes("--network"));
-  assert.ok(workerRunInvocation.args.includes("container:sandy-netguard-task-1"));
+  assert.ok(workerRunInvocation.args.includes(`container:${guardContainerName}`));
   assert.ok(workerRunInvocation.args.includes("--cap-drop"));
   assert.ok(workerRunInvocation.args.includes("NET_RAW"));
   assert.ok(!workerRunInvocation.args.includes("sandy-mcp-net"));
@@ -1027,11 +1015,17 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
     },
   }, async () => {});
 
+  const guardRunInvocation = invocations.find((invocation) =>
+    invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-network-guard:latest");
+  assert.ok(guardRunInvocation);
+  const guardContainerName = guardRunInvocation.args.find((arg) => arg.startsWith("sandy-netguard-"));
+  assert.ok(guardContainerName);
+
   const proxyRunInvocation = invocations.find((invocation) =>
-    invocation.args[0] === "run" && invocation.args.includes("sandy-http-proxy-task-1"));
+    invocation.args[0] === "run" && invocation.args.some((arg) => arg.startsWith("sandy-http-proxy-")));
   assert.ok(proxyRunInvocation);
   assert.ok(proxyRunInvocation.args.includes("--network"));
-  assert.ok(proxyRunInvocation.args.includes("container:sandy-netguard-task-1"));
+  assert.ok(proxyRunInvocation.args.includes(`container:${guardContainerName}`));
   assert.ok(proxyRunInvocation.args.includes("--cap-drop"));
   assert.ok(proxyRunInvocation.args.includes("NET_ADMIN"));
   assert.ok(proxyRunInvocation.args.includes("sandy-http-proxy:latest"));
@@ -1042,7 +1036,7 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
     invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-subagent:latest");
   assert.ok(workerRunInvocation);
   assert.ok(!workerRunInvocation.args.includes("--add-host"));
-  assert.ok(workerRunInvocation.args.includes("SANDY_HTTP_PROXY_URL=http://Bearer:token@sandy-http-proxy:8081"));
+  assert.ok(!workerRunInvocation.args.includes("SANDY_HTTP_PROXY_URL=http://Bearer:token@sandy-http-proxy:8081"));
   assert.ok(!workerRunInvocation.args.includes("SANDY_HTTP_PROXY_WRAPPER=/usr/local/bin/sandy-http-proxy-exec"));
   assert.ok(!workerRunInvocation.args.some((arg) =>
     arg.endsWith(":/run/sandy-http-token-descriptions.json:ro")));
@@ -1051,14 +1045,12 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
   taskChild.stdout.write('{"type":"worker_connected"}\n');
   await flushEvents();
 
-  assert.deepEqual(parseFirstStartTaskWrite(taskChild).config.httpTokens, [
+  const startTask = parseFirstStartTaskWrite(taskChild);
+  assert.deepEqual(startTask.config.httpTokens, [
     { tokenId: "vid2text", description: "Token for the video transcription API." },
   ]);
-  assert.equal(parseFirstStartTaskWrite(taskChild).config.httpProxyWrapper, "/usr/local/bin/sandy-http-proxy-exec");
-
-  const guardRunInvocation = invocations.find((invocation) =>
-    invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-network-guard:latest");
-  assert.ok(guardRunInvocation);
+  assert.equal(startTask.config.httpProxyWrapper, "/usr/local/bin/sandy-http-proxy-exec");
+  assert.equal(startTask.httpProxyUrl, "http://Bearer:token@sandy-http-proxy:8081");
   assert.ok(!guardRunInvocation.args.includes("sandy-http-proxy"));
 });
 
@@ -1142,14 +1134,16 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
     invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-network-guard:latest");
   assert.ok(guardRunInvocation);
   assert.ok(!guardRunInvocation.args.includes("--network"));
+  const guardContainerName = guardRunInvocation.args.find((arg) => arg.startsWith("sandy-netguard-"));
+  assert.ok(guardContainerName);
 
   const proxyRunInvocation = invocations.find((invocation) =>
-    invocation.args[0] === "run" && invocation.args.includes("sandy-http-proxy-task-1"));
+    invocation.args[0] === "run" && invocation.args.some((arg) => arg.startsWith("sandy-http-proxy-")));
   assert.ok(proxyRunInvocation);
-  assert.ok(proxyRunInvocation.args.includes("container:sandy-netguard-task-1"));
+  assert.ok(proxyRunInvocation.args.includes(`container:${guardContainerName}`));
 
   const workerRunInvocation = invocations.find((invocation) =>
     invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-subagent:latest");
   assert.ok(workerRunInvocation);
-  assert.ok(workerRunInvocation.args.includes("container:sandy-netguard-task-1"));
+  assert.ok(workerRunInvocation.args.includes(`container:${guardContainerName}`));
 });

@@ -1,11 +1,13 @@
+import {mkdir, writeFile} from "node:fs/promises";
 import {createInterface} from "node:readline";
 import {pathToFileURL} from "node:url";
+import {join} from "node:path";
 import {type Input, type Thread, type ThreadEvent, type TodoListItem, type UserInput} from "@openai/codex-sdk";
 import {createCodexClient} from "../codex-client.js";
 import {configureLogger, logger} from "../logger.js";
 import {type HostCommand, type SubAgentEvent,} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
-import {applyWorkerCodexConfigPatch, buildWorkerCodexEnvironment,} from "./worker-codex-config.js";
+import {applyWorkerCodexConfigPatch, buildWorkerCodexEnvironment, workerCodexHomePath,} from "./worker-codex-config.js";
 import {sandyMcpServerId} from "./worker-tools.js";
 import {
   buildInitialTaskInput,
@@ -206,8 +208,6 @@ export async function main(): Promise<void> {
     },
   });
 
-  await applyWorkerCodexConfigPatch();
-  const workerCodexEnvironment = buildWorkerCodexEnvironment();
   let thread: Thread | null = null;
 
   let currentAbort: AbortController | null = null;
@@ -285,6 +285,19 @@ export async function main(): Promise<void> {
           if (taskStarted) {
             throw new Error("start_task command received after task already started");
           }
+          for (const [name, value] of Object.entries(command.environment)) {
+            process.env[name] = value;
+          }
+          if (command.httpProxyUrl) {
+            process.env["SANDY_HTTP_PROXY_URL"] = command.httpProxyUrl;
+          }
+          process.env["SANDY_TASK_ID"] = command.taskId;
+          if (command.codexConfigToml) {
+            await mkdir(workerCodexHomePath, {recursive: true});
+            await writeFile(join(workerCodexHomePath, "config.toml"), command.codexConfigToml, "utf8");
+          }
+          await applyWorkerCodexConfigPatch();
+          const workerCodexEnvironment = buildWorkerCodexEnvironment();
           const codex = command.config.openAiApiKey
             ? await createCodexClient({ apiKey: command.config.openAiApiKey, env: workerCodexEnvironment })
             : await createCodexClient({ env: workerCodexEnvironment });

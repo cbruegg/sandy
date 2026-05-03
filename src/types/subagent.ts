@@ -78,10 +78,14 @@ export type WorkerStartConfig = {
 export type HostCommand =
   | {
       type: "start_task";
+      taskId: string;
       taskBrief: string;
       input: TaskInputPayload;
       taskLanguage: string;
       config: WorkerStartConfig;
+      environment: Record<string, string>;
+      codexConfigToml: string | null;
+      httpProxyUrl: string | null;
     }
   | {
       type: "user_message";

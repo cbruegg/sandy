@@ -1,19 +1,20 @@
-import {copyFile, mkdir, mkdtemp, readdir, rm, writeFile} from "node:fs/promises";
+import {readdir, rm} from "node:fs/promises";
 import {type ChildProcessWithoutNullStreams, spawn} from "node:child_process";
-import {tmpdir} from "node:os";
 import {join, relative, resolve} from "node:path";
 import {createInterface} from "node:readline";
 import type {WorkerNetworkConfig} from "../config.js";
 import {logger, type LogLevel} from "../logger.js";
-import {sharedWorkspaceMountPath} from "../shared-workspace.js";
-import {workerSkillsPath} from "../subagent/worker-codex-config.js";
 import type {HostCommand, PrivilegeResolutionResult, SubAgentEvent, TaskInputPayload} from "../types.js";
 import {parseSubAgentEvent, serializeHostCommand} from "../types.js";
-import { parseHttpProxyContainerMessage, serializeHttpProxyHostMessage, type HttpProxyAuthRequestMessage, type HttpProxyAuthResponseMessage } from "../http/http-proxy-protocol.js";
-import {launchNetworkGuardContainer, type StartedNetworkGuard} from "./network-guard.js";
+import {
+  type HttpProxyAuthRequestMessage,
+  type HttpProxyAuthResponseMessage,
+} from "../http/http-proxy-protocol.js";
 import type {LaunchTaskRequest, SandboxHandle, SandboxRunner, ShareInspection} from "./sandbox-runner.js";
+import {TaskBundleLauncherImpl} from "./task-bundle-launcher.js";
+import {TaskBundlePoolImpl} from "./task-bundle-pool.js";
+import type {ReservedTaskBundle} from "./task-bundle-types.js";
 
-const workerCodexSeedMountPath = "/run/sandy-codex-seed";
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 300_000;
 
 type DockerSandboxRunnerOptions = {
@@ -42,21 +43,14 @@ type DockerSandboxRunnerOptions = {
   resolveHttpProxyRequest?: (request: HttpProxyAuthRequestMessage) => Promise<HttpProxyAuthResponseMessage>;
 };
 
-type ActiveTaskContainer = {
-  child: ChildProcessWithoutNullStreams;
-  guardChild: ChildProcessWithoutNullStreams | null;
-  guardContainerName: string | null;
-  proxyChild: ChildProcessWithoutNullStreams | null;
-  proxyContainerName: string | null;
-  cleanupWorkerCodexConfig: () => Promise<void>;
-};
-
 export class DockerSandboxRunner implements SandboxRunner {
   private readonly handshakeTimeoutMs: number;
   private readonly spawnImpl: typeof spawn;
   private readonly setTimeoutImpl: typeof setTimeout;
   private readonly clearTimeoutImpl: typeof clearTimeout;
-  private readonly activeContainers = new Map<string, ActiveTaskContainer>();
+  private readonly pool: TaskBundlePoolImpl;
+  private readonly taskSharePaths = new Map<string, string>();
+  private readonly retiredBundles = new Set<string>();
   private shutdownPromise: Promise<void> | null = null;
   private shutdownRequested = false;
 
@@ -65,6 +59,33 @@ export class DockerSandboxRunner implements SandboxRunner {
     this.spawnImpl = options.spawnImpl ?? spawn;
     this.setTimeoutImpl = options.setTimeoutImpl ?? setTimeout;
     this.clearTimeoutImpl = options.clearTimeoutImpl ?? clearTimeout;
+
+    const launcher = new TaskBundleLauncherImpl({
+      workerImage: options.workerImage,
+      resolveWorkerImage: options.resolveWorkerImage,
+      networkGuardImage: options.networkGuardImage,
+      shareRoot: options.shareRoot,
+      codexAuthFile: options.codexAuthFile,
+      skillsDirectory: options.skillsDirectory,
+      workerCodexBinaryPath: options.workerCodexBinaryPath,
+      workerNetworkName: options.workerNetworkName,
+      workerNetwork: options.workerNetwork,
+      httpProxyCaCertPath: options.httpProxyCaCertPath,
+      httpProxyConfDirPath: options.httpProxyConfDirPath,
+      httpProxyImage: options.httpProxyImage,
+      resolveHttpProxyRequest: options.resolveHttpProxyRequest,
+      handshakeTimeoutMs: options.handshakeTimeoutMs,
+      logLevel: options.logLevel,
+      spawnImpl: options.spawnImpl,
+      setTimeoutImpl: options.setTimeoutImpl,
+      clearTimeoutImpl: options.clearTimeoutImpl,
+    });
+
+    this.pool = new TaskBundlePoolImpl(launcher);
+  }
+
+  async start(): Promise<void> {
+    await this.pool.start();
   }
 
   async launchTask(
@@ -75,63 +96,15 @@ export class DockerSandboxRunner implements SandboxRunner {
       throw new Error("Sandbox runner is shutting down and cannot launch new tasks.");
     }
 
-    const sharePath = this.getTaskSharePath(request.taskId);
-    await mkdir(sharePath, {recursive: true});
+    const bundle = await this.pool.acquire(request.taskId);
+    this.taskSharePaths.set(request.taskId, bundle.shareHostPath);
+
     const builtWorkerConfig = this.options.workerCodexConfigBuilder(request.taskId);
-    const workerCodexConfig = builtWorkerConfig.codexConfigToml;
-    const workerEnvironment = builtWorkerConfig.environment;
     const httpProxyUrl = this.options.httpProxyUrlFactory?.(request.taskId) ?? null;
     if (httpProxyUrl) {
       assertHttpProxySupportConfigured(this.options);
     }
-    const workerImage = this.resolveWorkerImage();
-    let workerTempDir: string | null = null;
-    let workerCodexHomeTempDir: string | null = null;
-    const needsWorkerCodexHome = Boolean(this.options.codexAuthFile || workerCodexConfig);
-    if (needsWorkerCodexHome) {
-      workerTempDir = await mkdtemp(join(tmpdir(), "sandy-worker-launch-"));
-    }
-    if (needsWorkerCodexHome) {
-      workerCodexHomeTempDir = join(workerTempDir!, "codex-home");
-      await mkdir(workerCodexHomeTempDir, {recursive: true});
-      if (this.options.codexAuthFile) {
-        try {
-          await copyFile(this.options.codexAuthFile, join(workerCodexHomeTempDir, "auth.json"));
-        } catch (error) {
-          await rm(workerTempDir!, {recursive: true, force: true});
-          throw error;
-        }
-      }
-      if (workerCodexConfig) {
-        try {
-          await writeFile(join(workerCodexHomeTempDir, "config.toml"), workerCodexConfig, "utf8");
-        } catch (error) {
-          await rm(workerTempDir!, {recursive: true, force: true});
-          throw error;
-        }
-      }
-    }
 
-    const hasProxyConfig = Boolean(
-      httpProxyUrl
-      && this.options.httpProxyImage
-      && this.options.httpProxyConfDirPath
-      && this.options.httpProxyCaCertPath
-      && this.options.resolveHttpProxyRequest
-    );
-
-    let tempConfigCleanedUp = false;
-    const cleanupWorkerCodexConfig = async (): Promise<void> => {
-      if (tempConfigCleanedUp) {
-        return;
-      }
-      tempConfigCleanedUp = true;
-      if (workerTempDir) {
-        await rm(workerTempDir, {recursive: true, force: true});
-      }
-    };
-
-    const containerName = `sandy-${request.taskId}`;
     let finished = false;
     let workerConnected = false;
     let taskInitialized = false;
@@ -147,172 +120,17 @@ export class DockerSandboxRunner implements SandboxRunner {
       };
     });
     void taskInitializedBarrier.catch(() => {});
+
     logger.info("sandbox.launching", {
       chatId: request.chatId,
       taskId: request.taskId,
       taskName: request.taskName,
-      sharePath,
-      workerImage,
+      sharePath: bundle.shareHostPath,
+      workerImage: this.resolveWorkerImage(),
       workerNetworkMode: this.options.workerNetwork.mode,
     });
 
-    let networkGuard: StartedNetworkGuard | null = null;
-    try {
-      networkGuard = await this.launchNetworkGuard(request.taskId, httpProxyUrl !== null);
-    } catch (error) {
-      await cleanupWorkerCodexConfig();
-      throw error;
-    }
-
-    let proxyContainerName: string | null = null;
-    let proxyChild: ChildProcessWithoutNullStreams | null = null;
-
-    if (hasProxyConfig) {
-      if (!networkGuard) {
-        throw new Error("HTTP proxy requires a network guard container.");
-      }
-      proxyContainerName = `sandy-http-proxy-${request.taskId}`;
-      const proxyDockerArgs = [
-        "run",
-        "--rm",
-        "-i",
-        "--name",
-        proxyContainerName,
-        "--network",
-        `container:${networkGuard.containerName}`,
-        "--cap-drop",
-        "NET_ADMIN",
-        "--cap-drop",
-        "NET_RAW",
-        "-v",
-        `${this.options.httpProxyConfDirPath}:/run/sandy-mitmproxy-conf:ro`,
-        "-e",
-        "MITMPROXY_CONFDIR=/run/sandy-mitmproxy-conf",
-        this.options.httpProxyImage!,
-      ];
-
-      proxyChild = this.spawnImpl("docker", proxyDockerArgs, {
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-
-      try {
-        await this.attachProxyControlChannelAndWaitForReady(
-          proxyChild,
-          proxyContainerName,
-          async (proxyRequest) => await this.options.resolveHttpProxyRequest!(proxyRequest),
-        );
-      } catch (error) {
-        proxyChild.kill("SIGTERM");
-        await cleanupWorkerCodexConfig();
-        throw error;
-      }
-    }
-
-    const dockerArgs = [
-      "run",
-      "--rm",
-      "-i",
-      "--name",
-      containerName,
-      // Drop network-manipulation capabilities so the worker cannot rewrite
-      // the guard's firewall rules and break out of network isolation.
-      "--cap-drop",
-      "NET_ADMIN",
-      "--cap-drop",
-      "NET_RAW",
-      "-e",
-      `SANDY_TASK_ID=${request.taskId}`,
-    ];
-
-    if (this.options.logLevel) {
-      dockerArgs.push("-e", `SANDY_LOG_LEVEL=${this.options.logLevel}`);
-    }
-
-    if (this.options.workerCodexBinaryPath) {
-      dockerArgs.push("-e", "SANDY_CODEX_PATH=/usr/local/bin/codex");
-    }
-
-    for (const [name, value] of Object.entries(workerEnvironment)) {
-      dockerArgs.push("-e", `${name}=${value}`);
-    }
-
-    if (httpProxyUrl) {
-      dockerArgs.push("-e", `SANDY_HTTP_PROXY_URL=${httpProxyUrl}`);
-    }
-
-    if (httpProxyUrl) {
-      // The proxy CA must be present when proxying is enabled; the earlier
-      // assertion guarantees this, but we assert again at the point of use
-      // so the dependency is visible here.
-      if (!this.options.httpProxyCaCertPath) {
-        throw new Error("HTTP proxy CA cert path is required when proxy URL is set.");
-      }
-      // Mount the Sandy CA into the system anchors directory so the worker
-      // retains the default system trust store. The entrypoint runs
-      // update-ca-certificates to refresh the bundle before starting.
-      dockerArgs.push("-v", `${this.options.httpProxyCaCertPath}:/etc/pki/trust/anchors/sandy-ca.pem:ro`);
-    }
-
-    if (workerCodexHomeTempDir) {
-      dockerArgs.push(
-        "-v",
-        `${workerCodexHomeTempDir}:${workerCodexSeedMountPath}:ro`,
-      );
-    }
-
-    if (this.options.workerCodexBinaryPath) {
-      dockerArgs.push(
-        "-v",
-        `${this.options.workerCodexBinaryPath}:/usr/local/bin/codex:ro`,
-      );
-    }
-
-    if (this.options.skillsDirectory) {
-      dockerArgs.push(
-        "-v",
-        `${this.options.skillsDirectory}:${workerSkillsPath}:ro`,
-      );
-    }
-
-    if (networkGuard) {
-      // Share the guard's namespace so the worker gets internet access through
-      // the guard's firewall, but cannot talk to the local network directly.
-      dockerArgs.push(
-        "--network",
-        `container:${networkGuard.containerName}`,
-      );
-    } else if (this.options.workerNetworkName) {
-      dockerArgs.push(
-        "--network",
-        this.options.workerNetworkName,
-      );
-    }
-
-    dockerArgs.push(
-      "-v",
-      `${sharePath}:${sharedWorkspaceMountPath}`,
-      workerImage,
-    );
-
-    const child = this.spawnImpl("docker", dockerArgs, {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    this.activeContainers.set(containerName, {
-      child,
-      guardChild: networkGuard?.child ?? null,
-      guardContainerName: networkGuard?.containerName ?? null,
-      proxyChild,
-      proxyContainerName,
-      cleanupWorkerCodexConfig,
-    });
-
-    const cleanupTaskContainers = async (): Promise<void> => {
-      await this.cleanupTaskContainers(
-        containerName,
-        networkGuard?.containerName ?? null,
-        proxyContainerName,
-      );
-    };
+    const child = bundle.child;
 
     const handshakeTimer = this.setTimeoutImpl(() => {
       if (workerConnected || terminalEventSeen || shutdownRequested) {
@@ -324,8 +142,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       });
       void reportDisconnect("Sub-agent worker did not complete startup handshake in time.");
       shutdownRequested = true;
-      child.kill("SIGTERM");
-      void cleanupTaskContainers();
+      void this.retireBundle(bundle);
     }, this.handshakeTimeoutMs);
 
     const clearHandshakeTimer = () => {
@@ -344,10 +161,14 @@ export class DockerSandboxRunner implements SandboxRunner {
         try {
           await this.sendToWorker(child, {
             type: "start_task",
+            taskId: request.taskId,
             taskBrief: request.taskBrief,
             input: request.initialInput,
             taskLanguage: request.taskLanguage,
             config: request.workerStartConfig,
+            environment: builtWorkerConfig.environment,
+            codexConfigToml: builtWorkerConfig.codexConfigToml,
+            httpProxyUrl,
           });
           taskInitialized = true;
           resolveTaskInitialized?.();
@@ -370,8 +191,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       finished = true;
       shutdownRequested = true;
       clearHandshakeTimer();
-      child.kill("SIGTERM");
-      await cleanupTaskContainers();
+      await this.retireBundle(bundle);
     };
 
     const emitEventSafely = (event: SubAgentEvent): void => {
@@ -400,9 +220,9 @@ export class DockerSandboxRunner implements SandboxRunner {
     this.attachStdoutParser(child, emitEventSafely);
     logger.info("sandbox.started", {
       taskId: request.taskId,
-      containerName,
-      guardContainerName: networkGuard?.containerName ?? null,
-      proxyContainerName,
+      containerName: bundle.containerName,
+      guardContainerName: bundle.guardContainerName,
+      proxyContainerName: bundle.proxyContainerName,
     });
 
     child.stderr.on("data", (chunk) => {
@@ -416,14 +236,12 @@ export class DockerSandboxRunner implements SandboxRunner {
     });
 
     child.on("error", (error) => {
-      this.activeContainers.delete(containerName);
       if (finished) {
         return;
       }
       finished = true;
       clearHandshakeTimer();
-      void cleanupWorkerCodexConfig();
-      void cleanupTaskContainers();
+      void this.retireBundle(bundle);
       logger.error("sandbox.launch_failed", {
         taskId: request.taskId,
         message: error.message,
@@ -442,9 +260,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     });
 
     child.on("exit", (code, signal) => {
-      this.activeContainers.delete(containerName);
-      void cleanupWorkerCodexConfig();
-      void cleanupTaskContainers();
+      void this.retireBundle(bundle);
       if (finished) {
         return;
       }
@@ -469,14 +285,14 @@ export class DockerSandboxRunner implements SandboxRunner {
       void reportDisconnect(`Sub-agent container exited before task completion (code=${code}, signal=${signal}).`);
     });
 
-    networkGuard?.child.on("error", (error) => {
+    bundle.guardChild?.on("error", (error) => {
       logger.error("sandbox.network_guard_failed", {
         taskId: request.taskId,
         message: error.message,
       });
     });
 
-    networkGuard?.child.on("exit", (code, signal) => {
+    bundle.guardChild?.on("exit", (code, signal) => {
       if (finished || shutdownRequested || terminalEventSeen) {
         return;
       }
@@ -488,18 +304,17 @@ export class DockerSandboxRunner implements SandboxRunner {
       void reportDisconnect(`Task network guard exited before task completion (code=${code}, signal=${signal}).`);
       shutdownRequested = true;
       clearHandshakeTimer();
-      child.kill("SIGTERM");
-      void cleanupTaskContainers();
+      void this.retireBundle(bundle);
     });
 
-    proxyChild?.on("error", (error) => {
+    bundle.proxyChild?.on("error", (error) => {
       logger.error("sandbox.http_proxy_failed", {
         taskId: request.taskId,
         message: error.message,
       });
     });
 
-    proxyChild?.on("exit", (code, signal) => {
+    bundle.proxyChild?.on("exit", (code, signal) => {
       if (finished || shutdownRequested || terminalEventSeen) {
         return;
       }
@@ -511,8 +326,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       void reportDisconnect(`HTTP proxy container exited before task completion (code=${code}, signal=${signal}).`);
       shutdownRequested = true;
       clearHandshakeTimer();
-      child.kill("SIGTERM");
-      void cleanupTaskContainers();
+      void this.retireBundle(bundle);
     });
 
     return {
@@ -572,8 +386,7 @@ export class DockerSandboxRunner implements SandboxRunner {
           taskId: request.taskId,
         });
         child.stdin.end();
-        child.kill("SIGTERM");
-        await cleanupTaskContainers();
+        await this.retireBundle(bundle);
       },
       cancel: async (reason: string) => {
         finished = true;
@@ -587,8 +400,7 @@ export class DockerSandboxRunner implements SandboxRunner {
           type: "cancel",
           reason,
         });
-        child.kill("SIGTERM");
-        await cleanupTaskContainers();
+        await this.retireBundle(bundle);
       },
     };
   }
@@ -597,31 +409,30 @@ export class DockerSandboxRunner implements SandboxRunner {
     return this.options.resolveWorkerImage?.() ?? this.options.workerImage;
   }
 
+  private async retireBundle(bundle: ReservedTaskBundle): Promise<void> {
+    if (this.retiredBundles.has(bundle.bundleId)) {
+      return;
+    }
+    this.retiredBundles.add(bundle.bundleId);
+    try {
+      await this.pool.retireBundle(bundle);
+    } catch (error) {
+      logger.error("sandbox.retire_bundle_failed", {
+        taskId: bundle.taskId,
+        bundleId: bundle.bundleId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   async shutdown(): Promise<void> {
     if (this.shutdownPromise) {
       return this.shutdownPromise;
     }
-
     this.shutdownRequested = true;
-    const activeContainers = [...this.activeContainers.entries()];
-    this.shutdownPromise = Promise.all(activeContainers.map(async ([containerName, activeContainer]) => {
-      logger.info("sandbox.shutdown_terminating", {
-        containerName,
-      });
-      activeContainer.child.kill("SIGTERM");
-      activeContainer.guardChild?.kill("SIGTERM");
-      activeContainer.proxyChild?.kill("SIGTERM");
-      await Promise.all([
-        activeContainer.cleanupWorkerCodexConfig(),
-        this.cleanupTaskContainers(containerName, activeContainer.guardContainerName, activeContainer.proxyContainerName),
-      ]);
-      this.activeContainers.delete(containerName);
-    })).then(() => {
-      logger.info("sandbox.shutdown_complete", {
-        containerCount: activeContainers.length,
-      });
+    this.shutdownPromise = this.pool.shutdown().then(() => {
+      logger.info("sandbox.shutdown_complete", {});
     });
-
     return this.shutdownPromise;
   }
 
@@ -674,6 +485,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       taskId,
       sharePath,
     });
+    this.taskSharePaths.delete(taskId);
   }
 
   private async deleteTaskShareWithDocker(taskId: string, sharePath: string): Promise<void> {
@@ -725,6 +537,14 @@ export class DockerSandboxRunner implements SandboxRunner {
   }
 
   getTaskSharePath(taskId: string): string {
+    const trackedPath = this.taskSharePaths.get(taskId);
+    if (trackedPath) {
+      return trackedPath;
+    }
+    return this.getLegacyTaskSharePath(taskId);
+  }
+
+  private getLegacyTaskSharePath(taskId: string): string {
     const shareRoot = resolve(this.options.shareRoot);
     const sharePath = resolve(shareRoot, taskId);
     const relativePath = relative(shareRoot, sharePath);
@@ -759,10 +579,10 @@ export class DockerSandboxRunner implements SandboxRunner {
             text: event.text,
           });
         }
-         if (event.type === "worker_log") {
-           this.forwardContainerLog(event.level, event.event, event.data);
-           return;
-         }
+        if (event.type === "worker_log") {
+          this.forwardContainerLog(event.level, event.event, event.data);
+          return;
+        }
         onEvent(event);
       } catch {
         logger.warn("sandbox.stdout_non_json", {
@@ -803,148 +623,13 @@ export class DockerSandboxRunner implements SandboxRunner {
     }
   }
 
-  private async launchNetworkGuard(taskId: string, needsNamespaceHolder: boolean): Promise<StartedNetworkGuard | null> {
-    return await launchNetworkGuardContainer({
-      taskId,
-      workerNetwork: this.options.workerNetwork,
-      networkGuardImage: this.options.networkGuardImage,
-      workerNetworkName: this.options.workerNetworkName,
-      // HTTP proxying still needs a shared namespace container even when the
-      // worker network mode is unrestricted, because the proxy binds localhost.
-      needsNamespaceHolder,
-      handshakeTimeoutMs: this.handshakeTimeoutMs,
-      spawnImpl: this.spawnImpl,
-      setTimeoutImpl: this.setTimeoutImpl,
-      clearTimeoutImpl: this.clearTimeoutImpl,
-      cleanupContainer: async (containerName) => this.cleanupContainer(containerName),
-    });
-  }
-
-  private async attachProxyControlChannelAndWaitForReady(
-    proxyChild: ChildProcessWithoutNullStreams,
-    containerName: string,
-    resolveHttpProxyRequest: (request: HttpProxyAuthRequestMessage) => Promise<HttpProxyAuthResponseMessage>,
-  ): Promise<void> {
-    const proxyStdout = createInterface({
-      input: proxyChild.stdout,
-      crlfDelay: Infinity,
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      let settled = false;
-      const timer = this.setTimeoutImpl(() => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        proxyChild.kill("SIGTERM");
-        reject(new Error("HTTP proxy container did not become ready in time."));
-      }, this.handshakeTimeoutMs);
-
-      proxyStdout.on("line", (line) => {
-        try {
-          const message = parseHttpProxyContainerMessage(line.trim());
-           if (message.type === "log") {
-             this.forwardContainerLog(message.level, message.event, message.data, { containerName, source: "http_proxy_container" });
-             return;
-           }
-          if (message.type === "auth_request") {
-            void this.handleHttpProxyAuthRequest(proxyChild, resolveHttpProxyRequest, message);
-            return;
-          }
-          if (message.type === "ready") {
-            if (settled) {
-              return;
-            }
-            settled = true;
-            this.clearTimeoutImpl(timer);
-            resolve();
-            return;
-          }
-          if (message.type === "fatal_error") {
-            if (settled) {
-              return;
-            }
-            settled = true;
-            this.clearTimeoutImpl(timer);
-            reject(new Error(message.message ?? "HTTP proxy container failed during startup."));
-          }
-        } catch (error) {
-          logger.error("sandbox.http_proxy_protocol_error", {
-            containerName,
-            line: line.trim(),
-            message: error instanceof Error ? error.message : "Invalid proxy control message.",
-          });
-        }
-      });
-
-      proxyChild.once("error", (error) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        this.clearTimeoutImpl(timer);
-        reject(error);
-      });
-
-      proxyChild.once("exit", (code, signal) => {
-        if (settled) {
-          return;
-        }
-        settled = true;
-        this.clearTimeoutImpl(timer);
-        reject(new Error(`HTTP proxy container exited before ready (code=${code}, signal=${signal}).`));
-      });
-    });
-
-    proxyChild.stderr.on("data", (chunk) => {
-      const message = String(chunk).trim();
-      if (message) {
-        logger.warn("sandbox.http_proxy_stderr", {
-          containerName,
-          message,
-        });
-      }
-    });
-  }
-
-  private async handleHttpProxyAuthRequest(
-    proxyChild: ChildProcessWithoutNullStreams,
-    resolveHttpProxyRequest: (request: HttpProxyAuthRequestMessage) => Promise<HttpProxyAuthResponseMessage>,
-    request: HttpProxyAuthRequestMessage,
-  ): Promise<void> {
-    let response: HttpProxyAuthResponseMessage;
-    try {
-      response = await resolveHttpProxyRequest(request);
-    } catch (error) {
-      response = {
-        type: "auth_response",
-        requestId: request.requestId,
-        outcome: "failed",
-        message: error instanceof Error ? error.message : "Authorization service error.",
-      };
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      proxyChild.stdin.write(serializeHttpProxyHostMessage(response), (error) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-        resolve();
-      });
-    });
-  }
-
   private forwardContainerLog(
     level: "debug" | "info" | "warn" | "error",
     event: string,
     data?: Record<string, unknown>,
-    extraFields?: Record<string, unknown>,
   ): void {
     const payload = {
       source: "worker",
-      ...extraFields,
       ...(data ?? {}),
     };
     switch (level) {
@@ -961,34 +646,6 @@ export class DockerSandboxRunner implements SandboxRunner {
         logger.error(event, payload);
         return;
     }
-  }
-
-  private async cleanupTaskContainers(
-    containerName: string,
-    guardContainerName: string | null,
-    proxyContainerName: string | null,
-  ): Promise<void> {
-    const containerNames = [containerName];
-    if (guardContainerName) {
-      containerNames.push(guardContainerName);
-    }
-    if (proxyContainerName) {
-      containerNames.push(proxyContainerName);
-    }
-    await Promise.all(containerNames.map(async (name) => this.cleanupContainer(name)));
-  }
-
-  private async cleanupContainer(containerName: string): Promise<void> {
-    await new Promise<void>((resolve) => {
-      logger.debug("sandbox.force_remove", {
-        containerName,
-      });
-      const child = this.spawnImpl("docker", ["rm", "-f", containerName], {
-        stdio: "ignore",
-      });
-      child.on("exit", () => resolve());
-      child.on("error", () => resolve());
-    });
   }
 
   private describeWriteFailure(error: unknown): string {
