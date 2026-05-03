@@ -192,8 +192,6 @@ export async function startApp(): Promise<void> {
   const taskBundlePool = new TaskBundlePoolImpl(taskBundleLauncher);
   const sandboxRunner = new DockerSandboxRunner(sandboxRunnerOptions, taskBundlePool);
 
-  sandboxRunner.start();
-
   const orchestrator = new SandyOrchestrator({
     channel,
     mainAgent,
@@ -225,6 +223,8 @@ export async function startApp(): Promise<void> {
    }, workerAccess);
 
   await sidecarManager?.start();
+
+  sandboxRunner.start();
 
   const stopWithLogging = async (step: string, fn: (() => Promise<void>) | null | undefined): Promise<void> => {
     if (!fn) {
