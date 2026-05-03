@@ -8,6 +8,8 @@ import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { DockerSandboxRunner } from "./docker-sandbox-runner.js";
+import { TaskBundleLauncherImpl } from "./task-bundle-launcher.js";
+import { TaskBundlePoolImpl } from "./task-bundle-pool.js";
 import type { ChannelFormatting, HostCommand, SubAgentEvent, WorkerStartConfig } from "../types.js";
 
 const testFormatting: ChannelFormatting = {
@@ -121,6 +123,33 @@ function createSpawnHarness(taskChild: FakeChildProcess) {
   };
 }
 
+type RunnerOptions = ConstructorParameters<typeof DockerSandboxRunner>[0];
+
+function createRunner(options: RunnerOptions): DockerSandboxRunner {
+  const launcher = new TaskBundleLauncherImpl({
+    workerImage: options.workerImage,
+    resolveWorkerImage: options.resolveWorkerImage,
+    networkGuardImage: options.networkGuardImage,
+    shareRoot: options.shareRoot,
+    codexAuthFile: options.codexAuthFile,
+    skillsDirectory: options.skillsDirectory,
+    workerCodexBinaryPath: options.workerCodexBinaryPath,
+    workerNetworkName: options.workerNetworkName,
+    workerNetwork: options.workerNetwork,
+    httpProxyCaCertPath: options.httpProxyCaCertPath,
+    httpProxyConfDirPath: options.httpProxyConfDirPath,
+    httpProxyImage: options.httpProxyImage,
+    resolveHttpProxyRequest: options.resolveHttpProxyRequest,
+    handshakeTimeoutMs: options.handshakeTimeoutMs,
+    logLevel: options.logLevel,
+    spawnImpl: options.spawnImpl,
+    setTimeoutImpl: options.setTimeoutImpl,
+    clearTimeoutImpl: options.clearTimeoutImpl,
+  });
+  const pool = new TaskBundlePoolImpl(launcher);
+  return new DockerSandboxRunner(options, pool);
+}
+
 async function launchRunnerWithChild(
   taskChild: FakeChildProcess,
   onEvent: (event: SubAgentEvent) => Promise<void>,
@@ -137,7 +166,7 @@ async function launchRunnerWithChild(
 ) {
   const timers = createTimerController();
   const harness = createSpawnHarness(taskChild);
-  const runner = new DockerSandboxRunner({
+  const runner = createRunner({
     workerImage: "sandy-subagent:latest",
     resolveWorkerImage: options?.resolveWorkerImage,
     networkGuardImage: "sandy-network-guard:latest",
@@ -240,7 +269,7 @@ test("DockerSandboxRunner passes the configured Codex model in the start_task pa
     return cleanupChild as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const runner = new DockerSandboxRunner({
+  const runner = createRunner({
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
@@ -499,7 +528,7 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
     return cleanupChild as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const runner = new DockerSandboxRunner({
+  const runner = createRunner({
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
@@ -549,7 +578,7 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
 
 test("DockerSandboxRunner inspects and deletes task shares on the host", async () => {
   const shareRoot = mkdtempSync(join(tmpdir(), "sandy-share-test-"));
-  const runner = new DockerSandboxRunner({
+  const runner = createRunner({
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
@@ -601,7 +630,7 @@ test("DockerSandboxRunner falls back to a root Docker container when host rm fai
     return child as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const runner = new DockerSandboxRunner({
+  const runner = createRunner({
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
@@ -745,7 +774,7 @@ test("DockerSandboxRunner launches a network guard and shares its network namesp
     return cleanupChild as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const runner = new DockerSandboxRunner({
+  const runner = createRunner({
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
@@ -825,7 +854,7 @@ test("DockerSandboxRunner reports a disconnect when the network guard exits mid-
     return cleanupChild as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const runner = new DockerSandboxRunner({
+  const runner = createRunner({
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
@@ -875,7 +904,7 @@ test("DockerSandboxRunner reports a disconnect when the network guard exits mid-
 
 test("DockerSandboxRunner rejects share inspection for unknown tasks", async () => {
   const shareRoot = mkdtempSync(join(tmpdir(), "sandy-share-escape-"));
-  const runner = new DockerSandboxRunner({
+  const runner = createRunner({
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
@@ -901,7 +930,7 @@ test("DockerSandboxRunner rejects share inspection for unknown tasks", async () 
 
 test("DockerSandboxRunner rejects share deletion for unknown tasks", async () => {
   const shareRoot = mkdtempSync(join(tmpdir(), "sandy-share-delete-"));
-  const runner = new DockerSandboxRunner({
+  const runner = createRunner({
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
@@ -958,7 +987,7 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
     return cleanupChild as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const runner = new DockerSandboxRunner({
+  const runner = createRunner({
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
@@ -1074,7 +1103,7 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
     return cleanupChild as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const runner = new DockerSandboxRunner({
+  const runner = createRunner({
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",

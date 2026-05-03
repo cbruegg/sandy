@@ -11,12 +11,11 @@ export class TaskBundlePoolImpl implements TaskBundlePool {
 
   constructor(private readonly launcher: TaskBundleLauncher) {}
 
-  start(): Promise<void> {
+  start(): void {
     if (this.shuttingDown) {
-      return Promise.resolve();
+      return;
     }
     this.scheduleReplenish();
-    return Promise.resolve();
   }
 
   async acquire(taskId: string): Promise<ReservedTaskBundle> {

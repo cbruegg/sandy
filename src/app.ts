@@ -17,6 +17,8 @@ import { SandyOrchestrator } from "./orchestrator.js";
 import { TomlPersistentApprovalStore } from "./privilege/persistent-approval-store.js";
 import { PrivilegeBrokerImpl } from "./privilege/privilege-broker.js";
 import { DockerSandboxRunner } from "./sandbox/docker-sandbox-runner.js";
+import { TaskBundleLauncherImpl } from "./sandbox/task-bundle-launcher.js";
+import { TaskBundlePoolImpl } from "./sandbox/task-bundle-pool.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
 import { OpenAiTranscriptionProvider } from "./transcription/openai-transcription-provider.js";
 import { resolvePublishedUpdateSource } from "./build-metadata.js";
@@ -153,38 +155,40 @@ export async function startApp(): Promise<void> {
     workerAccess,
   );
 
-  const sandboxRunner = new DockerSandboxRunner(
-      {
-        workerImage: config.workerImage,
-        resolveWorkerImage: () => workerImageManager.getLaunchImage(),
-        shareRoot: config.shareRoot,
-        codexAuthFile: config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthFile : null,
-        skillsDirectory: config.skillsDirectory,
-        workerCodexBinaryPath,
-        workerCodexConfigBuilder: (taskId) => mcpWorkerLaunchConfigBuilder.build(taskId),
-        httpProxyUrlFactory: httpTokensEnabled
-            ? (taskId) => {
-              const jwt = workerAccess.issueWorkerGrant(taskId).bearerToken;
-              const encodedJwt = encodeURIComponent(jwt);
-              // The worker container shares the network namespace with the proxy
-              // sidecar, so the proxy is reachable on localhost from the worker.
-              return `http://Bearer:${encodedJwt}@127.0.0.1:8081`;
-            }
-            : undefined,
-        networkGuardImage: config.networkGuardImage,
-        workerNetwork: config.workerNetwork,
-        workerNetworkName,
-        httpProxyCaCertPath: certificateAuthority?.certPath ?? null,
-        httpProxyConfDirPath: certificateAuthority?.confDirPath ?? null,
-        httpProxyImage: httpTokensEnabled ? config.httpProxyImage : null,
-        resolveHttpProxyRequest: proxyAuthService
-            ? async (request) => await proxyAuthService.resolveProxyRequest(request)
-            : undefined,
-        logLevel: config.logLevel,
+  const sandboxRunnerOptions = {
+    workerImage: config.workerImage,
+    resolveWorkerImage: () => workerImageManager.getLaunchImage(),
+    shareRoot: config.shareRoot,
+    codexAuthFile: config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthFile : null,
+    skillsDirectory: config.skillsDirectory,
+    workerCodexBinaryPath,
+    workerCodexConfigBuilder: (taskId: string) => mcpWorkerLaunchConfigBuilder.build(taskId),
+    httpProxyUrlFactory: httpTokensEnabled
+      ? (taskId: string) => {
+        const jwt = workerAccess.issueWorkerGrant(taskId).bearerToken;
+        const encodedJwt = encodeURIComponent(jwt);
+        // The worker container shares the network namespace with the proxy
+        // sidecar, so the proxy is reachable on localhost from the worker.
+        return `http://Bearer:${encodedJwt}@127.0.0.1:8081`;
       }
-   );
+      : undefined,
+    networkGuardImage: config.networkGuardImage,
+    workerNetwork: config.workerNetwork,
+    workerNetworkName,
+    httpProxyCaCertPath: certificateAuthority?.certPath ?? null,
+    httpProxyConfDirPath: certificateAuthority?.confDirPath ?? null,
+    httpProxyImage: httpTokensEnabled ? config.httpProxyImage : null,
+    resolveHttpProxyRequest: proxyAuthService
+      ? async (request: import("./http/http-proxy-protocol.js").HttpProxyAuthRequestMessage) =>
+        await proxyAuthService.resolveProxyRequest(request)
+      : undefined,
+    logLevel: config.logLevel,
+  };
+  const taskBundleLauncher = new TaskBundleLauncherImpl(sandboxRunnerOptions);
+  const taskBundlePool = new TaskBundlePoolImpl(taskBundleLauncher);
+  const sandboxRunner = new DockerSandboxRunner(sandboxRunnerOptions, taskBundlePool);
 
-  await sandboxRunner.start();
+  sandboxRunner.start();
 
   const orchestrator = new SandyOrchestrator({
     channel,

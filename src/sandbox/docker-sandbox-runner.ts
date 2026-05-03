@@ -11,9 +11,7 @@ import {
   type HttpProxyAuthResponseMessage,
 } from "../http/http-proxy-protocol.js";
 import type {LaunchTaskRequest, SandboxHandle, SandboxRunner, ShareInspection} from "./sandbox-runner.js";
-import {TaskBundleLauncherImpl} from "./task-bundle-launcher.js";
-import {TaskBundlePoolImpl} from "./task-bundle-pool.js";
-import type {ReservedTaskBundle, TaskBundleLauncher, TaskBundlePool} from "./task-bundle-types.js";
+import type {ReservedTaskBundle, TaskBundlePool} from "./task-bundle-types.js";
 
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 300_000;
 type TaskId = string;
@@ -43,7 +41,6 @@ type DockerSandboxRunnerOptions = {
   httpProxyConfDirPath?: string | null;
   httpProxyImage?: string | null;
   resolveHttpProxyRequest?: (request: HttpProxyAuthRequestMessage) => Promise<HttpProxyAuthResponseMessage>;
-  taskBundleLauncher?: TaskBundleLauncher;
 };
 
 export class DockerSandboxRunner implements SandboxRunner {
@@ -51,43 +48,22 @@ export class DockerSandboxRunner implements SandboxRunner {
   private readonly spawnImpl: typeof spawn;
   private readonly setTimeoutImpl: typeof setTimeout;
   private readonly clearTimeoutImpl: typeof clearTimeout;
-  private readonly pool: TaskBundlePool;
   private readonly taskSharePaths = new Map<TaskId, ShareHostPath>();
   private shutdownPromise: Promise<void> | null = null;
   private shutdownRequested = false;
 
-  constructor(private readonly options: DockerSandboxRunnerOptions) {
+  constructor(
+    private readonly options: DockerSandboxRunnerOptions,
+    private readonly pool: TaskBundlePool,
+  ) {
     this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
     this.spawnImpl = options.spawnImpl ?? spawn;
     this.setTimeoutImpl = options.setTimeoutImpl ?? setTimeout;
     this.clearTimeoutImpl = options.clearTimeoutImpl ?? clearTimeout;
-
-    const launcher = options.taskBundleLauncher ?? new TaskBundleLauncherImpl({
-      workerImage: options.workerImage,
-      resolveWorkerImage: options.resolveWorkerImage,
-      networkGuardImage: options.networkGuardImage,
-      shareRoot: options.shareRoot,
-      codexAuthFile: options.codexAuthFile,
-      skillsDirectory: options.skillsDirectory,
-      workerCodexBinaryPath: options.workerCodexBinaryPath,
-      workerNetworkName: options.workerNetworkName,
-      workerNetwork: options.workerNetwork,
-      httpProxyCaCertPath: options.httpProxyCaCertPath,
-      httpProxyConfDirPath: options.httpProxyConfDirPath,
-      httpProxyImage: options.httpProxyImage,
-      resolveHttpProxyRequest: options.resolveHttpProxyRequest,
-      handshakeTimeoutMs: options.handshakeTimeoutMs,
-      logLevel: options.logLevel,
-      spawnImpl: options.spawnImpl,
-      setTimeoutImpl: options.setTimeoutImpl,
-      clearTimeoutImpl: options.clearTimeoutImpl,
-    });
-
-    this.pool = new TaskBundlePoolImpl(launcher);
   }
 
-  start(): Promise<void> {
-    return this.pool.start();
+  start(): void {
+    this.pool.start();
   }
 
   async launchTask(

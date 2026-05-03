@@ -22,12 +22,16 @@ export type ReservedTaskBundle = TaskBundle & {
 
 export interface TaskBundleLauncher {
   createBundle(): Promise<TaskBundle>;
+
+  // Stop a bundle that has been assigned to a task, but leave share cleanup to the caller.
   terminateBundle(bundle: TaskBundle): Promise<void>;
+
+  // Tear down a bundle completely, including its bundle-local share directory.
   destroyBundle(bundle: TaskBundle): Promise<void>;
 }
 
 export interface TaskBundlePool {
-  start(): Promise<void>;
+  start(): void;
   acquire(taskId: string): Promise<ReservedTaskBundle>;
   retireBundle(bundle: ReservedTaskBundle): Promise<void>;
   shutdown(): Promise<void>;
