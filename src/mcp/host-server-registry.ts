@@ -38,6 +38,10 @@ export function buildStdioEnvironment(
   };
 }
 
+/**
+ * Only used for stdio servers (as we have to actually start the process and cannot just forward to them otherwise,
+ * unlike HTTP-based streamable MCP servers that can be configured in Sandy's config.toml).
+ */
 export class HostMcpServerRegistry {
   private readonly clients = new Map<string, ClientRecord>();
   private started = false;
