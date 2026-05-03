@@ -1,6 +1,6 @@
 import {readdir, rm} from "node:fs/promises";
 import {type ChildProcessWithoutNullStreams, spawn} from "node:child_process";
-import {join, relative, resolve} from "node:path";
+import {join} from "node:path";
 import {createInterface} from "node:readline";
 import type {WorkerNetworkConfig} from "../config.js";
 import {logger, type LogLevel} from "../logger.js";
@@ -567,18 +567,10 @@ export class DockerSandboxRunner implements SandboxRunner {
 
   getTaskSharePath(taskId: string): string {
     const trackedPath = this.taskSharePaths.get(taskId);
-    if (trackedPath) {
-      return trackedPath;
+    if (!trackedPath) {
+      throw new Error(`No tracked share path is registered for task ${taskId}.`);
     }
-    const shareRoot = resolve(this.options.shareRoot);
-    const sharePath = resolve(shareRoot, taskId);
-    const relativePath = relative(shareRoot, sharePath);
-
-    if (relativePath.startsWith("..") || relativePath === "" || isAbsolutePathEscape(relativePath)) {
-      throw new Error(`Task share path escapes the configured share root: ${taskId}`);
-    }
-
-    return sharePath;
+    return trackedPath;
   }
 
   private attachStdoutParser(child: ChildProcessWithoutNullStreams, onEvent: (event: SubAgentEvent) => void): void {
@@ -746,8 +738,4 @@ function assertHttpProxySupportConfigured(options: DockerSandboxRunnerOptions): 
   if (!options.resolveHttpProxyRequest) {
     throw new Error("HTTP proxy URL factory requires resolveHttpProxyRequest.");
   }
-}
-
-function isAbsolutePathEscape(path: string): boolean {
-  return path.startsWith("/");
 }

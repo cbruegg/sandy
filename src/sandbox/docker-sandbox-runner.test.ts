@@ -567,6 +567,7 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
   });
 
   const taskShare = join(shareRoot, "task-1");
+  (runner as unknown as { taskSharePaths: Map<string, string> }).taskSharePaths.set("task-1", taskShare);
   await mkdir(join(taskShare, "logs"), { recursive: true });
   await writeFile(join(taskShare, "report.txt"), "ok\n");
   await writeFile(join(taskShare, "logs", "latest.log"), "done\n");
@@ -617,6 +618,8 @@ test("DockerSandboxRunner falls back to a root Docker container when host rm fai
     }),
     spawnImpl,
   });
+
+  (runner as unknown as { taskSharePaths: Map<string, string> }).taskSharePaths.set("task-1", taskShare);
 
   try {
     await runner.deleteTaskShare("task-1");
@@ -870,10 +873,8 @@ test("DockerSandboxRunner reports a disconnect when the network guard exits mid-
   assert.equal(invocations.filter((invocation) => invocation.args[0] === "rm").length, 2);
 });
 
-test("DockerSandboxRunner rejects share inspection outside the configured share root", async () => {
-  const baseRoot = mkdtempSync(join(tmpdir(), "sandy-share-escape-"));
-  const shareRoot = join(baseRoot, "shares");
-  const outsidePath = join(baseRoot, "outside");
+test("DockerSandboxRunner rejects share inspection for unknown tasks", async () => {
+  const shareRoot = mkdtempSync(join(tmpdir(), "sandy-share-escape-"));
   const runner = new DockerSandboxRunner({
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
@@ -891,23 +892,15 @@ test("DockerSandboxRunner rejects share inspection outside the configured share 
     }),
   });
 
-  await mkdir(shareRoot, { recursive: true });
-  await mkdir(outsidePath, { recursive: true });
-  await writeFile(join(outsidePath, "keep.txt"), "safe\n");
-
   await assert.rejects(
-    runner.inspectTaskShare("../outside"),
-    /escapes the configured share root/,
+    runner.inspectTaskShare("task-unknown"),
+    /No tracked share path is registered/,
   );
-
-  await assert.doesNotReject(access(join(outsidePath, "keep.txt")));
-  await rm(baseRoot, { recursive: true, force: true });
+  await rm(shareRoot, { recursive: true, force: true });
 });
 
-test("DockerSandboxRunner rejects share deletion outside the configured share root", async () => {
-  const baseRoot = mkdtempSync(join(tmpdir(), "sandy-share-delete-"));
-  const shareRoot = join(baseRoot, "shares");
-  const outsidePath = join(baseRoot, "outside");
+test("DockerSandboxRunner rejects share deletion for unknown tasks", async () => {
+  const shareRoot = mkdtempSync(join(tmpdir(), "sandy-share-delete-"));
   const runner = new DockerSandboxRunner({
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
@@ -925,17 +918,11 @@ test("DockerSandboxRunner rejects share deletion outside the configured share ro
     }),
   });
 
-  await mkdir(shareRoot, { recursive: true });
-  await mkdir(outsidePath, { recursive: true });
-  await writeFile(join(outsidePath, "keep.txt"), "safe\n");
-
   await assert.rejects(
-    runner.deleteTaskShare("../outside"),
-    /escapes the configured share root/,
+    runner.deleteTaskShare("task-unknown"),
+    /No tracked share path is registered/,
   );
-
-  await assert.doesNotReject(access(join(outsidePath, "keep.txt")));
-  await rm(baseRoot, { recursive: true, force: true });
+  await rm(shareRoot, { recursive: true, force: true });
 });
 
 test("DockerSandboxRunner launches HTTP proxy container alongside worker", async () => {
