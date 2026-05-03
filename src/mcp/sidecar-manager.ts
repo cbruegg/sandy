@@ -234,17 +234,6 @@ export class McpSidecarManager {
     }
   }
 
-  releaseTask(taskId: string): void {
-    if (!this.child || this.stopped) {
-      return;
-    }
-
-    this.sendToSidecar({
-      type: "release_task",
-      taskId,
-    });
-  }
-
   private dispatchAuthorizationRequest(message: McpSidecarAuthorizationRequestMessage): void {
     void this.handleAuthorizationRequest(message).catch((error) => {
       const failureMessage = error instanceof Error ? error.message : "Unknown authorization request failure.";

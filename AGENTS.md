@@ -64,6 +64,8 @@ Use strict TypeScript with ES modules and 2-space indentation. Prefer small modu
 Keep all user-facing strings in `messages.ts` instead of scattering literals through runtime logic. This includes any text the user can see through a channel such as Telegram task updates, prompts, status messages, errors, summaries, and button labels. Add new channel-visible strings there so future i18n work stays localized.
 
 There is no formatter or linter configured yet, so keep style consistent with the existing code and avoid unrelated reformatting, especially w.r.t. to indentation.
+Keep the runtime dependency graph acyclic. Do not introduce circular construction or callback wiring between core services when a direct dependency order or extracted helper can express the relationship cleanly.
+When code depends on process environment values, inject an env object at the function boundary so tests do not need to mutate the global `process.env`.
 
 ## Testing Guidelines
 

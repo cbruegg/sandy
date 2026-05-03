@@ -119,11 +119,6 @@ const shutdownMessageSchema = z.object({
   type: z.literal("shutdown"),
 });
 
-const releaseTaskMessageSchema = z.object({
-  type: z.literal("release_task"),
-  taskId: z.string().min(1),
-});
-
 export type McpSidecarBootstrapMessage = z.infer<typeof bootstrapMessageSchema> & {
   mcpServers: Record<string, McpServerConfig>;
 };
@@ -139,14 +134,12 @@ type McpSidecarReadyMessage = z.infer<typeof readyMessageSchema>;
 type McpSidecarFatalErrorMessage = z.infer<typeof fatalErrorMessageSchema>;
 export type McpSidecarLogMessage = z.infer<typeof logMessageSchema>;
 type McpSidecarShutdownMessage = z.infer<typeof shutdownMessageSchema>;
-type McpSidecarReleaseTaskMessage = z.infer<typeof releaseTaskMessageSchema>;
 
 type HostToMcpSidecarMessage =
   | McpSidecarBootstrapMessage
   | McpSidecarAuthorizationResultMessage
   | McpSidecarNativeToolCallResultMessage
   | McpSidecarUpstreamResultMessage
-  | McpSidecarReleaseTaskMessage
   | McpSidecarShutdownMessage;
 
 type McpSidecarToHostMessage =
@@ -201,8 +194,6 @@ export function parseHostToMcpSidecarMessage(raw: string): HostToMcpSidecarMessa
       return upstreamResultMessageSchema.parse(parsed);
     case "shutdown":
       return shutdownMessageSchema.parse(parsed);
-    case "release_task":
-      return releaseTaskMessageSchema.parse(parsed);
     default:
       throw new Error(`Unsupported host-to-sidecar message type ${(parsed as { type: string }).type}.`);
   }

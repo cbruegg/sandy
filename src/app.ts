@@ -188,19 +188,7 @@ export async function startApp(): Promise<void> {
       }
    );
 
-  let orchestrator: SandyOrchestrator | null = null;
-  const sidecarManager = new McpSidecarManager({
-    configDirectory: config.configDirectory,
-    mcpServers: config.mcpServers,
-    workerNetworkName,
-    sidecarImage: config.mcpSidecarImage,
-    authorizeToolCall: (input) => orchestrator!.authorizeMcpToolCall(input),
-    authorizeResourceRead: (input) => orchestrator!.authorizeMcpResourceRead(input),
-    executeNativeToolCall: (input) => orchestrator!.executeNativeWorkerToolCall(input),
-    executeUpstreamMcpRequest: async (input) => await hostMcpRegistry.execute(input.taskId, input.serverId, input.method, input.params),
-  }, workerAccess);
-
-  orchestrator = new SandyOrchestrator({
+  const orchestrator = new SandyOrchestrator({
     channel,
     mainAgent,
     sandboxRunner,
@@ -217,9 +205,19 @@ export async function startApp(): Promise<void> {
     sessionStore,
     privilegeBroker: new PrivilegeBrokerImpl(),
     taskRegistry,
-    releaseMcpTask: (taskId) => sidecarManager.releaseTask(taskId),
     persistentApprovalStore,
   });
+
+  const sidecarManager = new McpSidecarManager({
+    configDirectory: config.configDirectory,
+    mcpServers: config.mcpServers,
+    workerNetworkName,
+    sidecarImage: config.mcpSidecarImage,
+    authorizeToolCall: orchestrator.authorizeMcpToolCall.bind(orchestrator),
+    authorizeResourceRead: orchestrator.authorizeMcpResourceRead.bind(orchestrator),
+    executeNativeToolCall: orchestrator.executeNativeWorkerToolCall.bind(orchestrator),
+    executeUpstreamMcpRequest: async (input) => await hostMcpRegistry.execute(input.taskId, input.serverId, input.method, input.params),
+  }, workerAccess);
 
   await sidecarManager.start();
 

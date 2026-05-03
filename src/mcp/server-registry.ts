@@ -19,7 +19,6 @@ export interface McpUpstreamServer {
 
 export interface McpServerRegistry {
   getServer(taskId: string, serverId: string): Promise<McpUpstreamServer>;
-  releaseTask?(taskId: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -36,7 +35,6 @@ type ClientRecord = {
 
 export class McpServerRegistryImpl implements McpServerRegistry {
   private readonly servers = new Map<string, ClientRecord>();
-  private readonly taskScopedServerKeys = new Map<string, Set<string>>();
 
   constructor(
     private readonly oauthStateDirectory: string,
@@ -49,27 +47,6 @@ export class McpServerRegistryImpl implements McpServerRegistry {
       await record.server.close();
     }
     this.servers.clear();
-    this.taskScopedServerKeys.clear();
-  }
-
-  async releaseTask(taskId: string): Promise<void> {
-    const taskServerKeys = this.taskScopedServerKeys.get(taskId);
-    if (!taskServerKeys) {
-      return;
-    }
-
-    for (const cacheKey of taskServerKeys) {
-      const record = this.servers.get(cacheKey);
-      try {
-        if (record) {
-          await record.server.close();
-        }
-      } finally {
-        this.servers.delete(cacheKey);
-      }
-    }
-
-    this.taskScopedServerKeys.delete(taskId);
   }
 
   async getServer(taskId: string, serverId: string): Promise<McpUpstreamServer> {
@@ -78,7 +55,7 @@ export class McpServerRegistryImpl implements McpServerRegistry {
       throw new Error(`Unknown MCP server "${serverId}".`);
     }
 
-    const cacheKey = config.transport === "stdio" ? `${taskId}:${serverId}` : serverId;
+    const cacheKey = serverId;
     const existing = this.servers.get(cacheKey);
     if (existing) {
       logger.debug("mcp.registry.server_reused", {
@@ -102,11 +79,6 @@ export class McpServerRegistryImpl implements McpServerRegistry {
     this.servers.set(cacheKey, {
       server,
     });
-    if (config.transport === "stdio") {
-      const taskServerKeys = this.taskScopedServerKeys.get(taskId) ?? new Set<string>();
-      taskServerKeys.add(cacheKey);
-      this.taskScopedServerKeys.set(taskId, taskServerKeys);
-    }
 
     logger.debug("mcp.registry.server_ready", {
       taskId,

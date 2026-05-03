@@ -48,7 +48,6 @@ type SandyOrchestratorDependencies = {
   sessionStore: SessionStore;
   privilegeBroker: PrivilegeBroker;
   taskRegistry: TaskRegistry;
-  releaseMcpTask?: (taskId: string) => Promise<void> | void;
   persistentApprovalStore?: PersistentApprovalStore;
 };
 
@@ -794,16 +793,6 @@ export class SandyOrchestrator {
     }
     this.handles.delete(task.taskId);
     this.deps.taskRegistry.unregister(task.taskId);
-    if (this.deps.releaseMcpTask) {
-      try {
-        await this.deps.releaseMcpTask(task.taskId);
-      } catch (error) {
-        logger.warn("task.mcp_release_failed", {
-          taskId: task.taskId,
-          message: error instanceof Error ? error.message : "Unknown MCP task release failure.",
-        });
-      }
-    }
     session.activeTask = null;
     await this.promptForShareDeletionIfNeeded(session, task.taskId, task.taskName);
   }

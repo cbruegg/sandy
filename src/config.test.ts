@@ -508,12 +508,10 @@ test("parseConfigToml expands the default codex auth path when present", async (
   const fakeHome = await mkdtemp(join(root, "home-"));
   const authDir = join(fakeHome, ".codex");
   const authFilePath = join(authDir, "auth.json");
-  const originalHome = process.env["HOME"];
 
   try {
     await mkdir(authDir, { recursive: true });
     await writeFile(authFilePath, "{}");
-    process.env["HOME"] = fakeHome;
     const config = parseConfigToml(`
 [channel]
 kind = "telegram"
@@ -521,18 +519,15 @@ kind = "telegram"
 [channel.telegram]
 bot_token = "telegram-token"
 allowed_user = "123456"
-`);
+`, undefined, undefined, {
+      HOME: fakeHome,
+    });
 
     assert.deepEqual(config.authMode, {
       mode: "codex_auth_file",
       codexAuthFile: authFilePath,
     });
   } finally {
-    if (originalHome === undefined) {
-      delete process.env["HOME"];
-    } else {
-      process.env["HOME"] = originalHome;
-    }
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -542,12 +537,10 @@ test("parseConfigToml expands tilde-prefixed codex auth paths", async () => {
   const fakeHome = await mkdtemp(join(root, "home-"));
   const authDir = join(fakeHome, ".codex");
   const authFilePath = join(authDir, "auth.json");
-  const originalHome = process.env["HOME"];
 
   try {
     await mkdir(authDir, { recursive: true });
     await writeFile(authFilePath, "{}");
-    process.env["HOME"] = fakeHome;
 
     const config = parseConfigToml(`
 [channel]
@@ -559,18 +552,15 @@ allowed_user = "123456"
 
 [auth]
 codex_auth_file = "~/.codex/auth.json"
-`);
+`, undefined, undefined, {
+      HOME: fakeHome,
+    });
 
     assert.deepEqual(config.authMode, {
       mode: "codex_auth_file",
       codexAuthFile: authFilePath,
     });
   } finally {
-    if (originalHome === undefined) {
-      delete process.env["HOME"];
-    } else {
-      process.env["HOME"] = originalHome;
-    }
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -617,11 +607,8 @@ test("parseConfigToml expands tilde-prefixed stdio working_directory values", as
   const root = await mkdtemp(join(tmpdir(), "sandy-config-"));
   const fakeHome = await mkdtemp(join(root, "home-"));
   const workingDirectory = join(fakeHome, "mcp", "spotify");
-  const originalHome = process.env["HOME"];
 
   try {
-    process.env["HOME"] = fakeHome;
-
     const config = parseConfigToml(`
 [channel]
 kind = "telegram"
@@ -634,7 +621,9 @@ allowed_user = "123456"
 transport = "stdio"
 command = "node"
 working_directory = "~/mcp/spotify"
-`);
+`, undefined, undefined, {
+      HOME: fakeHome,
+    });
 
     assert.deepEqual(config.mcpServers["spotify"], {
       transport: "stdio",
@@ -644,11 +633,6 @@ working_directory = "~/mcp/spotify"
       env: {},
     });
   } finally {
-    if (originalHome === undefined) {
-      delete process.env["HOME"];
-    } else {
-      process.env["HOME"] = originalHome;
-    }
     await rm(root, { recursive: true, force: true });
   }
 });

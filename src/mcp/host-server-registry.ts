@@ -13,10 +13,13 @@ type ClientRecord = {
   client: Client;
 };
 
-export function buildStdioEnvironment(overrides: Record<string, string>): Record<string, string> {
+export function buildStdioEnvironment(
+  overrides: Record<string, string>,
+  baseEnv: NodeJS.ProcessEnv = process.env,
+): Record<string, string> {
   const environment: Record<string, string> = {};
   for (const key of BASE_ENV_KEYS) {
-    const value = process.env[key];
+    const value = baseEnv[key];
     if (value) {
       environment[key] = value;
     }
@@ -25,8 +28,8 @@ export function buildStdioEnvironment(overrides: Record<string, string>): Record
   if (!environment["PATH"]) {
     environment["PATH"] = "/usr/bin:/bin";
   }
-  if (!environment["HOME"] && process.env["HOME"]) {
-    environment["HOME"] = process.env["HOME"];
+  if (!environment["HOME"] && baseEnv["HOME"]) {
+    environment["HOME"] = baseEnv["HOME"];
   }
 
   return {
