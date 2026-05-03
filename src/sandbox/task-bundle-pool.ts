@@ -125,6 +125,9 @@ export class TaskBundlePoolImpl implements TaskBundlePool {
           logger.error("pool.standby_warm_failed", {
             error: error instanceof Error ? error.message : String(error),
           });
+          setTimeout(() => {
+            this.scheduleReplenish();
+          }, 5_000);
         }
         throw error;
       })
@@ -135,5 +138,6 @@ export class TaskBundlePoolImpl implements TaskBundlePool {
       });
 
     this.warming = warmingPromise;
+    void warmingPromise.catch(() => {});
   }
 }

@@ -291,7 +291,6 @@ export async function main(): Promise<void> {
           if (command.httpProxyUrl) {
             process.env["SANDY_HTTP_PROXY_URL"] = command.httpProxyUrl;
           }
-          process.env["SANDY_TASK_ID"] = command.taskId;
           if (command.codexConfigToml) {
             await mkdir(workerCodexHomePath, {recursive: true});
             await writeFile(join(workerCodexHomePath, "config.toml"), command.codexConfigToml, "utf8");

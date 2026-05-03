@@ -2,6 +2,7 @@ import type {ChildProcessWithoutNullStreams} from "node:child_process";
 
 type BundleId = string;
 
+// A warmed or active worker bundle before the host has assigned it to a task.
 export type TaskBundle = {
   bundleId: BundleId;
   containerName: string;
@@ -14,6 +15,7 @@ export type TaskBundle = {
   cleanupWorkerCodexConfig: () => Promise<void>;
 };
 
+// A task-bound bundle after the pool has reserved it for one specific task.
 export type ReservedTaskBundle = TaskBundle & {
   taskId: string;
 };

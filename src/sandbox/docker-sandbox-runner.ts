@@ -13,9 +13,11 @@ import {
 import type {LaunchTaskRequest, SandboxHandle, SandboxRunner, ShareInspection} from "./sandbox-runner.js";
 import {TaskBundleLauncherImpl} from "./task-bundle-launcher.js";
 import {TaskBundlePoolImpl} from "./task-bundle-pool.js";
-import type {ReservedTaskBundle} from "./task-bundle-types.js";
+import type {ReservedTaskBundle, TaskBundleLauncher, TaskBundlePool} from "./task-bundle-types.js";
 
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 300_000;
+type TaskId = string;
+type ShareHostPath = string;
 
 type DockerSandboxRunnerOptions = {
   workerImage: string;
@@ -41,6 +43,7 @@ type DockerSandboxRunnerOptions = {
   httpProxyConfDirPath?: string | null;
   httpProxyImage?: string | null;
   resolveHttpProxyRequest?: (request: HttpProxyAuthRequestMessage) => Promise<HttpProxyAuthResponseMessage>;
+  taskBundleLauncher?: TaskBundleLauncher;
 };
 
 export class DockerSandboxRunner implements SandboxRunner {
@@ -48,9 +51,8 @@ export class DockerSandboxRunner implements SandboxRunner {
   private readonly spawnImpl: typeof spawn;
   private readonly setTimeoutImpl: typeof setTimeout;
   private readonly clearTimeoutImpl: typeof clearTimeout;
-  private readonly pool: TaskBundlePoolImpl;
-  private readonly taskSharePaths = new Map<string, string>();
-  private readonly retiredBundles = new Set<string>();
+  private readonly pool: TaskBundlePool;
+  private readonly taskSharePaths = new Map<TaskId, ShareHostPath>();
   private shutdownPromise: Promise<void> | null = null;
   private shutdownRequested = false;
 
@@ -60,7 +62,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     this.setTimeoutImpl = options.setTimeoutImpl ?? setTimeout;
     this.clearTimeoutImpl = options.clearTimeoutImpl ?? clearTimeout;
 
-    const launcher = new TaskBundleLauncherImpl({
+    const launcher = options.taskBundleLauncher ?? new TaskBundleLauncherImpl({
       workerImage: options.workerImage,
       resolveWorkerImage: options.resolveWorkerImage,
       networkGuardImage: options.networkGuardImage,
@@ -84,8 +86,8 @@ export class DockerSandboxRunner implements SandboxRunner {
     this.pool = new TaskBundlePoolImpl(launcher);
   }
 
-  async start(): Promise<void> {
-    await this.pool.start();
+  start(): Promise<void> {
+    return this.pool.start();
   }
 
   async launchTask(
@@ -96,41 +98,59 @@ export class DockerSandboxRunner implements SandboxRunner {
       throw new Error("Sandbox runner is shutting down and cannot launch new tasks.");
     }
 
-    const bundle = await this.pool.acquire(request.taskId);
-    this.taskSharePaths.set(request.taskId, bundle.shareHostPath);
+    let bundle: ReservedTaskBundle | null = null;
+    try {
+      bundle = await this.pool.acquire(request.taskId);
+      const reservedBundle = bundle;
+      this.taskSharePaths.set(request.taskId, reservedBundle.shareHostPath);
 
-    const builtWorkerConfig = this.options.workerCodexConfigBuilder(request.taskId);
-    const httpProxyUrl = this.options.httpProxyUrlFactory?.(request.taskId) ?? null;
-    if (httpProxyUrl) {
-      assertHttpProxySupportConfigured(this.options);
-    }
+      const builtWorkerConfig = this.options.workerCodexConfigBuilder(request.taskId);
+      const httpProxyUrl = this.options.httpProxyUrlFactory?.(request.taskId) ?? null;
+      if (httpProxyUrl) {
+        assertHttpProxySupportConfigured(this.options);
+      }
 
-    let finished = false;
-    let workerConnected = false;
-    let taskInitialized = false;
-    let terminalEventSeen = false;
-    let shutdownRequested = false;
-    let disconnectReported = false;
-    let resolveTaskInitialized: (() => void) | null = null;
-    let rejectTaskInitialized: ((error: Error) => void) | null = null;
-    const taskInitializedBarrier = new Promise<void>((resolve, reject) => {
-      resolveTaskInitialized = resolve;
-      rejectTaskInitialized = (error: Error) => {
-        reject(error);
+      let finished = false;
+      let workerConnected = false;
+      let taskInitialized = false;
+      let terminalEventSeen = false;
+      let shutdownRequested = false;
+      let disconnectReported = false;
+      let resolveTaskInitialized: (() => void) | null = null;
+      let rejectTaskInitialized: ((error: Error) => void) | null = null;
+      let retirePromise: Promise<void> | null = null;
+      const taskInitializedBarrier = new Promise<void>((resolve, reject) => {
+        resolveTaskInitialized = resolve;
+        rejectTaskInitialized = (error: Error) => {
+          reject(error);
+        };
+      });
+      void taskInitializedBarrier.catch(() => {});
+
+      const retireBundle = (): Promise<void> => {
+        if (retirePromise) {
+          return retirePromise;
+        }
+        retirePromise = this.pool.retireBundle(reservedBundle).catch((error) => {
+          logger.error("sandbox.retire_bundle_failed", {
+            taskId: reservedBundle.taskId,
+            bundleId: reservedBundle.bundleId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+        return retirePromise;
       };
-    });
-    void taskInitializedBarrier.catch(() => {});
 
-    logger.info("sandbox.launching", {
-      chatId: request.chatId,
-      taskId: request.taskId,
-      taskName: request.taskName,
-      sharePath: bundle.shareHostPath,
-      workerImage: this.resolveWorkerImage(),
-      workerNetworkMode: this.options.workerNetwork.mode,
-    });
+      logger.info("sandbox.launching", {
+        chatId: request.chatId,
+        taskId: request.taskId,
+        taskName: request.taskName,
+        sharePath: reservedBundle.shareHostPath,
+        workerImage: this.resolveWorkerImage(),
+        workerNetworkMode: this.options.workerNetwork.mode,
+      });
 
-    const child = bundle.child;
+      const child = reservedBundle.child;
 
     const handshakeTimer = this.setTimeoutImpl(() => {
       if (workerConnected || terminalEventSeen || shutdownRequested) {
@@ -142,7 +162,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       });
       void reportDisconnect("Sub-agent worker did not complete startup handshake in time.");
       shutdownRequested = true;
-      void this.retireBundle(bundle);
+      void retireBundle();
     }, this.handshakeTimeoutMs);
 
     const clearHandshakeTimer = () => {
@@ -191,7 +211,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       finished = true;
       shutdownRequested = true;
       clearHandshakeTimer();
-      await this.retireBundle(bundle);
+      await retireBundle();
     };
 
     const emitEventSafely = (event: SubAgentEvent): void => {
@@ -220,9 +240,9 @@ export class DockerSandboxRunner implements SandboxRunner {
     this.attachStdoutParser(child, emitEventSafely);
     logger.info("sandbox.started", {
       taskId: request.taskId,
-      containerName: bundle.containerName,
-      guardContainerName: bundle.guardContainerName,
-      proxyContainerName: bundle.proxyContainerName,
+      containerName: reservedBundle.containerName,
+      guardContainerName: reservedBundle.guardContainerName,
+      proxyContainerName: reservedBundle.proxyContainerName,
     });
 
     child.stderr.on("data", (chunk) => {
@@ -241,7 +261,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       }
       finished = true;
       clearHandshakeTimer();
-      void this.retireBundle(bundle);
+      void retireBundle();
       logger.error("sandbox.launch_failed", {
         taskId: request.taskId,
         message: error.message,
@@ -260,7 +280,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     });
 
     child.on("exit", (code, signal) => {
-      void this.retireBundle(bundle);
+      void retireBundle();
       if (finished) {
         return;
       }
@@ -285,14 +305,14 @@ export class DockerSandboxRunner implements SandboxRunner {
       void reportDisconnect(`Sub-agent container exited before task completion (code=${code}, signal=${signal}).`);
     });
 
-    bundle.guardChild?.on("error", (error) => {
+    reservedBundle.guardChild?.on("error", (error) => {
       logger.error("sandbox.network_guard_failed", {
         taskId: request.taskId,
         message: error.message,
       });
     });
 
-    bundle.guardChild?.on("exit", (code, signal) => {
+    reservedBundle.guardChild?.on("exit", (code, signal) => {
       if (finished || shutdownRequested || terminalEventSeen) {
         return;
       }
@@ -304,17 +324,17 @@ export class DockerSandboxRunner implements SandboxRunner {
       void reportDisconnect(`Task network guard exited before task completion (code=${code}, signal=${signal}).`);
       shutdownRequested = true;
       clearHandshakeTimer();
-      void this.retireBundle(bundle);
+      void retireBundle();
     });
 
-    bundle.proxyChild?.on("error", (error) => {
+    reservedBundle.proxyChild?.on("error", (error) => {
       logger.error("sandbox.http_proxy_failed", {
         taskId: request.taskId,
         message: error.message,
       });
     });
 
-    bundle.proxyChild?.on("exit", (code, signal) => {
+    reservedBundle.proxyChild?.on("exit", (code, signal) => {
       if (finished || shutdownRequested || terminalEventSeen) {
         return;
       }
@@ -326,7 +346,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       void reportDisconnect(`HTTP proxy container exited before task completion (code=${code}, signal=${signal}).`);
       shutdownRequested = true;
       clearHandshakeTimer();
-      void this.retireBundle(bundle);
+      void retireBundle();
     });
 
     return {
@@ -386,7 +406,7 @@ export class DockerSandboxRunner implements SandboxRunner {
           taskId: request.taskId,
         });
         child.stdin.end();
-        await this.retireBundle(bundle);
+        await retireBundle();
       },
       cancel: async (reason: string) => {
         finished = true;
@@ -400,29 +420,38 @@ export class DockerSandboxRunner implements SandboxRunner {
           type: "cancel",
           reason,
         });
-        await this.retireBundle(bundle);
+        await retireBundle();
       },
     };
+    } catch (error) {
+      if (bundle) {
+        try {
+          await this.pool.retireBundle(bundle);
+        } catch (retireError) {
+          logger.error("sandbox.retire_bundle_failed", {
+            taskId: bundle.taskId,
+            bundleId: bundle.bundleId,
+            error: retireError instanceof Error ? retireError.message : String(retireError),
+          });
+        }
+        if (this.taskSharePaths.has(request.taskId)) {
+          try {
+            await this.deleteTaskShare(request.taskId);
+          } catch (cleanupError) {
+            logger.error("sandbox.share_cleanup_failed", {
+              taskId: request.taskId,
+              sharePath: this.taskSharePaths.get(request.taskId) ?? null,
+              error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+            });
+          }
+        }
+      }
+      throw error;
+    }
   }
 
   private resolveWorkerImage(): string {
     return this.options.resolveWorkerImage?.() ?? this.options.workerImage;
-  }
-
-  private async retireBundle(bundle: ReservedTaskBundle): Promise<void> {
-    if (this.retiredBundles.has(bundle.bundleId)) {
-      return;
-    }
-    this.retiredBundles.add(bundle.bundleId);
-    try {
-      await this.pool.retireBundle(bundle);
-    } catch (error) {
-      logger.error("sandbox.retire_bundle_failed", {
-        taskId: bundle.taskId,
-        bundleId: bundle.bundleId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
   }
 
   async shutdown(): Promise<void> {
@@ -541,10 +570,6 @@ export class DockerSandboxRunner implements SandboxRunner {
     if (trackedPath) {
       return trackedPath;
     }
-    return this.getLegacyTaskSharePath(taskId);
-  }
-
-  private getLegacyTaskSharePath(taskId: string): string {
     const shareRoot = resolve(this.options.shareRoot);
     const sharePath = resolve(shareRoot, taskId);
     const relativePath = relative(shareRoot, sharePath);
