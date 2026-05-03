@@ -1,6 +1,6 @@
 import {existsSync, readFileSync} from "node:fs";
 import {isIP} from "node:net";
-import {dirname, join, resolve} from "node:path";
+import {dirname, isAbsolute, join, resolve} from "node:path";
 import * as toml from "@iarna/toml";
 import {z} from "zod";
 import { resolveDefaultImageReferences, type SandyBuildMetadata, type SandyImageDefaults } from "./build-metadata.js";
@@ -348,7 +348,15 @@ function resolveCodexAuthFile(configuredPath: string | null | undefined): string
   return null;
 }
 
-function normalizeMcpServerConfig(config: SandyConfigFile["mcp"]["servers"][string], configDirectory: string): McpServerConfig {
+function resolveMcpWorkingDirectory(configuredPath: string): string {
+  const expandedPath = expandHomeShorthand(configuredPath);
+  if (!isAbsolute(expandedPath)) {
+    throw new Error('mcp.servers.<name>.cwd must be an absolute path or start with "~".');
+  }
+  return resolve(expandedPath);
+}
+
+function normalizeMcpServerConfig(config: SandyConfigFile["mcp"]["servers"][string]): McpServerConfig {
   if (config.transport === "streamable_http") {
     return {
       transport: config.transport,
@@ -361,7 +369,7 @@ function normalizeMcpServerConfig(config: SandyConfigFile["mcp"]["servers"][stri
     transport: config.transport,
     command: config.command,
     args: config.args,
-    cwd: config.cwd ? resolve(configDirectory, expandHomeShorthand(config.cwd)) : null,
+    cwd: config.cwd ? resolveMcpWorkingDirectory(config.cwd) : null,
     env: config.env,
   };
 }
@@ -430,7 +438,7 @@ export function parseConfigToml(
     sttModel: parsed.stt.model,
     authMode,
     mcpServers: Object.fromEntries(
-      Object.entries(parsed.mcp.servers).map(([identifier, server]) => [identifier, normalizeMcpServerConfig(server, configDirectory)]),
+      Object.entries(parsed.mcp.servers).map(([identifier, server]) => [identifier, normalizeMcpServerConfig(server)]),
     ),
     httpTokens: Object.fromEntries(
       Object.entries(parsed.http.tokens).map(([identifier, token]) => [identifier, {

@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
-import { configureLogger } from "../logger.js";
+import { configureLogger, logger } from "../logger.js";
 import { SandyMcpProxy } from "./proxy.js";
 import { ProxyAccess } from "../proxy-access.js";
 import { McpServerRegistryImpl } from "./server-registry.js";
@@ -112,6 +112,15 @@ export async function main(): Promise<void> {
       }
       if (message.type === "upstream_result") {
         handleUpstreamResult(message, pendingUpstreamRequests);
+        return;
+      }
+      if (message.type === "release_task") {
+        void Promise.resolve(registry.releaseTask?.(message.taskId)).catch((error) => {
+          logger.warn("mcp.registry.task_release_failed", {
+            taskId: message.taskId,
+            message: error instanceof Error ? error.message : "Unknown task release failure.",
+          });
+        });
         return;
       }
       if (message.type === "shutdown") {

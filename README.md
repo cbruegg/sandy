@@ -98,7 +98,7 @@ url = "https://todoist.example/mcp"
 transport = "stdio"
 command = "node"
 args = ["/absolute/path/to/mcp-claude-spotify/build/index.js"]
-# cwd = "/absolute/path/to/mcp-claude-spotify"
+# working_directory = "/absolute/path/to/mcp-claude-spotify"
 
 [mcp.servers.spotify.env]
 SPOTIFY_CLIENT_ID = "your_client_id_here"

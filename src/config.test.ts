@@ -578,6 +578,7 @@ codex_auth_file = "~/.codex/auth.json"
 test("parseConfigToml accepts stdio MCP servers", async () => {
   const root = await mkdtemp(join(tmpdir(), "sandy-config-"));
   const configFilePath = join(root, "config.toml");
+  const localMcpDirectory = join(root, "tools", "local-mcp");
 
   try {
     const config = parseConfigToml(`
@@ -592,7 +593,7 @@ allowed_user = "123456"
 transport = "stdio"
 command = "node"
 args = ["build/index.js"]
-cwd = "./tools/local-mcp"
+cwd = "${localMcpDirectory}"
 
 [mcp.servers.local.env]
 FOO = "bar"
@@ -602,7 +603,7 @@ FOO = "bar"
       transport: "stdio",
       command: "node",
       args: ["build/index.js"],
-      cwd: join(root, "tools", "local-mcp"),
+      cwd: localMcpDirectory,
       env: {
         FOO: "bar",
       },
@@ -610,6 +611,64 @@ FOO = "bar"
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("parseConfigToml expands tilde-prefixed stdio cwd values", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sandy-config-"));
+  const fakeHome = await mkdtemp(join(root, "home-"));
+  const workingDirectory = join(fakeHome, "mcp", "spotify");
+  const originalHome = process.env["HOME"];
+
+  try {
+    process.env["HOME"] = fakeHome;
+
+    const config = parseConfigToml(`
+[channel]
+kind = "telegram"
+
+[channel.telegram]
+bot_token = "telegram-token"
+allowed_user = "123456"
+
+[mcp.servers.spotify]
+transport = "stdio"
+command = "node"
+cwd = "~/mcp/spotify"
+`);
+
+    assert.deepEqual(config.mcpServers["spotify"], {
+      transport: "stdio",
+      command: "node",
+      args: [],
+      cwd: workingDirectory,
+      env: {},
+    });
+  } finally {
+    if (originalHome === undefined) {
+      delete process.env["HOME"];
+    } else {
+      process.env["HOME"] = originalHome;
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("parseConfigToml rejects relative stdio cwd values", () => {
+  assert.throws(() => {
+    parseConfigToml(`
+[channel]
+kind = "telegram"
+
+[channel.telegram]
+bot_token = "telegram-token"
+allowed_user = "123456"
+
+[mcp.servers.local]
+transport = "stdio"
+command = "node"
+cwd = "./tools/local-mcp"
+`);
+  }, /cwd must be an absolute path/);
 });
 
 test("parseConfigToml rejects a missing telegram allowed_user", () => {

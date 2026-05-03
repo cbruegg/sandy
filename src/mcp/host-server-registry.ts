@@ -68,6 +68,8 @@ export class HostMcpServerRegistry {
         return await server.getPrompt(params as Parameters<Client["getPrompt"]>[0]);
       case "callTool":
         return await server.callTool(params as Parameters<Client["callTool"]>[0]);
+      default:
+        assertNever(method);
     }
   }
 
@@ -120,4 +122,8 @@ export class HostMcpServerRegistry {
 
     return client;
   }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unexpected MCP upstream method: ${String(value)}`);
 }

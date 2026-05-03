@@ -548,6 +548,7 @@ test("orchestrator asks the worker to finalize when the user marks the task as f
   const channel = new RecordingChannel();
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
+  const releasedTaskIds: string[] = [];
   const orchestrator = new SandyOrchestrator({
     channel,
     mainAgent: new StubMainAgent({
@@ -560,6 +561,9 @@ test("orchestrator asks the worker to finalize when the user marks the task as f
     sessionStore: store,
     privilegeBroker: new FakePrivilegeBroker(),
     taskRegistry: new TaskRegistry(),
+    releaseMcpTask: async (taskId) => {
+      releasedTaskIds.push(taskId);
+    },
   });
 
   await orchestrator.handleChatEvent({
@@ -596,6 +600,7 @@ test("orchestrator asks the worker to finalize when the user marks the task as f
 
   const session = store.getOrCreate("chat-mark-finished");
   assert.equal(session.activeTask, null);
+  assert.deepEqual(releasedTaskIds, [expectDefined(runner.launches[0], "Expected launch.").taskId]);
   assert.deepEqual(session.pendingTaskSummary, {
     taskName: "env-inspection",
     summary: [

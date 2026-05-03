@@ -79,6 +79,7 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
   }, access);
 
   await manager.start();
+  manager.releaseTask("task-1");
   await manager.stop();
 
   const firstInvocation = invocations[0];
@@ -97,6 +98,8 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
     && invocation.includes("host.docker.internal:host-gateway")));
   assert.ok(invocations.some((invocation) => invocation[0] === "network" && invocation[1] === "rm"));
   assert.match(stdinContent, /"type":"bootstrap"/);
+  assert.match(stdinContent, /"type":"release_task"/);
+  assert.match(stdinContent, /"taskId":"task-1"/);
   assert.match(stdinContent, /"workerProxyTokenSecret":"shared-secret"/);
 });
 
