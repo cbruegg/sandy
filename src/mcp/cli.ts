@@ -9,7 +9,8 @@ export async function runMcpCommand(args: string[]): Promise<void> {
     switch (command) {
         case "list":
             for (const server of admin.listServers()) {
-                console.log(`${server.serverId}\t${server.transport}\t${server.url}`);
+                const target = server.transport === "streamable_http" ? server.url : server.command;
+                console.log(`${server.serverId}\t${server.transport}\t${target}`);
             }
             return;
         case "status": {

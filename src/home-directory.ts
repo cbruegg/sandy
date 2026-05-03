@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 
-export function resolveHomeDirectory(): string {
-  const configuredHome = process.env["HOME"]?.trim();
+export function resolveHomeDirectory(env: NodeJS.ProcessEnv = process.env): string {
+  const configuredHome = env["HOME"]?.trim();
   if (configuredHome) {
     return configuredHome;
   }

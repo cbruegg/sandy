@@ -6,6 +6,7 @@ import type { McpServerConfig } from "../config.js";
 import { logger } from "../logger.js";
 import type { PrivilegeResolutionResult } from "../types.js";
 import { ProxyAccess } from "../proxy-access.js";
+import type { McpUpstreamMethod } from "./sidecar-protocol.js";
 import type {
   AuthorizeMcpResourceRead,
   AuthorizeMcpToolCall,
@@ -20,6 +21,7 @@ import {
   type McpSidecarNativeToolCallRequestMessage,
   type McpSidecarResourceAuthorizationRequestMessage,
   type McpSidecarLogMessage,
+  type McpSidecarUpstreamRequestMessage,
 } from "./sidecar-protocol.js";
 
 type McpSidecarManagerOptions = {
@@ -34,6 +36,12 @@ type McpSidecarManagerOptions = {
   authorizeToolCall: AuthorizeMcpToolCall;
   authorizeResourceRead: AuthorizeMcpResourceRead;
   executeNativeToolCall: ExecuteNativeToolCall;
+  executeUpstreamMcpRequest: (input: {
+    taskId: string;
+    serverId: string;
+    method: McpUpstreamMethod;
+    params: unknown;
+  }) => Promise<unknown>;
 };
 
 export class McpSidecarManager {
@@ -140,6 +148,10 @@ export class McpSidecarManager {
           }
           if (message.type === "native_tool_call_request") {
             this.dispatchNativeToolCallRequest(message);
+            return;
+          }
+          if (message.type === "upstream_request") {
+            this.dispatchUpstreamRequest(message);
             return;
           }
           if (message.type === "log") {
@@ -316,6 +328,58 @@ export class McpSidecarManager {
         isError: true,
         message: failureMessage,
       });
+    });
+  }
+
+  private dispatchUpstreamRequest(message: McpSidecarUpstreamRequestMessage): void {
+    void this.handleUpstreamRequest(message).catch((error) => {
+      const failureMessage = error instanceof Error ? error.message : "Unknown upstream MCP request failure.";
+
+      logger.warn("mcp.sidecar.upstream_request_failed", {
+        requestId: message.requestId,
+        taskId: message.taskId,
+        serverId: message.serverId,
+        method: message.method,
+        message: failureMessage,
+      });
+
+      this.sendToSidecar({
+        type: "upstream_result",
+        requestId: message.requestId,
+        ok: false,
+        errorMessage: failureMessage,
+      });
+    });
+  }
+
+  private async handleUpstreamRequest(message: McpSidecarUpstreamRequestMessage): Promise<void> {
+    logger.debug("mcp.sidecar.upstream_request_executing", {
+      requestId: message.requestId,
+      taskId: message.taskId,
+      serverId: message.serverId,
+      method: message.method,
+      params: message.params,
+    });
+
+    const result = await this.options.executeUpstreamMcpRequest({
+      taskId: message.taskId,
+      serverId: message.serverId,
+      method: message.method,
+      params: message.params,
+    });
+
+    logger.debug("mcp.sidecar.upstream_request_executed", {
+      requestId: message.requestId,
+      taskId: message.taskId,
+      serverId: message.serverId,
+      method: message.method,
+    });
+
+    this.sendToSidecar({
+      type: "upstream_result",
+      requestId: message.requestId,
+      ok: true,
+      result,
     });
   }
 

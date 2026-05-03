@@ -122,6 +122,10 @@ export const messages = {
 export const mcpAdminMessages = {
   oauthLoginUnsupported: (serverId: string): string =>
     `MCP server ${serverId} does not support OAuth login because it is not streamable_http.`,
+  stdioLoginUnsupported: (serverId: string): string =>
+    `MCP server ${serverId} does not support OAuth login because it uses stdio.`,
+  stdioLogoutUnsupported: (serverId: string): string =>
+    `MCP server ${serverId} does not support OAuth logout because it uses stdio.`,
   oauthAuthorizationUrlMissing: (serverId: string): string =>
     `OAuth login for ${serverId} did not provide an authorization URL.`,
   oauthDiscoveryInvalidMetadata: (

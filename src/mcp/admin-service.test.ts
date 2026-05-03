@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { z } from "zod";
-import { normalizeOAuthLoginError, parseAuthorizationCodeInput, resolveLoginServerUrl } from "./admin-service.js";
+import { normalizeOAuthLoginError, parseAuthorizationCodeInput, resolveLoginServerUrl, SandyMcpAdminService } from "./admin-service.js";
 
 test("normalizeOAuthLoginError rewrites Zod discovery errors into a targeted message", () => {
   const result = z.object({
@@ -33,6 +33,45 @@ test("normalizeOAuthLoginError rewrites Zod discovery errors into a targeted mes
 test("normalizeOAuthLoginError preserves non-Zod errors", () => {
   const original = new Error("boom");
   assert.equal(normalizeOAuthLoginError("homeassistant", "http://raspinas:8123/api/mcp", original), original);
+});
+
+test("SandyMcpAdminService lists stdio servers without OAuth state", () => {
+  const admin = new SandyMcpAdminService("/tmp/sandy-config", {
+    spotify: {
+      transport: "stdio",
+      command: "node",
+      args: ["build/index.js"],
+      workingDirectory: "/tmp/spotify",
+      env: {
+        SPOTIFY_CLIENT_ID: "client-id",
+      },
+    },
+  });
+
+  assert.deepEqual(admin.listServers(), [{
+    serverId: "spotify",
+    transport: "stdio",
+    command: "node",
+    args: ["build/index.js"],
+    workingDirectory: "/tmp/spotify",
+    envKeys: ["SPOTIFY_CLIENT_ID"],
+    oauthConfigured: false,
+  }]);
+});
+
+test("SandyMcpAdminService rejects OAuth login for stdio servers", async () => {
+  const admin = new SandyMcpAdminService("/tmp/sandy-config", {
+    spotify: {
+      transport: "stdio",
+      command: "node",
+      args: ["build/index.js"],
+      workingDirectory: "/tmp/spotify",
+      env: {},
+    },
+  });
+
+  await assert.rejects(() => admin.login("spotify"), /uses stdio/);
+  await assert.rejects(() => admin.logout("spotify"), /uses stdio/);
 });
 
 test("parseAuthorizationCodeInput accepts a raw code", () => {

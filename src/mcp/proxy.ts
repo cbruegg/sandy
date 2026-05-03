@@ -16,7 +16,7 @@ import {
 import { logger } from "../logger.js";
 import { ProxyAccess } from "../proxy-access.js";
 import { parseMcpProxyPath, type McpProxyRoute } from "./proxy-route.js";
-import type { McpServerRegistry } from "./server-registry.js";
+import type { McpServerRegistry, McpUpstreamServer } from "./server-registry.js";
 import {
   parseWorkerToolPayload,
   sandyMcpServerId,
@@ -199,7 +199,7 @@ export class SandyMcpProxy {
       },
     });
 
-    const getClient = async () => this.options.registry.getClient(route.serverId);
+    const getUpstream = async (): Promise<McpUpstreamServer> => await this.options.registry.getServer(route.taskId, route.serverId);
 
     if (route.serverId === sandyMcpServerId) {
       this.configureBuiltInSandyServer(server, route);
@@ -207,13 +207,13 @@ export class SandyMcpProxy {
     }
 
     server.server.setRequestHandler(ListToolsRequestSchema, async (request) => {
-      return (await getClient()).listTools(request.params);
+      return (await getUpstream()).listTools(request.params);
     });
     server.server.setRequestHandler(ListResourcesRequestSchema, async (request) => {
-      return (await getClient()).listResources(request.params);
+      return (await getUpstream()).listResources(request.params);
     });
     server.server.setRequestHandler(ListResourceTemplatesRequestSchema, async (request) => {
-      return (await getClient()).listResourceTemplates(request.params);
+      return (await getUpstream()).listResourceTemplates(request.params);
     });
     server.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
       const approval = await this.options.authorizeResourceRead({
@@ -226,13 +226,13 @@ export class SandyMcpProxy {
         return buildResourceErrorResult(approval.message);
       }
 
-      return (await getClient()).readResource(request.params);
+      return (await getUpstream()).readResource(request.params);
     });
     server.server.setRequestHandler(ListPromptsRequestSchema, async (request) => {
-      return (await getClient()).listPrompts(request.params);
+      return (await getUpstream()).listPrompts(request.params);
     });
     server.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
-      return (await getClient()).getPrompt(request.params);
+      return (await getUpstream()).getPrompt(request.params);
     });
     server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const approval = await this.options.authorizeToolCall({
@@ -246,7 +246,7 @@ export class SandyMcpProxy {
         return buildToolErrorResult(approval.message);
       }
 
-      return (await getClient()).callTool(request.params);
+      return (await getUpstream()).callTool(request.params);
     });
 
     return server;

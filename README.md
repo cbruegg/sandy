@@ -89,10 +89,19 @@ allowed_user_id = "@cbruegg:matrix.org"
 # mode = "disabled" # one of: "disabled", "relaunch", "exit"
 
 [mcp.servers.todoist]
-# Currently the only allowed transport:
 transport = "streamable_http"
 url = "https://todoist.example/mcp"
 # oauth_scopes = []
+
+[mcp.servers.spotify]
+transport = "stdio"
+command = "node"
+args = ["/absolute/path/to/mcp-claude-spotify/build/index.js"]
+# working_directory = "/absolute/path/to/mcp-claude-spotify"
+
+[mcp.servers.spotify.env]
+SPOTIFY_CLIENT_ID = "your_client_id_here"
+SPOTIFY_CLIENT_SECRET = "your_client_secret_here"
 
 [approvals.mcp.todoist]
 # always_allow_tools = []
@@ -195,8 +204,9 @@ MCP OAuth behavior:
 - Every worker also gets a built-in MCP server named `sandy`. It exposes Sandy's host-mediated tools such as shared-workspace copy operations, file send-back, task completion, and HTTP token requests.
 - `mcp.servers.sandy` is reserved for that built-in server and must not be configured by users.
 - `mcp.servers.<name>.oauth_scopes` optionally sets OAuth scopes to request during `sandy mcp login <name>`.
-- Sandy runs upstream MCP connections from an MCP sidecar container, not from the host process directly.
+- Sandy runs `streamable_http` MCP connections from an MCP sidecar container and starts `stdio` MCP processes eagerly on the host. The sidecar bridges stdio-backed servers back to the host over its control channel.
 - If an MCP server runs on the same host as Sandy, use `http://host.docker.internal:<port>/...` when configuring `mcp.servers.<name>.url`.
+- `mcp.servers.<name>.env` only applies to `stdio` servers and is merged on top of a minimal inherited base environment.
 
 HTTP token behavior:
 
@@ -444,9 +454,10 @@ As such, these requests from the sub-agent must use a special message type on th
 *not* forwarded to the main agent, but instead directly to the user.
 
 For MCP, Sandy exposes configured upstream servers to workers through an app-wide Docker sidecar on a dedicated Docker
-network. Upstream OAuth credentials stay in the host's Sandy config directory and are mounted into the sidecar. The
-worker receives Codex MCP configuration for the configured servers, plus a Sandy-issued JWT bearer token valid for one
-day.
+network. `streamable_http` servers stay proxied through the sidecar, while `stdio` servers are started eagerly on the
+host and reached through the sidecar control channel. Upstream OAuth credentials stay in the host's Sandy config
+directory and are mounted into the sidecar. The worker receives Codex MCP configuration for the configured servers,
+plus a Sandy-issued JWT bearer token valid for one day.
 
 MCP `callTool` and `readResource` operations are privilege-managed independently. The user can approve one operation
 once, for the current worker session, or as `auto-allow for suitable tasks`; persisted approvals are written back to

@@ -75,6 +75,7 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
       isError: false,
       message: "ok",
     }),
+    executeUpstreamMcpRequest: async () => ({}),
   }, access);
 
   await manager.start();
@@ -146,6 +147,7 @@ test("McpSidecarManager returns a failed authorization result when authorization
       isError: false,
       message: "ok",
     }),
+    executeUpstreamMcpRequest: async () => ({}),
   }, new ProxyAccess("shared-secret"));
 
   await manager.start();
@@ -232,6 +234,7 @@ test("McpSidecarManager forwards structured sidecar logs through the host logger
       isError: false,
       message: "ok",
     }),
+    executeUpstreamMcpRequest: async () => ({}),
   }, new ProxyAccess("shared-secret"));
 
   await manager.start();
@@ -305,6 +308,7 @@ test("McpSidecarManager answers native Sandy tool calls over the control channel
       isError: false,
       message: "native-ok",
     }),
+    executeUpstreamMcpRequest: async () => ({}),
   }, new ProxyAccess("shared-secret"));
 
   await manager.start();
@@ -370,6 +374,7 @@ test("McpSidecarManager returns a failed native tool call result when native too
     executeNativeToolCall: async () => {
       throw new Error("native tool failed");
     },
+    executeUpstreamMcpRequest: async () => ({}),
   }, new ProxyAccess("shared-secret"));
 
   await manager.start();
@@ -391,4 +396,86 @@ test("McpSidecarManager returns a failed native tool call result when native too
   assert.match(stdinContent, /native tool failed/);
 });
 
+test("McpSidecarManager forwards stdio MCP requests to the host registry", async () => {
+  const sidecarChild = new FakeChildProcess();
+  let stdinContent = "";
+  sidecarChild.stdin.on("data", (chunk: Buffer | string) => {
+    stdinContent += String(chunk);
+  });
 
+  const spawnImpl = ((_command: string, args: readonly string[]) => {
+    const child = new FakeChildProcess();
+    if (args[0] === "network" && args[1] === "ls") {
+      queueMicrotask(() => {
+        child.emit("exit", 0, null);
+      });
+      return child as unknown as ChildProcessWithoutNullStreams;
+    }
+    if (args[0] === "run") {
+      sidecarChild.stdout.write('{"type":"ready"}\n');
+      return sidecarChild as unknown as ChildProcessWithoutNullStreams;
+    }
+    queueMicrotask(() => {
+      child.emit("exit", 0, null);
+    });
+    return child as unknown as ChildProcessWithoutNullStreams;
+  }) as typeof import("node:child_process").spawn;
+
+  const manager = new McpSidecarManager({
+    configDirectory: "/tmp/sandy-config",
+    mcpServers: {
+      spotify: {
+        transport: "stdio",
+        command: "node",
+        args: ["build/index.js"],
+        workingDirectory: "/tmp/spotify",
+        env: {},
+      },
+    },
+    workerNetworkName: createMcpWorkerNetworkName(),
+    sidecarImage: "sandy-mcp-proxy:latest",
+    spawnImpl,
+    authorizeToolCall: async () => ({
+      requestId: "approval-1",
+      outcome: "approved",
+      message: "approved",
+    }),
+    authorizeResourceRead: async () => ({
+      requestId: "approval-1",
+      outcome: "approved",
+      message: "approved",
+    }),
+    executeNativeToolCall: async () => ({
+      isError: false,
+      message: "ok",
+    }),
+    executeUpstreamMcpRequest: async (input) => ({
+      serverId: input.serverId,
+      method: input.method,
+      params: input.params,
+    }),
+  }, new ProxyAccess("shared-secret"));
+
+  await manager.start();
+  sidecarChild.stdout.write(
+    JSON.stringify({
+      type: "upstream_request",
+      requestId: "request-1",
+      taskId: "task-1",
+      serverId: "spotify",
+      method: "callTool",
+      params: {
+        name: "play",
+        arguments: {},
+      },
+    }) + "\n",
+  );
+  await new Promise<void>((resolve) => setImmediateCallback(resolve));
+  await manager.stop();
+
+  assert.match(stdinContent, /"type":"upstream_result"/);
+  assert.match(stdinContent, /"requestId":"request-1"/);
+  assert.match(stdinContent, /"ok":true/);
+  assert.match(stdinContent, /"serverId":"spotify"/);
+  assert.match(stdinContent, /"method":"callTool"/);
+});
