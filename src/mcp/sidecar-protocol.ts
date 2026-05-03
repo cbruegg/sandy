@@ -16,16 +16,6 @@ const stdioServerSchema = z.object({
   env: z.record(z.string(), z.string()),
 });
 
-const mcpUpstreamMethodSchema = z.enum([
-  "listTools",
-  "listResources",
-  "listResourceTemplates",
-  "readResource",
-  "listPrompts",
-  "getPrompt",
-  "callTool",
-]);
-
 const bootstrapMessageSchema = z.object({
   type: z.literal("bootstrap"),
   oauthStateDirectory: z.string().min(1),
@@ -73,6 +63,16 @@ const nativeToolCallResultMessageSchema = z.object({
   isError: z.boolean(),
   message: z.string(),
 });
+
+const mcpUpstreamMethodSchema = z.enum([
+  "listTools",
+  "listResources",
+  "listResourceTemplates",
+  "readResource",
+  "listPrompts",
+  "getPrompt",
+  "callTool",
+]);
 
 const upstreamRequestMessageSchema = z.object({
   type: z.literal("upstream_request"),
