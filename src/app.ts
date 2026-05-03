@@ -16,8 +16,8 @@ import { createMcpWorkerNetworkName } from "./mcp/worker-network-name.js";
 import { SandyOrchestrator } from "./orchestrator.js";
 import { TomlPersistentApprovalStore } from "./privilege/persistent-approval-store.js";
 import { PrivilegeBrokerImpl } from "./privilege/privilege-broker.js";
-import { DockerSandboxRunner } from "./sandbox/docker-sandbox-runner.js";
-import { TaskBundleLauncherImpl } from "./sandbox/task-bundle-launcher.js";
+import {DockerSandboxRunner, type DockerSandboxRunnerOptions} from "./sandbox/docker-sandbox-runner.js";
+import {TaskBundleLauncherImpl, type TaskBundleLauncherOptions} from "./sandbox/task-bundle-launcher.js";
 import { TaskBundlePoolImpl } from "./sandbox/task-bundle-pool.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
 import { OpenAiTranscriptionProvider } from "./transcription/openai-transcription-provider.js";
@@ -26,6 +26,7 @@ import { createRetryingChannelAdapter } from "./channel/retrying-channel-adapter
 import { SelfUpdateCoordinator } from "./update/self-update.js";
 import { WorkerImageManager } from "./worker-image-manager.js";
 import { validateMatrixAuthStateForStartup, resolveMatrixAccessToken } from "./matrix/startup-validator.js";
+import type {HttpProxyAuthRequestMessage} from "./http/http-proxy-protocol.ts";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -155,23 +156,31 @@ export async function startApp(): Promise<void> {
     workerAccess,
   );
 
-  const sandboxRunnerOptions = {
+  const codexAuthFile = config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthFile : null;
+  const sandboxRunnerOptions: DockerSandboxRunnerOptions = {
+    workerImage: config.workerImage,
+    shareRoot: config.shareRoot,
+    codexAuthFile,
+    skillsDirectory: config.skillsDirectory,
+    workerNetwork: config.workerNetwork,
+    workerCodexConfigBuilder: (taskId: string) => mcpWorkerLaunchConfigBuilder.build(taskId),
+    httpProxyUrlFactory: httpTokensEnabled
+        ? (taskId: string) => {
+          const jwt = workerAccess.issueWorkerGrant(taskId).bearerToken;
+          const encodedJwt = encodeURIComponent(jwt);
+          // The worker container shares the network namespace with the proxy
+          // sidecar, so the proxy is reachable on localhost from the worker.
+          return `http://Bearer:${encodedJwt}@127.0.0.1:8081`;
+        }
+        : undefined,
+  }
+  const taskBundleLauncherOptions: TaskBundleLauncherOptions = {
     workerImage: config.workerImage,
     resolveWorkerImage: () => workerImageManager.getLaunchImage(),
     shareRoot: config.shareRoot,
-    codexAuthFile: config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthFile : null,
+    codexAuthFile,
     skillsDirectory: config.skillsDirectory,
     workerCodexBinaryPath,
-    workerCodexConfigBuilder: (taskId: string) => mcpWorkerLaunchConfigBuilder.build(taskId),
-    httpProxyUrlFactory: httpTokensEnabled
-      ? (taskId: string) => {
-        const jwt = workerAccess.issueWorkerGrant(taskId).bearerToken;
-        const encodedJwt = encodeURIComponent(jwt);
-        // The worker container shares the network namespace with the proxy
-        // sidecar, so the proxy is reachable on localhost from the worker.
-        return `http://Bearer:${encodedJwt}@127.0.0.1:8081`;
-      }
-      : undefined,
     networkGuardImage: config.networkGuardImage,
     workerNetwork: config.workerNetwork,
     workerNetworkName,
@@ -179,12 +188,12 @@ export async function startApp(): Promise<void> {
     httpProxyConfDirPath: certificateAuthority?.confDirPath ?? null,
     httpProxyImage: httpTokensEnabled ? config.httpProxyImage : null,
     resolveHttpProxyRequest: proxyAuthService
-      ? async (request: import("./http/http-proxy-protocol.js").HttpProxyAuthRequestMessage) =>
+      ? async (request: HttpProxyAuthRequestMessage) =>
         await proxyAuthService.resolveProxyRequest(request)
       : undefined,
     logLevel: config.logLevel,
   };
-  const taskBundleLauncher = new TaskBundleLauncherImpl(sandboxRunnerOptions);
+  const taskBundleLauncher = new TaskBundleLauncherImpl(taskBundleLauncherOptions);
   const taskBundlePool = new TaskBundlePoolImpl(taskBundleLauncher);
   const sandboxRunner = new DockerSandboxRunner(sandboxRunnerOptions, taskBundlePool);
 

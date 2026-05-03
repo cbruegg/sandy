@@ -21,7 +21,7 @@ import {randomUUID} from "node:crypto";
 const workerCodexSeedMountPath = "/run/sandy-codex-seed";
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 300_000;
 
-type TaskBundleLauncherOptions = {
+export type TaskBundleLauncherOptions = {
   workerImage: string;
   resolveWorkerImage?: () => string;
   networkGuardImage?: string;

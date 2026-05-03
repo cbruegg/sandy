@@ -17,7 +17,7 @@ const DEFAULT_HANDSHAKE_TIMEOUT_MS = 300_000;
 type TaskId = string;
 type ShareHostPath = string;
 
-type DockerSandboxRunnerOptions = {
+export type DockerSandboxRunnerOptions = {
   workerImage: string;
   resolveWorkerImage?: () => string;
   networkGuardImage?: string;
