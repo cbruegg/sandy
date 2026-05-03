@@ -128,277 +128,277 @@ export class DockerSandboxRunner implements SandboxRunner {
 
       const child = reservedBundle.child;
 
-    const handshakeTimer = this.setTimeoutImpl(() => {
-      if (workerConnected || terminalEventSeen || shutdownRequested) {
-        return;
-      }
-      logger.error("sandbox.handshake_timeout", {
-        taskId: request.taskId,
-        timeoutMs: this.handshakeTimeoutMs,
-      });
-      void reportDisconnect("Sub-agent worker did not complete startup handshake in time.");
-      shutdownRequested = true;
-      void retireBundle();
-    }, this.handshakeTimeoutMs);
-
-    const clearHandshakeTimer = () => {
-      this.clearTimeoutImpl(handshakeTimer);
-    };
-
-    const emitEvent = async (event: SubAgentEvent): Promise<void> => {
-      await onEvent(event);
-      if (event.type === "task_done" || event.type === "final_result" || event.type === "task_error") {
-        terminalEventSeen = true;
-        clearHandshakeTimer();
-      }
-      if (event.type === "worker_connected") {
-        workerConnected = true;
-        clearHandshakeTimer();
-        try {
-          await this.sendToWorker(child, {
-            type: "start_task",
-            taskId: request.taskId,
-            taskBrief: request.taskBrief,
-            input: request.initialInput,
-            taskLanguage: request.taskLanguage,
-            config: request.workerStartConfig,
-            environment: builtWorkerConfig.environment,
-            codexConfigToml: builtWorkerConfig.codexConfigToml,
-            httpProxyUrl,
-          });
-          taskInitialized = true;
-          resolveTaskInitialized?.();
-        } catch (error) {
-          rejectTaskInitialized?.(new Error(this.describeWriteFailure(error)));
-          await reportDisconnect(this.describeWriteFailure(error));
+      const handshakeTimer = this.setTimeoutImpl(() => {
+        if (workerConnected || terminalEventSeen || shutdownRequested) {
+          return;
         }
-      }
-    };
-
-    const handleEventDeliveryFailure = async (event: SubAgentEvent, error: unknown): Promise<void> => {
-      logger.error("sandbox.event_handler_failed", {
-        taskId: request.taskId,
-        eventType: event.type,
-        message: error instanceof Error ? error.message : "Unknown event delivery failure.",
-      });
-      if (finished || shutdownRequested) {
-        return;
-      }
-      finished = true;
-      shutdownRequested = true;
-      clearHandshakeTimer();
-      await retireBundle();
-    };
-
-    const emitEventSafely = (event: SubAgentEvent): void => {
-      void emitEvent(event).catch(async (error) => {
-        await handleEventDeliveryFailure(event, error);
-      });
-    };
-
-    const reportDisconnect = async (message: string): Promise<void> => {
-      if (disconnectReported || terminalEventSeen || shutdownRequested) {
-        return;
-      }
-      disconnectReported = true;
-      rejectTaskInitialized?.(new Error(message));
-      clearHandshakeTimer();
-      logger.error("sandbox.worker_disconnected", {
-        taskId: request.taskId,
-        message,
-      });
-      await emitEvent({
-        type: "worker_disconnected",
-        message,
-      });
-    };
-
-    this.attachStdoutParser(child, emitEventSafely);
-    logger.info("sandbox.started", {
-      taskId: request.taskId,
-      containerName: reservedBundle.containerName,
-      guardContainerName: reservedBundle.guardContainerName,
-      proxyContainerName: reservedBundle.proxyContainerName,
-    });
-
-    child.stderr.on("data", (chunk) => {
-      const message = String(chunk).trim();
-      if (message) {
-        logger.warn("sandbox.stderr", {
+        logger.error("sandbox.handshake_timeout", {
           taskId: request.taskId,
-          message,
+          timeoutMs: this.handshakeTimeoutMs,
         });
-      }
-    });
+        void reportDisconnect("Sub-agent worker did not complete startup handshake in time.");
+        shutdownRequested = true;
+        void retireBundle();
+      }, this.handshakeTimeoutMs);
 
-    child.on("error", (error) => {
-      if (finished) {
-        return;
-      }
-      finished = true;
-      clearHandshakeTimer();
-      void retireBundle();
-      logger.error("sandbox.launch_failed", {
-        taskId: request.taskId,
-        message: error.message,
-      });
-      emitEventSafely({
-        type: "task_error",
-        message: `Failed to launch Docker sub-agent: ${error.message}`,
-      });
-    });
+      const clearHandshakeTimer = () => {
+        this.clearTimeoutImpl(handshakeTimer);
+      };
 
-    child.stdout.on("close", () => {
-      if (finished || shutdownRequested || terminalEventSeen) {
-        return;
-      }
-      void reportDisconnect("Sub-agent control channel disconnected before task completion.");
-    });
-
-    child.on("exit", (code, signal) => {
-      void retireBundle();
-      if (finished) {
-        return;
-      }
-      finished = true;
-      clearHandshakeTimer();
-      if (shutdownRequested) {
-        logger.info("sandbox.exited", {
-          taskId: request.taskId,
-          code,
-          signal,
-        });
-        return;
-      }
-      if (terminalEventSeen && code === 0) {
-        logger.info("sandbox.exited", {
-          taskId: request.taskId,
-          code,
-          signal,
-        });
-        return;
-      }
-      void reportDisconnect(`Sub-agent container exited before task completion (code=${code}, signal=${signal}).`);
-    });
-
-    reservedBundle.guardChild?.on("error", (error) => {
-      logger.error("sandbox.network_guard_failed", {
-        taskId: request.taskId,
-        message: error.message,
-      });
-    });
-
-    reservedBundle.guardChild?.on("exit", (code, signal) => {
-      if (finished || shutdownRequested || terminalEventSeen) {
-        return;
-      }
-      logger.error("sandbox.network_guard_exited", {
-        taskId: request.taskId,
-        code,
-        signal,
-      });
-      void reportDisconnect(`Task network guard exited before task completion (code=${code}, signal=${signal}).`);
-      shutdownRequested = true;
-      clearHandshakeTimer();
-      void retireBundle();
-    });
-
-    reservedBundle.proxyChild?.on("error", (error) => {
-      logger.error("sandbox.http_proxy_failed", {
-        taskId: request.taskId,
-        message: error.message,
-      });
-    });
-
-    reservedBundle.proxyChild?.on("exit", (code, signal) => {
-      if (finished || shutdownRequested || terminalEventSeen) {
-        return;
-      }
-      logger.error("sandbox.http_proxy_exited", {
-        taskId: request.taskId,
-        code,
-        signal,
-      });
-      void reportDisconnect(`HTTP proxy container exited before task completion (code=${code}, signal=${signal}).`);
-      shutdownRequested = true;
-      clearHandshakeTimer();
-      void retireBundle();
-    });
-
-    return {
-      sendUserMessage: async (input: TaskInputPayload) => {
-        logger.debugContent("sandbox.user_message", {
-          taskId: request.taskId,
-          text: input.text,
-          imageCount: input.images.length,
-        });
-        try {
-          if (!taskInitialized) {
-            await taskInitializedBarrier;
+      const emitEvent = async (event: SubAgentEvent): Promise<void> => {
+        await onEvent(event);
+        if (event.type === "task_done" || event.type === "final_result" || event.type === "task_error") {
+          terminalEventSeen = true;
+          clearHandshakeTimer();
+        }
+        if (event.type === "worker_connected") {
+          workerConnected = true;
+          clearHandshakeTimer();
+          try {
+            await this.sendToWorker(child, {
+              type: "start_task",
+              taskId: request.taskId,
+              taskBrief: request.taskBrief,
+              input: request.initialInput,
+              taskLanguage: request.taskLanguage,
+              config: request.workerStartConfig,
+              environment: builtWorkerConfig.environment,
+              codexConfigToml: builtWorkerConfig.codexConfigToml,
+              httpProxyUrl,
+            });
+            taskInitialized = true;
+            resolveTaskInitialized?.();
+          } catch (error) {
+            rejectTaskInitialized?.(new Error(this.describeWriteFailure(error)));
+            await reportDisconnect(this.describeWriteFailure(error));
           }
-          await this.sendToWorker(child, {
-            type: "user_message",
-            input,
-          });
-        } catch (error) {
-          await reportDisconnect(this.describeWriteFailure(error));
         }
-      },
-      resolvePrivilege: async (result: PrivilegeResolutionResult) => {
-        logger.info("sandbox.privilege_decision", {
+      };
+
+      const handleEventDeliveryFailure = async (event: SubAgentEvent, error: unknown): Promise<void> => {
+        logger.error("sandbox.event_handler_failed", {
           taskId: request.taskId,
-          requestId: result.requestId,
-          outcome: result.outcome,
+          eventType: event.type,
+          message: error instanceof Error ? error.message : "Unknown event delivery failure.",
         });
-        try {
-          await this.sendToWorker(child, {
-            type: "privilege_result",
-            result,
-          });
-        } catch (error) {
-          await reportDisconnect(this.describeWriteFailure(error));
-        }
-      },
-      markFinished: async () => {
-        logger.info("sandbox.mark_finished", {
-          taskId: request.taskId,
-        });
-        try {
-          await this.sendToWorker(child, {
-            type: "mark_finished",
-          });
-        } catch (error) {
-          await reportDisconnect(this.describeWriteFailure(error));
-        }
-      },
-      close: async () => {
         if (finished || shutdownRequested) {
           return;
         }
         finished = true;
         shutdownRequested = true;
         clearHandshakeTimer();
-        logger.info("sandbox.closing", {
-          taskId: request.taskId,
-        });
-        child.stdin.end();
         await retireBundle();
-      },
-      cancel: async (reason: string) => {
+      };
+
+      const emitEventSafely = (event: SubAgentEvent): void => {
+        void emitEvent(event).catch(async (error) => {
+          await handleEventDeliveryFailure(event, error);
+        });
+      };
+
+      const reportDisconnect = async (message: string): Promise<void> => {
+        if (disconnectReported || terminalEventSeen || shutdownRequested) {
+          return;
+        }
+        disconnectReported = true;
+        rejectTaskInitialized?.(new Error(message));
+        clearHandshakeTimer();
+        logger.error("sandbox.worker_disconnected", {
+          taskId: request.taskId,
+          message,
+        });
+        await emitEvent({
+          type: "worker_disconnected",
+          message,
+        });
+      };
+
+      this.attachStdoutParser(child, emitEventSafely);
+      logger.info("sandbox.started", {
+        taskId: request.taskId,
+        containerName: reservedBundle.containerName,
+        guardContainerName: reservedBundle.guardContainerName,
+        proxyContainerName: reservedBundle.proxyContainerName,
+      });
+
+      child.stderr.on("data", (chunk) => {
+        const message = String(chunk).trim();
+        if (message) {
+          logger.warn("sandbox.stderr", {
+            taskId: request.taskId,
+            message,
+          });
+        }
+      });
+
+      child.on("error", (error) => {
+        if (finished) {
+          return;
+        }
         finished = true;
+        clearHandshakeTimer();
+        void retireBundle();
+        logger.error("sandbox.launch_failed", {
+          taskId: request.taskId,
+          message: error.message,
+        });
+        emitEventSafely({
+          type: "task_error",
+          message: `Failed to launch Docker sub-agent: ${error.message}`,
+        });
+      });
+
+      child.stdout.on("close", () => {
+        if (finished || shutdownRequested || terminalEventSeen) {
+          return;
+        }
+        void reportDisconnect("Sub-agent control channel disconnected before task completion.");
+      });
+
+      child.on("exit", (code, signal) => {
+        void retireBundle();
+        if (finished) {
+          return;
+        }
+        finished = true;
+        clearHandshakeTimer();
+        if (shutdownRequested) {
+          logger.info("sandbox.exited", {
+            taskId: request.taskId,
+            code,
+            signal,
+          });
+          return;
+        }
+        if (terminalEventSeen && code === 0) {
+          logger.info("sandbox.exited", {
+            taskId: request.taskId,
+            code,
+            signal,
+          });
+          return;
+        }
+        void reportDisconnect(`Sub-agent container exited before task completion (code=${code}, signal=${signal}).`);
+      });
+
+      reservedBundle.guardChild?.on("error", (error) => {
+        logger.error("sandbox.network_guard_failed", {
+          taskId: request.taskId,
+          message: error.message,
+        });
+      });
+
+      reservedBundle.guardChild?.on("exit", (code, signal) => {
+        if (finished || shutdownRequested || terminalEventSeen) {
+          return;
+        }
+        logger.error("sandbox.network_guard_exited", {
+          taskId: request.taskId,
+          code,
+          signal,
+        });
+        void reportDisconnect(`Task network guard exited before task completion (code=${code}, signal=${signal}).`);
         shutdownRequested = true;
         clearHandshakeTimer();
-        logger.warn("sandbox.cancelling", {
+        void retireBundle();
+      });
+
+      reservedBundle.proxyChild?.on("error", (error) => {
+        logger.error("sandbox.http_proxy_failed", {
           taskId: request.taskId,
-          reason,
+          message: error.message,
         });
-        await this.sendToWorkerSafe(child, {
-          type: "cancel",
-          reason,
+      });
+
+      reservedBundle.proxyChild?.on("exit", (code, signal) => {
+        if (finished || shutdownRequested || terminalEventSeen) {
+          return;
+        }
+        logger.error("sandbox.http_proxy_exited", {
+          taskId: request.taskId,
+          code,
+          signal,
         });
-        await retireBundle();
-      },
-    };
+        void reportDisconnect(`HTTP proxy container exited before task completion (code=${code}, signal=${signal}).`);
+        shutdownRequested = true;
+        clearHandshakeTimer();
+        void retireBundle();
+      });
+
+      return {
+        sendUserMessage: async (input: TaskInputPayload) => {
+          logger.debugContent("sandbox.user_message", {
+            taskId: request.taskId,
+            text: input.text,
+            imageCount: input.images.length,
+          });
+          try {
+            if (!taskInitialized) {
+              await taskInitializedBarrier;
+            }
+            await this.sendToWorker(child, {
+              type: "user_message",
+              input,
+            });
+          } catch (error) {
+            await reportDisconnect(this.describeWriteFailure(error));
+          }
+        },
+        resolvePrivilege: async (result: PrivilegeResolutionResult) => {
+          logger.info("sandbox.privilege_decision", {
+            taskId: request.taskId,
+            requestId: result.requestId,
+            outcome: result.outcome,
+          });
+          try {
+            await this.sendToWorker(child, {
+              type: "privilege_result",
+              result,
+            });
+          } catch (error) {
+            await reportDisconnect(this.describeWriteFailure(error));
+          }
+        },
+        markFinished: async () => {
+          logger.info("sandbox.mark_finished", {
+            taskId: request.taskId,
+          });
+          try {
+            await this.sendToWorker(child, {
+              type: "mark_finished",
+            });
+          } catch (error) {
+            await reportDisconnect(this.describeWriteFailure(error));
+          }
+        },
+        close: async () => {
+          if (finished || shutdownRequested) {
+            return;
+          }
+          finished = true;
+          shutdownRequested = true;
+          clearHandshakeTimer();
+          logger.info("sandbox.closing", {
+            taskId: request.taskId,
+          });
+          child.stdin.end();
+          await retireBundle();
+        },
+        cancel: async (reason: string) => {
+          finished = true;
+          shutdownRequested = true;
+          clearHandshakeTimer();
+          logger.warn("sandbox.cancelling", {
+            taskId: request.taskId,
+            reason,
+          });
+          await this.sendToWorkerSafe(child, {
+            type: "cancel",
+            reason,
+          });
+          await retireBundle();
+        },
+      };
     } catch (error) {
       if (bundle) {
         try {
