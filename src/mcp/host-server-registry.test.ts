@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { buildStdioEnvironment } from "./stdio-server-registry.js";
+import { buildStdioEnvironment } from "./host-server-registry.js";
 
 test("buildStdioEnvironment keeps a minimal base environment", () => {
   const originalPath = process.env["PATH"];

@@ -2,15 +2,38 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { McpServerConfig } from "../config.js";
 import { logger } from "../logger.js";
-import { buildStdioEnvironment } from "./stdio-server-registry.js";
 import type { McpUpstreamMethod } from "./sidecar-protocol.js";
 
 type ClientFactory = () => Client;
 type TransportFactory = (config: Extract<McpServerConfig, { transport: "stdio" }>) => StdioClientTransport;
 
+const BASE_ENV_KEYS = ["HOME", "PATH", "TMPDIR", "TMP", "TEMP"] as const;
+
 type ClientRecord = {
   client: Client;
 };
+
+export function buildStdioEnvironment(overrides: Record<string, string>): Record<string, string> {
+  const environment: Record<string, string> = {};
+  for (const key of BASE_ENV_KEYS) {
+    const value = process.env[key];
+    if (value) {
+      environment[key] = value;
+    }
+  }
+
+  if (!environment["PATH"]) {
+    environment["PATH"] = "/usr/bin:/bin";
+  }
+  if (!environment["HOME"] && process.env["HOME"]) {
+    environment["HOME"] = process.env["HOME"];
+  }
+
+  return {
+    ...environment,
+    ...overrides,
+  };
+}
 
 export class HostMcpServerRegistry {
   private readonly clients = new Map<string, ClientRecord>();
