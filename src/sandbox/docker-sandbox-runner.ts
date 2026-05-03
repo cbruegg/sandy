@@ -3,13 +3,9 @@ import {type ChildProcessWithoutNullStreams, spawn} from "node:child_process";
 import {join} from "node:path";
 import {createInterface} from "node:readline";
 import type {WorkerNetworkConfig} from "../config.js";
-import {logger, type LogLevel} from "../logger.js";
+import {logger} from "../logger.js";
 import type {HostCommand, PrivilegeResolutionResult, SubAgentEvent, TaskInputPayload} from "../types.js";
 import {parseSubAgentEvent, serializeHostCommand} from "../types.js";
-import {
-  type HttpProxyAuthRequestMessage,
-  type HttpProxyAuthResponseMessage,
-} from "../http/http-proxy-protocol.js";
 import type {LaunchTaskRequest, SandboxHandle, SandboxRunner, ShareInspection} from "./sandbox-runner.js";
 import type {ReservedTaskBundle, TaskBundlePool} from "./task-bundle-types.js";
 
@@ -20,12 +16,6 @@ type ShareHostPath = string;
 export type DockerSandboxRunnerOptions = {
   workerImage: string;
   resolveWorkerImage?: () => string;
-  networkGuardImage?: string;
-  shareRoot: string;
-  codexAuthFile: string | null;
-  skillsDirectory: string | null;
-  workerCodexBinaryPath?: string | null;
-  workerNetworkName?: string | null;
   workerNetwork: WorkerNetworkConfig;
   workerCodexConfigBuilder: (taskId: string) => {
     codexConfigToml: string | null;
@@ -33,14 +23,9 @@ export type DockerSandboxRunnerOptions = {
   };
   httpProxyUrlFactory?: (taskId: string) => string | null;
   handshakeTimeoutMs?: number;
-  logLevel?: LogLevel;
   spawnImpl?: typeof spawn;
   setTimeoutImpl?: typeof setTimeout;
   clearTimeoutImpl?: typeof clearTimeout;
-  httpProxyCaCertPath?: string | null;
-  httpProxyConfDirPath?: string | null;
-  httpProxyImage?: string | null;
-  resolveHttpProxyRequest?: (request: HttpProxyAuthRequestMessage) => Promise<HttpProxyAuthResponseMessage>;
 };
 
 export class DockerSandboxRunner implements SandboxRunner {
@@ -82,9 +67,6 @@ export class DockerSandboxRunner implements SandboxRunner {
 
       const builtWorkerConfig = this.options.workerCodexConfigBuilder(request.taskId);
       const httpProxyUrl = this.options.httpProxyUrlFactory?.(request.taskId) ?? null;
-      if (httpProxyUrl) {
-        assertHttpProxySupportConfigured(this.options);
-      }
 
       let finished = false;
       let workerConnected = false;
@@ -699,19 +681,4 @@ function isMissingPathError(error: unknown): error is NodeJS.ErrnoException {
 
 function isPermissionError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error && (error.code === "EACCES" || error.code === "EPERM");
-}
-
-function assertHttpProxySupportConfigured(options: DockerSandboxRunnerOptions): void {
-  if (!options.httpProxyImage) {
-    throw new Error("HTTP proxy URL factory requires httpProxyImage.");
-  }
-  if (!options.httpProxyCaCertPath) {
-    throw new Error("HTTP proxy URL factory requires httpProxyCaCertPath.");
-  }
-  if (!options.httpProxyConfDirPath) {
-    throw new Error("HTTP proxy URL factory requires httpProxyConfDirPath.");
-  }
-  if (!options.resolveHttpProxyRequest) {
-    throw new Error("HTTP proxy URL factory requires resolveHttpProxyRequest.");
-  }
 }

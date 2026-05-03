@@ -26,7 +26,6 @@ import { createRetryingChannelAdapter } from "./channel/retrying-channel-adapter
 import { SelfUpdateCoordinator } from "./update/self-update.js";
 import { WorkerImageManager } from "./worker-image-manager.js";
 import { validateMatrixAuthStateForStartup, resolveMatrixAccessToken } from "./matrix/startup-validator.js";
-import type {HttpProxyAuthRequestMessage} from "./http/http-proxy-protocol.ts";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -156,16 +155,27 @@ export async function startApp(): Promise<void> {
     workerAccess,
   );
 
-  const codexAuthFile = config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthFile : null;
-  const resolveHttpProxyRequest = proxyAuthService
-      ? async (request: HttpProxyAuthRequestMessage) =>
-          await proxyAuthService.resolveProxyRequest(request)
-      : undefined;
+  const taskBundleLauncherOptions: TaskBundleLauncherOptions = {
+    workerImage: config.workerImage,
+    resolveWorkerImage: () => workerImageManager.getLaunchImage(),
+    shareRoot: config.shareRoot,
+    codexAuthFile: config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthFile : null,
+    skillsDirectory: config.skillsDirectory,
+    workerCodexBinaryPath,
+    networkGuardImage: config.networkGuardImage,
+    workerNetwork: config.workerNetwork,
+    workerNetworkName,
+    httpProxyCaCertPath: certificateAuthority?.certPath ?? null,
+    httpProxyConfDirPath: certificateAuthority?.confDirPath ?? null,
+    httpProxyImage: httpTokensEnabled ? config.httpProxyImage : null,
+    resolveHttpProxyRequest: proxyAuthService
+        ? async (request) => await proxyAuthService.resolveProxyRequest(request)
+        : undefined,
+    logLevel: config.logLevel,
+  };
   const sandboxRunnerOptions: DockerSandboxRunnerOptions = {
     workerImage: config.workerImage,
-    shareRoot: config.shareRoot,
-    codexAuthFile,
-    skillsDirectory: config.skillsDirectory,
+    resolveWorkerImage: () => workerImageManager.getLaunchImage(),
     workerNetwork: config.workerNetwork,
     workerCodexConfigBuilder: (taskId: string) => mcpWorkerLaunchConfigBuilder.build(taskId),
     httpProxyUrlFactory: httpTokensEnabled
@@ -177,31 +187,6 @@ export async function startApp(): Promise<void> {
           return `http://Bearer:${encodedJwt}@127.0.0.1:8081`;
         }
         : undefined,
-      resolveWorkerImage: () => workerImageManager.getLaunchImage(),
-      workerCodexBinaryPath,
-      networkGuardImage: config.networkGuardImage,
-      workerNetworkName,
-      httpProxyCaCertPath: certificateAuthority?.certPath ?? null,
-      httpProxyConfDirPath: certificateAuthority?.confDirPath ?? null,
-      httpProxyImage: httpTokensEnabled ? config.httpProxyImage : null,
-      resolveHttpProxyRequest,
-      logLevel: config.logLevel,
-  }
-  const taskBundleLauncherOptions: TaskBundleLauncherOptions = {
-    workerImage: config.workerImage,
-    resolveWorkerImage: () => workerImageManager.getLaunchImage(),
-    shareRoot: config.shareRoot,
-    codexAuthFile,
-    skillsDirectory: config.skillsDirectory,
-    workerCodexBinaryPath,
-    networkGuardImage: config.networkGuardImage,
-    workerNetwork: config.workerNetwork,
-    workerNetworkName,
-    httpProxyCaCertPath: certificateAuthority?.certPath ?? null,
-    httpProxyConfDirPath: certificateAuthority?.confDirPath ?? null,
-    httpProxyImage: httpTokensEnabled ? config.httpProxyImage : null,
-    resolveHttpProxyRequest,
-    logLevel: config.logLevel,
   };
   const taskBundleLauncher = new TaskBundleLauncherImpl(taskBundleLauncherOptions);
   const taskBundlePool = new TaskBundlePoolImpl(taskBundleLauncher);

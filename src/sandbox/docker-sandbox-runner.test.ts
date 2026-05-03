@@ -8,7 +8,7 @@ import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { DockerSandboxRunner } from "./docker-sandbox-runner.js";
-import { TaskBundleLauncherImpl } from "./task-bundle-launcher.js";
+import { TaskBundleLauncherImpl, type TaskBundleLauncherOptions } from "./task-bundle-launcher.js";
 import { TaskBundlePoolImpl } from "./task-bundle-pool.js";
 import type { ChannelFormatting, HostCommand, SubAgentEvent, WorkerStartConfig } from "../types.js";
 
@@ -123,31 +123,13 @@ function createSpawnHarness(taskChild: FakeChildProcess) {
   };
 }
 
-type RunnerOptions = ConstructorParameters<typeof DockerSandboxRunner>[0];
-
-function createRunner(options: RunnerOptions): DockerSandboxRunner {
-  const launcher = new TaskBundleLauncherImpl({
-    workerImage: options.workerImage,
-    resolveWorkerImage: options.resolveWorkerImage,
-    networkGuardImage: options.networkGuardImage,
-    shareRoot: options.shareRoot,
-    codexAuthFile: options.codexAuthFile,
-    skillsDirectory: options.skillsDirectory,
-    workerCodexBinaryPath: options.workerCodexBinaryPath,
-    workerNetworkName: options.workerNetworkName,
-    workerNetwork: options.workerNetwork,
-    httpProxyCaCertPath: options.httpProxyCaCertPath,
-    httpProxyConfDirPath: options.httpProxyConfDirPath,
-    httpProxyImage: options.httpProxyImage,
-    resolveHttpProxyRequest: options.resolveHttpProxyRequest,
-    handshakeTimeoutMs: options.handshakeTimeoutMs,
-    logLevel: options.logLevel,
-    spawnImpl: options.spawnImpl,
-    setTimeoutImpl: options.setTimeoutImpl,
-    clearTimeoutImpl: options.clearTimeoutImpl,
-  });
+function createRunner(
+  runnerOptions: ConstructorParameters<typeof DockerSandboxRunner>[0],
+  launcherOptions: TaskBundleLauncherOptions,
+): DockerSandboxRunner {
+  const launcher = new TaskBundleLauncherImpl(launcherOptions);
   const pool = new TaskBundlePoolImpl(launcher);
-  return new DockerSandboxRunner(options, pool);
+  return new DockerSandboxRunner(runnerOptions, pool);
 }
 
 async function launchRunnerWithChild(
@@ -166,7 +148,8 @@ async function launchRunnerWithChild(
 ) {
   const timers = createTimerController();
   const harness = createSpawnHarness(taskChild);
-  const runner = createRunner({
+
+  const launcherOptions: TaskBundleLauncherOptions = {
     workerImage: "sandy-subagent:latest",
     resolveWorkerImage: options?.resolveWorkerImage,
     networkGuardImage: "sandy-network-guard:latest",
@@ -174,6 +157,24 @@ async function launchRunnerWithChild(
     codexAuthFile: null,
     skillsDirectory: options?.skillsDirectory ?? null,
     workerCodexBinaryPath: options?.workerCodexBinaryPath,
+    workerNetworkName: options?.workerNetworkName,
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
+    httpProxyCaCertPath: null,
+    httpProxyConfDirPath: null,
+    httpProxyImage: null,
+    resolveHttpProxyRequest: undefined,
+    handshakeTimeoutMs: options?.handshakeTimeoutMs ?? 10_000,
+    spawnImpl: harness.spawnImpl,
+    setTimeoutImpl: timers.setTimeoutImpl,
+    clearTimeoutImpl: timers.clearTimeoutImpl,
+  };
+
+  const runnerOptions: ConstructorParameters<typeof DockerSandboxRunner>[0] = {
+    workerImage: "sandy-subagent:latest",
+    resolveWorkerImage: options?.resolveWorkerImage,
     workerNetwork: {
       mode: "unrestricted",
       allowLocalCidrs: [],
@@ -182,12 +183,13 @@ async function launchRunnerWithChild(
       codexConfigToml: options?.builtWorkerCodexConfigToml ?? null,
       environment: {},
     }),
-    workerNetworkName: options?.workerNetworkName,
     handshakeTimeoutMs: options?.handshakeTimeoutMs ?? 10_000,
     spawnImpl: harness.spawnImpl,
     setTimeoutImpl: timers.setTimeoutImpl,
     clearTimeoutImpl: timers.clearTimeoutImpl,
-  });
+  };
+
+  const runner = createRunner(runnerOptions, launcherOptions);
 
   const handle = await runner.launchTask(
     {
@@ -269,7 +271,7 @@ test("DockerSandboxRunner passes the configured Codex model in the start_task pa
     return cleanupChild as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const runner = createRunner({
+  const launcherOptions: TaskBundleLauncherOptions = {
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
@@ -280,12 +282,24 @@ test("DockerSandboxRunner passes the configured Codex model in the start_task pa
       mode: "unrestricted",
       allowLocalCidrs: [],
     },
+    httpProxyCaCertPath: null,
+    httpProxyConfDirPath: null,
+    httpProxyImage: null,
+    resolveHttpProxyRequest: undefined,
+    spawnImpl,
+  };
+  const runner = createRunner({
+    workerImage: "sandy-subagent:latest",
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
     }),
     spawnImpl,
-  });
+  }, launcherOptions);
 
   await runner.launchTask({
     chatId: "chat-1",
@@ -528,7 +542,7 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
     return cleanupChild as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const runner = createRunner({
+  const launcherOptions: TaskBundleLauncherOptions = {
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
@@ -539,12 +553,24 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
       mode: "unrestricted",
       allowLocalCidrs: [],
     },
+    httpProxyCaCertPath: null,
+    httpProxyConfDirPath: null,
+    httpProxyImage: null,
+    resolveHttpProxyRequest: undefined,
+    spawnImpl,
+  };
+  const runner = createRunner({
+    workerImage: "sandy-subagent:latest",
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
     }),
     spawnImpl,
-  });
+  }, launcherOptions);
 
   await runner.launchTask({
     chatId: "chat-1",
@@ -578,7 +604,7 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
 
 test("DockerSandboxRunner inspects and deletes task shares on the host", async () => {
   const shareRoot = mkdtempSync(join(tmpdir(), "sandy-share-test-"));
-  const runner = createRunner({
+  const launcherOptions: TaskBundleLauncherOptions = {
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
@@ -589,11 +615,22 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
       mode: "unrestricted",
       allowLocalCidrs: [],
     },
+    httpProxyCaCertPath: null,
+    httpProxyConfDirPath: null,
+    httpProxyImage: null,
+    resolveHttpProxyRequest: undefined,
+  };
+  const runner = createRunner({
+    workerImage: "sandy-subagent:latest",
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
     }),
-  });
+  }, launcherOptions);
 
   const taskShare = join(shareRoot, "task-1");
   (runner as unknown as { taskSharePaths: Map<string, string> }).taskSharePaths.set("task-1", taskShare);
@@ -630,7 +667,7 @@ test("DockerSandboxRunner falls back to a root Docker container when host rm fai
     return child as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const runner = createRunner({
+  const launcherOptions: TaskBundleLauncherOptions = {
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
@@ -641,12 +678,24 @@ test("DockerSandboxRunner falls back to a root Docker container when host rm fai
       mode: "unrestricted",
       allowLocalCidrs: [],
     },
+    httpProxyCaCertPath: null,
+    httpProxyConfDirPath: null,
+    httpProxyImage: null,
+    resolveHttpProxyRequest: undefined,
+    spawnImpl,
+  };
+  const runner = createRunner({
+    workerImage: "sandy-subagent:latest",
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
     }),
     spawnImpl,
-  });
+  }, launcherOptions);
 
   (runner as unknown as { taskSharePaths: Map<string, string> }).taskSharePaths.set("task-1", taskShare);
 
@@ -774,13 +823,26 @@ test("DockerSandboxRunner launches a network guard and shares its network namesp
     return cleanupChild as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const runner = createRunner({
+  const launcherOptions: TaskBundleLauncherOptions = {
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
     codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
+    workerNetworkName: "sandy-mcp-net",
+    workerNetwork: {
+      mode: "public_internet_only",
+      allowLocalCidrs: ["192.168.178.0/24", "fd00::/8"],
+    },
+    httpProxyCaCertPath: null,
+    httpProxyConfDirPath: null,
+    httpProxyImage: null,
+    resolveHttpProxyRequest: undefined,
+    spawnImpl,
+  };
+  const runner = createRunner({
+    workerImage: "sandy-subagent:latest",
     workerNetwork: {
       mode: "public_internet_only",
       allowLocalCidrs: ["192.168.178.0/24", "fd00::/8"],
@@ -789,9 +851,8 @@ test("DockerSandboxRunner launches a network guard and shares its network namesp
       codexConfigToml: null,
       environment: {},
     }),
-    workerNetworkName: "sandy-mcp-net",
     spawnImpl,
-  });
+  }, launcherOptions);
 
   await runner.launchTask({
     chatId: "chat-1",
@@ -854,7 +915,7 @@ test("DockerSandboxRunner reports a disconnect when the network guard exits mid-
     return cleanupChild as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const runner = createRunner({
+  const launcherOptions: TaskBundleLauncherOptions = {
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
@@ -865,12 +926,24 @@ test("DockerSandboxRunner reports a disconnect when the network guard exits mid-
       mode: "public_internet_only",
       allowLocalCidrs: [],
     },
+    httpProxyCaCertPath: null,
+    httpProxyConfDirPath: null,
+    httpProxyImage: null,
+    resolveHttpProxyRequest: undefined,
+    spawnImpl,
+  };
+  const runner = createRunner({
+    workerImage: "sandy-subagent:latest",
+    workerNetwork: {
+      mode: "public_internet_only",
+      allowLocalCidrs: [],
+    },
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
     }),
     spawnImpl,
-  });
+  }, launcherOptions);
 
   await runner.launchTask({
     chatId: "chat-1",
@@ -904,7 +977,7 @@ test("DockerSandboxRunner reports a disconnect when the network guard exits mid-
 
 test("DockerSandboxRunner rejects share inspection for unknown tasks", async () => {
   const shareRoot = mkdtempSync(join(tmpdir(), "sandy-share-escape-"));
-  const runner = createRunner({
+  const launcherOptions: TaskBundleLauncherOptions = {
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
@@ -915,11 +988,22 @@ test("DockerSandboxRunner rejects share inspection for unknown tasks", async () 
       mode: "unrestricted",
       allowLocalCidrs: [],
     },
+    httpProxyCaCertPath: null,
+    httpProxyConfDirPath: null,
+    httpProxyImage: null,
+    resolveHttpProxyRequest: undefined,
+  };
+  const runner = createRunner({
+    workerImage: "sandy-subagent:latest",
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
     }),
-  });
+  }, launcherOptions);
 
   await assert.rejects(
     runner.inspectTaskShare("task-unknown"),
@@ -930,7 +1014,7 @@ test("DockerSandboxRunner rejects share inspection for unknown tasks", async () 
 
 test("DockerSandboxRunner rejects share deletion for unknown tasks", async () => {
   const shareRoot = mkdtempSync(join(tmpdir(), "sandy-share-delete-"));
-  const runner = createRunner({
+  const launcherOptions: TaskBundleLauncherOptions = {
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
@@ -941,11 +1025,22 @@ test("DockerSandboxRunner rejects share deletion for unknown tasks", async () =>
       mode: "unrestricted",
       allowLocalCidrs: [],
     },
+    httpProxyCaCertPath: null,
+    httpProxyConfDirPath: null,
+    httpProxyImage: null,
+    resolveHttpProxyRequest: undefined,
+  };
+  const runner = createRunner({
+    workerImage: "sandy-subagent:latest",
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
     workerCodexConfigBuilder: () => ({
       codexConfigToml: null,
       environment: {},
     }),
-  });
+  }, launcherOptions);
 
   await assert.rejects(
     runner.deleteTaskShare("task-unknown"),
@@ -987,23 +1082,18 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
     return cleanupChild as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const runner = createRunner({
+  const launcherOptions: TaskBundleLauncherOptions = {
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
     codexAuthFile: null,
     skillsDirectory: null,
     workerCodexBinaryPath: null,
+    workerNetworkName: "sandy-mcp-net",
     workerNetwork: {
       mode: "public_internet_only",
       allowLocalCidrs: [],
     },
-    workerCodexConfigBuilder: () => ({
-      codexConfigToml: null,
-      environment: {},
-    }),
-    httpProxyUrlFactory: () => "http://Bearer:token@sandy-http-proxy:8081",
-    workerNetworkName: "sandy-mcp-net",
     httpProxyImage: "sandy-http-proxy:latest",
     httpProxyCaCertPath: "/tmp/sandy-ca.pem",
     httpProxyConfDirPath: "/tmp/sandy-mitmproxy-conf",
@@ -1014,7 +1104,20 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
       headers: request.headers,
     }),
     spawnImpl,
-  });
+  };
+  const runner = createRunner({
+    workerImage: "sandy-subagent:latest",
+    workerNetwork: {
+      mode: "public_internet_only",
+      allowLocalCidrs: [],
+    },
+    workerCodexConfigBuilder: () => ({
+      codexConfigToml: null,
+      environment: {},
+    }),
+    httpProxyUrlFactory: () => "http://Bearer:token@sandy-http-proxy:8081",
+    spawnImpl,
+  }, launcherOptions);
 
   await runner.launchTask({
     chatId: "chat-1",
@@ -1103,7 +1206,7 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
     return cleanupChild as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const runner = createRunner({
+  const launcherOptions: TaskBundleLauncherOptions = {
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
@@ -1114,11 +1217,6 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
       mode: "unrestricted",
       allowLocalCidrs: [],
     },
-    workerCodexConfigBuilder: () => ({
-      codexConfigToml: null,
-      environment: {},
-    }),
-    httpProxyUrlFactory: () => "http://Bearer:token@sandy-http-proxy:8081",
     httpProxyImage: "sandy-http-proxy:latest",
     httpProxyCaCertPath: "/tmp/sandy-ca.pem",
     httpProxyConfDirPath: "/tmp/sandy-mitmproxy-conf",
@@ -1129,7 +1227,20 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
       headers: request.headers,
     }),
     spawnImpl,
-  });
+  };
+  const runner = createRunner({
+    workerImage: "sandy-subagent:latest",
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
+    workerCodexConfigBuilder: () => ({
+      codexConfigToml: null,
+      environment: {},
+    }),
+    httpProxyUrlFactory: () => "http://Bearer:token@sandy-http-proxy:8081",
+    spawnImpl,
+  }, launcherOptions);
 
   await runner.launchTask({
     chatId: "chat-1",
