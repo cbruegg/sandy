@@ -575,9 +575,12 @@ codex_auth_file = "~/.codex/auth.json"
   }
 });
 
-test("parseConfigToml rejects stdio MCP servers", () => {
-  assert.throws(() => {
-    parseConfigToml(`
+test("parseConfigToml accepts stdio MCP servers", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sandy-config-"));
+  const configFilePath = join(root, "config.toml");
+
+  try {
+    const config = parseConfigToml(`
 [channel]
 kind = "telegram"
 
@@ -588,8 +591,25 @@ allowed_user = "123456"
 [mcp.servers.local]
 transport = "stdio"
 command = "node"
-`);
-  }, /streamable_http|Invalid input/);
+args = ["build/index.js"]
+cwd = "./tools/local-mcp"
+
+[mcp.servers.local.env]
+FOO = "bar"
+`, configFilePath);
+
+    assert.deepEqual(config.mcpServers["local"], {
+      transport: "stdio",
+      command: "node",
+      args: ["build/index.js"],
+      cwd: join(root, "tools", "local-mcp"),
+      env: {
+        FOO: "bar",
+      },
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("parseConfigToml rejects a missing telegram allowed_user", () => {

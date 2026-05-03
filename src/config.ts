@@ -10,6 +10,7 @@ import { sandyMcpServerId } from "./subagent/worker-tools.js";
 
 const logLevelSchema = z.enum(["debug", "info", "warn", "error"]);
 const mcpTransportSchema = z.literal("streamable_http");
+const mcpStdioTransportSchema = z.literal("stdio");
 
 const DEFAULT_LOG_LEVEL: z.infer<typeof logLevelSchema> = "info";
 const DEFAULT_SHARE_ROOT = "/tmp/sandy-shares";
@@ -173,14 +174,20 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
     }),
     mcp: z.object({
       sidecar_image: z.string().min(1).default(defaultImages.sidecarImage),
-      servers: z.record(z.string(), z.object({
-        transport: mcpTransportSchema,
-        url: z.string().min(1).optional(),
-        command: z.string().min(1).optional(),
-        args: z.array(z.string()).default([]),
-        env: z.record(z.string(), z.string()).default({}),
-        oauth_scopes: z.array(z.string()).default([]),
-      }).strict()).default({}),
+      servers: z.record(z.string(), z.discriminatedUnion("transport", [
+        z.object({
+          transport: mcpTransportSchema,
+          url: z.string().min(1),
+          oauth_scopes: z.array(z.string()).default([]),
+        }).strict(),
+        z.object({
+          transport: mcpStdioTransportSchema,
+          command: z.string().min(1),
+          args: z.array(z.string()).default([]),
+          cwd: z.string().min(1).optional(),
+          env: z.record(z.string(), z.string()).default({}),
+        }).strict(),
+      ])).default({}),
     }).default({
       sidecar_image: defaultImages.sidecarImage,
       servers: {},
@@ -218,11 +225,19 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
 type SandyConfigFile = z.infer<ReturnType<typeof buildSandyConfigSchema>>;
 type SandyConfigFileData = SandyConfigFile;
 
-export type McpServerConfig = {
-  transport: "streamable_http";
-  url: string;
-  oauthScopes: string[];
-};
+export type McpServerConfig =
+  | {
+    transport: "streamable_http";
+    url: string;
+    oauthScopes: string[];
+  }
+  | {
+    transport: "stdio";
+    command: string;
+    args: string[];
+    cwd: string | null;
+    env: Record<string, string>;
+  };
 
 export type HttpTokenConfig = {
   description: string;
@@ -333,15 +348,21 @@ function resolveCodexAuthFile(configuredPath: string | null | undefined): string
   return null;
 }
 
-function normalizeMcpServerConfig(config: SandyConfigFile["mcp"]["servers"][string]): McpServerConfig {
-  if (!config.url) {
-    throw new Error("MCP streamable_http servers require a url.");
+function normalizeMcpServerConfig(config: SandyConfigFile["mcp"]["servers"][string], configDirectory: string): McpServerConfig {
+  if (config.transport === "streamable_http") {
+    return {
+      transport: config.transport,
+      url: config.url,
+      oauthScopes: config.oauth_scopes,
+    };
   }
 
   return {
     transport: config.transport,
-    url: config.url,
-    oauthScopes: config.oauth_scopes,
+    command: config.command,
+    args: config.args,
+    cwd: config.cwd ? resolve(configDirectory, expandHomeShorthand(config.cwd)) : null,
+    env: config.env,
   };
 }
 
@@ -409,7 +430,7 @@ export function parseConfigToml(
     sttModel: parsed.stt.model,
     authMode,
     mcpServers: Object.fromEntries(
-      Object.entries(parsed.mcp.servers).map(([identifier, server]) => [identifier, normalizeMcpServerConfig(server)]),
+      Object.entries(parsed.mcp.servers).map(([identifier, server]) => [identifier, normalizeMcpServerConfig(server, configDirectory)]),
     ),
     httpTokens: Object.fromEntries(
       Object.entries(parsed.http.tokens).map(([identifier, token]) => [identifier, {

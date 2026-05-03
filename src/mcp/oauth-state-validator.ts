@@ -15,6 +15,9 @@ export async function validateOAuthStateFilesForStartup(
   const oauthStateDirectory = buildHostOauthStateDirectory(configDirectory);
 
   for (const [serverId] of Object.entries(mcpServers)) {
+    if (mcpServers[serverId]?.transport !== "streamable_http") {
+      continue;
+    }
     const stateFilePath = join(oauthStateDirectory, `${serverId}.json`);
     let raw: string;
     try {

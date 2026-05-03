@@ -1,18 +1,26 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { ProxyAccess } from "../proxy-access.js";
 import { sandyMcpServerId } from "../subagent/worker-tools.js";
 import { SandyMcpProxy } from "./proxy.js";
-import type { McpServerRegistry } from "./server-registry.js";
+import type { McpServerRegistry, McpUpstreamServer } from "./server-registry.js";
 
 class FakeRegistry implements McpServerRegistry {
-  private readonly client = {} as Client;
+  private readonly server: McpUpstreamServer = {
+    listTools: async () => ({ tools: [] }),
+    listResources: async () => ({ resources: [] }),
+    listResourceTemplates: async () => ({ resourceTemplates: [] }),
+    readResource: async () => ({ contents: [] }),
+    listPrompts: async () => ({ prompts: [] }),
+    getPrompt: async () => ({ description: "", messages: [] }),
+    callTool: async () => ({ content: [], isError: false }),
+    close: async () => {},
+  };
 
-  async getClient(_serverId: string): Promise<Client> {
-    return this.client;
+  async getServer(_taskId: string, _serverId: string): Promise<McpUpstreamServer> {
+    return this.server;
   }
 
   async close() {}
@@ -21,15 +29,22 @@ class FakeRegistry implements McpServerRegistry {
 class ReadResourceRegistry implements McpServerRegistry {
   public readonly calls: string[] = [];
 
-  constructor(private readonly result: Awaited<ReturnType<Client["readResource"]>>) {}
+  constructor(private readonly result: Awaited<ReturnType<McpUpstreamServer["readResource"]>>) {}
 
-  async getClient(_serverId: string): Promise<Client> {
+  async getServer(_taskId: string, _serverId: string): Promise<McpUpstreamServer> {
     return {
+      listTools: async () => ({ tools: [] }),
+      listResources: async () => ({ resources: [] }),
+      listResourceTemplates: async () => ({ resourceTemplates: [] }),
       readResource: async (params: { uri: string }) => {
         this.calls.push(params.uri);
         return this.result;
       },
-    } as unknown as Client;
+      listPrompts: async () => ({ prompts: [] }),
+      getPrompt: async () => ({ description: "", messages: [] }),
+      callTool: async () => ({ content: [], isError: false }),
+      close: async () => {},
+    };
   }
 
   async close() {}

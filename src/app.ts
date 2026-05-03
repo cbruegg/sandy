@@ -13,6 +13,7 @@ import { ProxyAuthService } from "./http/proxy-auth-service.js";
 import { TaskRegistry } from "./task-registry.js";
 import { McpWorkerLaunchConfigBuilder } from "./mcp/worker-launch-config-builder.js";
 import { createMcpWorkerNetworkName } from "./mcp/worker-network-name.js";
+import { HostMcpServerRegistry } from "./mcp/host-server-registry.js";
 import { SandyOrchestrator } from "./orchestrator.js";
 import { TomlPersistentApprovalStore } from "./privilege/persistent-approval-store.js";
 import { PrivilegeBrokerImpl } from "./privilege/privilege-broker.js";
@@ -110,6 +111,9 @@ export async function startApp(): Promise<void> {
     baseImage: config.workerImage,
     launchImage: initialWorkerImage,
   });
+
+  const hostMcpRegistry = new HostMcpServerRegistry(config.mcpServers);
+  await hostMcpRegistry.start();
 
   const mainAgent = new CodexMainAgentController(
     codex,
@@ -212,6 +216,7 @@ export async function startApp(): Promise<void> {
      authorizeToolCall: (input) => orchestrator.authorizeMcpToolCall(input),
      authorizeResourceRead: (input) => orchestrator.authorizeMcpResourceRead(input),
      executeNativeToolCall: (input) => orchestrator.executeNativeWorkerToolCall(input),
+     executeUpstreamMcpRequest: async (input) => await hostMcpRegistry.execute(input.taskId, input.serverId, input.method, input.params),
    }, workerAccess);
 
   await sidecarManager?.start();
@@ -229,9 +234,10 @@ export async function startApp(): Promise<void> {
     logger.info("app.shutdown_started");
     updateCoordinator.stop();
     await stopWithLogging("channel.stop", () => channel.stop());
-    await stopWithLogging("workerImageManager.stop", () => workerImageManager.stop());
-    await stopWithLogging("sandboxRunner.shutdown", sandboxRunner.shutdown?.bind(sandboxRunner));
     await stopWithLogging("sidecarManager.stop", sidecarManager?.stop.bind(sidecarManager));
+    await stopWithLogging("hostMcpRegistry.close", () => hostMcpRegistry.close());
+    await stopWithLogging("sandboxRunner.shutdown", sandboxRunner.shutdown?.bind(sandboxRunner));
+    await stopWithLogging("workerImageManager.stop", () => workerImageManager.stop());
     logger.info("app.shutdown_completed");
   };
 

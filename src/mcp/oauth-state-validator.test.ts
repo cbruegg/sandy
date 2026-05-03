@@ -76,3 +76,21 @@ test("validateOAuthStateFilesForStartup ignores missing state files", async () =
     await rm(configDirectory, { recursive: true, force: true });
   }
 });
+
+test("validateOAuthStateFilesForStartup ignores stdio MCP servers", async () => {
+  const configDirectory = await mkdtemp(join(tmpdir(), "sandy-oauth-state-"));
+
+  try {
+    await validateOAuthStateFilesForStartup(configDirectory, {
+      spotify: {
+        transport: "stdio",
+        command: "node",
+        args: ["build/index.js"],
+        cwd: null,
+        env: {},
+      },
+    });
+  } finally {
+    await rm(configDirectory, { recursive: true, force: true });
+  }
+});

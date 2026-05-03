@@ -4,7 +4,12 @@ import { configureLogger } from "../logger.js";
 import { SandyMcpProxy } from "./proxy.js";
 import { ProxyAccess } from "../proxy-access.js";
 import { McpServerRegistryImpl } from "./server-registry.js";
-import { parseHostToMcpSidecarMessage, type McpSidecarBootstrapMessage } from "./sidecar-protocol.js";
+import {
+  parseHostToMcpSidecarMessage,
+  type McpSidecarBootstrapMessage,
+  type McpSidecarUpstreamRequestMessage,
+  type McpSidecarUpstreamResultMessage,
+} from "./sidecar-protocol.js";
 import type { NativeToolCallResult } from "./proxy-contract.js";
 import type { PrivilegeResolutionResult } from "../types.js";
 
@@ -29,7 +34,15 @@ export async function main(): Promise<void> {
 
   const bootstrap = await readBootstrapMessage(input);
   const access = new ProxyAccess(bootstrap.workerProxyTokenSecret);
-  const registry = new McpServerRegistryImpl(bootstrap.oauthStateDirectory, bootstrap.mcpServers);
+  const pendingUpstreamRequests = new Map<string, {
+    resolve: (result: unknown) => void;
+    reject: (error: Error) => void;
+  }>();
+  const registry = new McpServerRegistryImpl(
+    bootstrap.oauthStateDirectory,
+    bootstrap.mcpServers,
+    async (request) => await requestHostMcp(request, pendingUpstreamRequests),
+  );
   const pendingAuthorization = new Map<string, (result: PrivilegeResolutionResult) => void>();
   const pendingNativeToolCalls = new Map<string, (result: NativeToolCallResult) => void>();
   let shuttingDown = false;
@@ -97,6 +110,10 @@ export async function main(): Promise<void> {
         pendingNativeToolCalls.delete(message.requestId);
         return;
       }
+      if (message.type === "upstream_result") {
+        handleUpstreamResult(message, pendingUpstreamRequests);
+        return;
+      }
       if (message.type === "shutdown") {
         shuttingDown = true;
         void proxy.stop().finally(() => {
@@ -146,4 +163,45 @@ async function readBootstrapMessage(input: ReturnType<typeof createInterface>): 
       reject(new Error("Host control channel closed before sidecar bootstrap."));
     });
   });
+}
+
+async function requestHostMcp(
+  request: Omit<McpSidecarUpstreamRequestMessage, "type" | "requestId">,
+  pendingUpstreamRequests: Map<string, {
+    resolve: (result: unknown) => void;
+    reject: (error: Error) => void;
+  }>,
+): Promise<unknown> {
+  const requestId = randomUUID();
+  const pending = await new Promise<unknown>((resolve, reject) => {
+    pendingUpstreamRequests.set(requestId, {
+      resolve,
+      reject,
+    });
+    send({
+      type: "upstream_request",
+      requestId,
+      ...request,
+    });
+  });
+  return pending;
+}
+
+function handleUpstreamResult(
+  message: McpSidecarUpstreamResultMessage,
+  pendingUpstreamRequests: Map<string, {
+    resolve: (result: unknown) => void;
+    reject: (error: Error) => void;
+  }>,
+): void {
+  const pending = pendingUpstreamRequests.get(message.requestId);
+  if (!pending) {
+    return;
+  }
+  pendingUpstreamRequests.delete(message.requestId);
+  if (message.ok) {
+    pending.resolve(message.result);
+    return;
+  }
+  pending.reject(new Error(message.errorMessage));
 }

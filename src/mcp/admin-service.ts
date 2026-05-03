@@ -14,12 +14,22 @@ import {
   shouldUseIndieAuthFallbackClientId,
 } from "./oauth-compatibility.js";
 
-type McpServerStatus = {
-  serverId: string;
-  transport: McpServerConfig["transport"];
-  url: string;
-  oauthConfigured: boolean;
-};
+type McpServerStatus =
+  | {
+    serverId: string;
+    transport: "streamable_http";
+    url: string;
+    oauthConfigured: boolean;
+  }
+  | {
+    serverId: string;
+    transport: "stdio";
+    command: string;
+    args: string[];
+    cwd: string | null;
+    envKeys: string[];
+    oauthConfigured: false;
+  };
 
 export class SandyMcpAdminService {
   constructor(
@@ -28,16 +38,45 @@ export class SandyMcpAdminService {
   ) {}
 
   listServers(): McpServerStatus[] {
-    return Object.entries(this.mcpServers).map(([serverId, config]) => ({
-      serverId,
-      transport: config.transport,
-      url: config.url,
-      oauthConfigured: config.oauthScopes.length > 0,
-    }));
+    return Object.entries(this.mcpServers).map(([serverId, config]) => {
+      if (config.transport === "streamable_http") {
+        return {
+          serverId,
+          transport: config.transport,
+          url: config.url,
+          oauthConfigured: config.oauthScopes.length > 0,
+        };
+      }
+
+      return {
+        serverId,
+        transport: config.transport,
+        command: config.command,
+        args: config.args,
+        cwd: config.cwd,
+        envKeys: Object.keys(config.env).sort(),
+        oauthConfigured: false,
+      };
+    });
   }
 
   async getStatus(serverId: string): Promise<{ server: McpServerStatus; loggedIn: boolean }> {
     const config = this.requireServer(serverId);
+    if (config.transport === "stdio") {
+      return {
+        server: {
+          serverId,
+          transport: config.transport,
+          command: config.command,
+          args: config.args,
+          cwd: config.cwd,
+          envKeys: Object.keys(config.env).sort(),
+          oauthConfigured: false,
+        },
+        loggedIn: false,
+      };
+    }
+
     const provider = this.createProvider(serverId, false);
     return {
       server: {
@@ -53,7 +92,7 @@ export class SandyMcpAdminService {
   async login(serverId: string): Promise<void> {
     const config = this.requireServer(serverId);
     if (config.transport !== "streamable_http") {
-      throw new Error(mcpAdminMessages.oauthLoginUnsupported(serverId));
+      throw new Error(mcpAdminMessages.stdioLoginUnsupported(serverId));
     }
     // `config.url` is the canonical runtime URL, but host-side login may need
     // a different hostname to reach the same server. The classic case is a
@@ -152,6 +191,10 @@ export class SandyMcpAdminService {
   }
 
   async logout(serverId: string): Promise<void> {
+    const config = this.requireServer(serverId);
+    if (config.transport !== "streamable_http") {
+      throw new Error(mcpAdminMessages.stdioLogoutUnsupported(serverId));
+    }
     const provider = this.createProvider(serverId, false);
     await provider.logout();
   }
@@ -173,15 +216,24 @@ export class SandyMcpAdminService {
     configuredServerUrl?: string,
     loginServerUrl?: string,
   ): SandyOAuthClientProvider {
+    const server = this.requireHttpServer(serverId);
     return new SandyOAuthClientProvider({
       stateFilePath: join(buildHostOauthStateDirectory(this.configDirectory), `${serverId}.json`),
       redirectUrl,
       onRedirect,
       interactive,
       clientId,
-      configuredServerUrl: configuredServerUrl ?? this.requireServer(serverId).url,
+      configuredServerUrl: configuredServerUrl ?? server.url,
       loginServerUrl,
     });
+  }
+
+  private requireHttpServer(serverId: string): Extract<McpServerConfig, { transport: "streamable_http" }> {
+    const server = this.requireServer(serverId);
+    if (server.transport !== "streamable_http") {
+      throw new Error(mcpAdminMessages.stdioLoginUnsupported(serverId));
+    }
+    return server;
   }
 }
 
