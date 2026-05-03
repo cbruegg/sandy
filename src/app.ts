@@ -184,7 +184,7 @@ export async function startApp(): Promise<void> {
       }
    );
 
-   await sandboxRunner.start();
+  await sandboxRunner.start();
 
   const orchestrator = new SandyOrchestrator({
     channel,
