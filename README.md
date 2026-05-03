@@ -3,8 +3,7 @@
 Sandy aims to be a safer alternative to the OpenClaw agent, executing actions in a sandboxed environment
 with granular control over the agent's capabilities.
 
-This README describes Sandy's intended target architecture and product direction. For the current v1 implementation
-status, completed work, and known gaps relative to that target, see `PLAN_v1.md`.
+This README describes Sandy's intended target architecture and product direction.
 
 ## Usage
 
