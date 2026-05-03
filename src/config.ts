@@ -185,7 +185,6 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
           command: z.string().min(1),
           args: z.array(z.string()).default([]),
           working_directory: z.string().min(1).optional(),
-          cwd: z.string().min(1).optional(),
           env: z.record(z.string(), z.string()).default({}),
         }).strict(),
       ])).default({}),
@@ -372,9 +371,7 @@ function normalizeMcpServerConfig(config: SandyConfigFile["mcp"]["servers"][stri
     args: config.args,
     workingDirectory: config.working_directory
       ? resolveMcpWorkingDirectory(config.working_directory)
-      : config.cwd
-        ? resolveMcpWorkingDirectory(config.cwd)
-        : null,
+      : null,
     env: config.env,
   };
 }

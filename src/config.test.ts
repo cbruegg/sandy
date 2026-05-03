@@ -671,38 +671,6 @@ working_directory = "./tools/local-mcp"
   }, /working_directory must be an absolute path/);
 });
 
-test("parseConfigToml accepts legacy stdio cwd values", async () => {
-  const root = await mkdtemp(join(tmpdir(), "sandy-config-"));
-  const configFilePath = join(root, "config.toml");
-  const localMcpDirectory = join(root, "tools", "local-mcp");
-
-  try {
-    const config = parseConfigToml(`
-[channel]
-kind = "telegram"
-
-[channel.telegram]
-bot_token = "telegram-token"
-allowed_user = "123456"
-
-[mcp.servers.local]
-transport = "stdio"
-command = "node"
-cwd = "${localMcpDirectory}"
-`, configFilePath);
-
-    assert.deepEqual(config.mcpServers["local"], {
-      transport: "stdio",
-      command: "node",
-      args: [],
-      workingDirectory: localMcpDirectory,
-      env: {},
-    });
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
 test("parseConfigToml rejects a missing telegram allowed_user", () => {
   assert.throws(() => {
     parseConfigToml(`
