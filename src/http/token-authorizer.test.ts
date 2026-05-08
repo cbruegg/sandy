@@ -16,6 +16,8 @@ function createFakePersistentApprovalStore(
     allowResourceRead: async () => {},
     isHttpTokenAlwaysAllowed: (tokenId: string, host: string) => allowed.has(`${tokenId}:${host}`),
     allowHttpToken: async () => {},
+    isHostDirectoryAlwaysAllowed: () => false,
+    allowHostDirectory: async () => {},
   };
 }
 
@@ -46,6 +48,7 @@ test("HttpTokenAuthorizer prefers worker_session grants over once grants", async
     approvedMcpResourceReads: [],
     approvedHttpTokenSessionGrants: [{ tokenId: "api-token", host: "api.example.com" }],
     approvedHttpTokenOnceGrants: [{ tokenId: "api-token", host: "api.example.com", consumed: false }],
+    approvedHostDirectories: [],
     workerConnected: false,
     taskSummary: null,
   };
@@ -95,6 +98,7 @@ test("HttpTokenAuthorizer consumes once grants without affecting session grants"
     approvedMcpResourceReads: [],
     approvedHttpTokenSessionGrants: [],
     approvedHttpTokenOnceGrants: [{ tokenId: "api-token", host: "api.example.com", consumed: false }],
+    approvedHostDirectories: [],
     workerConnected: false,
     taskSummary: null,
   };
@@ -159,6 +163,7 @@ test("HttpTokenAuthorizer applies persistent approvals only when task policy ena
     approvedMcpResourceReads: [],
     approvedHttpTokenSessionGrants: [],
     approvedHttpTokenOnceGrants: [],
+    approvedHostDirectories: [],
     workerConnected: false,
     taskSummary: null,
   };

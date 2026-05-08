@@ -9,6 +9,14 @@ type HostOperationPrivilegeRequest = {
   payload: PrivilegedWorkerToolPayload;
 };
 
+type HostDirectoryAccessPrivilegeRequest = {
+  kind: "host_directory_access";
+  requestId: string;
+  path: string;
+  level: "read_only" | "read_write";
+  confirmsAutoApprovalForTask?: boolean;
+};
+
 type McpToolCallPrivilegeRequest = {
   kind: "mcp_tool_call";
   requestId: string;
@@ -35,7 +43,7 @@ type HttpTokenUsePrivilegeRequest = {
   confirmsAutoApprovalForTask?: boolean;
 };
 
-export type PrivilegeRequest = HostOperationPrivilegeRequest | McpToolCallPrivilegeRequest | McpResourceReadPrivilegeRequest | HttpTokenUsePrivilegeRequest;
+export type PrivilegeRequest = HostOperationPrivilegeRequest | HostDirectoryAccessPrivilegeRequest | McpToolCallPrivilegeRequest | McpResourceReadPrivilegeRequest | HttpTokenUsePrivilegeRequest;
 
 export const privilegeResolutionResultSchema = z.object({
   requestId: z.string().min(1),

@@ -40,6 +40,8 @@ export type TaskBundleLauncherOptions = {
   spawnImpl?: typeof spawn;
   setTimeoutImpl?: typeof setTimeout;
   clearTimeoutImpl?: typeof clearTimeout;
+  createHostfsVolume?: (bundleId: string) => Promise<string | null>;
+  removeHostfsVolume?: (bundleId: string) => Promise<void>;
 };
 
 export class TaskBundleLauncherImpl implements TaskBundleLauncher {
@@ -90,11 +92,25 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
     const workerImage = this.resolveWorkerImage();
     const containerName = `sandy-${bundleId}`;
 
+    let hostfsVolumeName: string | null = null;
+    if (this.options.createHostfsVolume) {
+      try {
+        hostfsVolumeName = await this.options.createHostfsVolume(bundleId);
+      } catch (error) {
+        logger.error("bundle.hostfs_volume_creation_failed", {
+          bundleId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Continue without hostfs volume
+      }
+    }
+
     logger.info("bundle.creating", {
       bundleId,
       shareHostPath,
       workerImage,
       workerNetworkMode: this.options.workerNetwork.mode,
+      hostfsVolumeName,
     });
 
     const networkGuard = await (async (): Promise<StartedNetworkGuard | null> => {
@@ -196,6 +212,10 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
       dockerArgs.push("--network", this.options.workerNetworkName);
     }
 
+    if (hostfsVolumeName) {
+      dockerArgs.push("-v", `${hostfsVolumeName}:/workspace/host`);
+    }
+
     dockerArgs.push("-v", `${shareHostPath}:${sharedWorkspaceMountPath}`, workerImage);
 
     const child = this.spawnImpl("docker", dockerArgs, {
@@ -218,6 +238,7 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
       proxyChild,
       proxyContainerName,
       shareHostPath,
+      hostfsVolumeName,
       cleanupWorkerCodexConfig,
     };
   }
@@ -234,6 +255,16 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
       bundle.cleanupWorkerCodexConfig(),
       this.cleanupTaskContainers(bundle.containerName, bundle.guardContainerName, bundle.proxyContainerName),
     ]);
+    if (bundle.hostfsVolumeName && this.options.removeHostfsVolume) {
+      try {
+        await this.options.removeHostfsVolume(bundle.bundleId);
+      } catch (error) {
+        logger.warn("bundle.hostfs_volume_cleanup_failed", {
+          bundleId: bundle.bundleId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
     logger.info("bundle.terminated", {
       bundleId: bundle.bundleId,
       containerName: bundle.containerName,

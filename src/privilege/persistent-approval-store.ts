@@ -10,6 +10,8 @@ export interface PersistentApprovalStore {
   allowResourceRead(serverId: string, uri: string): Promise<void>;
   isHttpTokenAlwaysAllowed(tokenId: string, host: string): boolean;
   allowHttpToken(tokenId: string, host: string): Promise<void>;
+  isHostDirectoryAlwaysAllowed(path: string, level: "read_only" | "read_write"): boolean;
+  allowHostDirectory(path: string, level: "read_only" | "read_write"): Promise<void>;
 }
 
 // Type for the raw approvals structure we modify
@@ -22,6 +24,10 @@ type RawApprovalsConfig = {
     http?: Record<string, {
       always_allow_hosts?: string[];
     }>;
+    host_directories?: Array<{
+      path: string;
+      level: string;
+    }>;
   };
 };
 
@@ -29,12 +35,14 @@ export class TomlPersistentApprovalStore implements PersistentApprovalStore {
   private readonly approvals = new Map<string, Set<string>>();
   private readonly resourceApprovals = new Map<string, Set<string>>();
   private readonly httpApprovals = new Map<string, Set<string>>();
+  private readonly hostDirectoryApprovals = new Map<string, "read_only" | "read_write">();
 
   constructor(
     private readonly configFilePath: string,
     initialApprovals: Record<string, string[]>,
     initialHttpApprovals: Record<string, string[]> = {},
     initialResourceApprovals: Record<string, string[]> = {},
+    initialHostDirectoryApprovals: Array<{path: string; level: "read_only" | "read_write"}> = [],
   ) {
     for (const [serverId, tools] of Object.entries(initialApprovals)) {
       this.approvals.set(serverId, new Set(tools));
@@ -44,6 +52,9 @@ export class TomlPersistentApprovalStore implements PersistentApprovalStore {
     }
     for (const [tokenId, hosts] of Object.entries(initialHttpApprovals)) {
       this.httpApprovals.set(tokenId, new Set(hosts));
+    }
+    for (const entry of initialHostDirectoryApprovals) {
+      this.hostDirectoryApprovals.set(entry.path, entry.level);
     }
   }
 
@@ -105,6 +116,28 @@ export class TomlPersistentApprovalStore implements PersistentApprovalStore {
     const hosts = this.httpApprovals.get(tokenId) ?? new Set<string>();
     hosts.add(host);
     this.httpApprovals.set(tokenId, hosts);
+  }
+
+  isHostDirectoryAlwaysAllowed(path: string, level: "read_only" | "read_write"): boolean {
+    const stored = this.hostDirectoryApprovals.get(path);
+    if (!stored) {
+      return false;
+    }
+    return stored === "read_write" || level === "read_only";
+  }
+
+  async allowHostDirectory(path: string, level: "read_only" | "read_write"): Promise<void> {
+    if (this.isHostDirectoryAlwaysAllowed(path, level)) {
+      return;
+    }
+
+    const raw = await readFile(this.configFilePath, "utf8");
+    const next = applyHostDirectoryPersistentApprovalToRawToml(raw, path, level);
+    const tempFilePath = join(dirname(this.configFilePath), `.tmp-${process.pid}-${Date.now()}-config.toml`);
+    await writeFile(tempFilePath, next, "utf8");
+    await rename(tempFilePath, this.configFilePath);
+
+    this.hostDirectoryApprovals.set(path, level);
   }
 }
 
@@ -179,6 +212,43 @@ function applyPersistentResourceApprovalToRawToml(
   const existingResources = parsed.approvals.mcp[serverId].always_allow_resources ?? [];
   const nextResources = Array.from(new Set([...existingResources, uri])).sort();
   parsed.approvals.mcp[serverId].always_allow_resources = nextResources;
+
+  return toml.stringify(parsed);
+}
+
+function applyHostDirectoryPersistentApprovalToRawToml(
+  rawToml: string,
+  path: string,
+  level: "read_only" | "read_write",
+): string {
+  const parsed = normalizeParsedToml(toml.parse(rawToml)) as RawApprovalsConfig;
+
+  if (!parsed.approvals) {
+    parsed.approvals = {};
+  }
+  if (!parsed.approvals.host_directories) {
+    parsed.approvals.host_directories = [];
+  }
+
+  const hostDirectories = parsed.approvals.host_directories;
+  const existingIndex = hostDirectories.findIndex((entry) => entry.path === path);
+
+  if (existingIndex >= 0) {
+    const existingEntry = hostDirectories[existingIndex];
+    if (existingEntry) {
+      if (existingEntry.level === "read_write" || level === "read_only") {
+        // Already satisfied
+        return rawToml;
+      }
+      // Upgrade read_only to read_write
+      existingEntry.level = level;
+    }
+  } else {
+    hostDirectories.push({path, level});
+  }
+
+  // Sort by path for consistency
+  parsed.approvals.host_directories = hostDirectories.sort((a, b) => a.path.localeCompare(b.path));
 
   return toml.stringify(parsed);
 }

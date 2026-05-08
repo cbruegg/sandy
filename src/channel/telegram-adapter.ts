@@ -234,6 +234,9 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       case "http_token_use":
         requestType = `http:${request.tokenId}@${request.host}`;
         break;
+      case "host_directory_access":
+        requestType = `host_directory_access:${request.path}:${request.level}`;
+        break;
     }
     logger.info("telegram.send_privilege_request", {
       chatId,
@@ -312,7 +315,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
 }
 
 function buildPrivilegeKeyboard(request: PrivilegeRequest): Array<Array<{ text: string; callback_data: string }>> {
-  if ((request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use")
+  if ((request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use" || request.kind === "host_directory_access")
     && request.confirmsAutoApprovalForTask) {
     return [
       [
@@ -334,6 +337,22 @@ function buildPrivilegeKeyboard(request: PrivilegeRequest): Array<Array<{ text: 
       ],
       [
         { text: buttonLabels.approveAlways, callback_data: `approve_always:${request.requestId}` },
+        { text: buttonLabels.deny, callback_data: `deny:${request.requestId}` },
+      ],
+      [
+        { text: buttonLabels.reportDangerousOutput, callback_data: "report" },
+        { text: buttonLabels.abortTask, callback_data: "cancel" },
+      ],
+    ];
+  }
+
+  if (request.kind === "host_directory_access") {
+    return [
+      [
+        { text: buttonLabels.approveWorkerSession, callback_data: `approve_session:${request.requestId}` },
+        { text: buttonLabels.approveAlways, callback_data: `approve_always:${request.requestId}` },
+      ],
+      [
         { text: buttonLabels.deny, callback_data: `deny:${request.requestId}` },
       ],
       [

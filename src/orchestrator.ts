@@ -4,6 +4,7 @@ import type { MainAgentController } from "./agent/main-agent-controller.js";
 import type { PrivilegeBroker } from "./privilege/privilege-broker.js";
 import { isSupportedPrivilegeRequest } from "./privilege/privilege-broker.js";
 import type { PersistentApprovalStore } from "./privilege/persistent-approval-store.js";
+import type {HostfsBroker} from "./hostfs/hostfs-broker.js";
 import type { SandboxHandle, SandboxRunner } from "./sandbox/sandbox-runner.js";
 import type { SessionStore } from "./session/in-memory-session-store.js";
 import type { TaskRegistry } from "./task-registry.js";
@@ -49,6 +50,8 @@ type SandyOrchestratorDependencies = {
   privilegeBroker: PrivilegeBroker;
   taskRegistry: TaskRegistry;
   persistentApprovalStore?: PersistentApprovalStore;
+  hostfsBroker?: HostfsBroker;
+  bundleRegistry?: {getBundleIdForTask(taskId: string): string | null};
 };
 
 export class SandyOrchestrator {
@@ -67,6 +70,8 @@ export class SandyOrchestrator {
       allowResourceRead: async () => {},
       isHttpTokenAlwaysAllowed: () => false,
       allowHttpToken: async () => {},
+      isHostDirectoryAlwaysAllowed: () => false,
+      allowHostDirectory: async () => {},
     };
   }
 
@@ -234,6 +239,15 @@ export class SandyOrchestrator {
           host: call.host,
           reason: call.reason,
           confirmsAutoApprovalForTask: this.shouldConfirmHttpTokenAutoApprovalForTask(session, call.tokenId, call.host),
+        });
+      }
+      case "request_host_directory_access": {
+        return await this.awaitHostDirectoryPrivilegeResolution(chatId, session, {
+          kind: "host_directory_access",
+          requestId: randomUUID(),
+          path: call.path,
+          level: call.level,
+          confirmsAutoApprovalForTask: this.shouldConfirmHostDirectoryAutoApprovalForTask(session, call.path, call.level),
         });
       }
       case "complete_task": {
@@ -460,6 +474,7 @@ export class SandyOrchestrator {
           approvedMcpResourceReads: [],
           approvedHttpTokenSessionGrants: [],
           approvedHttpTokenOnceGrants: [],
+          approvedHostDirectories: [],
           workerConnected: false,
           taskSummary: null,
         };
@@ -573,6 +588,8 @@ export class SandyOrchestrator {
       result = await this.resolvePendingMcpResourceReadRequest(session, request, decision);
     } else if (request.kind === "http_token_use") {
       result = await this.resolvePendingHttpTokenRequest(session, request, decision);
+    } else if (request.kind === "host_directory_access") {
+      result = await this.resolvePendingHostDirectoryRequest(session, request, decision);
     } else if (decision === "deny") {
       result = {
         requestId: request.requestId,
@@ -592,7 +609,7 @@ export class SandyOrchestrator {
       };
     }
 
-    if (request.kind === "host_operation" || request.kind === "http_token_use") {
+    if (request.kind === "host_operation" || request.kind === "http_token_use" || request.kind === "host_directory_access") {
       const nativeResolver = this.pendingNativeToolResolvers.get(request.requestId);
       if (nativeResolver) {
         nativeResolver(result);
@@ -671,6 +688,172 @@ export class SandyOrchestrator {
     });
   }
 
+  private async awaitHostDirectoryPrivilegeResolution(
+    chatId: string,
+    session: SessionState,
+    request: Extract<PrivilegeRequest, { kind: "host_directory_access" }>,
+  ): Promise<PrivilegeResolutionResult> {
+    const activeTask = session.activeTask;
+    if (!activeTask) {
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: messages.taskNoLongerActive(chatId),
+      };
+    }
+
+    // Check if this task already has session-level approval for this path at sufficient level
+    const existingGrant = activeTask.approvedHostDirectories.find(
+      (g) => g.path === request.path && (g.level === "read_write" || request.level === "read_only"),
+    );
+    if (existingGrant) {
+      return this.grantHostDirectoryAccess(activeTask, request);
+    }
+
+    // Check persistent auto-approval
+    if (this.persistentApprovalStore.isHostDirectoryAlwaysAllowed(request.path, request.level)) {
+      return this.grantHostDirectoryAccess(activeTask, request);
+    }
+
+    if (activeTask.pendingPrivilegeRequest) {
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: messages.anotherPrivilegeRequestPendingForTask(),
+      };
+    }
+
+    activeTask.pendingPrivilegeRequest = request;
+    activeTask.status = "awaiting_privilege_decision";
+    this.deps.sessionStore.save(session);
+    await this.deps.channel.sendPrivilegeRequest(chatId, request);
+
+    return await new Promise<PrivilegeResolutionResult>((resolve) => {
+      this.pendingNativeToolResolvers.set(request.requestId, resolve);
+    });
+  }
+
+  private async grantHostDirectoryAccess(
+    activeTask: NonNullable<SessionState["activeTask"]>,
+    request: Extract<PrivilegeRequest, { kind: "host_directory_access" }>,
+  ): Promise<PrivilegeResolutionResult> {
+    const hostfsBroker = this.deps.hostfsBroker;
+    const bundleRegistry = this.deps.bundleRegistry;
+    if (!hostfsBroker || !bundleRegistry) {
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: "Host directory access is not enabled.",
+      };
+    }
+
+    const bundleId = bundleRegistry.getBundleIdForTask(activeTask.taskId);
+    if (!bundleId) {
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: "No bundle is assigned to this task.",
+      };
+    }
+
+    const result = await hostfsBroker.requestDirectoryAccess(
+      bundleId,
+      activeTask.taskId,
+      request.path,
+      request.level,
+    );
+
+    if (!result.ok) {
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: messages.hostDirectoryAccessFailed(request.path, result.error),
+      };
+    }
+
+    return {
+      requestId: request.requestId,
+      outcome: "approved",
+      message: `Host directory access granted. Use the path: ${result.grantPath}`,
+    };
+  }
+
+  private async resolvePendingHostDirectoryRequest(
+    session: SessionState,
+    request: Extract<PrivilegeRequest, { kind: "host_directory_access" }>,
+    decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
+  ): Promise<PrivilegeResolutionResult> {
+    const activeTask = session.activeTask;
+    if (!activeTask) {
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: messages.taskNoLongerActive(session.chatId),
+      };
+    }
+
+    switch (decision) {
+      case "deny":
+        return {
+          requestId: request.requestId,
+          outcome: "denied",
+          message: messages.hostDirectoryAccessDenied(request.path, request.level),
+        };
+      case "approve":
+      case "approve_once":
+        if (request.confirmsAutoApprovalForTask) {
+          grantHostDirectoryAutoApprovalForTask(activeTask, request.path, request.level);
+          return this.grantHostDirectoryAccess(activeTask, request);
+        }
+        return {
+          requestId: request.requestId,
+          outcome: "approved",
+          message: messages.hostDirectoryAccessAllowedOnce(request.path, request.level),
+          scope: "once",
+        };
+      case "approve_worker_session":
+        if (request.confirmsAutoApprovalForTask) {
+          grantHostDirectoryAutoApprovalForTask(activeTask, request.path, request.level);
+          return this.grantHostDirectoryAccess(activeTask, request);
+        }
+        this.grantTaskHostDirectoryAccess(activeTask, request.path, request.level);
+        return this.grantHostDirectoryAccess(activeTask, request);
+      case "approve_always":
+        await this.persistentApprovalStore.allowHostDirectory(request.path, request.level);
+        grantHostDirectoryAutoApprovalForTask(activeTask, request.path, request.level);
+        return this.grantHostDirectoryAccess(activeTask, request);
+      default:
+        assertNever(decision);
+    }
+  }
+
+  private grantTaskHostDirectoryAccess(
+    task: NonNullable<SessionState["activeTask"]>,
+    path: string,
+    level: "read_only" | "read_write",
+  ): void {
+    const existing = task.approvedHostDirectories.find((g) => g.path === path);
+    if (existing) {
+      if (existing.level === "read_write" || level === "read_only") {
+        return;
+      }
+      existing.level = level;
+      return;
+    }
+    task.approvedHostDirectories.push({path, level});
+  }
+
+  private shouldConfirmHostDirectoryAutoApprovalForTask(
+    session: SessionState,
+    path: string,
+    level: "read_only" | "read_write",
+  ): boolean {
+    const activeTask = session.activeTask;
+    return activeTask !== null
+      && !isHostDirectoryAutoApprovalAllowed(activeTask, path, level)
+      && this.persistentApprovalStore.isHostDirectoryAlwaysAllowed(path, level);
+  }
+
   private buildUnsupportedPrivilegeResult(request: PrivilegeRequest): PrivilegeResolutionResult {
     switch (request.kind) {
       case "host_operation":
@@ -696,6 +879,12 @@ export class SandyOrchestrator {
           requestId: request.requestId,
           outcome: "failed",
           message: messages.httpTokenNotConfigured(request.tokenId),
+        };
+      case "host_directory_access":
+        return {
+          requestId: request.requestId,
+          outcome: "failed",
+          message: messages.hostDirectoryAccessFailed(request.path, "Host directory access is not supported by this runtime."),
         };
     }
   }
@@ -1345,6 +1534,27 @@ function grantHttpTokenAutoApprovalForTask(task: NonNullable<SessionState["activ
     return;
   }
   task.taskPolicy.autoApproveHttpTokens.push(tokenId);
+}
+
+function isHostDirectoryAutoApprovalAllowed(
+  task: NonNullable<SessionState["activeTask"]>,
+  path: string,
+  level: "read_only" | "read_write",
+): boolean {
+  return task.approvedHostDirectories.some(
+    (g) => g.path === path && (g.level === "read_write" || level === "read_only"),
+  );
+}
+
+function grantHostDirectoryAutoApprovalForTask(
+  task: NonNullable<SessionState["activeTask"]>,
+  path: string,
+  level: "read_only" | "read_write",
+): void {
+  if (isHostDirectoryAutoApprovalAllowed(task, path, level)) {
+    return;
+  }
+  task.approvedHostDirectories.push({path, level});
 }
 
 function assertNever(value: never): never {

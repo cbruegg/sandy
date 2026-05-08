@@ -9,7 +9,11 @@ export class TaskBundlePoolImpl implements TaskBundlePool {
   private readonly activeBundles = new Map<string, ReservedTaskBundle>();
   private acquireLock: Promise<void> = Promise.resolve();
 
-  constructor(private readonly launcher: TaskBundleLauncher) {}
+  constructor(
+    private readonly launcher: TaskBundleLauncher,
+    private readonly onBundleAcquired?: (bundle: ReservedTaskBundle) => void,
+    private readonly onBundleRetired?: (bundle: ReservedTaskBundle) => void,
+  ) {}
 
   start(): void {
     if (this.shuttingDown) {
@@ -57,6 +61,7 @@ export class TaskBundlePoolImpl implements TaskBundlePool {
 
       const reserved: ReservedTaskBundle = {...bundle, taskId};
       this.activeBundles.set(taskId, reserved);
+      this.onBundleAcquired?.(reserved);
       this.scheduleReplenish();
       return reserved;
     } finally {
@@ -66,6 +71,7 @@ export class TaskBundlePoolImpl implements TaskBundlePool {
 
   async retireBundle(bundle: ReservedTaskBundle): Promise<void> {
     this.activeBundles.delete(bundle.taskId);
+    this.onBundleRetired?.(bundle);
     await this.launcher.terminateBundle(bundle);
   }
 

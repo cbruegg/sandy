@@ -22,6 +22,11 @@ type HttpTokenSessionGrant = {
   host: string;
 };
 
+type HostDirectoryGrant = {
+  path: string;
+  level: "read_only" | "read_write";
+};
+
 type TaskStatus =
   | "idle"
   | "running"
@@ -43,6 +48,7 @@ export type ActiveTaskState = {
   approvedMcpResourceReads: McpResourceReadGrant[];
   approvedHttpTokenSessionGrants: HttpTokenSessionGrant[];
   approvedHttpTokenOnceGrants: HttpTokenOnceGrant[];
+  approvedHostDirectories: HostDirectoryGrant[];
   workerConnected: boolean;
   taskSummary: string | null;
 };

@@ -12,6 +12,7 @@ export type TaskBundle = {
   proxyChild: ChildProcessWithoutNullStreams | null;
   proxyContainerName: string | null;
   shareHostPath: string;
+  hostfsVolumeName: string | null;
   cleanupWorkerCodexConfig: () => Promise<void>;
 };
 

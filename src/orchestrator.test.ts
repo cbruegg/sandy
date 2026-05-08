@@ -1192,6 +1192,8 @@ test("orchestrator authorizes mcp resource reads from persistent config", async 
     allowResourceRead: async () => {},
     isHttpTokenAlwaysAllowed: () => false,
     allowHttpToken: async () => {},
+    isHostDirectoryAlwaysAllowed: () => false,
+    allowHostDirectory: async () => {},
   };
   const orchestrator = new SandyOrchestrator({
     channel,
@@ -1246,6 +1248,8 @@ test("orchestrator does not apply persistent mcp approvals when task policy omit
     allowResourceRead: async () => {},
     isHttpTokenAlwaysAllowed: () => false,
     allowHttpToken: async () => {},
+    isHostDirectoryAlwaysAllowed: () => false,
+    allowHostDirectory: async () => {},
   };
   const orchestrator = new SandyOrchestrator({
     channel,
@@ -1313,6 +1317,8 @@ test("orchestrator confirms persisted mcp tool approval suitability and reuses i
     allowResourceRead: async () => {},
     isHttpTokenAlwaysAllowed: () => false,
     allowHttpToken: async () => {},
+    isHostDirectoryAlwaysAllowed: () => false,
+    allowHostDirectory: async () => {},
   };
   const orchestrator = new SandyOrchestrator({
     channel,
@@ -1399,6 +1405,8 @@ test("orchestrator confirms persisted http token suitability and enables later p
     allowResourceRead: async () => {},
     isHttpTokenAlwaysAllowed: (tokenId, host) => tokenId === "vid2text" && host === "api.example.com",
     allowHttpToken: async () => {},
+    isHostDirectoryAlwaysAllowed: () => false,
+    allowHostDirectory: async () => {},
   };
   const orchestrator = new SandyOrchestrator({
     channel,

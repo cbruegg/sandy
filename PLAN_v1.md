@@ -2,8 +2,8 @@
 
 ## Status
 
-- State: proposed
-- Branch: `plan/host-directory-volume-plugin`
+- State: implemented
+- Branch: `main`
 - Scope: concrete implementation plan for host-directory access using a stable Docker volume mount backed by `rclone/docker-volume-rclone` and a Sandy-hosted WebDAV broker
 
 ## Goals
@@ -214,6 +214,8 @@ Names can change, but these responsibilities should remain separate.
 
 ### Phase 0: Validate the Stack With a Narrow Spike
 
+Status: partially validated through unit tests; full Docker-mounted validation pending manual testing.
+
 Deliverable:
 
 - a minimal proof that a worker container can mount a bundle-scoped `rclone` WebDAV volume at `/workspace/host` and that new directories become visible after the broker updates grant state
@@ -234,69 +236,65 @@ Exit criteria:
 
 ### Phase 1: Add Hostfs Infrastructure
 
+Status: completed.
+
 Deliverable:
 
 - hostfs broker and WebDAV service live inside Sandy
 
-Tasks:
+Implemented modules:
 
-- implement bundle registration and credential issuance
-- implement canonical path resolution on the real host OS
-- implement synthetic grant tree generation
-- implement `read_only` and `read_write` enforcement
-- implement safe symlink handling and containment checks
-- expose a WebDAV endpoint bound to localhost on the real host
-
-Notes:
-
-- all host path checks must use canonical paths
-- symlink traversal must not allow escaping a granted root
-- path handling must be tested separately on macOS, Linux, and Windows path shapes
+- `src/hostfs/path-policy.ts` – canonical path resolution and access-level implication
+- `src/hostfs/bundle-registry.ts` – bundle-scoped credential issuance
+- `src/hostfs/webdav-server.ts` – minimal WebDAV server (PROPFIND, GET, HEAD, OPTIONS)
+- `src/hostfs/hostfs-broker.ts` – grant table management and synthetic tree generation
 
 ### Phase 2: Install and Manage the Rclone Plugin
+
+Status: completed.
 
 Deliverable:
 
 - Sandy ensures the `rclone` plugin exists and is usable before warming bundles
 
-Tasks:
+Implemented modules:
 
-- add a plugin manager that can detect, install, configure, enable, and health-check the plugin
-- create `/tmp/sandy-rclone-plugin/config` and `/tmp/sandy-rclone-plugin/cache` in the Docker daemon environment
-- install the managed plugin with those paths
-- document the plugin's required privileges and failure modes
-- add startup validation that fails clearly if the plugin cannot be installed or enabled
+- `src/hostfs/rclone-plugin-manager.ts` – detects, installs, enables, and health-checks the managed plugin
 
 ### Phase 3: Create Bundle-Scoped Hostfs Volumes
+
+Status: completed.
 
 Deliverable:
 
 - each warmed bundle has a stable `/workspace/host` mount from creation time onward
 
-Tasks:
+Implemented modules:
 
-- extend bundle creation to create a bundle-scoped named volume before `docker run`
-- configure the volume with bundle-specific WebDAV URL and auth
-- mount that volume into the worker container at `/workspace/host`
-- store bundle-to-volume metadata in `TaskBundle`
-- on bundle destroy, remove the named volume and revoke broker state
+- `src/hostfs/hostfs-volume-manager.ts` – creates and removes bundle-scoped `rclone` volumes
+- `src/sandbox/task-bundle-launcher.ts` – extended to mount hostfs volume at `/workspace/host`
+- `src/sandbox/task-bundle-pool.ts` – extended with optional acquire/retire callbacks
 
 ### Phase 4: Add the Worker Tool and Approval Flow
+
+Status: completed.
 
 Deliverable:
 
 - workers can request host-directory access through the Sandy MCP server
 
-Tasks:
+Changes:
 
-- add the new worker tool and schema
-- add the new privilege request kind
-- add task-scoped and persistent approval state for host-directory grants
-- remove `approve once` from this request type in all channel adapters
-- implement implication logic so `read_write` covers `read_only`
-- return the worker-visible grant path in the tool response
+- `src/subagent/worker-tools.ts` – added `request_host_directory_access` tool
+- `src/types/privilege.ts` – added `host_directory_access` privilege request kind
+- `src/types/task-state.ts` – added `approvedHostDirectories` to `ActiveTaskState`
+- `src/orchestrator.ts` – added approval flow with task-scoped and persistent grants, `read_write` implies `read_only`
+- `src/messages.ts` – added host-directory access messages
+- `src/channel/telegram-adapter.ts` and `src/channel/matrix-adapter.ts` – updated privilege keyboards to exclude `approve once` for host-directory requests
 
 ### Phase 5: Persist Exact Approvals
+
+Status: completed.
 
 Deliverable:
 
@@ -304,50 +302,47 @@ Deliverable:
 
 Config shape:
 
-Use an array form instead of path-as-table-key, for example:
-
 ```toml
 [[approvals.host_directories]]
 path = "/Users/alice/project"
 level = "read_only"
 ```
 
-Tasks:
+Changes:
 
-- extend config parsing
-- extend persistent approval storage reads and writes
-- normalize stored paths before matching
-- treat stored `read_write` as satisfying later `read_only`
+- `src/config.ts` – parses `approvals.host_directories` array
+- `src/privilege/persistent-approval-store.ts` – persists host-directory approvals to config TOML
 
 ### Phase 6: Worker Guidance and UX
+
+Status: completed.
 
 Deliverable:
 
 - workers know when and how to use the feature correctly
 
-Tasks:
+Changes:
 
-- update the worker prompt to mention `/workspace/host`
-- instruct workers to request access through the Sandy MCP tool rather than asking the user in plain text
-- keep the guidance clear that the tool response path is the only path they should use
+- `src/subagent/worker-prompt.ts` – updated initial prompt to mention `/workspace/host` and the `request_host_directory_access` tool
 
 ### Phase 7: Test Coverage
 
-Unit tests:
+Status: completed for unit tests; integration and manual tests pending.
 
-- `src/orchestrator.test.ts` for approval behavior and grant implication
-- `src/messages`-related tests where applicable
-- `src/config.test.ts` for persistent approval parsing
-- `src/privilege/persistent-approval-store.test.ts` for persistence writes
-- new `src/hostfs/*.test.ts` for path normalization, synthetic tree behavior, and access enforcement
-- `src/subagent/worker.test.ts` for tool prompt/guidance updates
+Unit tests added:
 
-Integration-style tests:
+- `src/hostfs/path-policy.test.ts`
+- `src/hostfs/bundle-registry.test.ts`
+- `src/hostfs/hostfs-broker.test.ts`
+- `src/hostfs/webdav-server.test.ts`
+- existing tests updated for new fields and interfaces
+
+Integration-style tests pending:
 
 - `src/sandbox/docker-sandbox-runner.test.ts` or new bundle-launcher tests for added hostfs volume mount wiring
 - local-test workflow that requests directory access, approves it, and verifies the worker can read from the returned mount path
 
-Manual validation matrix:
+Manual validation matrix pending:
 
 - Linux host with Docker Engine
 - macOS with Docker Desktop

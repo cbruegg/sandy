@@ -67,6 +67,9 @@ export function buildInitialTaskInputWithCapabilities(
     "Keep user-visible progress updates minimal and concise. Only report meaningful milestones, not every shell command completion.",
     "If you need to show text to the user and also call a Sandy MCP tool, send the user-visible text first and then call the tool separately.",
     `The MCP server "${sandyMcpServerId}" exposes additional host-integration tools. Use MCP tool discovery to list its tools ahead of working on a task.`,
+    "A host filesystem mount is available at /workspace/host. To access host directories, do not ask the user in plain text.",
+    `Call ${sandyMcpServerId}.request_host_directory_access with the absolute host path and desired access level.`,
+    "The tool response will provide the exact worker-visible path you should use. Only use the returned grant path.",
   ];
 
   if (runtimeCapabilities.length > 0) {
