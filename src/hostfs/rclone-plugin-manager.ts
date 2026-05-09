@@ -17,6 +17,8 @@ const DEFAULT_PLUGIN_CONFIG_DIR = "/var/lib/docker-plugins/rclone/config";
 const DEFAULT_PLUGIN_CACHE_DIR = "/var/lib/docker-plugins/rclone/cache";
 const DEFAULT_HELPER_IMAGE = "alpine:latest";
 const PLUGIN_STATE_FILE_NAME = "docker-plugin.state";
+// Keep recovery behind a flag until we have real evidence that the fallback path
+// is worth the extra code; if that never happens, remove the flag and dead path.
 const DEFAULT_ENABLE_PLUGIN_RECOVERY = false;
 
 export class RclonePluginManager {
