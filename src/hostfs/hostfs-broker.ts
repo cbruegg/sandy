@@ -18,19 +18,15 @@ type HostfsBrokerOptions = {
 };
 
 export class HostfsBroker {
-  private readonly bundleGrants = new Map<string, Map<string, HostDirectoryGrant>>(); // bundleId -> (canonicalPath -> grant)
-
   constructor(private readonly options: HostfsBrokerOptions) {}
 
   registerBundle(bundleId: string): void {
     this.options.namespaceRegistry.register(bundleId);
-    this.bundleGrants.set(bundleId, new Map());
     logger.info("hostfs.bundle_registered", {bundleId});
   }
 
   revokeBundle(bundleId: string): void {
     this.options.namespaceRegistry.revoke(bundleId);
-    this.bundleGrants.delete(bundleId);
     logger.info("hostfs.bundle_revoked", {bundleId});
   }
 
@@ -45,17 +41,22 @@ export class HostfsBroker {
       return {ok: false, error: canonicalResult.error};
     }
 
+    const namespace = this.options.namespaceRegistry.get(bundleId);
+    if (!namespace) {
+      return {ok: false, error: `Bundle namespace not found: ${bundleId}`};
+    }
+
     const canonicalPath = canonicalResult.canonicalPath;
 
-    const bundleGrantMap = this.bundleGrants.get(bundleId);
-    if (bundleGrantMap) {
-      const existing = bundleGrantMap.get(canonicalPath);
-      if (existing && isAccessLevelSatisfiedOrBetter(level, existing.level)) {
-        return {
-          ok: true,
-          grantPath: `${hostGrantsPrefix}/${existing.grantId}`,
-          grantId: existing.grantId,
-        };
+    for (const existing of namespace.grants.values()) {
+      if (existing.hostPath === canonicalPath) {
+        if (existing && isAccessLevelSatisfiedOrBetter(level, existing.level)) {
+          return {
+            ok: true,
+            grantPath: `${hostGrantsPrefix}/${existing.grantId}`,
+            grantId: existing.grantId,
+          };
+        }
       }
     }
 
@@ -66,12 +67,7 @@ export class HostfsBroker {
       level,
     };
 
-    this.ensureBundleGrantMap(bundleId).set(canonicalPath, grant);
-
-    const namespace = this.options.namespaceRegistry.get(bundleId);
-    if (namespace) {
-      namespace.grants.set(grantId, grant);
-    }
+    namespace.grants.set(grantId, grant);
 
     logger.info("hostfs.directory_granted", {
       bundleId,
@@ -94,15 +90,6 @@ export class HostfsBroker {
 
   getWebDAVUrlForBundle(bundleId: string): string {
     return `${this.options.webdavBaseUrl}/bundles/${bundleId}`;
-  }
-
-  private ensureBundleGrantMap(bundleId: string): Map<string, HostDirectoryGrant> {
-    let map = this.bundleGrants.get(bundleId);
-    if (!map) {
-      map = new Map();
-      this.bundleGrants.set(bundleId, map);
-    }
-    return map;
   }
 }
 
