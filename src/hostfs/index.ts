@@ -10,8 +10,6 @@ type HostfsConfig = {
   webdavHost: string;
   webdavBaseUrl: string;
   volumePrefix?: string;
-  rclonePluginConfigDir?: string;
-  rclonePluginCacheDir?: string;
 };
 
 type HostfsServices = {
@@ -58,10 +56,7 @@ export async function initializeHostfs(config: HostfsConfig): Promise<HostfsServ
     volumePrefix: config.volumePrefix,
   });
 
-  const rclonePluginManager = new RclonePluginManager({
-    pluginConfigDir: config.rclonePluginConfigDir,
-    pluginCacheDir: config.rclonePluginCacheDir,
-  });
+  const rclonePluginManager = new RclonePluginManager();
 
   await webdavServer.start();
   await rclonePluginManager.ensureInstalled();

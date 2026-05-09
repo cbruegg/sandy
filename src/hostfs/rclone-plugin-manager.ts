@@ -7,6 +7,7 @@ type RclonePluginManagerOptions = {
   pluginConfigDir?: string;
   pluginCacheDir?: string;
   helperImage?: string;
+  enableRecovery?: boolean;
   spawnImpl?: typeof spawn;
 };
 
@@ -16,6 +17,7 @@ const DEFAULT_PLUGIN_CONFIG_DIR = "/var/lib/docker-plugins/rclone/config";
 const DEFAULT_PLUGIN_CACHE_DIR = "/var/lib/docker-plugins/rclone/cache";
 const DEFAULT_HELPER_IMAGE = "alpine:3.21";
 const PLUGIN_STATE_FILE_NAME = "docker-plugin.state";
+const DEFAULT_ENABLE_PLUGIN_RECOVERY = false;
 
 export class RclonePluginManager {
   private readonly spawnImpl: typeof spawn;
@@ -34,7 +36,7 @@ export class RclonePluginManager {
     try {
       await this.ensureInstalledOnce(pluginName, pluginConfigDir, pluginCacheDir);
     } catch (error) {
-      if (!this.isRecoverablePluginError(error)) {
+      if (!this.isRecoveryEnabled() || !this.isRecoverablePluginError(error)) {
         throw error;
       }
 
@@ -55,6 +57,10 @@ export class RclonePluginManager {
     await this.ensurePluginStateDirectories(pluginConfigDir, pluginCacheDir);
     await this.recoverPlugin(pluginName, pluginCacheDir);
     await this.ensureInstalledOnce(pluginName, pluginConfigDir, pluginCacheDir);
+  }
+
+  isRecoveryEnabled(): boolean {
+    return this.options.enableRecovery ?? DEFAULT_ENABLE_PLUGIN_RECOVERY;
   }
 
   isRecoverablePluginError(error: unknown): boolean {

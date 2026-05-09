@@ -151,8 +151,6 @@ export async function startApp(): Promise<void> {
   const webdavDockerHost = isDockerDesktop
     ? "host.docker.internal"
     : "127.0.0.1";
-  const rclonePluginStateRoot = "/var/lib/docker-plugins/rclone";
-
   const hostfsServices = await initializeHostfs({
     enabled: true,
     webdavPort,
@@ -163,8 +161,6 @@ export async function startApp(): Promise<void> {
     // The URL the rclone volume plugin uses; on macOS/Windows it must use
     // host.docker.internal because the plugin runs inside the Docker Desktop VM.
     webdavBaseUrl: buildWebDAVBaseUrl(webdavDockerHost, webdavPort),
-    rclonePluginConfigDir: `${rclonePluginStateRoot}/config`,
-    rclonePluginCacheDir: `${rclonePluginStateRoot}/cache`,
   });
   const httpTokenAuthorizer = new HttpTokenAuthorizer(
     taskRegistry,
@@ -211,7 +207,7 @@ export async function startApp(): Promise<void> {
             try {
               return await hostfsServices.volumeManager.createVolume(bundleId, credentials.secret);
             } catch (error) {
-              if (!hostfsServices.rclonePluginManager.isRecoverablePluginError(error)) {
+              if (!hostfsServices.rclonePluginManager.isRecoveryEnabled() || !hostfsServices.rclonePluginManager.isRecoverablePluginError(error)) {
                 throw error;
               }
 

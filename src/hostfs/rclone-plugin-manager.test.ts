@@ -115,7 +115,7 @@ test("RclonePluginManager treats rclone:latest as an installed plugin name", asy
     return child as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const manager = new RclonePluginManager({spawnImpl});
+  const manager = new RclonePluginManager({spawnImpl, enableRecovery: true});
   await manager.ensureInstalled();
 
   assert.deepEqual(invocations[1], ["plugin", "ls", "--format", "{{.Name}}"]);
@@ -189,7 +189,7 @@ test("RclonePluginManager clears plugin state and reinstalls after socket failur
     return child as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const manager = new RclonePluginManager({spawnImpl});
+  const manager = new RclonePluginManager({spawnImpl, enableRecovery: true});
   await manager.ensureInstalled();
 
   assert.ok(invocations.some((invocation) => invocation[0] === "plugin" && invocation[1] === "disable" && invocation[2] === "-f" && invocation[3] === "rclone"));
