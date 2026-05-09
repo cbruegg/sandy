@@ -4,11 +4,17 @@ import {logger} from "../logger.js";
 type RclonePluginManagerOptions = {
   pluginName?: string;
   pluginImage?: string;
+  pluginConfigDir?: string;
+  pluginCacheDir?: string;
+  helperImage?: string;
   spawnImpl?: typeof spawn;
 };
 
 const DEFAULT_PLUGIN_NAME = "rclone";
 const DEFAULT_PLUGIN_IMAGE = "rclone/docker-volume-rclone:latest";
+const DEFAULT_PLUGIN_CONFIG_DIR = "/var/lib/docker-plugins/rclone/config";
+const DEFAULT_PLUGIN_CACHE_DIR = "/var/lib/docker-plugins/rclone/cache";
+const DEFAULT_HELPER_IMAGE = "alpine:3.21";
 
 export class RclonePluginManager {
   private readonly spawnImpl: typeof spawn;
@@ -19,6 +25,10 @@ export class RclonePluginManager {
 
   async ensureInstalled(): Promise<void> {
     const pluginName = this.options.pluginName ?? DEFAULT_PLUGIN_NAME;
+    const pluginConfigDir = this.options.pluginConfigDir ?? DEFAULT_PLUGIN_CONFIG_DIR;
+    const pluginCacheDir = this.options.pluginCacheDir ?? DEFAULT_PLUGIN_CACHE_DIR;
+
+    await this.ensurePluginStateDirectories(pluginConfigDir, pluginCacheDir);
 
     const isInstalled = await this.isPluginInstalled(pluginName);
     if (isInstalled) {
@@ -43,16 +53,52 @@ export class RclonePluginManager {
       "--alias",
       pluginName,
       this.options.pluginImage ?? DEFAULT_PLUGIN_IMAGE,
-    ]);
+      `config=${pluginConfigDir}`,
+      `cache=${pluginCacheDir}`,
+    ]).catch(async (error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes("already exists")) {
+        throw error;
+      }
+
+      logger.warn("hostfs.rclone_plugin_already_exists", {pluginName});
+      const isEnabled = await this.isPluginEnabled(pluginName);
+      if (!isEnabled) {
+        logger.info("hostfs.rclone_enabling_plugin", {pluginName});
+        await this.runDockerPluginCommand(["enable", pluginName]);
+      }
+    });
 
     logger.info("hostfs.rclone_plugin_installed", {pluginName});
   }
 
+  private async ensurePluginStateDirectories(pluginConfigDir: string, pluginCacheDir: string): Promise<void> {
+    logger.info("hostfs.rclone_preparing_plugin_state", {
+      pluginConfigDir,
+      pluginCacheDir,
+      helperImage: this.options.helperImage ?? DEFAULT_HELPER_IMAGE,
+    });
+
+    await this.runDockerCommand([
+      "run",
+      "--rm",
+      "-v",
+      `${pluginConfigDir}:${pluginConfigDir}`,
+      "-v",
+      `${pluginCacheDir}:${pluginCacheDir}`,
+      this.options.helperImage ?? DEFAULT_HELPER_IMAGE,
+      "mkdir",
+      "-p",
+      pluginConfigDir,
+      pluginCacheDir,
+    ]);
+  }
+
   private async isPluginInstalled(pluginName: string): Promise<boolean> {
     try {
-      const output = await this.runDockerPluginCommandOutput(["ls", "--format", "{{.Name}}"]);
+      const output = await this.runDockerPluginCommandOutput(["ls", "--format", "{{.Name}}"]); 
       const lines = output.split("\n").map((line) => line.trim()).filter(Boolean);
-      return lines.includes(pluginName);
+      return lines.some((line) => this.matchesPluginName(line, pluginName));
     } catch {
       return false;
     }
@@ -63,8 +109,13 @@ export class RclonePluginManager {
       const output = await this.runDockerPluginCommandOutput(["ls", "--format", "{{.Name}}:{{.Enabled}}"]);
       const lines = output.split("\n").map((line) => line.trim()).filter(Boolean);
       for (const line of lines) {
-        const [name, enabled] = line.split(":");
-        if (name === pluginName) {
+        const separatorIndex = line.lastIndexOf(":");
+        if (separatorIndex === -1) {
+          continue;
+        }
+        const name = line.slice(0, separatorIndex);
+        const enabled = line.slice(separatorIndex + 1);
+        if (this.matchesPluginName(name, pluginName)) {
           return enabled === "true";
         }
       }
@@ -75,8 +126,16 @@ export class RclonePluginManager {
   }
 
   private runDockerPluginCommand(args: string[]): Promise<void> {
+    return this.runDockerCommand(["plugin", ...args]);
+  }
+
+  private matchesPluginName(candidate: string, pluginName: string): boolean {
+    return candidate === pluginName || candidate.startsWith(`${pluginName}:`);
+  }
+
+  private runDockerCommand(args: string[]): Promise<void> {
     return new Promise((resolve, reject) => {
-      const child = this.spawnImpl("docker", ["plugin", ...args], {
+      const child = this.spawnImpl("docker", args, {
         stdio: ["ignore", "pipe", "pipe"],
       });
 

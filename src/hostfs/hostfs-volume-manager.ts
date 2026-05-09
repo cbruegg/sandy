@@ -32,10 +32,10 @@ export class HostfsVolumeManager {
         "create",
         "-d", "rclone",
         "-o", "type=webdav",
-        "-o", `url=${webdavUrl}`,
-        "-o", "vendor=other",
-        "-o", "user=sandy",
-        "-o", `pass=${secret}`,
+        "-o", `webdav-url=${webdavUrl}`,
+        "-o", "webdav-vendor=other",
+        "-o", "webdav-user=sandy",
+        "-o", `webdav-pass=${secret}`,
         volumeName,
       ]);
     } catch (error) {
@@ -48,10 +48,10 @@ export class HostfsVolumeManager {
           "create",
           "-d", "rclone",
           "-o", "type=webdav",
-          "-o", `url=${webdavUrl}`,
-          "-o", "vendor=other",
-          "-o", "user=sandy",
-          "-o", `pass=${secret}`,
+          "-o", `webdav-url=${webdavUrl}`,
+          "-o", "webdav-vendor=other",
+          "-o", "webdav-user=sandy",
+          "-o", `webdav-pass=${secret}`,
           volumeName,
         ]);
       } else {
