@@ -354,6 +354,9 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       case "http_token_use":
         requestType = `http:${request.tokenId}@${request.host}`;
         break;
+      case "host_directory_access":
+        requestType = `host_directory_access:${request.path}:${request.level}`;
+        break;
     }
     logger.info("matrix.send_privilege_request", {
       chatId,
@@ -364,12 +367,41 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     await this.sendPoll(
       chatId,
       "Privilege request",
-      (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use") && request.confirmsAutoApprovalForTask
+      (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use")
+        && request.confirmsAutoApprovalForTask
         ? [
             {
               answerId: "approve",
               label: buttonLabels.approve,
               event: { kind: "approval_response", decision: "approve", requestId: request.requestId },
+            },
+            {
+              answerId: "deny",
+              label: buttonLabels.deny,
+              event: { kind: "approval_response", decision: "deny", requestId: request.requestId },
+            },
+            {
+              answerId: "report",
+              label: buttonLabels.reportDangerousOutput,
+              event: { kind: "danger_report" },
+            },
+            {
+              answerId: "cancel",
+              label: buttonLabels.abortTask,
+              event: { kind: "cancel_request" },
+            },
+          ]
+        : request.kind === "host_directory_access"
+        ? [
+            {
+              answerId: "approve_worker_session",
+              label: buttonLabels.approveWorkerSession,
+              event: { kind: "approval_response", decision: "approve_worker_session", requestId: request.requestId },
+            },
+            {
+              answerId: "approve_always",
+              label: buttonLabels.approveAlwaysHostDirectory,
+              event: { kind: "approval_response", decision: "approve_always", requestId: request.requestId },
             },
             {
               answerId: "deny",

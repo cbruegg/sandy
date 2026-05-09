@@ -118,6 +118,11 @@ SPOTIFY_CLIENT_SECRET = "your_client_secret_here"
 
 [approvals.http.vid2text]
 # always_allow_hosts = ["api.vid2text.example"]
+
+# Optional persisted host-directory approvals:
+# [[approvals.host_directories]]
+# path = "/Users/alice/project"
+# level = "read_only" # or read_write
 ```
 
 `agent.model` optionally overrides the Codex model used by both Sandy's main agent and worker sub-agents.
@@ -443,8 +448,8 @@ workers after they spawn.
 
 Sub-agents may request access to additional resources from the user, such as:
 - Certain host files to be copied in and out of the shared volume.
-- Read-only mount access to a specific directory on the host machine.
-- Read-write mount access to a specific directory on the host machine.
+- Read-only or read-write a ccess to a host directory through the built-in `sandy.request_host_directory_access` MCP tool,
+  which mounts the approved path inside the worker at `/workspace/host/grants/...`.
 - MCP tool calls and resource reads exposed through Sandy's host-side MCP proxy.
 - Tools to send authenticated HTTP requests through Sandy's HTTP token proxy,
   [similar to NanoClaw](https://docs.nanoclaw.dev/concepts/security#6-credential-handling).
@@ -475,6 +480,16 @@ sub-agent of the result so it can proceed with its execution.
 
 Sandy's own host-mediated worker tools are not rewritten to MCP in v1. External MCP access and Sandy's native
 copy/file-send flows coexist for now.
+
+Host directory access behavior:
+
+- Every worker starts with a stable mount at `/workspace/host`.
+- To access a host directory, workers call the built-in `sandy.request_host_directory_access` MCP tool with the absolute host path and desired access level (`read_only` or `read_write`).
+- Sandy asks the user for approval. Host-directory requests offer `Allow in task`, `Always allow`, and `Deny`. There is no `Approve once` option.
+- If approved, Sandy reveals the directory inside `/workspace/host/grants/<grant-id>/` and returns that worker-visible path to the worker.
+- A `read_write` approval satisfies later `read_only` requests for the same canonical path, but not vice versa.
+- Persisted approvals are stored in `approvals.host_directories` in the config file and survive restarts.
+- The host directory mount uses the `rclone/docker-volume-rclone` Docker volume plugin, which Sandy installs and manages automatically.
 
 ## Testing
 

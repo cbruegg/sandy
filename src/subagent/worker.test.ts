@@ -12,6 +12,7 @@ import {
 import type { ChannelFormatting, PrivilegeResolutionResult } from "../types.js";
 import { parseSubAgentEvent } from "../types.js";
 import { parseWorkerToolPayload, sandyMcpServerId } from "./worker-tools.js";
+import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 
 test("buildInitialTaskInput tells the sub-agent where the shared workspace is", () => {
   const formatting: ChannelFormatting = {
@@ -124,14 +125,14 @@ test("nextPlannedStep formats todo-list progress updates", () => {
 
 test("parseWorkerToolPayload parses privilege-escalated worker tools", () => {
   const payload = parseWorkerToolPayload("copy_out_of_share", {
-    sourcePath: "/workspace/share/random_numbers.txt",
+    sourcePath: `${sharedWorkspaceMountPath}/random_numbers.txt`,
     targetPath: "~/Downloads/random_numbers.txt",
     reason: "Deliver the generated file.",
   });
 
   assert.deepEqual(payload, {
     type: "copy_out_of_share",
-    sourcePath: "/workspace/share/random_numbers.txt",
+    sourcePath: `${sharedWorkspaceMountPath}/random_numbers.txt`,
     targetPath: "~/Downloads/random_numbers.txt",
     reason: "Deliver the generated file.",
   });

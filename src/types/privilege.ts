@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { PrivilegedWorkerToolPayload } from "../subagent/worker-tools.js";
+import type {HostDirectoryAccessLevel} from "../hostfs/path-policy.ts";
 
 const privilegeApprovalScopeSchema = z.enum(["once", "worker_session", "always"]);
 
@@ -7,6 +8,13 @@ type HostOperationPrivilegeRequest = {
   kind: "host_operation";
   requestId: string;
   payload: PrivilegedWorkerToolPayload;
+};
+
+type HostDirectoryAccessPrivilegeRequest = {
+  kind: "host_directory_access";
+  requestId: string;
+  path: string;
+  level: HostDirectoryAccessLevel;
 };
 
 type McpToolCallPrivilegeRequest = {
@@ -35,7 +43,7 @@ type HttpTokenUsePrivilegeRequest = {
   confirmsAutoApprovalForTask?: boolean;
 };
 
-export type PrivilegeRequest = HostOperationPrivilegeRequest | McpToolCallPrivilegeRequest | McpResourceReadPrivilegeRequest | HttpTokenUsePrivilegeRequest;
+export type PrivilegeRequest = HostOperationPrivilegeRequest | HostDirectoryAccessPrivilegeRequest | McpToolCallPrivilegeRequest | McpResourceReadPrivilegeRequest | HttpTokenUsePrivilegeRequest;
 
 export const privilegeResolutionResultSchema = z.object({
   requestId: z.string().min(1),

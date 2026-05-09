@@ -1,6 +1,6 @@
 import {cp, mkdir} from "node:fs/promises";
-import {dirname, isAbsolute, resolve} from "node:path";
-import {resolveHomeDirectory} from "../home-directory.js";
+import {dirname} from "node:path";
+import {resolveAbsoluteHostPath} from "../host-paths.js";
 import {resolveTaskShareHostPath} from "../shared-workspace.js";
 import type {PrivilegedWorkerToolPayload} from "../subagent/worker-tools.js";
 
@@ -75,22 +75,4 @@ export class PrivilegeBrokerImpl implements PrivilegeBroker {
 
 export function isSupportedPrivilegeRequest(request: PrivilegedWorkerToolPayload): request is SupportedPrivilegeRequest {
   return request.type === "copy_into_share" || request.type === "copy_out_of_share";
-}
-
-function resolveAbsoluteHostPath(inputPath: string, fieldName: string): string {
-  const expandedPath = expandHomePath(inputPath);
-  if (!isAbsolute(expandedPath)) {
-    throw new Error(`${fieldName} must be an absolute path.`);
-  }
-  return resolve(expandedPath);
-}
-
-function expandHomePath(inputPath: string): string {
-  if (inputPath === "~") {
-    return resolveHomeDirectory();
-  }
-  if (inputPath.startsWith("~/")) {
-    return resolve(resolveHomeDirectory(), inputPath.slice(2));
-  }
-  return inputPath;
 }

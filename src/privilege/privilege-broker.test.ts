@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PrivilegeBrokerImpl } from "./privilege-broker.js";
+import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 
 test("PrivilegeBrokerImpl copies a host file into the task share", async () => {
   const broker = new PrivilegeBrokerImpl();
@@ -18,7 +19,7 @@ test("PrivilegeBrokerImpl copies a host file into the task share", async () => {
       type: "copy_into_share",
       reason: "Need fixture input.",
       sourcePath,
-      targetPath: "/workspace/share/copied/input.txt",
+      targetPath: `${sharedWorkspaceMountPath}/copied/input.txt`,
     },
     {
       taskId: "task-1",
@@ -28,7 +29,7 @@ test("PrivilegeBrokerImpl copies a host file into the task share", async () => {
 
   assert.deepEqual(result, {
     outcome: "approved",
-    message: `Copied ${sourcePath} into the shared workspace at /workspace/share/copied/input.txt.`,
+    message: `Copied ${sourcePath} into the shared workspace at ${sharedWorkspaceMountPath}/copied/input.txt.`,
   });
   assert.equal(
     await readFile(join(taskSharePath, "copied", "input.txt"), "utf8"),
@@ -48,7 +49,7 @@ test("PrivilegeBrokerImpl copies a shared file out to the host", async () => {
     {
       type: "copy_out_of_share",
       reason: "Export result.",
-      sourcePath: "/workspace/share/nested/result.txt",
+      sourcePath: `${sharedWorkspaceMountPath}/nested/result.txt`,
       targetPath,
     },
     {
@@ -59,7 +60,7 @@ test("PrivilegeBrokerImpl copies a shared file out to the host", async () => {
 
   assert.deepEqual(result, {
     outcome: "approved",
-    message: `Copied /workspace/share/nested/result.txt out of the shared workspace to ${targetPath}.`,
+    message: `Copied ${sharedWorkspaceMountPath}/nested/result.txt out of the shared workspace to ${targetPath}.`,
   });
   assert.equal(await readFile(targetPath, "utf8"), "hello from share");
 });
@@ -87,7 +88,7 @@ test("PrivilegeBrokerImpl rejects share path traversal", async () => {
 
   assert.deepEqual(result, {
     outcome: "failed",
-    message: "copy_into_share targetPath must stay within /workspace/share.",
+    message: `copy_into_share targetPath must stay within ${sharedWorkspaceMountPath}.`,
   });
 });
 
@@ -109,7 +110,7 @@ test("PrivilegeBrokerImpl expands ~/ for host paths", async () => {
       {
         type: "copy_out_of_share",
         reason: "Export result.",
-        sourcePath: "/workspace/share/result.txt",
+        sourcePath: `${sharedWorkspaceMountPath}/result.txt`,
         targetPath: `~/${targetPath.slice(fakeHome.length + 1)}`,
       },
       {
@@ -120,7 +121,7 @@ test("PrivilegeBrokerImpl expands ~/ for host paths", async () => {
 
     assert.deepEqual(result, {
       outcome: "approved",
-      message: `Copied /workspace/share/result.txt out of the shared workspace to ${targetPath}.`,
+      message: `Copied ${sharedWorkspaceMountPath}/result.txt out of the shared workspace to ${targetPath}.`,
     });
     assert.equal(await readFile(targetPath, "utf8"), "hello from share");
   } finally {

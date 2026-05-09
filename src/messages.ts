@@ -7,6 +7,7 @@ export const buttonLabels = {
   approve: "Approve once",
   approveWorkerSession: "Allow in task",
   approveAlways: "Auto-allow for suitable tasks",
+  approveAlwaysHostDirectory: "Always allow",
   deny: "Deny",
 } as const;
 
@@ -116,7 +117,18 @@ export const messages = {
     `HTTP token "${tokenId}" is not configured in Sandy's config file.`,
   httpTokenHostNotAllowed: (tokenId: string, host: string): string =>
     `Host "${host}" is not in the configured allowed_hosts for token ${tokenId}.`,
-
+  hostDirectoryAccessDenied: (path: string, level: string): string =>
+    `The user denied host directory access to ${path} (${level}).`,
+  hostDirectoryAccessAllowedForWorkerSession: (path: string, level: string): string =>
+    `Allowed host directory access to ${path} (${level}) for this worker session.`,
+  hostDirectoryAccessAllowedFromPersistentConfig: (path: string, level: string): string =>
+    `Allowed host directory access to ${path} (${level}) from persistent config for this task.`,
+  hostDirectoryAccessAllowedAndPersisted: (path: string, level: string): string =>
+    `Allowed host directory access to ${path} (${level}) and updated Sandy's config file for future suitable tasks.`,
+  hostDirectoryAccessFailed: (path: string, error: string): string =>
+    `Host directory access request for ${path} failed: ${error}`,
+  hostDirectoryNotFound: (path: string): string =>
+    `Host directory not found or not accessible: ${path}`,
 } as const;
 
 export const mcpAdminMessages = {
@@ -249,6 +261,13 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
     ].join("\n");
   }
 
+  if (request.kind === "host_directory_access") {
+    return [
+      `host_directory_access: ${request.path}`,
+      `Level: ${request.level}`,
+    ].join("\n");
+  }
+
   switch (request.payload.type) {
     case "copy_into_share":
     case "copy_out_of_share":
@@ -259,7 +278,7 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
 }
 
 function describePrivilegeActions(request: PrivilegeRequest): string | null {
-  if (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use") {
+  if (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use" || request.kind === "host_directory_access") {
     // In this case, it's pretty clear to the user that approve/deny will approve/deny the request
     return null;
   }

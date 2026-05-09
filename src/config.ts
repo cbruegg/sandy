@@ -202,9 +202,14 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
       http: z.record(z.string(), z.object({
         always_allow_hosts: z.array(z.string()).default([]),
       }).strict()).default({}),
+      host_directories: z.array(z.object({
+        path: z.string().min(1),
+        level: z.enum(["read_only", "read_write"]),
+      }).strict()).default([]),
     }).default({
       mcp: {},
       http: {},
+      host_directories: [],
     }),
     updates: z.object({
       mode: updateModeSchema.default(DEFAULT_UPDATE_MODE),
@@ -297,6 +302,7 @@ export type SandyConfig = {
   persistentMcpApprovals: Record<string, string[]>;
   persistentMcpResourceApprovals: Record<string, string[]>;
   persistentHttpApprovals: Record<string, string[]>;
+  persistentHostDirectoryApprovals: Array<{path: string; level: "read_only" | "read_write"}>;
   updateMode: SandyUpdateMode;
   // The resolved image values alone are not enough here because a user may
   // explicitly pin an image to the same string as the baked default. The
@@ -459,6 +465,10 @@ export function parseConfigToml(
     persistentHttpApprovals: Object.fromEntries(
       Object.entries(parsed.approvals.http).map(([identifier, approval]) => [identifier, approval.always_allow_hosts]),
     ),
+    persistentHostDirectoryApprovals: parsed.approvals.host_directories.map((entry) => ({
+      path: entry.path,
+      level: entry.level,
+    })),
     updateMode: parsed.updates.mode,
     explicitImageOverrides: parsedFile.explicitImageOverrides,
   };

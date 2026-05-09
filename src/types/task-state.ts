@@ -1,5 +1,6 @@
 import type { PrivilegeRequest } from "./privilege.js";
 import type { MainAgentTaskPolicy } from "./main-agent.js";
+import type {HostDirectoryAccessLevel} from "../hostfs/path-policy.ts";
 
 type McpToolGrant = {
   serverId: string;
@@ -20,6 +21,11 @@ type HttpTokenOnceGrant = {
 type HttpTokenSessionGrant = {
   tokenId: string;
   host: string;
+};
+
+type HostDirectoryGrant = {
+  path: string;
+  level: HostDirectoryAccessLevel;
 };
 
 type TaskStatus =
@@ -43,6 +49,7 @@ export type ActiveTaskState = {
   approvedMcpResourceReads: McpResourceReadGrant[];
   approvedHttpTokenSessionGrants: HttpTokenSessionGrant[];
   approvedHttpTokenOnceGrants: HttpTokenOnceGrant[];
+  approvedHostDirectories: HostDirectoryGrant[];
   workerConnected: boolean;
   taskSummary: string | null;
 };

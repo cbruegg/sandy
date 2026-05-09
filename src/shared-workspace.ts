@@ -1,6 +1,7 @@
 import { isAbsolute, relative, resolve } from "node:path";
+import { workspaceRoot } from "./paths.js";
 
-export const sharedWorkspaceMountPath = "/workspace/share";
+export const sharedWorkspaceMountPath = `${workspaceRoot}/share`;
 
 function resolveSharedWorkspaceRelativePath(sharedPath: string, fieldName: string): string {
   if (!isAbsolute(sharedPath)) {

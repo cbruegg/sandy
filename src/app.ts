@@ -20,6 +20,7 @@ import { PrivilegeBrokerImpl } from "./privilege/privilege-broker.js";
 import {DockerSandboxRunner, type DockerSandboxRunnerOptions} from "./sandbox/docker-sandbox-runner.js";
 import {TaskBundleLauncherImpl, type TaskBundleLauncherOptions} from "./sandbox/task-bundle-launcher.js";
 import { TaskBundlePoolImpl } from "./sandbox/task-bundle-pool.js";
+import { TaskBundleAssignmentRegistry } from "./sandbox/task-bundle-assignment-registry.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
 import { OpenAiTranscriptionProvider } from "./transcription/openai-transcription-provider.js";
 import { resolvePublishedUpdateSource } from "./build-metadata.js";
@@ -27,6 +28,7 @@ import { createRetryingChannelAdapter } from "./channel/retrying-channel-adapter
 import { SelfUpdateCoordinator } from "./update/self-update.js";
 import { WorkerImageManager } from "./worker-image-manager.js";
 import { validateMatrixAuthStateForStartup, resolveMatrixAccessToken } from "./matrix/startup-validator.js";
+import {initializeHostfs} from "./hostfs/index.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -137,7 +139,27 @@ export async function startApp(): Promise<void> {
     config.persistentMcpApprovals,
     config.persistentHttpApprovals,
     config.persistentMcpResourceApprovals,
+    config.persistentHostDirectoryApprovals,
   );
+
+  // Docker Desktop (macOS, Windows) runs containers inside a VM. The VM cannot
+  // reach the host via 127.0.0.1, so we must bind the WebDAV server to 0.0.0.0
+  // and tell the rclone volume plugin to connect via host.docker.internal.
+  // On Linux, Docker Engine runs natively and the managed plugin shares the
+  // host network namespace, so 127.0.0.1 is sufficient and more restrictive.
+  const isDockerDesktop = process.platform === "darwin" || process.platform === "win32";
+  const webdavDockerHost = isDockerDesktop
+    ? "host.docker.internal"
+    : "127.0.0.1";
+  const hostfsServices = await initializeHostfs({
+    // Bind to all interfaces only on Docker Desktop (macOS/Windows), where the
+    // Docker VM cannot reach the host via 127.0.0.1. On Linux the rclone plugin
+    // runs in the host network namespace, so localhost is sufficient.
+    webdavHost: isDockerDesktop ? "0.0.0.0" : "127.0.0.1",
+    // The URL the rclone volume plugin uses; on macOS/Windows it must use
+    // host.docker.internal because the plugin runs inside the Docker Desktop VM.
+    webdavDockerHost,
+  });
   const httpTokenAuthorizer = new HttpTokenAuthorizer(
     taskRegistry,
     sessionStore,
@@ -159,6 +181,31 @@ export async function startApp(): Promise<void> {
     workerAccess,
   );
 
+  const createHostfsVolume = async (bundleId: string): Promise<string | null> => {
+    const credentials = hostfsServices.bundleRegistry.createBundle(bundleId);
+    hostfsServices.broker.registerBundle(bundleId);
+    try {
+      return await hostfsServices.volumeManager.createVolume(bundleId, credentials.secret);
+    } catch (error) {
+      if (!hostfsServices.rclonePluginManager.isRecoveryEnabled() || !hostfsServices.rclonePluginManager.isRecoverablePluginError(error)) {
+        throw error;
+      }
+
+      logger.warn("hostfs.volume_creation_retrying_after_plugin_recovery", {
+        bundleId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await hostfsServices.rclonePluginManager.recover();
+      return await hostfsServices.volumeManager.createVolume(bundleId, credentials.secret);
+    }
+  };
+
+  const removeHostfsVolume = async (bundleId: string): Promise<void> => {
+    hostfsServices.broker.revokeBundle(bundleId);
+    hostfsServices.bundleRegistry.revokeBundle(bundleId);
+    await hostfsServices.volumeManager.removeVolume(bundleId);
+  };
+
   const taskBundleLauncherOptions: TaskBundleLauncherOptions = {
     workerImage: config.workerImage,
     resolveWorkerImage: () => workerImageManager.getLaunchImage(),
@@ -176,6 +223,8 @@ export async function startApp(): Promise<void> {
         ? async (request) => await proxyAuthService.resolveProxyRequest(request)
         : undefined,
     logLevel: config.logLevel,
+    createHostfsVolume,
+    removeHostfsVolume,
   };
   const sandboxRunnerOptions: DockerSandboxRunnerOptions = {
     workerImage: config.workerImage,
@@ -193,7 +242,20 @@ export async function startApp(): Promise<void> {
         : undefined,
   };
   const taskBundleLauncher = new TaskBundleLauncherImpl(taskBundleLauncherOptions);
-  const taskBundlePool = new TaskBundlePoolImpl(taskBundleLauncher);
+  const taskBundleAssignmentRegistry = new TaskBundleAssignmentRegistry();
+  const taskBundlePool = new TaskBundlePoolImpl(
+    taskBundleLauncher,
+    (bundle) => {
+      taskBundleAssignmentRegistry.activate(
+        bundle.taskId,
+        bundle.bundleId,
+        bundle.hostfsVolumeName !== null,
+      );
+    },
+    (bundle) => {
+      taskBundleAssignmentRegistry.release(bundle.taskId);
+    },
+  );
   const sandboxRunner = new DockerSandboxRunner(sandboxRunnerOptions, taskBundlePool);
 
   const orchestrator = new SandyOrchestrator({
@@ -214,6 +276,8 @@ export async function startApp(): Promise<void> {
     privilegeBroker: new PrivilegeBrokerImpl(),
     taskRegistry,
     persistentApprovalStore,
+    hostfsBroker: hostfsServices.broker,
+    taskBundleAssignmentRegistry,
   });
 
   const sidecarManager = new McpSidecarManager({
@@ -248,6 +312,9 @@ export async function startApp(): Promise<void> {
     await stopWithLogging("hostMcpRegistry.close", () => hostMcpRegistry.close());
     await stopWithLogging("sandboxRunner.shutdown", sandboxRunner.shutdown?.bind(sandboxRunner));
     await stopWithLogging("workerImageManager.stop", () => workerImageManager.stop());
+    if (hostfsServices) {
+      await stopWithLogging("hostfs.webdav.stop", () => hostfsServices.webdavServer.stop());
+    }
     logger.info("app.shutdown_completed");
   };
 

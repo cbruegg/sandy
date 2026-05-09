@@ -4,6 +4,8 @@ import type { MainAgentController } from "./agent/main-agent-controller.js";
 import type { PrivilegeBroker } from "./privilege/privilege-broker.js";
 import { isSupportedPrivilegeRequest } from "./privilege/privilege-broker.js";
 import type { PersistentApprovalStore } from "./privilege/persistent-approval-store.js";
+import type {HostfsBroker} from "./hostfs/hostfs-broker.js";
+import type {TaskBundleAssignmentLookup} from "./sandbox/task-bundle-assignment-registry.js";
 import type { SandboxHandle, SandboxRunner } from "./sandbox/sandbox-runner.js";
 import type { SessionStore } from "./session/in-memory-session-store.js";
 import type { TaskRegistry } from "./task-registry.js";
@@ -48,7 +50,9 @@ type SandyOrchestratorDependencies = {
   sessionStore: SessionStore;
   privilegeBroker: PrivilegeBroker;
   taskRegistry: TaskRegistry;
-  persistentApprovalStore?: PersistentApprovalStore;
+  persistentApprovalStore: PersistentApprovalStore;
+  hostfsBroker: HostfsBroker;
+  taskBundleAssignmentRegistry: TaskBundleAssignmentLookup;
 };
 
 export class SandyOrchestrator {
@@ -60,14 +64,7 @@ export class SandyOrchestrator {
 
   constructor(private readonly deps: SandyOrchestratorDependencies) {
     this.channelFormatting = deps.channel.getFormatting();
-    this.persistentApprovalStore = deps.persistentApprovalStore ?? {
-      isAlwaysAllowed: () => false,
-      allowTool: async () => {},
-      isResourceReadAlwaysAllowed: () => false,
-      allowResourceRead: async () => {},
-      isHttpTokenAlwaysAllowed: () => false,
-      allowHttpToken: async () => {},
-    };
+    this.persistentApprovalStore = deps.persistentApprovalStore;
   }
 
   async handleChatEvent(event: NormalizedChatEvent): Promise<void> {
@@ -234,6 +231,14 @@ export class SandyOrchestrator {
           host: call.host,
           reason: call.reason,
           confirmsAutoApprovalForTask: this.shouldConfirmHttpTokenAutoApprovalForTask(session, call.tokenId, call.host),
+        });
+      }
+      case "request_host_directory_access": {
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+          kind: "host_directory_access",
+          requestId: randomUUID(),
+          path: call.path,
+          level: call.level,
         });
       }
       case "complete_task": {
@@ -460,6 +465,7 @@ export class SandyOrchestrator {
           approvedMcpResourceReads: [],
           approvedHttpTokenSessionGrants: [],
           approvedHttpTokenOnceGrants: [],
+          approvedHostDirectories: [],
           workerConnected: false,
           taskSummary: null,
         };
@@ -573,6 +579,8 @@ export class SandyOrchestrator {
       result = await this.resolvePendingMcpResourceReadRequest(session, request, decision);
     } else if (request.kind === "http_token_use") {
       result = await this.resolvePendingHttpTokenRequest(session, request, decision);
+    } else if (request.kind === "host_directory_access") {
+      result = await this.resolvePendingHostDirectoryRequest(session, request, decision);
     } else if (decision === "deny") {
       result = {
         requestId: request.requestId,
@@ -592,7 +600,7 @@ export class SandyOrchestrator {
       };
     }
 
-    if (request.kind === "host_operation" || request.kind === "http_token_use") {
+    if (request.kind === "host_operation" || request.kind === "http_token_use" || request.kind === "host_directory_access") {
       const nativeResolver = this.pendingNativeToolResolvers.get(request.requestId);
       if (nativeResolver) {
         nativeResolver(result);
@@ -631,7 +639,7 @@ export class SandyOrchestrator {
   private async awaitNativeToolPrivilegeResolution(
     chatId: string,
     session: SessionState,
-    request: Extract<PrivilegeRequest, { kind: "host_operation" | "http_token_use" }>,
+    request: Extract<PrivilegeRequest, { kind: "host_operation" | "http_token_use" | "host_directory_access" }>,
   ): Promise<PrivilegeResolutionResult> {
     const activeTask = session.activeTask;
     if (!activeTask) {
@@ -653,6 +661,13 @@ export class SandyOrchestrator {
       }
     }
 
+    if (request.kind === "host_directory_access") {
+      const immediateHostDirectoryResult = await this.tryAuthorizeHostDirectoryAccess(session, request);
+      if (immediateHostDirectoryResult) {
+        return immediateHostDirectoryResult;
+      }
+    }
+
     if (activeTask.pendingPrivilegeRequest) {
       return {
         requestId: request.requestId,
@@ -671,7 +686,169 @@ export class SandyOrchestrator {
     });
   }
 
-  private buildUnsupportedPrivilegeResult(request: PrivilegeRequest): PrivilegeResolutionResult {
+  private async grantHostDirectoryAccess(
+    activeTask: NonNullable<SessionState["activeTask"]>,
+    request: Extract<PrivilegeRequest, { kind: "host_directory_access" }>,
+  ): Promise<PrivilegeResolutionResult> {
+    const assignment = this.deps.taskBundleAssignmentRegistry.get(activeTask.taskId);
+    if (!assignment) {
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: "No bundle is assigned to this task.",
+      };
+    }
+
+    if (!assignment.hasHostfsVolume) {
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: messages.hostDirectoryAccessFailed(request.path, "This task bundle does not have a hostfs mount."),
+      };
+    }
+
+    const result = await this.deps.hostfsBroker.requestDirectoryAccess(
+      assignment.bundleId,
+      activeTask.taskId,
+      request.path,
+      request.level,
+    );
+
+    if (!result.ok) {
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: messages.hostDirectoryAccessFailed(request.path, result.error),
+      };
+    }
+
+    return {
+      requestId: request.requestId,
+      outcome: "approved",
+      message: `Host directory access granted. Use the path: ${result.grantPath}`,
+    };
+  }
+
+  private async resolvePendingHostDirectoryRequest(
+    session: SessionState,
+    request: Extract<PrivilegeRequest, { kind: "host_directory_access" }>,
+    decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
+  ): Promise<PrivilegeResolutionResult> {
+    const activeTask = session.activeTask;
+    if (!activeTask) {
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: messages.taskNoLongerActive(session.chatId),
+      };
+    }
+
+    switch (decision) {
+      case "deny":
+        return {
+          requestId: request.requestId,
+          outcome: "denied",
+          message: messages.hostDirectoryAccessDenied(request.path, request.level),
+        };
+      case "approve":
+      case "approve_once":
+      case "approve_worker_session":
+        this.grantTaskHostDirectoryAccess(activeTask, request.path, request.level);
+        return this.withHostDirectoryGrantMessage(
+          await this.grantHostDirectoryAccess(activeTask, request),
+          messages.hostDirectoryAccessAllowedForWorkerSession(request.path, request.level),
+          "worker_session",
+        );
+      case "approve_always":
+        await this.persistentApprovalStore.allowHostDirectory(request.path, request.level);
+        this.grantTaskHostDirectoryAccess(activeTask, request.path, request.level);
+        return this.withHostDirectoryGrantMessage(
+          await this.grantHostDirectoryAccess(activeTask, request),
+          messages.hostDirectoryAccessAllowedAndPersisted(request.path, request.level),
+          "always",
+        );
+      default:
+        assertNever(decision);
+    }
+  }
+
+  private async tryAuthorizeHostDirectoryAccess(
+    session: SessionState,
+    request: Extract<PrivilegeRequest, { kind: "host_directory_access" }>,
+  ): Promise<PrivilegeResolutionResult | null> {
+    const activeTask = session.activeTask;
+    if (!activeTask) {
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: messages.taskNoLongerActive(session.chatId),
+      };
+    }
+
+    if (this.isTaskHostDirectoryAccessAllowed(activeTask, request.path, request.level)) {
+      return this.withHostDirectoryGrantMessage(
+        await this.grantHostDirectoryAccess(activeTask, request),
+        messages.hostDirectoryAccessAllowedForWorkerSession(request.path, request.level),
+        "worker_session",
+      );
+    }
+
+    if (this.persistentApprovalStore.isHostDirectoryAlwaysAllowed(request.path, request.level)) {
+      return this.withHostDirectoryGrantMessage(
+        await this.grantHostDirectoryAccess(activeTask, request),
+        messages.hostDirectoryAccessAllowedFromPersistentConfig(request.path, request.level),
+        "always",
+      );
+    }
+
+    return null;
+  }
+
+  private grantTaskHostDirectoryAccess(
+    task: NonNullable<SessionState["activeTask"]>,
+    path: string,
+    level: "read_only" | "read_write",
+  ): void {
+    const existing = task.approvedHostDirectories.find((g) => g.path === path);
+    if (existing) {
+      if (existing.level === "read_write" || level === "read_only") {
+        return;
+      }
+      existing.level = level;
+      return;
+    }
+    task.approvedHostDirectories.push({path, level});
+  }
+
+  private isTaskHostDirectoryAccessAllowed(
+    task: NonNullable<SessionState["activeTask"]>,
+    path: string,
+    level: "read_only" | "read_write",
+  ): boolean {
+    return task.approvedHostDirectories.some(
+      (grant) => grant.path === path && (grant.level === "read_write" || level === "read_only"),
+    );
+  }
+
+  private withHostDirectoryGrantMessage(
+    result: PrivilegeResolutionResult,
+    message: string,
+    scope: Extract<NonNullable<PrivilegeResolutionResult["scope"]>, "worker_session" | "always">,
+  ): PrivilegeResolutionResult {
+    if (result.outcome !== "approved") {
+      return result;
+    }
+
+    return {
+      ...result,
+      message,
+      scope,
+    };
+  }
+
+  private buildUnsupportedPrivilegeResult(
+    request: Extract<PrivilegeRequest, { kind: "host_operation" | "mcp_tool_call" | "mcp_resource_read" | "http_token_use" }>,
+  ): PrivilegeResolutionResult {
     switch (request.kind) {
       case "host_operation":
         return {

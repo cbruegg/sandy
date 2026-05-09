@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { hostGrantsPrefix } from "../paths.js";
 
 export const sandyMcpServerId = "sandy";
 
@@ -40,6 +41,7 @@ const copyOutOfShareToolName = "copy_out_of_share";
 const sendFileToChannelToolName = "send_file_to_channel";
 const completeTaskToolName = "complete_task";
 const requestHttpTokenToolName = "request_http_token";
+const requestHostDirectoryAccessToolName = "request_host_directory_access";
 
 const copyIntoShareSchema = z.object({
   type: z.literal(copyIntoShareToolName),
@@ -70,6 +72,12 @@ const requestHttpTokenSchema = z.object({
   tokenId: z.string(),
   host: z.string(),
   reason: z.string(),
+}).strict();
+
+const requestHostDirectoryAccessSchema = z.object({
+  type: z.literal(requestHostDirectoryAccessToolName),
+  path: z.string(),
+  level: z.enum(["read_only", "read_write"]),
 }).strict();
 
 export const workerToolEntries = [
@@ -103,6 +111,12 @@ export const workerToolEntries = [
     true,
     requestHttpTokenSchema,
   ),
+  defineWorkerTool(
+    requestHostDirectoryAccessToolName,
+    `Ask the host for permission to access a directory on the host filesystem. Emit this tool call directly instead of asking the user in plain text. The host will mount the approved directory inside ${hostGrantsPrefix}/ if approved.`,
+    true,
+    requestHostDirectoryAccessSchema,
+  ),
 ] as const satisfies readonly WorkerToolDefinition[];
 
 // Public API
@@ -112,11 +126,13 @@ export type WorkerToolPayload =
   | z.infer<typeof copyOutOfShareSchema>
   | z.infer<typeof sendFileToChannelSchema>
   | z.infer<typeof completeTaskSchema>
-  | z.infer<typeof requestHttpTokenSchema>;
+  | z.infer<typeof requestHttpTokenSchema>
+  | z.infer<typeof requestHostDirectoryAccessSchema>;
 export type PrivilegedWorkerToolPayload =
   | z.infer<typeof copyIntoShareSchema>
   | z.infer<typeof copyOutOfShareSchema>
-  | z.infer<typeof requestHttpTokenSchema>;
+  | z.infer<typeof requestHttpTokenSchema>
+  | z.infer<typeof requestHostDirectoryAccessSchema>;
 
 export function parseWorkerToolPayload(name: string, argumentsValue: unknown): WorkerToolPayload {
   const definition = workerToolEntries.find((entry) => entry.name === name);
