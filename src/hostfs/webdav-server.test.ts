@@ -4,6 +4,7 @@ import {mkdtemp, readFile, rm, writeFile} from "node:fs/promises";
 import {basename, join} from "node:path";
 import {tmpdir} from "node:os";
 import {WebDAVServer} from "./webdav-server.js";
+import {BundleNamespaceRegistry} from "./bundle-namespace-registry.js";
 
 async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(join(tmpdir(), "sandy-webdav-test-"));
@@ -18,25 +19,27 @@ function createServer(
   grants: Map<string, {grantId: string; hostPath: string; level: "read_only" | "read_write"}>,
   authenticate?: (username: string, password: string) => string | null,
 ): WebDAVServer {
+  const registry = new BundleNamespaceRegistry();
+  registry.register("test-bundle");
+  const ns = registry.get("test-bundle");
+  if (ns) {
+    for (const [grantId, grant] of grants) {
+      ns.grants.set(grantId, grant);
+    }
+  }
   return new WebDAVServer({
     port: 0,
     host: "127.0.0.1",
     authenticate: authenticate ?? (() => "test-bundle"),
-    getBundleNamespace: () => ({
-      bundleId: "test-bundle",
-      grants,
-    }),
+    namespaceRegistry: registry,
   });
-}
-
-function getServerPort(server: WebDAVServer): number {
-  const address = (server as unknown as {server: {address(): {port: number} | null}}).server?.address();
-  return address?.port ?? 0;
 }
 
 test("WebDAVServer starts and stops", async () => {
   const server = createServer(new Map());
-  await server.start();
+  const port = await server.start();
+  assert.ok(port > 0);
+  assert.equal(server.getPort(), port);
   await server.stop();
 });
 
@@ -44,7 +47,7 @@ test("WebDAVServer responds to OPTIONS with write methods", async () => {
   await withTempDir(async () => {
     const server = createServer(new Map());
     await server.start();
-    const port = getServerPort(server);
+    const port = server.getPort();
     try {
       const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle`, {
         method: "OPTIONS",
@@ -66,7 +69,7 @@ test("WebDAVServer PUT creates a file", async () => {
     const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_write" as const}]]);
     const server = createServer(grants);
     await server.start();
-    const port = getServerPort(server);
+    const port = server.getPort();
     try {
       const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/hello.txt`, {
         method: "PUT",
@@ -87,7 +90,7 @@ test("WebDAVServer PUT overwrites existing file with 204", async () => {
     const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_write" as const}]]);
     const server = createServer(grants);
     await server.start();
-    const port = getServerPort(server);
+    const port = server.getPort();
     try {
       await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/hello.txt`, {
         method: "PUT",
@@ -113,7 +116,7 @@ test("WebDAVServer PUT on read-only grant returns 403", async () => {
     const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_only" as const}]]);
     const server = createServer(grants);
     await server.start();
-    const port = getServerPort(server);
+    const port = server.getPort();
     try {
       const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/hello.txt`, {
         method: "PUT",
@@ -132,7 +135,7 @@ test("WebDAVServer DELETE removes a file", async () => {
     const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_write" as const}]]);
     const server = createServer(grants);
     await server.start();
-    const port = getServerPort(server);
+    const port = server.getPort();
     try {
       await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/hello.txt`, {
         method: "PUT",
@@ -157,7 +160,7 @@ test("WebDAVServer DELETE on read-only grant returns 403", async () => {
     const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_only" as const}]]);
     const server = createServer(grants);
     await server.start();
-    const port = getServerPort(server);
+    const port = server.getPort();
     try {
       const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/hello.txt`, {
         method: "DELETE",
@@ -175,7 +178,7 @@ test("WebDAVServer DELETE on grant root returns 403", async () => {
     const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_write" as const}]]);
     const server = createServer(grants);
     await server.start();
-    const port = getServerPort(server);
+    const port = server.getPort();
     try {
       const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/`, {
         method: "DELETE",
@@ -193,7 +196,7 @@ test("WebDAVServer MKCOL creates a directory", async () => {
     const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_write" as const}]]);
     const server = createServer(grants);
     await server.start();
-    const port = getServerPort(server);
+    const port = server.getPort();
     try {
       const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/newdir`, {
         method: "MKCOL",
@@ -213,7 +216,7 @@ test("WebDAVServer MKCOL on read-only grant returns 403", async () => {
     const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_only" as const}]]);
     const server = createServer(grants);
     await server.start();
-    const port = getServerPort(server);
+    const port = server.getPort();
     try {
       const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/newdir`, {
         method: "MKCOL",
@@ -232,7 +235,7 @@ for (const method of ["OPTIONS", "GET", "HEAD", "PROPFIND", "PUT", "DELETE", "MK
       const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_write" as const}]]);
       const server = createServer(grants);
       await server.start();
-      const port = getServerPort(server);
+      const port = server.getPort();
       try {
         const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/hello.txt`, {
           method,
@@ -255,7 +258,7 @@ for (const method of ["OPTIONS", "GET", "HEAD", "PROPFIND", "PUT", "DELETE", "MK
         return password === "correct-secret" ? "test-bundle" : null;
       });
       await server.start();
-      const port = getServerPort(server);
+      const port = server.getPort();
       try {
         const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/hello.txt`, {
           method,
@@ -276,7 +279,7 @@ test("WebDAVServer GET with path traversal returns 404", async () => {
       const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_write" as const}]]);
       const server = createServer(grants);
       await server.start();
-      const port = getServerPort(server);
+      const port = server.getPort();
       try {
         const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/../../${basename(parentDir)}/secret.txt`, {
           method: "GET",
@@ -299,7 +302,7 @@ test("WebDAVServer PUT with path traversal returns 404", async () => {
       const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_write" as const}]]);
       const server = createServer(grants);
       await server.start();
-      const port = getServerPort(server);
+      const port = server.getPort();
       try {
         const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/../../${basename(parentDir)}/secret.txt`, {
           method: "PUT",
@@ -326,7 +329,7 @@ test("WebDAVServer DELETE with path traversal returns 404", async () => {
       const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_write" as const}]]);
       const server = createServer(grants);
       await server.start();
-      const port = getServerPort(server);
+      const port = server.getPort();
       try {
         const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/../../${basename(parentDir)}/secret.txt`, {
           method: "DELETE",
@@ -351,7 +354,7 @@ test("WebDAVServer PROPFIND with path traversal returns 404", async () => {
       const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_write" as const}]]);
       const server = createServer(grants);
       await server.start();
-      const port = getServerPort(server);
+      const port = server.getPort();
       try {
         const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/../../${basename(parentDir)}`, {
           method: "PROPFIND",

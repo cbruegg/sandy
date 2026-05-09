@@ -27,7 +27,7 @@ import { createRetryingChannelAdapter } from "./channel/retrying-channel-adapter
 import { SelfUpdateCoordinator } from "./update/self-update.js";
 import { WorkerImageManager } from "./worker-image-manager.js";
 import { validateMatrixAuthStateForStartup, resolveMatrixAccessToken } from "./matrix/startup-validator.js";
-import {initializeHostfs, buildWebDAVBaseUrl} from "./hostfs/index.js";
+import {initializeHostfs} from "./hostfs/index.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -141,7 +141,6 @@ export async function startApp(): Promise<void> {
     config.persistentHostDirectoryApprovals,
   );
 
-  const webdavPort = 9876;
   // Docker Desktop (macOS, Windows) runs containers inside a VM. The VM cannot
   // reach the host via 127.0.0.1, so we must bind the WebDAV server to 0.0.0.0
   // and tell the rclone volume plugin to connect via host.docker.internal.
@@ -153,14 +152,13 @@ export async function startApp(): Promise<void> {
     : "127.0.0.1";
   const hostfsServices = await initializeHostfs({
     enabled: true,
-    webdavPort,
     // Bind to all interfaces only on Docker Desktop (macOS/Windows), where the
     // Docker VM cannot reach the host via 127.0.0.1. On Linux the rclone plugin
     // runs in the host network namespace, so localhost is sufficient.
     webdavHost: isDockerDesktop ? "0.0.0.0" : "127.0.0.1",
     // The URL the rclone volume plugin uses; on macOS/Windows it must use
     // host.docker.internal because the plugin runs inside the Docker Desktop VM.
-    webdavBaseUrl: buildWebDAVBaseUrl(webdavDockerHost, webdavPort),
+    webdavDockerHost,
   });
   const httpTokenAuthorizer = new HttpTokenAuthorizer(
     taskRegistry,

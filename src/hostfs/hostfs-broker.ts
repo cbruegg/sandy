@@ -1,9 +1,10 @@
 import {randomUUID} from "node:crypto";
 import type {BundleRegistry} from "./bundle-registry.js";
-import type {WebDAVBundleNamespace, WebDAVServer} from "./webdav-server.js";
+import type {WebDAVBundleNamespace} from "./webdav-server.js";
 import type {HostDirectoryAccessLevel} from "./path-policy.js";
 import {canonicalizeHostPath, isAccessLevelSatisfiedOrBetter} from "./path-policy.js";
 import {logger} from "../logger.js";
+import type {BundleNamespaceRegistry} from "./bundle-namespace-registry.js";
 
 type HostDirectoryGrant = {
   grantId: string;
@@ -13,32 +14,24 @@ type HostDirectoryGrant = {
 
 type HostfsBrokerOptions = {
   bundleRegistry: BundleRegistry;
-  webdavServer: WebDAVServer;
+  namespaceRegistry: BundleNamespaceRegistry;
   webdavBaseUrl: string;
 };
 
 export class HostfsBroker {
-  private readonly bundleNamespaces = new Map<string, WebDAVBundleNamespace>();
   private readonly taskGrants = new Map<string, Map<string, HostDirectoryGrant>>(); // taskId -> (canonicalPath -> grant)
   private readonly bundleGrants = new Map<string, Map<string, HostDirectoryGrant>>(); // bundleId -> (canonicalPath -> grant)
 
   constructor(private readonly options: HostfsBrokerOptions) {}
 
   registerBundle(bundleId: string): void {
-    if (this.bundleNamespaces.has(bundleId)) {
-      return;
-    }
-    const namespace: WebDAVBundleNamespace = {
-      bundleId,
-      grants: new Map(),
-    };
-    this.bundleNamespaces.set(bundleId, namespace);
+    this.options.namespaceRegistry.register(bundleId);
     this.bundleGrants.set(bundleId, new Map());
     logger.info("hostfs.bundle_registered", {bundleId});
   }
 
   revokeBundle(bundleId: string): void {
-    this.bundleNamespaces.delete(bundleId);
+    this.options.namespaceRegistry.revoke(bundleId);
     this.bundleGrants.delete(bundleId);
     // Clean up task grants for tasks using this bundle
     for (const [taskId, taskBundleId] of this.getTaskBundleMappings()) {
@@ -101,7 +94,7 @@ export class HostfsBroker {
     this.ensureTaskGrantMap(taskId).set(canonicalPath, grant);
     this.ensureBundleGrantMap(bundleId).set(canonicalPath, grant);
 
-    const namespace = this.bundleNamespaces.get(bundleId);
+    const namespace = this.options.namespaceRegistry.get(bundleId);
     if (namespace) {
       namespace.grants.set(grantId, grant);
     }
@@ -122,7 +115,7 @@ export class HostfsBroker {
   }
 
   getBundleNamespace(bundleId: string): WebDAVBundleNamespace | null {
-    return this.bundleNamespaces.get(bundleId) ?? null;
+    return this.options.namespaceRegistry.get(bundleId);
   }
 
   getGrantForTask(taskId: string, canonicalPath: string): HostDirectoryGrant | null {

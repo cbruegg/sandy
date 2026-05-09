@@ -3,17 +3,18 @@ import {BundleRegistry} from "./bundle-registry.js";
 import {HostfsBroker} from "./hostfs-broker.js";
 import {HostfsVolumeManager} from "./hostfs-volume-manager.js";
 import {RclonePluginManager} from "./rclone-plugin-manager.js";
+import {BundleNamespaceRegistry} from "./bundle-namespace-registry.js";
 
 type HostfsConfig = {
   enabled: boolean;
-  webdavPort: number;
   webdavHost: string;
-  webdavBaseUrl: string;
+  webdavDockerHost: string;
   volumePrefix?: string;
 };
 
 type HostfsServices = {
   webdavServer: WebDAVServer;
+  webdavBaseUrl: string;
   bundleRegistry: BundleRegistry;
   broker: HostfsBroker;
   volumeManager: HostfsVolumeManager;
@@ -26,43 +27,38 @@ export async function initializeHostfs(config: HostfsConfig): Promise<HostfsServ
   }
 
   const bundleRegistry = new BundleRegistry();
-
-  const broker = new HostfsBroker({
-    bundleRegistry,
-    webdavServer: null as unknown as WebDAVServer,
-    webdavBaseUrl: config.webdavBaseUrl,
-  });
+  const namespaceRegistry = new BundleNamespaceRegistry();
 
   const webdavServer = new WebDAVServer({
-    port: config.webdavPort,
+    port: 0,
     host: config.webdavHost,
     authenticate: (_username, password) => {
       return bundleRegistry.getBundleIdBySecret(password);
     },
-    getBundleNamespace: (bundleId) => {
-      return broker.getBundleNamespace(bundleId);
-    },
+    namespaceRegistry,
   });
 
-  // Fix the circular reference by setting webdavServer on broker after creation
-  (broker as unknown as Record<string, unknown>)["options"] = {
+  const webdavPort = await webdavServer.start();
+  const webdavBaseUrl = buildWebDAVBaseUrl(config.webdavDockerHost, webdavPort);
+
+  const broker = new HostfsBroker({
     bundleRegistry,
-    webdavServer,
-    webdavBaseUrl: config.webdavBaseUrl,
-  };
+    namespaceRegistry,
+    webdavBaseUrl,
+  });
 
   const volumeManager = new HostfsVolumeManager({
-    webdavBaseUrl: config.webdavBaseUrl,
+    webdavBaseUrl,
     volumePrefix: config.volumePrefix,
   });
 
   const rclonePluginManager = new RclonePluginManager();
 
-  await webdavServer.start();
   await rclonePluginManager.ensureInstalled();
 
   return {
     webdavServer,
+    webdavBaseUrl,
     bundleRegistry,
     broker,
     volumeManager,
@@ -70,6 +66,6 @@ export async function initializeHostfs(config: HostfsConfig): Promise<HostfsServ
   };
 }
 
-export function buildWebDAVBaseUrl(host: string, port: number): string {
+function buildWebDAVBaseUrl(host: string, port: number): string {
   return `http://${host}:${port}`;
 }

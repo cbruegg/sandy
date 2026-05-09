@@ -2,13 +2,13 @@ import {test} from "bun:test";
 import assert from "node:assert/strict";
 import {BundleRegistry} from "./bundle-registry.js";
 import {HostfsBroker} from "./hostfs-broker.js";
-import {WebDAVServer} from "./webdav-server.js";
+import {BundleNamespaceRegistry} from "./bundle-namespace-registry.js";
 
 test("HostfsBroker registers and revokes bundles", () => {
   const registry = new BundleRegistry();
   const broker = new HostfsBroker({
     bundleRegistry: registry,
-    webdavServer: null as unknown as WebDAVServer,
+    namespaceRegistry: new BundleNamespaceRegistry(),
     webdavBaseUrl: "http://localhost:9876",
   });
 
@@ -25,7 +25,7 @@ test("HostfsBroker grants directory access and returns grant path", async () => 
   const registry = new BundleRegistry();
   const broker = new HostfsBroker({
     bundleRegistry: registry,
-    webdavServer: null as unknown as WebDAVServer,
+    namespaceRegistry: new BundleNamespaceRegistry(),
     webdavBaseUrl: "http://localhost:9876",
   });
 
@@ -48,7 +48,7 @@ test("HostfsBroker reuses existing grant for same path and level", async () => {
   const registry = new BundleRegistry();
   const broker = new HostfsBroker({
     bundleRegistry: registry,
-    webdavServer: null as unknown as WebDAVServer,
+    namespaceRegistry: new BundleNamespaceRegistry(),
     webdavBaseUrl: "http://localhost:9876",
   });
 
@@ -77,7 +77,7 @@ test("HostfsBroker rejects invalid paths", async () => {
   const registry = new BundleRegistry();
   const broker = new HostfsBroker({
     bundleRegistry: registry,
-    webdavServer: null as unknown as WebDAVServer,
+    namespaceRegistry: new BundleNamespaceRegistry(),
     webdavBaseUrl: "http://localhost:9876",
   });
 
@@ -96,7 +96,7 @@ test("HostfsBroker lists grants for task", async () => {
   const registry = new BundleRegistry();
   const broker = new HostfsBroker({
     bundleRegistry: registry,
-    webdavServer: null as unknown as WebDAVServer,
+    namespaceRegistry: new BundleNamespaceRegistry(),
     webdavBaseUrl: "http://localhost:9876",
   });
 

@@ -4,6 +4,7 @@ import {mkdir, rm, stat, readdir} from "node:fs/promises";
 import {basename, dirname, join, resolve} from "node:path";
 import {pipeline} from "node:stream/promises";
 import {logger} from "../logger.js";
+import type {BundleNamespaceRegistry} from "./bundle-namespace-registry.js";
 
 type WebDAVGrant = {
   grantId: string;
@@ -20,7 +21,7 @@ type WebDAVServerOptions = {
   port: number;
   host?: string;
   authenticate: (username: string, password: string) => string | null; // returns bundleId or null
-  getBundleNamespace: (bundleId: string) => WebDAVBundleNamespace | null;
+  namespaceRegistry: BundleNamespaceRegistry;
 };
 
 const READ_METHODS = ["OPTIONS", "GET", "HEAD", "PROPFIND"];
@@ -32,19 +33,32 @@ export class WebDAVServer {
 
   constructor(private readonly options: WebDAVServerOptions) {}
 
-  start(): Promise<void> {
+  start(): Promise<number> {
     return new Promise((resolve) => {
       this.server = createServer((req, res) => {
         void this.handleRequest(req, res);
       });
       this.server.listen(this.options.port, this.options.host ?? "127.0.0.1", () => {
+        const address = this.server!.address();
+        const port = typeof address === "string" ? parseInt(address, 10) : address!.port;
         logger.info("hostfs.webdav_server_started", {
           host: this.options.host ?? "127.0.0.1",
-          port: this.options.port,
+          port,
         });
-        resolve();
+        resolve(port);
       });
     });
+  }
+
+  getPort(): number {
+    if (!this.server) {
+      throw new Error("WebDAV server has not been started.");
+    }
+    const address = this.server.address();
+    if (!address) {
+      throw new Error("WebDAV server is not listening.");
+    }
+    return typeof address === "string" ? parseInt(address, 10) : address.port;
   }
 
   stop(): Promise<void> {
@@ -81,7 +95,7 @@ export class WebDAVServer {
       bundleId,
     });
 
-    const namespace = this.options.getBundleNamespace(bundleId);
+    const namespace = this.options.namespaceRegistry.get(bundleId);
     if (!namespace) {
       logger.warn("hostfs.webdav_namespace_missing", {
         method: req.method,
