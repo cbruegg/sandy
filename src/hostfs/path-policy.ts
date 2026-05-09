@@ -1,6 +1,6 @@
-import {isAbsolute, normalize, resolve} from "node:path";
-import {stat} from "node:fs/promises";
-import {resolveHomeDirectory} from "../home-directory.js";
+import {realpath, stat} from "node:fs/promises";
+import {normalize} from "node:path";
+import {resolveAbsoluteHostPath} from "../host-paths.js";
 
 export type HostDirectoryAccessLevel = "read_only" | "read_write";
 
@@ -9,12 +9,12 @@ type CanonicalPathResult =
   | { ok: false; error: string };
 
 export async function canonicalizeHostPath(inputPath: string): Promise<CanonicalPathResult> {
-  const expanded = expandHomePath(inputPath);
-  if (!isAbsolute(expanded)) {
+  let normalized: string;
+  try {
+    normalized = normalize(resolveAbsoluteHostPath(inputPath, "Path"));
+  } catch {
     return {ok: false, error: `Path must be absolute, got: ${inputPath}`};
   }
-
-  const normalized = normalize(expanded);
 
   try {
     const stats = await stat(normalized);
@@ -30,19 +30,8 @@ export async function canonicalizeHostPath(inputPath: string): Promise<Canonical
   }
 }
 
-function expandHomePath(inputPath: string): string {
-  if (inputPath === "~") {
-    return resolveHomeDirectory();
-  }
-  if (inputPath.startsWith("~/")) {
-    return resolve(resolveHomeDirectory(), inputPath.slice(2));
-  }
-  return inputPath;
-}
-
 async function realpathSafe(inputPath: string): Promise<string> {
   try {
-    const {realpath} = await import("node:fs/promises");
     return await realpath(inputPath);
   } catch {
     // If realpath fails, fall back to the normalized path
