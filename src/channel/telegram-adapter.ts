@@ -350,7 +350,7 @@ function buildPrivilegeKeyboard(request: PrivilegeRequest): Array<Array<{ text: 
     return [
       [
         { text: buttonLabels.approveWorkerSession, callback_data: `approve_session:${request.requestId}` },
-        { text: buttonLabels.approveAlways, callback_data: `approve_always:${request.requestId}` },
+        { text: buttonLabels.approveAlwaysHostDirectory, callback_data: `approve_always:${request.requestId}` },
       ],
       [
         { text: buttonLabels.deny, callback_data: `deny:${request.requestId}` },

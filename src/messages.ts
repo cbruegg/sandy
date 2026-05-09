@@ -7,6 +7,7 @@ export const buttonLabels = {
   approve: "Approve once",
   approveWorkerSession: "Allow in task",
   approveAlways: "Auto-allow for suitable tasks",
+  approveAlwaysHostDirectory: "Always allow",
   deny: "Deny",
 } as const;
 

@@ -400,7 +400,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
             },
             {
               answerId: "approve_always",
-              label: buttonLabels.approveAlways,
+              label: buttonLabels.approveAlwaysHostDirectory,
               event: { kind: "approval_response", decision: "approve_always", requestId: request.requestId },
             },
             {
