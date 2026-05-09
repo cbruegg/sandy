@@ -2,6 +2,7 @@ import {test} from "bun:test";
 import assert from "node:assert/strict";
 import {HostfsBroker} from "./hostfs-broker.js";
 import {BundleNamespaceRegistry} from "./bundle-namespace-registry.js";
+import {hostGrantsPrefix} from "../paths.js";
 
 function createBroker(): HostfsBroker {
   return new HostfsBroker({
@@ -35,7 +36,7 @@ test("HostfsBroker grants directory access and returns grant path", async () => 
 
   assert.equal(result.ok, true);
   if (result.ok) {
-    assert.ok(result.grantPath.startsWith("/workspace/host/grants/"));
+    assert.ok(result.grantPath.startsWith(hostGrantsPrefix + "/"));
     assert.ok(result.grantId.length > 0);
   }
 });

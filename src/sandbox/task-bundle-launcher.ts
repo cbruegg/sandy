@@ -5,6 +5,7 @@ import {join} from "node:path";
 import {createInterface} from "node:readline";
 import type {WorkerNetworkConfig} from "../config.js";
 import {logger, type LogLevel} from "../logger.js";
+import {hostMountPath} from "../paths.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {workerSkillsPath} from "../subagent/worker-codex-config.js";
 import {
@@ -213,7 +214,7 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
     }
 
     if (hostfsVolumeName) {
-      dockerArgs.push("-v", `${hostfsVolumeName}:/workspace/host`);
+      dockerArgs.push("-v", `${hostfsVolumeName}:${hostMountPath}`);
     }
 
     dockerArgs.push("-v", `${shareHostPath}:${sharedWorkspaceMountPath}`, workerImage);

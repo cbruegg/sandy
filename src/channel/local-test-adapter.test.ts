@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { LocalTestChannelAdapter } from "./local-test-adapter.js";
 import type { NormalizedChatEvent, PrivilegeRequest } from "../types.js";
 import { parseLocalTestOutboundEvent } from "./local-test-protocol.js";
+import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 
 async function waitFor<T>(load: () => Promise<T>, predicate: (value: T) => boolean, timeoutMs = 3000): Promise<T> {
   const started = Date.now();
@@ -113,7 +114,7 @@ test("LocalTestChannelAdapter writes privilege requests and file sends to the ou
       payload: {
         type: "copy_into_share",
         sourcePath: "/tmp/source.txt",
-        targetPath: "/workspace/share/source.txt",
+        targetPath: `${sharedWorkspaceMountPath}/source.txt`,
         reason: "Need the file.",
       },
     };

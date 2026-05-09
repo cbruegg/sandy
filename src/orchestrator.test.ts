@@ -12,6 +12,8 @@ import type { HostfsBroker } from "./hostfs/hostfs-broker.js";
 import { createNoopHostfsBroker } from "./hostfs/hostfs-broker.js";
 import type { HostDirectoryAccessLevel } from "./hostfs/path-policy.js";
 import { HttpTokenAuthorizer } from "./http/token-authorizer.js";
+import { hostGrantsPrefix } from "./paths.js";
+import { sharedWorkspaceMountPath } from "./shared-workspace.js";
 import type { SandboxHandle, SandboxRunner, LaunchTaskRequest } from "./sandbox/sandbox-runner.js";
 import type { TaskInputPayload } from "./types.js";
 import { SandyOrchestrator } from "./orchestrator.js";
@@ -388,7 +390,7 @@ test("orchestrator applies supported privilege requests deterministically and ou
     toolName: "copy_into_share",
     arguments: {
       sourcePath: "/Users/test/input.txt",
-      targetPath: "/workspace/share/input.txt",
+      targetPath: `${sharedWorkspaceMountPath}/input.txt`,
       reason: "Need a local fixture file.",
     },
   });
@@ -409,7 +411,7 @@ test("orchestrator applies supported privilege requests deterministically and ou
     request: {
       type: "copy_into_share",
       sourcePath: "/Users/test/input.txt",
-      targetPath: "/workspace/share/input.txt",
+      targetPath: `${sharedWorkspaceMountPath}/input.txt`,
       reason: "Need a local fixture file.",
     },
     taskId,
@@ -519,7 +521,7 @@ test("orchestrator sends worker-requested shared files back through the channel"
     taskId: expectDefined(runner.launches[0], "Expected launch.").taskId,
     toolName: "send_file_to_channel",
     arguments: {
-      path: "/workspace/share/results/output.txt",
+      path: `${sharedWorkspaceMountPath}/results/output.txt`,
       caption: "Generated output",
     },
   });
@@ -977,7 +979,7 @@ test("orchestrator fails the active task if channel file delivery fails", async 
     taskId: expectDefined(runner.launches[0], "Expected launch.").taskId,
     toolName: "send_file_to_channel",
     arguments: {
-      path: "/workspace/share/result.txt",
+      path: `${sharedWorkspaceMountPath}/result.txt`,
       caption: "Result",
     },
   });
@@ -1585,7 +1587,7 @@ test("orchestrator creates a hostfs grant for worker-session host directory appr
         return {
           ok: true,
           grantId: "grant-1",
-          grantPath: "/workspace/host/grants/grant-1",
+          grantPath: `${hostGrantsPrefix}/grant-1`,
         };
       },
     } as unknown as HostfsBroker,

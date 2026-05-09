@@ -1,6 +1,7 @@
 import {spawn} from "node:child_process";
 import {createCipheriv, randomBytes} from "node:crypto";
 import {logger} from "../logger.js";
+import {hostMountPath} from "../paths.js";
 
 type HostfsVolumeManagerOptions = {
   volumePrefix?: string;
@@ -9,7 +10,6 @@ type HostfsVolumeManagerOptions = {
 };
 
 const DEFAULT_VOLUME_PREFIX = "sandy-hostfs";
-const WORKER_MOUNT_PATH = "/workspace/host";
 const RCLONE_OBSCURE_KEY = Buffer.from([
   0x9c, 0x93, 0x5b, 0x48, 0x73, 0x0a, 0x55, 0x4d,
   0x6b, 0xfd, 0x7c, 0x63, 0xc8, 0x86, 0xa9, 0x2b,
@@ -90,7 +90,7 @@ export class HostfsVolumeManager {
 
   getWorkerMountArgs(bundleId: string): string[] {
     const volumeName = this.buildVolumeName(bundleId);
-    return ["-v", `${volumeName}:${WORKER_MOUNT_PATH}`];
+    return ["-v", `${volumeName}:${hostMountPath}`];
   }
 
   private buildVolumeName(bundleId: string): string {

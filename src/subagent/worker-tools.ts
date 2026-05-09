@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
+import { hostGrantsPrefix } from "../paths.js";
 
 export const sandyMcpServerId = "sandy";
 
@@ -112,7 +113,7 @@ export const workerToolEntries = [
   ),
   defineWorkerTool(
     requestHostDirectoryAccessToolName,
-    "Ask the host for permission to access a directory on the host filesystem. Emit this tool call directly instead of asking the user in plain text. The host will mount the approved directory inside /workspace/host/grants/ if approved.",
+    `Ask the host for permission to access a directory on the host filesystem. Emit this tool call directly instead of asking the user in plain text. The host will mount the approved directory inside ${hostGrantsPrefix}/ if approved.`,
     true,
     requestHostDirectoryAccessSchema,
   ),

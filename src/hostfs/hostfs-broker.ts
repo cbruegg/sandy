@@ -4,6 +4,7 @@ import type {HostDirectoryAccessLevel} from "./path-policy.js";
 import {canonicalizeHostPath, isAccessLevelSatisfiedOrBetter} from "./path-policy.js";
 import {logger} from "../logger.js";
 import type {BundleNamespaceRegistry} from "./bundle-namespace-registry.js";
+import {hostGrantsPrefix} from "../paths.js";
 
 type HostDirectoryGrant = {
   grantId: string;
@@ -52,7 +53,7 @@ export class HostfsBroker {
       if (existing && isAccessLevelSatisfiedOrBetter(level, existing.level)) {
         return {
           ok: true,
-          grantPath: `/workspace/host/grants/${existing.grantId}`,
+          grantPath: `${hostGrantsPrefix}/${existing.grantId}`,
           grantId: existing.grantId,
         };
       }
@@ -82,7 +83,7 @@ export class HostfsBroker {
 
     return {
       ok: true,
-      grantPath: `/workspace/host/grants/${grantId}`,
+      grantPath: `${hostGrantsPrefix}/${grantId}`,
       grantId,
     };
   }
