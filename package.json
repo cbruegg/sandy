@@ -20,7 +20,7 @@
     "build": "bun run clean && bun run lint && bun run typecheck && bun run build:bundle && bun run knip",
     "start": "bun run src/entrypoint-main.ts",
     "start:local-test": "bun run src/entrypoint-local-test.ts",
-    "test": "bun run build && bun test"
+    "test": "bun run build && bun test src"
   },
   "dependencies": {
     "@iarna/toml": "^2.2.5",
