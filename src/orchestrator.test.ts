@@ -1576,7 +1576,6 @@ test("orchestrator creates a hostfs grant for worker-session host directory appr
       registerBundle: () => {},
       revokeBundle: () => {},
       getBundleNamespace: () => null,
-      getWebDAVUrlForBundle: () => "http://localhost:9876/bundles/bundle-1",
       requestDirectoryAccess: async (
         bundleId: string,
         taskId: string,

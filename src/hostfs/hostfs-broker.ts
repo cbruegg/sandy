@@ -30,6 +30,12 @@ export class HostfsBroker {
     logger.info("hostfs.bundle_revoked", {bundleId});
   }
 
+  /**
+   * Grant a task-scoped bundle access to a host directory at the given level.
+   * Reuses an existing grant for the same canonical path when the level is
+   * sufficient. Returns the grant path that the worker will see as
+   * /workspace/host/grants/<grantId>.
+   */
   async requestDirectoryAccess(
     bundleId: string,
     taskId: string,
@@ -87,10 +93,6 @@ export class HostfsBroker {
   getBundleNamespace(bundleId: string): WebDAVBundleNamespace | null {
     return this.options.namespaceRegistry.get(bundleId);
   }
-
-  getWebDAVUrlForBundle(bundleId: string): string {
-    return `${this.options.webdavBaseUrl}/bundles/${bundleId}`;
-  }
 }
 
 export function createNoopHostfsBroker(): HostfsBroker {
@@ -99,6 +101,5 @@ export function createNoopHostfsBroker(): HostfsBroker {
     revokeBundle: () => {},
     requestDirectoryAccess: () => Promise.resolve({ ok: false, error: "Host directory access is not enabled." }),
     getBundleNamespace: () => null,
-    getWebDAVUrlForBundle: () => "",
   } as unknown as HostfsBroker;
 }
