@@ -151,6 +151,7 @@ export async function startApp(): Promise<void> {
   const webdavDockerHost = isDockerDesktop
     ? "host.docker.internal"
     : "127.0.0.1";
+  const rclonePluginStateRoot = "/var/lib/docker-plugins/rclone";
 
   const hostfsServices = await initializeHostfs({
     enabled: true,
@@ -162,6 +163,8 @@ export async function startApp(): Promise<void> {
     // The URL the rclone volume plugin uses; on macOS/Windows it must use
     // host.docker.internal because the plugin runs inside the Docker Desktop VM.
     webdavBaseUrl: buildWebDAVBaseUrl(webdavDockerHost, webdavPort),
+    rclonePluginConfigDir: `${rclonePluginStateRoot}/config`,
+    rclonePluginCacheDir: `${rclonePluginStateRoot}/cache`,
   });
   const httpTokenAuthorizer = new HttpTokenAuthorizer(
     taskRegistry,
@@ -205,7 +208,20 @@ export async function startApp(): Promise<void> {
         ? async (bundleId) => {
             const credentials = hostfsServices.bundleRegistry.createBundle(bundleId);
             hostfsServices.broker.registerBundle(bundleId);
-            return await hostfsServices.volumeManager.createVolume(bundleId, credentials.secret);
+            try {
+              return await hostfsServices.volumeManager.createVolume(bundleId, credentials.secret);
+            } catch (error) {
+              if (!hostfsServices.rclonePluginManager.isRecoverablePluginError(error)) {
+                throw error;
+              }
+
+              logger.warn("hostfs.volume_creation_retrying_after_plugin_recovery", {
+                bundleId,
+                error: error instanceof Error ? error.message : String(error),
+              });
+              await hostfsServices.rclonePluginManager.recover();
+              return await hostfsServices.volumeManager.createVolume(bundleId, credentials.secret);
+            }
           }
         : undefined,
     removeHostfsVolume: hostfsServices
@@ -237,11 +253,13 @@ export async function startApp(): Promise<void> {
     hostfsServices
         ? (bundle) => {
             hostfsServices.bundleRegistry.assignTask(bundle.bundleId, bundle.taskId);
+            hostfsServices.bundleRegistry.setHostfsVolumeAvailability(bundle.bundleId, bundle.hostfsVolumeName !== null);
           }
         : undefined,
     hostfsServices
         ? (bundle) => {
             hostfsServices.bundleRegistry.assignTask(bundle.bundleId, null);
+            hostfsServices.bundleRegistry.setHostfsVolumeAvailability(bundle.bundleId, false);
           }
         : undefined,
   );

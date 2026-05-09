@@ -158,3 +158,42 @@ test("RclonePluginManager recovers when install reports plugin already exists", 
   assert.ok(invocations.some((invocation) => invocation[0] === "plugin" && invocation[1] === "install"));
   assert.ok(invocations.some((invocation) => invocation[0] === "plugin" && invocation[1] === "enable" && invocation[2] === "rclone"));
 });
+
+test("RclonePluginManager clears plugin state and reinstalls after socket failure", async () => {
+  const invocations: string[][] = [];
+  let pluginListCallCount = 0;
+  const spawnImpl = ((_command: string, args: readonly string[]) => {
+    invocations.push([...args]);
+    const child = new FakeChildProcess();
+
+    queueMicrotask(() => {
+      if (args[0] === "plugin" && args[1] === "ls" && args[3] === "{{.Name}}") {
+        pluginListCallCount += 1;
+        child.stdout.write(pluginListCallCount === 1 ? "rclone:latest\n" : "");
+        child.emit("exit", 0, null);
+        return;
+      }
+      if (args[0] === "plugin" && args[1] === "ls" && args[3] === "{{.Name}}:{{.Enabled}}") {
+        child.stdout.write("rclone:latest:false\n");
+        child.emit("exit", 0, null);
+        return;
+      }
+      if (args[0] === "plugin" && args[1] === "enable") {
+        child.stderr.write("Error response from daemon: dial unix /run/docker/plugins/test/rclone.sock: connect: no such file or directory");
+        child.emit("exit", 1, null);
+        return;
+      }
+      child.emit("exit", 0, null);
+    });
+
+    return child as unknown as ChildProcessWithoutNullStreams;
+  }) as typeof import("node:child_process").spawn;
+
+  const manager = new RclonePluginManager({spawnImpl});
+  await manager.ensureInstalled();
+
+  assert.ok(invocations.some((invocation) => invocation[0] === "plugin" && invocation[1] === "disable" && invocation[2] === "-f" && invocation[3] === "rclone"));
+  assert.ok(invocations.some((invocation) => invocation[0] === "run" && invocation.includes("rm") && invocation.includes("/var/lib/docker-plugins/rclone/cache/docker-plugin.state")));
+  assert.ok(invocations.some((invocation) => invocation[0] === "plugin" && invocation[1] === "rm" && invocation[2] === "-f" && invocation[3] === "rclone"));
+  assert.ok(invocations.some((invocation) => invocation[0] === "plugin" && invocation[1] === "install"));
+});

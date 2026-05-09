@@ -1527,6 +1527,7 @@ test("orchestrator creates a hostfs grant for one-time host directory approval",
     } as unknown as HostfsBroker,
     bundleRegistry: {
       getBundleIdForTask: (taskId: string) => taskId === launchedTaskId ? "bundle-1" : null,
+      taskHasHostfsVolume: () => true,
     },
   });
 

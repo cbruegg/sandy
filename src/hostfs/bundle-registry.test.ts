@@ -31,6 +31,18 @@ test("BundleRegistry assigns and retrieves task IDs", () => {
   assert.equal(registry.getBundleIdForTask("task-1"), "bundle-1");
 });
 
+test("BundleRegistry tracks hostfs availability for tasks", () => {
+  const registry = new BundleRegistry();
+  registry.createBundle("bundle-1");
+  registry.assignTask("bundle-1", "task-1");
+
+  assert.equal(registry.taskHasHostfsVolume("task-1"), false);
+
+  registry.setHostfsVolumeAvailability("bundle-1", true);
+
+  assert.equal(registry.taskHasHostfsVolume("task-1"), true);
+});
+
 test("BundleRegistry revoke removes bundle", () => {
   const registry = new BundleRegistry();
   const creds = registry.createBundle("bundle-1");

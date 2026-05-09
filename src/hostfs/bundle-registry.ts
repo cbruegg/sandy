@@ -8,6 +8,7 @@ type BundleCredentials = {
 type ActiveBundleRecord = {
   credentials: BundleCredentials;
   taskId: string | null;
+  hasHostfsVolume: boolean;
 };
 
 export class BundleRegistry {
@@ -20,6 +21,7 @@ export class BundleRegistry {
     this.bundles.set(bundleId, {
       credentials,
       taskId: null,
+      hasHostfsVolume: false,
     });
     this.secrets.set(secret, bundleId);
     return credentials;
@@ -29,6 +31,13 @@ export class BundleRegistry {
     const record = this.bundles.get(bundleId);
     if (record) {
       record.taskId = taskId;
+    }
+  }
+
+  setHostfsVolumeAvailability(bundleId: string, hasHostfsVolume: boolean): void {
+    const record = this.bundles.get(bundleId);
+    if (record) {
+      record.hasHostfsVolume = hasHostfsVolume;
     }
   }
 
@@ -51,6 +60,15 @@ export class BundleRegistry {
       }
     }
     return null;
+  }
+
+  taskHasHostfsVolume(taskId: string): boolean {
+    for (const record of this.bundles.values()) {
+      if (record.taskId === taskId) {
+        return record.hasHostfsVolume;
+      }
+    }
+    return false;
   }
 
   revokeBundle(bundleId: string): void {

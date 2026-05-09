@@ -15,6 +15,7 @@ const DEFAULT_PLUGIN_IMAGE = "rclone/docker-volume-rclone:latest";
 const DEFAULT_PLUGIN_CONFIG_DIR = "/var/lib/docker-plugins/rclone/config";
 const DEFAULT_PLUGIN_CACHE_DIR = "/var/lib/docker-plugins/rclone/cache";
 const DEFAULT_HELPER_IMAGE = "alpine:3.21";
+const PLUGIN_STATE_FILE_NAME = "docker-plugin.state";
 
 export class RclonePluginManager {
   private readonly spawnImpl: typeof spawn;
@@ -30,6 +31,44 @@ export class RclonePluginManager {
 
     await this.ensurePluginStateDirectories(pluginConfigDir, pluginCacheDir);
 
+    try {
+      await this.ensureInstalledOnce(pluginName, pluginConfigDir, pluginCacheDir);
+    } catch (error) {
+      if (!this.isRecoverablePluginError(error)) {
+        throw error;
+      }
+
+      logger.warn("hostfs.rclone_plugin_recovering", {
+        pluginName,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await this.recoverPlugin(pluginName, pluginCacheDir);
+      await this.ensureInstalledOnce(pluginName, pluginConfigDir, pluginCacheDir);
+    }
+  }
+
+  async recover(): Promise<void> {
+    const pluginName = this.options.pluginName ?? DEFAULT_PLUGIN_NAME;
+    const pluginConfigDir = this.options.pluginConfigDir ?? DEFAULT_PLUGIN_CONFIG_DIR;
+    const pluginCacheDir = this.options.pluginCacheDir ?? DEFAULT_PLUGIN_CACHE_DIR;
+
+    await this.ensurePluginStateDirectories(pluginConfigDir, pluginCacheDir);
+    await this.recoverPlugin(pluginName, pluginCacheDir);
+    await this.ensureInstalledOnce(pluginName, pluginConfigDir, pluginCacheDir);
+  }
+
+  isRecoverablePluginError(error: unknown): boolean {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes("plugin.moby.localhost")
+      || message.includes("VolumeDriver.Create")
+      || message.includes("VolumeDriver.Get")
+      || message.includes("context deadline exceeded")
+      || message.includes("Client.Timeout exceeded")
+      || message.includes("rclone.sock")
+      || message.includes("error looking up volume plugin");
+  }
+
+  private async ensureInstalledOnce(pluginName: string, pluginConfigDir: string, pluginCacheDir: string): Promise<void> {
     const isInstalled = await this.isPluginInstalled(pluginName);
     if (isInstalled) {
       const isEnabled = await this.isPluginEnabled(pluginName);
@@ -41,6 +80,11 @@ export class RclonePluginManager {
       return;
     }
 
+    await this.installPlugin(pluginName, pluginConfigDir, pluginCacheDir);
+    logger.info("hostfs.rclone_plugin_installed", {pluginName});
+  }
+
+  private async installPlugin(pluginName: string, pluginConfigDir: string, pluginCacheDir: string): Promise<void> {
     logger.info("hostfs.rclone_installing_plugin", {
       pluginName,
       pluginImage: this.options.pluginImage ?? DEFAULT_PLUGIN_IMAGE,
@@ -68,8 +112,18 @@ export class RclonePluginManager {
         await this.runDockerPluginCommand(["enable", pluginName]);
       }
     });
+  }
 
-    logger.info("hostfs.rclone_plugin_installed", {pluginName});
+  private async recoverPlugin(pluginName: string, pluginCacheDir: string): Promise<void> {
+    logger.warn("hostfs.rclone_plugin_resetting_state", {
+      pluginName,
+      pluginCacheDir,
+      stateFile: `${pluginCacheDir}/${PLUGIN_STATE_FILE_NAME}`,
+    });
+
+    await this.runDockerPluginCommand(["disable", "-f", pluginName]).catch(() => {});
+    await this.clearPluginStateFile(pluginCacheDir);
+    await this.runDockerPluginCommand(["rm", "-f", pluginName]).catch(() => {});
   }
 
   private async ensurePluginStateDirectories(pluginConfigDir: string, pluginCacheDir: string): Promise<void> {
@@ -79,7 +133,7 @@ export class RclonePluginManager {
       helperImage: this.options.helperImage ?? DEFAULT_HELPER_IMAGE,
     });
 
-    await this.runDockerCommand([
+    await this.runHelperCommand([
       "run",
       "--rm",
       "-v",
@@ -91,6 +145,19 @@ export class RclonePluginManager {
       "-p",
       pluginConfigDir,
       pluginCacheDir,
+    ]);
+  }
+
+  private async clearPluginStateFile(pluginCacheDir: string): Promise<void> {
+    await this.runHelperCommand([
+      "run",
+      "--rm",
+      "-v",
+      `${pluginCacheDir}:${pluginCacheDir}`,
+      this.options.helperImage ?? DEFAULT_HELPER_IMAGE,
+      "rm",
+      "-f",
+      `${pluginCacheDir}/${PLUGIN_STATE_FILE_NAME}`,
     ]);
   }
 
@@ -131,6 +198,10 @@ export class RclonePluginManager {
 
   private matchesPluginName(candidate: string, pluginName: string): boolean {
     return candidate === pluginName || candidate.startsWith(`${pluginName}:`);
+  }
+
+  private runHelperCommand(args: string[]): Promise<void> {
+    return this.runDockerCommand(args);
   }
 
   private runDockerCommand(args: string[]): Promise<void> {

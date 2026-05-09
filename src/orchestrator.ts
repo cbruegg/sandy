@@ -51,7 +51,10 @@ type SandyOrchestratorDependencies = {
   taskRegistry: TaskRegistry;
   persistentApprovalStore?: PersistentApprovalStore;
   hostfsBroker?: HostfsBroker;
-  bundleRegistry?: {getBundleIdForTask(taskId: string): string | null};
+  bundleRegistry?: {
+    getBundleIdForTask(taskId: string): string | null;
+    taskHasHostfsVolume(taskId: string): boolean;
+  };
 };
 
 export class SandyOrchestrator {
@@ -753,6 +756,14 @@ export class SandyOrchestrator {
         requestId: request.requestId,
         outcome: "failed",
         message: "No bundle is assigned to this task.",
+      };
+    }
+
+    if (!bundleRegistry.taskHasHostfsVolume(activeTask.taskId)) {
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: messages.hostDirectoryAccessFailed(request.path, "This task bundle does not have a hostfs mount."),
       };
     }
 
