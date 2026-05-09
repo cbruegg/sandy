@@ -1,5 +1,6 @@
 import type { PrivilegeRequest } from "./privilege.js";
 import type { MainAgentTaskPolicy } from "./main-agent.js";
+import type {HostDirectoryAccessLevel} from "../hostfs/path-policy.ts";
 
 type McpToolGrant = {
   serverId: string;
@@ -24,7 +25,7 @@ type HttpTokenSessionGrant = {
 
 type HostDirectoryGrant = {
   path: string;
-  level: "read_only" | "read_write";
+  level: HostDirectoryAccessLevel;
 };
 
 type TaskStatus =

@@ -5,11 +5,12 @@ import {basename, dirname, join, resolve} from "node:path";
 import {pipeline} from "node:stream/promises";
 import {logger} from "../logger.js";
 import type {BundleNamespaceRegistry} from "./bundle-namespace-registry.js";
+import type {HostDirectoryAccessLevel} from "./path-policy.ts";
 
 type WebDAVGrant = {
   grantId: string;
   hostPath: string;
-  level: "read_only" | "read_write";
+  level: HostDirectoryAccessLevel;
 };
 
 export type WebDAVBundleNamespace = {

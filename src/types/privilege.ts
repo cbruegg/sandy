@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { PrivilegedWorkerToolPayload } from "../subagent/worker-tools.js";
+import type {HostDirectoryAccessLevel} from "../hostfs/path-policy.ts";
 
 const privilegeApprovalScopeSchema = z.enum(["once", "worker_session", "always"]);
 
@@ -13,7 +14,7 @@ type HostDirectoryAccessPrivilegeRequest = {
   kind: "host_directory_access";
   requestId: string;
   path: string;
-  level: "read_only" | "read_write";
+  level: HostDirectoryAccessLevel;
 };
 
 type McpToolCallPrivilegeRequest = {
