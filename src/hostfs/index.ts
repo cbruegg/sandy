@@ -6,7 +6,9 @@ import {RclonePluginManager} from "./rclone-plugin-manager.js";
 import {BundleNamespaceRegistry} from "./bundle-namespace-registry.js";
 
 type HostfsConfig = {
+  // Interface the host WebDAV server binds to.
   webdavHost: string;
+  // Hostname the Docker-managed rclone plugin uses to reach that WebDAV server.
   webdavDockerHost: string;
   volumePrefix?: string;
 };
