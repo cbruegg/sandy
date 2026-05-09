@@ -119,8 +119,6 @@ export const messages = {
     `Host "${host}" is not in the configured allowed_hosts for token ${tokenId}.`,
   hostDirectoryAccessDenied: (path: string, level: string): string =>
     `The user denied host directory access to ${path} (${level}).`,
-  hostDirectoryAccessAllowedOnce: (path: string, level: string): string =>
-    `Allowed host directory access to ${path} (${level}) once.`,
   hostDirectoryAccessAllowedForWorkerSession: (path: string, level: string): string =>
     `Allowed host directory access to ${path} (${level}) for this worker session.`,
   hostDirectoryAccessAllowedFromPersistentConfig: (path: string, level: string): string =>
@@ -264,12 +262,6 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
   }
 
   if (request.kind === "host_directory_access") {
-    if (request.confirmsAutoApprovalForTask) {
-      return [
-        `Previously auto-allowed for suitable tasks: host directory access to ${request.path} (${request.level})`,
-        "Apply that auto-approval to this task?",
-      ].join("\n");
-    }
     return [
       `host_directory_access: ${request.path}`,
       `Level: ${request.level}`,

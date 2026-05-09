@@ -20,6 +20,7 @@ import { PrivilegeBrokerImpl } from "./privilege/privilege-broker.js";
 import {DockerSandboxRunner, type DockerSandboxRunnerOptions} from "./sandbox/docker-sandbox-runner.js";
 import {TaskBundleLauncherImpl, type TaskBundleLauncherOptions} from "./sandbox/task-bundle-launcher.js";
 import { TaskBundlePoolImpl } from "./sandbox/task-bundle-pool.js";
+import { TaskBundleAssignmentRegistry } from "./sandbox/task-bundle-assignment-registry.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
 import { OpenAiTranscriptionProvider } from "./transcription/openai-transcription-provider.js";
 import { resolvePublishedUpdateSource } from "./build-metadata.js";
@@ -151,7 +152,6 @@ export async function startApp(): Promise<void> {
     ? "host.docker.internal"
     : "127.0.0.1";
   const hostfsServices = await initializeHostfs({
-    enabled: true,
     // Bind to all interfaces only on Docker Desktop (macOS/Windows), where the
     // Docker VM cannot reach the host via 127.0.0.1. On Linux the rclone plugin
     // runs in the host network namespace, so localhost is sufficient.
@@ -198,33 +198,29 @@ export async function startApp(): Promise<void> {
         ? async (request) => await proxyAuthService.resolveProxyRequest(request)
         : undefined,
     logLevel: config.logLevel,
-    createHostfsVolume: hostfsServices
-        ? async (bundleId) => {
-            const credentials = hostfsServices.bundleRegistry.createBundle(bundleId);
-            hostfsServices.broker.registerBundle(bundleId);
-            try {
-              return await hostfsServices.volumeManager.createVolume(bundleId, credentials.secret);
-            } catch (error) {
-              if (!hostfsServices.rclonePluginManager.isRecoveryEnabled() || !hostfsServices.rclonePluginManager.isRecoverablePluginError(error)) {
-                throw error;
-              }
+    createHostfsVolume: async (bundleId) => {
+      const credentials = hostfsServices.bundleRegistry.createBundle(bundleId);
+      hostfsServices.broker.registerBundle(bundleId);
+      try {
+        return await hostfsServices.volumeManager.createVolume(bundleId, credentials.secret);
+      } catch (error) {
+        if (!hostfsServices.rclonePluginManager.isRecoveryEnabled() || !hostfsServices.rclonePluginManager.isRecoverablePluginError(error)) {
+          throw error;
+        }
 
-              logger.warn("hostfs.volume_creation_retrying_after_plugin_recovery", {
-                bundleId,
-                error: error instanceof Error ? error.message : String(error),
-              });
-              await hostfsServices.rclonePluginManager.recover();
-              return await hostfsServices.volumeManager.createVolume(bundleId, credentials.secret);
-            }
-          }
-        : undefined,
-    removeHostfsVolume: hostfsServices
-        ? async (bundleId) => {
-            hostfsServices.broker.revokeBundle(bundleId);
-            hostfsServices.bundleRegistry.revokeBundle(bundleId);
-            await hostfsServices.volumeManager.removeVolume(bundleId);
-          }
-        : undefined,
+        logger.warn("hostfs.volume_creation_retrying_after_plugin_recovery", {
+          bundleId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        await hostfsServices.rclonePluginManager.recover();
+        return await hostfsServices.volumeManager.createVolume(bundleId, credentials.secret);
+      }
+    },
+    removeHostfsVolume: async (bundleId) => {
+      hostfsServices.broker.revokeBundle(bundleId);
+      hostfsServices.bundleRegistry.revokeBundle(bundleId);
+      await hostfsServices.volumeManager.removeVolume(bundleId);
+    },
   };
   const sandboxRunnerOptions: DockerSandboxRunnerOptions = {
     workerImage: config.workerImage,
@@ -242,20 +238,20 @@ export async function startApp(): Promise<void> {
         : undefined,
   };
   const taskBundleLauncher = new TaskBundleLauncherImpl(taskBundleLauncherOptions);
+  const taskBundleAssignmentRegistry = new TaskBundleAssignmentRegistry();
   const taskBundlePool = new TaskBundlePoolImpl(
     taskBundleLauncher,
-    hostfsServices
-        ? (bundle) => {
-            hostfsServices.bundleRegistry.assignTask(bundle.bundleId, bundle.taskId);
-            hostfsServices.bundleRegistry.setHostfsVolumeAvailability(bundle.bundleId, bundle.hostfsVolumeName !== null);
-          }
-        : undefined,
-    hostfsServices
-        ? (bundle) => {
-            hostfsServices.bundleRegistry.assignTask(bundle.bundleId, null);
-            hostfsServices.bundleRegistry.setHostfsVolumeAvailability(bundle.bundleId, false);
-          }
-        : undefined,
+    (bundle) => {
+      taskBundleAssignmentRegistry.activate(
+        bundle.taskId,
+        bundle.bundleId,
+        bundle.hostfsVolumeName !== null,
+      );
+    },
+    (bundle) => {
+      taskBundleAssignmentRegistry.release(bundle.taskId);
+      hostfsServices.broker.releaseTask(bundle.taskId);
+    },
   );
   const sandboxRunner = new DockerSandboxRunner(sandboxRunnerOptions, taskBundlePool);
 
@@ -277,8 +273,8 @@ export async function startApp(): Promise<void> {
     privilegeBroker: new PrivilegeBrokerImpl(),
     taskRegistry,
     persistentApprovalStore,
-    hostfsBroker: hostfsServices?.broker,
-    bundleRegistry: hostfsServices?.bundleRegistry,
+    hostfsBroker: hostfsServices.broker,
+    taskBundleAssignmentRegistry,
   });
 
   const sidecarManager = new McpSidecarManager({

@@ -1,5 +1,4 @@
 import {randomUUID} from "node:crypto";
-import type {BundleRegistry} from "./bundle-registry.js";
 import type {WebDAVBundleNamespace} from "./webdav-server.js";
 import type {HostDirectoryAccessLevel} from "./path-policy.js";
 import {canonicalizeHostPath, isAccessLevelSatisfiedOrBetter} from "./path-policy.js";
@@ -13,7 +12,6 @@ type HostDirectoryGrant = {
 };
 
 type HostfsBrokerOptions = {
-  bundleRegistry: BundleRegistry;
   namespaceRegistry: BundleNamespaceRegistry;
   webdavBaseUrl: string;
 };
@@ -33,13 +31,11 @@ export class HostfsBroker {
   revokeBundle(bundleId: string): void {
     this.options.namespaceRegistry.revoke(bundleId);
     this.bundleGrants.delete(bundleId);
-    // Clean up task grants for tasks using this bundle
-    for (const [taskId, taskBundleId] of this.getTaskBundleMappings()) {
-      if (taskBundleId === bundleId) {
-        this.taskGrants.delete(taskId);
-      }
-    }
     logger.info("hostfs.bundle_revoked", {bundleId});
+  }
+
+  releaseTask(taskId: string): void {
+    this.taskGrants.delete(taskId);
   }
 
   async requestDirectoryAccess(
@@ -151,19 +147,17 @@ export class HostfsBroker {
     }
     return map;
   }
+}
 
-  private getTaskBundleMappings(): [string, string][] {
-    const result: [string, string][] = [];
-    for (const taskId of this.taskGrants.keys()) {
-      for (const bundleId of this.bundleGrants.keys()) {
-        // We need to track this differently. For now, let the caller handle it.
-        // The bundle registry has taskId -> bundleId mapping.
-        const registryTaskId = this.options.bundleRegistry.getTaskId(bundleId);
-        if (registryTaskId === taskId) {
-          result.push([taskId, bundleId]);
-        }
-      }
-    }
-    return result;
-  }
+export function createNoopHostfsBroker(): HostfsBroker {
+  return {
+    registerBundle: () => {},
+    revokeBundle: () => {},
+    releaseTask: () => {},
+    requestDirectoryAccess: () => Promise.resolve({ ok: false, error: "Host directory access is not enabled." }),
+    getBundleNamespace: () => null,
+    getGrantForTask: () => null,
+    listGrantsForTask: () => [],
+    getWebDAVUrlForBundle: () => "",
+  } as unknown as HostfsBroker;
 }

@@ -6,7 +6,10 @@ import type { MainAgentController } from "./agent/main-agent-controller.js";
 import { messages } from "./messages.js";
 import type { PrivilegeBroker } from "./privilege/privilege-broker.js";
 import type { PersistentApprovalStore } from "./privilege/persistent-approval-store.js";
+import { createNoopPersistentApprovalStore } from "./privilege/persistent-approval-store.js";
+import { createNoopTaskBundleAssignmentRegistry } from "./sandbox/task-bundle-assignment-registry.js";
 import type { HostfsBroker } from "./hostfs/hostfs-broker.js";
+import { createNoopHostfsBroker } from "./hostfs/hostfs-broker.js";
 import type { HostDirectoryAccessLevel } from "./hostfs/path-policy.js";
 import { HttpTokenAuthorizer } from "./http/token-authorizer.js";
 import type { SandboxHandle, SandboxRunner, LaunchTaskRequest } from "./sandbox/sandbox-runner.js";
@@ -210,6 +213,9 @@ test("orchestrator accepts active-task output without storing host-side history"
   taskLanguage: "English",
   });
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent,
     sandboxRunner: runner,
@@ -260,6 +266,9 @@ test("orchestrator stages attached files into the task share before launching th
   taskLanguage: "English",
   });
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent,
     sandboxRunner: runner,
@@ -296,6 +305,9 @@ test("orchestrator stages attached files into the active task share and notifies
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -344,6 +356,9 @@ test("orchestrator applies supported privilege requests deterministically and ou
   const store = new InMemorySessionStore();
   const privilegeBroker = new FakePrivilegeBroker();
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -413,6 +428,9 @@ test("orchestrator keeps completed-task summary pending until the user sends ano
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -471,6 +489,9 @@ test("orchestrator sends worker-requested shared files back through the channel"
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -521,6 +542,9 @@ test("orchestrator closes the sandbox handle on normal task completion", async (
   taskLanguage: "English",
   });
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent,
     sandboxRunner: runner,
@@ -551,6 +575,9 @@ test("orchestrator asks the worker to finalize when the user marks the task as f
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -613,6 +640,9 @@ test("orchestrator uses the task name in task_done completion messages", async (
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -670,6 +700,9 @@ test("orchestrator releases completed-task output only when the user continues n
     },
   ]);
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent,
     sandboxRunner: runner,
@@ -728,6 +761,9 @@ test("orchestrator discards completed-task output when the user sends a danger r
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -799,6 +835,9 @@ test("orchestrator keeps final_result output pending until the user continues no
     },
   ]);
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent,
     sandboxRunner: runner,
@@ -866,6 +905,9 @@ test("orchestrator marks worker disconnects as task failure and clears the task"
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -905,6 +947,9 @@ test("orchestrator fails the active task if channel file delivery fails", async 
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -951,6 +996,9 @@ test("orchestrator reports top-level chat event failures back to the user", asyn
   const channel = new RecordingChannel();
   const store = new InMemorySessionStore();
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent: {
       async decide(): Promise<MainAgentDecision> {
@@ -985,6 +1033,9 @@ test("orchestrator prompts before deleting a non-empty shared workspace", async 
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -1031,6 +1082,9 @@ test("orchestrator deletes or preserves a finished task share based on user conf
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent: new SequenceMainAgent([
       {
@@ -1140,6 +1194,9 @@ test("orchestrator blocks new idle input while shared workspace deletion is pend
     },
   ]);
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent,
     sandboxRunner: runner,
@@ -1198,6 +1255,8 @@ test("orchestrator authorizes mcp resource reads from persistent config", async 
     allowHostDirectory: async () => {},
   };
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
     channel,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -1254,6 +1313,8 @@ test("orchestrator does not apply persistent mcp approvals when task policy omit
     allowHostDirectory: async () => {},
   };
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
     channel,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -1323,6 +1384,8 @@ test("orchestrator confirms persisted mcp tool approval suitability and reuses i
     allowHostDirectory: async () => {},
   };
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
     channel,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -1411,6 +1474,8 @@ test("orchestrator confirms persisted http token suitability and enables later p
     allowHostDirectory: async () => {},
   };
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
     channel,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -1485,7 +1550,7 @@ test("orchestrator confirms persisted http token suitability and enables later p
   assert.equal(proxyResult.scope, "always");
 });
 
-test("orchestrator creates a hostfs grant for one-time host directory approval", async () => {
+test("orchestrator creates a hostfs grant for worker-session host directory approval", async () => {
   const channel = new RecordingChannel();
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
@@ -1493,6 +1558,7 @@ test("orchestrator creates a hostfs grant for one-time host directory approval",
   const hostfsCalls: Array<{ bundleId: string; taskId: string; path: string; level: string }> = [];
   let launchedTaskId: string | null = null;
   const orchestrator = new SandyOrchestrator({
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -1525,9 +1591,10 @@ test("orchestrator creates a hostfs grant for one-time host directory approval",
         };
       },
     } as unknown as HostfsBroker,
-    bundleRegistry: {
-      getBundleIdForTask: (taskId: string) => taskId === launchedTaskId ? "bundle-1" : null,
-      taskHasHostfsVolume: () => true,
+    taskBundleAssignmentRegistry: {
+      get: (taskId: string) => taskId === launchedTaskId
+        ? {bundleId: "bundle-1", hasHostfsVolume: true}
+        : null,
     },
   });
 
@@ -1563,7 +1630,7 @@ test("orchestrator creates a hostfs grant for one-time host directory approval",
     chatId: "chat-hostfs-once",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
-    decision: "approve_once",
+    decision: "approve_worker_session",
     requestId: request.requestId,
   });
 
@@ -1575,7 +1642,7 @@ test("orchestrator creates a hostfs grant for one-time host directory approval",
   }]);
   assert.deepEqual(await toolCallPromise, {
     isError: false,
-    message: messages.hostDirectoryAccessAllowedOnce("/tmp", "read_only"),
+    message: messages.hostDirectoryAccessAllowedForWorkerSession("/tmp", "read_only"),
   });
 });
 
@@ -1584,6 +1651,9 @@ test("orchestrator sends mcp resource read privilege request to user when not pr
   const runner = new FakeSandboxRunner();
   const store = new InMemorySessionStore();
   const orchestrator = new SandyOrchestrator({
+    hostfsBroker: createNoopHostfsBroker(),
+    taskBundleAssignmentRegistry: createNoopTaskBundleAssignmentRegistry(),
+    persistentApprovalStore: createNoopPersistentApprovalStore(),
     channel,
     mainAgent: new StubMainAgent({
       action: "launch_task",

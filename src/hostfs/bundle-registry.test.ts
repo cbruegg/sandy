@@ -22,25 +22,12 @@ test("BundleRegistry looks up bundle by secret", () => {
   assert.equal(registry.getBundleIdBySecret("wrong-secret"), null);
 });
 
-test("BundleRegistry assigns and retrieves task IDs", () => {
+test("BundleRegistry retrieves credentials by bundleId", () => {
   const registry = new BundleRegistry();
-  registry.createBundle("bundle-1");
-  registry.assignTask("bundle-1", "task-1");
+  const creds = registry.createBundle("bundle-1");
 
-  assert.equal(registry.getTaskId("bundle-1"), "task-1");
-  assert.equal(registry.getBundleIdForTask("task-1"), "bundle-1");
-});
-
-test("BundleRegistry tracks hostfs availability for tasks", () => {
-  const registry = new BundleRegistry();
-  registry.createBundle("bundle-1");
-  registry.assignTask("bundle-1", "task-1");
-
-  assert.equal(registry.taskHasHostfsVolume("task-1"), false);
-
-  registry.setHostfsVolumeAvailability("bundle-1", true);
-
-  assert.equal(registry.taskHasHostfsVolume("task-1"), true);
+  assert.deepEqual(registry.getCredentials("bundle-1"), creds);
+  assert.equal(registry.getCredentials("wrong-bundle"), null);
 });
 
 test("BundleRegistry revoke removes bundle", () => {

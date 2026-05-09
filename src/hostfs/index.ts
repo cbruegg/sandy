@@ -6,7 +6,6 @@ import {RclonePluginManager} from "./rclone-plugin-manager.js";
 import {BundleNamespaceRegistry} from "./bundle-namespace-registry.js";
 
 type HostfsConfig = {
-  enabled: boolean;
   webdavHost: string;
   webdavDockerHost: string;
   volumePrefix?: string;
@@ -21,10 +20,7 @@ type HostfsServices = {
   rclonePluginManager: RclonePluginManager;
 };
 
-export async function initializeHostfs(config: HostfsConfig): Promise<HostfsServices | null> {
-  if (!config.enabled) {
-    return null;
-  }
+export async function initializeHostfs(config: HostfsConfig): Promise<HostfsServices> {
 
   const bundleRegistry = new BundleRegistry();
   const namespaceRegistry = new BundleNamespaceRegistry();
@@ -42,7 +38,6 @@ export async function initializeHostfs(config: HostfsConfig): Promise<HostfsServ
   const webdavBaseUrl = buildWebDAVBaseUrl(config.webdavDockerHost, webdavPort);
 
   const broker = new HostfsBroker({
-    bundleRegistry,
     namespaceRegistry,
     webdavBaseUrl,
   });

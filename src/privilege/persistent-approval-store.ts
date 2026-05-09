@@ -14,6 +14,19 @@ export interface PersistentApprovalStore {
   allowHostDirectory(path: string, level: "read_only" | "read_write"): Promise<void>;
 }
 
+export function createNoopPersistentApprovalStore(): PersistentApprovalStore {
+  return {
+    isAlwaysAllowed: () => false,
+    allowTool: async () => {},
+    isResourceReadAlwaysAllowed: () => false,
+    allowResourceRead: async () => {},
+    isHttpTokenAlwaysAllowed: () => false,
+    allowHttpToken: async () => {},
+    isHostDirectoryAlwaysAllowed: () => false,
+    allowHostDirectory: async () => {},
+  };
+}
+
 // Type for the raw approvals structure we modify
 type RawApprovalsConfig = {
   approvals?: {

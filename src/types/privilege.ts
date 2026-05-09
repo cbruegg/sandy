@@ -14,7 +14,6 @@ type HostDirectoryAccessPrivilegeRequest = {
   requestId: string;
   path: string;
   level: "read_only" | "read_write";
-  confirmsAutoApprovalForTask?: boolean;
 };
 
 type McpToolCallPrivilegeRequest = {

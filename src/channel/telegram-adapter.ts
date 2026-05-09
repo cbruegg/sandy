@@ -315,7 +315,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
 }
 
 function buildPrivilegeKeyboard(request: PrivilegeRequest): Array<Array<{ text: string; callback_data: string }>> {
-  if ((request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use" || request.kind === "host_directory_access")
+  if ((request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use")
     && request.confirmsAutoApprovalForTask) {
     return [
       [

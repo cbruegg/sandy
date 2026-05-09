@@ -7,8 +7,6 @@ type BundleCredentials = {
 
 type ActiveBundleRecord = {
   credentials: BundleCredentials;
-  taskId: string | null;
-  hasHostfsVolume: boolean;
 };
 
 export class BundleRegistry {
@@ -18,27 +16,9 @@ export class BundleRegistry {
   createBundle(bundleId: string): BundleCredentials {
     const secret = randomBytes(32).toString("hex");
     const credentials: BundleCredentials = {bundleId, secret};
-    this.bundles.set(bundleId, {
-      credentials,
-      taskId: null,
-      hasHostfsVolume: false,
-    });
+    this.bundles.set(bundleId, {credentials});
     this.secrets.set(secret, bundleId);
     return credentials;
-  }
-
-  assignTask(bundleId: string, taskId: string | null): void {
-    const record = this.bundles.get(bundleId);
-    if (record) {
-      record.taskId = taskId;
-    }
-  }
-
-  setHostfsVolumeAvailability(bundleId: string, hasHostfsVolume: boolean): void {
-    const record = this.bundles.get(bundleId);
-    if (record) {
-      record.hasHostfsVolume = hasHostfsVolume;
-    }
   }
 
   getBundleIdBySecret(secret: string): string | null {
@@ -47,28 +27,6 @@ export class BundleRegistry {
 
   getCredentials(bundleId: string): BundleCredentials | null {
     return this.bundles.get(bundleId)?.credentials ?? null;
-  }
-
-  getTaskId(bundleId: string): string | null {
-    return this.bundles.get(bundleId)?.taskId ?? null;
-  }
-
-  getBundleIdForTask(taskId: string): string | null {
-    for (const [bundleId, record] of this.bundles) {
-      if (record.taskId === taskId) {
-        return bundleId;
-      }
-    }
-    return null;
-  }
-
-  taskHasHostfsVolume(taskId: string): boolean {
-    for (const record of this.bundles.values()) {
-      if (record.taskId === taskId) {
-        return record.hasHostfsVolume;
-      }
-    }
-    return false;
   }
 
   revokeBundle(bundleId: string): void {

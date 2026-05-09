@@ -101,6 +101,9 @@ export class TaskBundlePoolImpl implements TaskBundlePool {
 
       const active = Array.from(this.activeBundles.values());
       this.activeBundles.clear();
+      for (const bundle of active) {
+        this.onBundleRetired?.(bundle);
+      }
       await Promise.all(active.map((b) => this.launcher.terminateBundle(b)));
     })();
 

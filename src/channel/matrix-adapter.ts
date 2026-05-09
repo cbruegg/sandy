@@ -367,7 +367,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     await this.sendPoll(
       chatId,
       "Privilege request",
-      (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use" || request.kind === "host_directory_access")
+      (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use")
         && request.confirmsAutoApprovalForTask
         ? [
             {
