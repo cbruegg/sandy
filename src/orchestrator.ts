@@ -805,12 +805,16 @@ export class SandyOrchestrator {
           grantHostDirectoryAutoApprovalForTask(activeTask, request.path, request.level);
           return this.grantHostDirectoryAccess(activeTask, request);
         }
-        return {
-          requestId: request.requestId,
-          outcome: "approved",
-          message: messages.hostDirectoryAccessAllowedOnce(request.path, request.level),
-          scope: "once",
-        };
+        {
+          const result = await this.grantHostDirectoryAccess(activeTask, request);
+          return {
+            ...result,
+            message: result.outcome === "approved"
+              ? messages.hostDirectoryAccessAllowedOnce(request.path, request.level)
+              : result.message,
+            scope: result.outcome === "approved" ? "once" : result.scope,
+          };
+        }
       case "approve_worker_session":
         if (request.confirmsAutoApprovalForTask) {
           grantHostDirectoryAutoApprovalForTask(activeTask, request.path, request.level);

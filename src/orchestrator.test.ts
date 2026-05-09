@@ -6,6 +6,8 @@ import type { MainAgentController } from "./agent/main-agent-controller.js";
 import { messages } from "./messages.js";
 import type { PrivilegeBroker } from "./privilege/privilege-broker.js";
 import type { PersistentApprovalStore } from "./privilege/persistent-approval-store.js";
+import type { HostfsBroker } from "./hostfs/hostfs-broker.js";
+import type { HostDirectoryAccessLevel } from "./hostfs/path-policy.js";
 import { HttpTokenAuthorizer } from "./http/token-authorizer.js";
 import type { SandboxHandle, SandboxRunner, LaunchTaskRequest } from "./sandbox/sandbox-runner.js";
 import type { TaskInputPayload } from "./types.js";
@@ -1481,6 +1483,99 @@ test("orchestrator confirms persisted http token suitability and enables later p
 
   assert.equal(proxyResult.outcome, "approved");
   assert.equal(proxyResult.scope, "always");
+});
+
+test("orchestrator creates a hostfs grant for one-time host directory approval", async () => {
+  const channel = new RecordingChannel();
+  const runner = new FakeSandboxRunner();
+  const store = new InMemorySessionStore();
+  const taskRegistry = new TaskRegistry();
+  const hostfsCalls: Array<{ bundleId: string; taskId: string; path: string; level: string }> = [];
+  let launchedTaskId: string | null = null;
+  const orchestrator = new SandyOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Inspect a host directory.",
+      taskName: "hostfs-check",
+      taskLanguage: "English",
+    }),
+    sandboxRunner: runner,
+    sessionStore: store,
+    privilegeBroker: new FakePrivilegeBroker(),
+    taskRegistry,
+    hostfsBroker: {
+      registerBundle: () => {},
+      revokeBundle: () => {},
+      getBundleNamespace: () => null,
+      getGrantForTask: () => null,
+      listGrantsForTask: () => [],
+      getWebDAVUrlForBundle: () => "http://localhost:9876/bundles/bundle-1",
+      requestDirectoryAccess: async (
+        bundleId: string,
+        taskId: string,
+        path: string,
+        level: HostDirectoryAccessLevel,
+      ) => {
+        hostfsCalls.push({ bundleId, taskId, path, level });
+        return {
+          ok: true,
+          grantId: "grant-1",
+          grantPath: "/workspace/host/grants/grant-1",
+        };
+      },
+    } as unknown as HostfsBroker,
+    bundleRegistry: {
+      getBundleIdForTask: (taskId: string) => taskId === launchedTaskId ? "bundle-1" : null,
+    },
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-hostfs-once",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Inspect this host directory",
+    rawText: "Inspect this host directory",
+    attachments: [],
+  });
+
+  const taskId = expectDefined(runner.launches[0], "Expected launch.").taskId;
+  launchedTaskId = taskId;
+
+  const toolCallPromise = orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "request_host_directory_access",
+    arguments: {
+      path: "/tmp",
+      level: "read_only",
+    },
+  });
+
+  await new Promise<void>((resolve) => setImmediate(() => resolve()));
+
+  const request = expectDefined(channel.privilegeRequests[0], "Expected privilege request.").request;
+  assert.equal(request.kind, "host_directory_access");
+
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-hostfs-once",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    decision: "approve_once",
+    requestId: request.requestId,
+  });
+
+  assert.deepEqual(hostfsCalls, [{
+    bundleId: "bundle-1",
+    taskId,
+    path: "/tmp",
+    level: "read_only",
+  }]);
+  assert.deepEqual(await toolCallPromise, {
+    isError: false,
+    message: messages.hostDirectoryAccessAllowedOnce("/tmp", "read_only"),
+  });
 });
 
 test("orchestrator sends mcp resource read privilege request to user when not pre-approved", async () => {

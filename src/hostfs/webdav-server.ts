@@ -60,18 +60,34 @@ export class WebDAVServer {
   }
 
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const requestPath = decodeURIComponent(req.url ?? "/");
     const authHeader = req.headers.authorization ?? "";
     const bundleId = this.authenticateRequest(authHeader);
 
     if (!bundleId) {
+      logger.warn("hostfs.webdav_auth_failed", {
+        method: req.method,
+        url: requestPath,
+      });
       res.statusCode = 401;
       res.setHeader("WWW-Authenticate", 'Basic realm="Sandy Hostfs"');
       res.end("Unauthorized");
       return;
     }
 
+    logger.debug("hostfs.webdav_request_received", {
+      method: req.method,
+      url: requestPath,
+      bundleId,
+    });
+
     const namespace = this.options.getBundleNamespace(bundleId);
     if (!namespace) {
+      logger.warn("hostfs.webdav_namespace_missing", {
+        method: req.method,
+        url: requestPath,
+        bundleId,
+      });
       res.statusCode = 404;
       res.end("Bundle namespace not found");
       return;
@@ -109,12 +125,12 @@ export class WebDAVServer {
           res.end("Method not allowed");
       }
     } catch (error) {
-      logger.error("hostfs.webdav_request_failed", {
-        method: req.method,
-        url: req.url,
-        bundleId,
-        error: error instanceof Error ? error.message : String(error),
-      });
+        logger.error("hostfs.webdav_request_failed", {
+          method: req.method,
+          url: requestPath,
+          bundleId,
+          error: error instanceof Error ? error.message : String(error),
+        });
       res.statusCode = 500;
       res.end("Internal server error");
     }
