@@ -35,6 +35,9 @@ export class HostfsBroker {
    * Reuses an existing grant for the same canonical path when the level is
    * sufficient. Returns the grant path that the worker will see as
    * /workspace/host/grants/<grantId>.
+   *
+   * Returns `{ok: false}` when the requested path does not exist, is not a
+   * directory, is relative, or when the bundle is not registered.
    */
   async requestDirectoryAccess(
     bundleId: string,
