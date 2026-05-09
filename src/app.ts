@@ -250,7 +250,6 @@ export async function startApp(): Promise<void> {
     },
     (bundle) => {
       taskBundleAssignmentRegistry.release(bundle.taskId);
-      hostfsServices.broker.releaseTask(bundle.taskId);
     },
   );
   const sandboxRunner = new DockerSandboxRunner(sandboxRunnerOptions, taskBundlePool);

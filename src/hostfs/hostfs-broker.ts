@@ -17,7 +17,6 @@ type HostfsBrokerOptions = {
 };
 
 export class HostfsBroker {
-  private readonly taskGrants = new Map<string, Map<string, HostDirectoryGrant>>(); // taskId -> (canonicalPath -> grant)
   private readonly bundleGrants = new Map<string, Map<string, HostDirectoryGrant>>(); // bundleId -> (canonicalPath -> grant)
 
   constructor(private readonly options: HostfsBrokerOptions) {}
@@ -34,10 +33,6 @@ export class HostfsBroker {
     logger.info("hostfs.bundle_revoked", {bundleId});
   }
 
-  releaseTask(taskId: string): void {
-    this.taskGrants.delete(taskId);
-  }
-
   async requestDirectoryAccess(
     bundleId: string,
     taskId: string,
@@ -51,26 +46,10 @@ export class HostfsBroker {
 
     const canonicalPath = canonicalResult.canonicalPath;
 
-    // Check if this task already has a grant for this path at sufficient level
-    const taskGrantMap = this.taskGrants.get(taskId);
-    if (taskGrantMap) {
-      const existing = taskGrantMap.get(canonicalPath);
-      if (existing && isAccessLevelSatisfiedOrBetter(level, existing.level)) {
-        return {
-          ok: true,
-          grantPath: `/workspace/host/grants/${existing.grantId}`,
-          grantId: existing.grantId,
-        };
-      }
-    }
-
-    // Check if this bundle already has a grant for this path at sufficient level
     const bundleGrantMap = this.bundleGrants.get(bundleId);
     if (bundleGrantMap) {
       const existing = bundleGrantMap.get(canonicalPath);
       if (existing && isAccessLevelSatisfiedOrBetter(level, existing.level)) {
-        // Reuse the existing grant for this task too
-        this.ensureTaskGrantMap(taskId).set(canonicalPath, existing);
         return {
           ok: true,
           grantPath: `/workspace/host/grants/${existing.grantId}`,
@@ -79,7 +58,6 @@ export class HostfsBroker {
       }
     }
 
-    // Create a new grant
     const grantId = randomUUID();
     const grant: HostDirectoryGrant = {
       grantId,
@@ -87,7 +65,6 @@ export class HostfsBroker {
       level,
     };
 
-    this.ensureTaskGrantMap(taskId).set(canonicalPath, grant);
     this.ensureBundleGrantMap(bundleId).set(canonicalPath, grant);
 
     const namespace = this.options.namespaceRegistry.get(bundleId);
@@ -114,29 +91,8 @@ export class HostfsBroker {
     return this.options.namespaceRegistry.get(bundleId);
   }
 
-  getGrantForTask(taskId: string, canonicalPath: string): HostDirectoryGrant | null {
-    return this.taskGrants.get(taskId)?.get(canonicalPath) ?? null;
-  }
-
-  listGrantsForTask(taskId: string): HostDirectoryGrant[] {
-    const map = this.taskGrants.get(taskId);
-    if (!map) {
-      return [];
-    }
-    return Array.from(map.values());
-  }
-
   getWebDAVUrlForBundle(bundleId: string): string {
     return `${this.options.webdavBaseUrl}/bundles/${bundleId}`;
-  }
-
-  private ensureTaskGrantMap(taskId: string): Map<string, HostDirectoryGrant> {
-    let map = this.taskGrants.get(taskId);
-    if (!map) {
-      map = new Map();
-      this.taskGrants.set(taskId, map);
-    }
-    return map;
   }
 
   private ensureBundleGrantMap(bundleId: string): Map<string, HostDirectoryGrant> {
@@ -153,11 +109,8 @@ export function createNoopHostfsBroker(): HostfsBroker {
   return {
     registerBundle: () => {},
     revokeBundle: () => {},
-    releaseTask: () => {},
     requestDirectoryAccess: () => Promise.resolve({ ok: false, error: "Host directory access is not enabled." }),
     getBundleNamespace: () => null,
-    getGrantForTask: () => null,
-    listGrantsForTask: () => [],
     getWebDAVUrlForBundle: () => "",
   } as unknown as HostfsBroker;
 }
