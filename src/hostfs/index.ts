@@ -11,9 +11,10 @@ type HostfsConfig = {
   // Hostname the Docker-managed rclone plugin uses to reach that WebDAV server.
   webdavDockerHost: string;
   volumePrefix?: string;
+  rclonePluginManager?: RclonePluginManager;
 };
 
-type HostfsServices = {
+export type HostfsServices = {
   webdavServer: WebDAVServer;
   webdavBaseUrl: string;
   bundleRegistry: BundleRegistry;
@@ -49,9 +50,14 @@ export async function initializeHostfs(config: HostfsConfig): Promise<HostfsServ
     volumePrefix: config.volumePrefix,
   });
 
-  const rclonePluginManager = new RclonePluginManager();
+  const rclonePluginManager = config.rclonePluginManager ?? new RclonePluginManager();
 
-  await rclonePluginManager.ensureInstalled();
+  try {
+    await rclonePluginManager.ensureInstalled();
+  } catch (error) {
+    await webdavServer.stop().catch(() => {});
+    throw error;
+  }
 
   return {
     webdavServer,

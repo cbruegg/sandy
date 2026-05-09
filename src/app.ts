@@ -28,7 +28,8 @@ import { createRetryingChannelAdapter } from "./channel/retrying-channel-adapter
 import { SelfUpdateCoordinator } from "./update/self-update.js";
 import { WorkerImageManager } from "./worker-image-manager.js";
 import { validateMatrixAuthStateForStartup, resolveMatrixAccessToken } from "./matrix/startup-validator.js";
-import {initializeHostfs} from "./hostfs/index.js";
+import {createNoopHostfsBroker} from "./hostfs/hostfs-broker.js";
+import {initializeHostfs, type HostfsServices} from "./hostfs/index.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -151,15 +152,22 @@ export async function startApp(): Promise<void> {
   const webdavDockerHost = isDockerDesktop
     ? "host.docker.internal"
     : "127.0.0.1";
-  const hostfsServices = await initializeHostfs({
-    // Bind to all interfaces only on Docker Desktop (macOS/Windows), where the
-    // Docker VM cannot reach the host via 127.0.0.1. On Linux the rclone plugin
-    // runs in the host network namespace, so localhost is sufficient.
-    webdavHost: isDockerDesktop ? "0.0.0.0" : "127.0.0.1",
-    // The URL the rclone volume plugin uses; on macOS/Windows it must use
-    // host.docker.internal because the plugin runs inside the Docker Desktop VM.
-    webdavDockerHost,
-  });
+  let hostfsServices: HostfsServices | null = null;
+  try {
+    hostfsServices = await initializeHostfs({
+      // Bind to all interfaces only on Docker Desktop (macOS/Windows), where the
+      // Docker VM cannot reach the host via 127.0.0.1. On Linux the rclone plugin
+      // runs in the host network namespace, so localhost is sufficient.
+      webdavHost: isDockerDesktop ? "0.0.0.0" : "127.0.0.1",
+      // The URL the rclone volume plugin uses; on macOS/Windows it must use
+      // host.docker.internal because the plugin runs inside the Docker Desktop VM.
+      webdavDockerHost,
+    });
+  } catch (error) {
+    logger.warn("hostfs.startup_disabled", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
   const httpTokenAuthorizer = new HttpTokenAuthorizer(
     taskRegistry,
     sessionStore,
@@ -181,13 +189,14 @@ export async function startApp(): Promise<void> {
     workerAccess,
   );
 
-  const createHostfsVolume = async (bundleId: string): Promise<string | null> => {
-    const credentials = hostfsServices.bundleRegistry.createBundle(bundleId);
-    hostfsServices.broker.registerBundle(bundleId);
+  const createHostfsVolume = hostfsServices ? async (bundleId: string): Promise<string | null> => {
+    const services = hostfsServices;
+    const credentials = services.bundleRegistry.createBundle(bundleId);
+    services.broker.registerBundle(bundleId);
     try {
-      return await hostfsServices.volumeManager.createVolume(bundleId, credentials.secret);
+      return await services.volumeManager.createVolume(bundleId, credentials.secret);
     } catch (error) {
-      if (!hostfsServices.rclonePluginManager.isRecoveryEnabled() || !hostfsServices.rclonePluginManager.isRecoverablePluginError(error)) {
+      if (!services.rclonePluginManager.isRecoveryEnabled() || !services.rclonePluginManager.isRecoverablePluginError(error)) {
         throw error;
       }
 
@@ -195,16 +204,17 @@ export async function startApp(): Promise<void> {
         bundleId,
         error: error instanceof Error ? error.message : String(error),
       });
-      await hostfsServices.rclonePluginManager.recover();
-      return await hostfsServices.volumeManager.createVolume(bundleId, credentials.secret);
+      await services.rclonePluginManager.recover();
+      return await services.volumeManager.createVolume(bundleId, credentials.secret);
     }
-  };
+  } : undefined;
 
-  const removeHostfsVolume = async (bundleId: string): Promise<void> => {
-    hostfsServices.broker.revokeBundle(bundleId);
-    hostfsServices.bundleRegistry.revokeBundle(bundleId);
-    await hostfsServices.volumeManager.removeVolume(bundleId);
-  };
+  const removeHostfsVolume = hostfsServices ? async (bundleId: string): Promise<void> => {
+    const services = hostfsServices;
+    services.broker.revokeBundle(bundleId);
+    services.bundleRegistry.revokeBundle(bundleId);
+    await services.volumeManager.removeVolume(bundleId);
+  } : undefined;
 
   const taskBundleLauncherOptions: TaskBundleLauncherOptions = {
     workerImage: config.workerImage,
@@ -276,7 +286,7 @@ export async function startApp(): Promise<void> {
     privilegeBroker: new PrivilegeBrokerImpl(),
     taskRegistry,
     persistentApprovalStore,
-    hostfsBroker: hostfsServices.broker,
+    hostfsBroker: hostfsServices?.broker ?? createNoopHostfsBroker(),
     taskBundleAssignmentRegistry,
   });
 
