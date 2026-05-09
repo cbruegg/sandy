@@ -27,7 +27,7 @@ test("RclonePluginManager prepares plugin directories before installing the plug
     return child as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const manager = new RclonePluginManager({spawnImpl});
+  const manager = new RclonePluginManager({spawnImpl, hostArch: "x64"});
   await manager.ensureInstalled();
 
   assert.deepEqual(invocations[0], [
@@ -50,10 +50,54 @@ test("RclonePluginManager prepares plugin directories before installing the plug
     "--grant-all-permissions",
     "--alias",
     "rclone",
-    "rclone/docker-volume-rclone:latest",
+    "rclone/docker-volume-rclone:amd64",
     "config=/var/lib/docker-plugins/rclone/config",
     "cache=/var/lib/docker-plugins/rclone/cache",
   ]);
+});
+
+test("RclonePluginManager uses the arm64 rclone plugin image on arm64 hosts", async () => {
+  const invocations: string[][] = [];
+  const spawnImpl = ((_command: string, args: readonly string[]) => {
+    invocations.push([...args]);
+    const child = new FakeChildProcess();
+
+    queueMicrotask(() => {
+      if (args[0] === "plugin" && args[1] === "ls" && args[3] === "{{.Name}}") {
+        child.stdout.write("");
+      }
+      child.emit("exit", 0, null);
+    });
+
+    return child as unknown as ChildProcessWithoutNullStreams;
+  }) as typeof import("node:child_process").spawn;
+
+  const manager = new RclonePluginManager({spawnImpl, hostArch: "arm64"});
+  await manager.ensureInstalled();
+
+  assert.ok(invocations.some((invocation) => invocation.includes("rclone/docker-volume-rclone:arm64")));
+});
+
+test("RclonePluginManager uses the arm-v7 rclone plugin image on arm hosts", async () => {
+  const invocations: string[][] = [];
+  const spawnImpl = ((_command: string, args: readonly string[]) => {
+    invocations.push([...args]);
+    const child = new FakeChildProcess();
+
+    queueMicrotask(() => {
+      if (args[0] === "plugin" && args[1] === "ls" && args[3] === "{{.Name}}") {
+        child.stdout.write("");
+      }
+      child.emit("exit", 0, null);
+    });
+
+    return child as unknown as ChildProcessWithoutNullStreams;
+  }) as typeof import("node:child_process").spawn;
+
+  const manager = new RclonePluginManager({spawnImpl, hostArch: "arm"});
+  await manager.ensureInstalled();
+
+  assert.ok(invocations.some((invocation) => invocation.includes("rclone/docker-volume-rclone:arm-v7")));
 });
 
 test("RclonePluginManager enables an installed disabled plugin after preparing directories", async () => {

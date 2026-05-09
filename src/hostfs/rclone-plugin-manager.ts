@@ -4,6 +4,7 @@ import {logger} from "../logger.js";
 type RclonePluginManagerOptions = {
   pluginName?: string;
   pluginImage?: string;
+  hostArch?: NodeJS.Architecture;
   pluginConfigDir?: string;
   pluginCacheDir?: string;
   helperImage?: string;
@@ -12,7 +13,7 @@ type RclonePluginManagerOptions = {
 };
 
 const DEFAULT_PLUGIN_NAME = "rclone";
-const DEFAULT_PLUGIN_IMAGE = "rclone/docker-volume-rclone:latest";
+const DEFAULT_PLUGIN_IMAGE_REPOSITORY = "rclone/docker-volume-rclone";
 const DEFAULT_PLUGIN_CONFIG_DIR = "/var/lib/docker-plugins/rclone/config";
 const DEFAULT_PLUGIN_CACHE_DIR = "/var/lib/docker-plugins/rclone/cache";
 const DEFAULT_HELPER_IMAGE = "alpine:latest";
@@ -91,9 +92,10 @@ export class RclonePluginManager {
   }
 
   private async installPlugin(pluginName: string, pluginConfigDir: string, pluginCacheDir: string): Promise<void> {
+    const pluginImage = this.resolvePluginImage();
     logger.info("hostfs.rclone_installing_plugin", {
       pluginName,
-      pluginImage: this.options.pluginImage ?? DEFAULT_PLUGIN_IMAGE,
+      pluginImage,
     });
 
     // Install the plugin with grant-all-permissions since it needs mount privileges
@@ -102,7 +104,7 @@ export class RclonePluginManager {
       "--grant-all-permissions",
       "--alias",
       pluginName,
-      this.options.pluginImage ?? DEFAULT_PLUGIN_IMAGE,
+      pluginImage,
       `config=${pluginConfigDir}`,
       `cache=${pluginCacheDir}`,
     ]).catch(async (error) => {
@@ -130,6 +132,24 @@ export class RclonePluginManager {
     await this.runDockerPluginCommand(["disable", "-f", pluginName]).catch(() => {});
     await this.clearPluginStateFile(pluginCacheDir);
     await this.runDockerPluginCommand(["rm", "-f", pluginName]).catch(() => {});
+  }
+
+  private resolvePluginImage(): string {
+    if (this.options.pluginImage) {
+      return this.options.pluginImage;
+    }
+
+    const arch = this.options.hostArch ?? process.arch;
+    switch (arch) {
+      case "x64":
+        return `${DEFAULT_PLUGIN_IMAGE_REPOSITORY}:amd64`;
+      case "arm64":
+        return `${DEFAULT_PLUGIN_IMAGE_REPOSITORY}:arm64`;
+      case "arm":
+        return `${DEFAULT_PLUGIN_IMAGE_REPOSITORY}:arm-v7`;
+      default:
+        return `${DEFAULT_PLUGIN_IMAGE_REPOSITORY}:latest`;
+    }
   }
 
   private async ensurePluginStateDirectories(pluginConfigDir: string, pluginCacheDir: string): Promise<void> {
