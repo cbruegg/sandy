@@ -181,6 +181,31 @@ export async function startApp(): Promise<void> {
     workerAccess,
   );
 
+  const createHostfsVolume = async (bundleId: string): Promise<string | null> => {
+    const credentials = hostfsServices.bundleRegistry.createBundle(bundleId);
+    hostfsServices.broker.registerBundle(bundleId);
+    try {
+      return await hostfsServices.volumeManager.createVolume(bundleId, credentials.secret);
+    } catch (error) {
+      if (!hostfsServices.rclonePluginManager.isRecoveryEnabled() || !hostfsServices.rclonePluginManager.isRecoverablePluginError(error)) {
+        throw error;
+      }
+
+      logger.warn("hostfs.volume_creation_retrying_after_plugin_recovery", {
+        bundleId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await hostfsServices.rclonePluginManager.recover();
+      return await hostfsServices.volumeManager.createVolume(bundleId, credentials.secret);
+    }
+  };
+
+  const removeHostfsVolume = async (bundleId: string): Promise<void> => {
+    hostfsServices.broker.revokeBundle(bundleId);
+    hostfsServices.bundleRegistry.revokeBundle(bundleId);
+    await hostfsServices.volumeManager.removeVolume(bundleId);
+  };
+
   const taskBundleLauncherOptions: TaskBundleLauncherOptions = {
     workerImage: config.workerImage,
     resolveWorkerImage: () => workerImageManager.getLaunchImage(),
@@ -198,29 +223,8 @@ export async function startApp(): Promise<void> {
         ? async (request) => await proxyAuthService.resolveProxyRequest(request)
         : undefined,
     logLevel: config.logLevel,
-    createHostfsVolume: async (bundleId) => {
-      const credentials = hostfsServices.bundleRegistry.createBundle(bundleId);
-      hostfsServices.broker.registerBundle(bundleId);
-      try {
-        return await hostfsServices.volumeManager.createVolume(bundleId, credentials.secret);
-      } catch (error) {
-        if (!hostfsServices.rclonePluginManager.isRecoveryEnabled() || !hostfsServices.rclonePluginManager.isRecoverablePluginError(error)) {
-          throw error;
-        }
-
-        logger.warn("hostfs.volume_creation_retrying_after_plugin_recovery", {
-          bundleId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        await hostfsServices.rclonePluginManager.recover();
-        return await hostfsServices.volumeManager.createVolume(bundleId, credentials.secret);
-      }
-    },
-    removeHostfsVolume: async (bundleId) => {
-      hostfsServices.broker.revokeBundle(bundleId);
-      hostfsServices.bundleRegistry.revokeBundle(bundleId);
-      await hostfsServices.volumeManager.removeVolume(bundleId);
-    },
+    createHostfsVolume,
+    removeHostfsVolume,
   };
   const sandboxRunnerOptions: DockerSandboxRunnerOptions = {
     workerImage: config.workerImage,
