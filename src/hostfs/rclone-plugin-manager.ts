@@ -15,7 +15,7 @@ const DEFAULT_PLUGIN_NAME = "rclone";
 const DEFAULT_PLUGIN_IMAGE = "rclone/docker-volume-rclone:latest";
 const DEFAULT_PLUGIN_CONFIG_DIR = "/var/lib/docker-plugins/rclone/config";
 const DEFAULT_PLUGIN_CACHE_DIR = "/var/lib/docker-plugins/rclone/cache";
-const DEFAULT_HELPER_IMAGE = "alpine:3.21";
+const DEFAULT_HELPER_IMAGE = "alpine:latest";
 const PLUGIN_STATE_FILE_NAME = "docker-plugin.state";
 const DEFAULT_ENABLE_PLUGIN_RECOVERY = false;
 
