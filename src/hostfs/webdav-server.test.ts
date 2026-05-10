@@ -1,6 +1,6 @@
 import {test} from "bun:test";
 import assert from "node:assert/strict";
-import {mkdtemp, readFile, rm, writeFile} from "node:fs/promises";
+import {mkdtemp, readFile, rm, writeFile, stat} from "node:fs/promises";
 import {basename, join} from "node:path";
 import {tmpdir} from "node:os";
 import {WebDAVServer} from "./webdav-server.js";
@@ -58,6 +58,30 @@ test("WebDAVServer responds to OPTIONS with write methods", async () => {
       assert.ok(allow.includes("PUT"));
       assert.ok(allow.includes("DELETE"));
       assert.ok(allow.includes("MKCOL"));
+      assert.ok(allow.includes("COPY"));
+      assert.ok(allow.includes("MOVE"));
+      assert.ok(allow.includes("PROPPATCH"));
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
+test("WebDAVServer PROPFIND includes quota properties for a single grant namespace", async () => {
+  await withTempDir(async (dir) => {
+    const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_write" as const}]]);
+    const server = createServer(grants);
+    await server.start();
+    const port = server.getPort();
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle`, {
+        method: "PROPFIND",
+        headers: {Authorization: "Basic dXNlcjpwYXNz", Depth: "0"},
+      });
+      assert.equal(response.status, 207);
+      const body = await response.text();
+      assert.match(body, /<D:quota-available-bytes>\d+<\/D:quota-available-bytes>/);
+      assert.match(body, /<D:quota-used-bytes>\d+<\/D:quota-used-bytes>/);
     } finally {
       await server.stop();
     }
@@ -229,7 +253,138 @@ test("WebDAVServer MKCOL on read-only grant returns 403", async () => {
   });
 });
 
-for (const method of ["OPTIONS", "GET", "HEAD", "PROPFIND", "PUT", "DELETE", "MKCOL"] as const) {
+test("WebDAVServer COPY duplicates a file", async () => {
+  await withTempDir(async (dir) => {
+    const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_write" as const}]]);
+    const server = createServer(grants);
+    await server.start();
+    const port = server.getPort();
+    try {
+      await writeFile(join(dir, "source.txt"), "hello");
+      const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/source.txt`, {
+        method: "COPY",
+        headers: {
+          Authorization: "Basic dXNlcjpwYXNz",
+          Destination: `http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/copied.txt`,
+        },
+      });
+      assert.equal(response.status, 201);
+      assert.equal(await readFile(join(dir, "copied.txt"), "utf8"), "hello");
+      assert.equal(await readFile(join(dir, "source.txt"), "utf8"), "hello");
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
+test("WebDAVServer COPY with overwrite false returns 412", async () => {
+  await withTempDir(async (dir) => {
+    const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_write" as const}]]);
+    const server = createServer(grants);
+    await server.start();
+    const port = server.getPort();
+    try {
+      await writeFile(join(dir, "source.txt"), "hello");
+      await writeFile(join(dir, "copied.txt"), "existing");
+      const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/source.txt`, {
+        method: "COPY",
+        headers: {
+          Authorization: "Basic dXNlcjpwYXNz",
+          Overwrite: "F",
+          Destination: `http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/copied.txt`,
+        },
+      });
+      assert.equal(response.status, 412);
+      assert.equal(await readFile(join(dir, "copied.txt"), "utf8"), "existing");
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
+test("WebDAVServer MOVE renames a file", async () => {
+  await withTempDir(async (dir) => {
+    const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_write" as const}]]);
+    const server = createServer(grants);
+    await server.start();
+    const port = server.getPort();
+    try {
+      await writeFile(join(dir, "source.txt"), "hello");
+      const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/source.txt`, {
+        method: "MOVE",
+        headers: {
+          Authorization: "Basic dXNlcjpwYXNz",
+          Destination: `http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/moved.txt`,
+        },
+      });
+      assert.equal(response.status, 201);
+      assert.equal(await statSafe(join(dir, "source.txt")), null);
+      assert.equal(await readFile(join(dir, "moved.txt"), "utf8"), "hello");
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
+test("WebDAVServer MOVE with overwrite false returns 412", async () => {
+  await withTempDir(async (dir) => {
+    const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_write" as const}]]);
+    const server = createServer(grants);
+    await server.start();
+    const port = server.getPort();
+    try {
+      await writeFile(join(dir, "source.txt"), "hello");
+      await writeFile(join(dir, "moved.txt"), "existing");
+      const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/source.txt`, {
+        method: "MOVE",
+        headers: {
+          Authorization: "Basic dXNlcjpwYXNz",
+          Overwrite: "F",
+          Destination: `http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/moved.txt`,
+        },
+      });
+      assert.equal(response.status, 412);
+      assert.equal(await readFile(join(dir, "source.txt"), "utf8"), "hello");
+      assert.equal(await readFile(join(dir, "moved.txt"), "utf8"), "existing");
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
+test("WebDAVServer PROPPATCH updates getlastmodified", async () => {
+  await withTempDir(async (dir) => {
+    const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_write" as const}]]);
+    const server = createServer(grants);
+    await server.start();
+    const port = server.getPort();
+    const newTime = "Mon, 06 Jan 2025 12:34:56 GMT";
+    try {
+      await writeFile(join(dir, "hello.txt"), "hello");
+      const response = await fetch(`http://127.0.0.1:${port}/bundles/test-bundle/grants/grant-1/hello.txt`, {
+        method: "PROPPATCH",
+        headers: {Authorization: "Basic dXNlcjpwYXNz", "Content-Type": "application/xml"},
+        body: `<?xml version="1.0" encoding="utf-8"?>
+<D:propertyupdate xmlns:D="DAV:">
+  <D:set>
+    <D:prop>
+      <D:getlastmodified>${newTime}</D:getlastmodified>
+    </D:prop>
+  </D:set>
+</D:propertyupdate>`,
+      });
+      assert.equal(response.status, 207);
+      const body = await response.text();
+      assert.match(body, /<D:getlastmodified\/>/);
+      const updatedStats = await stat(join(dir, "hello.txt"));
+      assert.equal(updatedStats.mtime.toUTCString(), new Date(newTime).toUTCString());
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
+for (const method of ["OPTIONS", "GET", "HEAD", "PROPFIND", "PUT", "DELETE", "MKCOL", "COPY", "MOVE", "PROPPATCH"] as const) {
   test(`WebDAVServer ${method} without Authorization returns 401`, async () => {
     await withTempDir(async (dir) => {
       const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_write" as const}]]);
@@ -250,7 +405,7 @@ for (const method of ["OPTIONS", "GET", "HEAD", "PROPFIND", "PUT", "DELETE", "MK
   });
 }
 
-for (const method of ["OPTIONS", "GET", "HEAD", "PROPFIND", "PUT", "DELETE", "MKCOL"] as const) {
+for (const method of ["OPTIONS", "GET", "HEAD", "PROPFIND", "PUT", "DELETE", "MKCOL", "COPY", "MOVE", "PROPPATCH"] as const) {
   test(`WebDAVServer ${method} with wrong token returns 401`, async () => {
     await withTempDir(async (dir) => {
       const grants = new Map([["grant-1", {grantId: "grant-1", hostPath: dir, level: "read_write" as const}]]);

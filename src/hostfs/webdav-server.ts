@@ -1,6 +1,6 @@
 import {createServer, type IncomingMessage, type Server, type ServerResponse} from "node:http";
 import {createReadStream, createWriteStream, type Stats} from "node:fs";
-import {mkdir, rm, stat, readdir} from "node:fs/promises";
+import {mkdir, rm, stat, readdir, rename, copyFile, cp, statfs, utimes} from "node:fs/promises";
 import {basename, dirname, join, resolve} from "node:path";
 import {pipeline} from "node:stream/promises";
 import {logger} from "../logger.js";
@@ -26,7 +26,7 @@ type WebDAVServerOptions = {
 };
 
 const READ_METHODS = ["OPTIONS", "GET", "HEAD", "PROPFIND"];
-const WRITE_METHODS = ["PUT", "DELETE", "MKCOL"];
+const WRITE_METHODS = ["PUT", "DELETE", "MKCOL", "COPY", "MOVE", "PROPPATCH"];
 const ALLOWED_METHODS = [...READ_METHODS, ...WRITE_METHODS];
 
 export class WebDAVServer {
@@ -127,6 +127,15 @@ export class WebDAVServer {
           break;
         case "MKCOL":
           await this.handleMkcol(req, res, namespace);
+          break;
+        case "COPY":
+          await this.handleCopy(req, res, namespace);
+          break;
+        case "MOVE":
+          await this.handleMove(req, res, namespace);
+          break;
+        case "PROPPATCH":
+          await this.handleProppatch(req, res, namespace);
           break;
         case "OPTIONS":
           res.statusCode = 200;
@@ -416,6 +425,13 @@ export class WebDAVServer {
       props.push(`<D:getcontentlength>${entry.size}</D:getcontentlength>`);
     }
 
+    if (entry.quotaAvailableBytes !== undefined) {
+      props.push(`<D:quota-available-bytes>${entry.quotaAvailableBytes}</D:quota-available-bytes>`);
+    }
+    if (entry.quotaUsedBytes !== undefined) {
+      props.push(`<D:quota-used-bytes>${entry.quotaUsedBytes}</D:quota-used-bytes>`);
+    }
+
     return [
       "<D:response>",
       `<D:href>${hrefEncoded}</D:href>`,
@@ -437,16 +453,16 @@ export class WebDAVServer {
 
     // Root of bundle namespace
     if (normalizedPath === `/bundles/${namespace.bundleId}`) {
-      return [this.makeSyntheticDirEntry("/"), [this.makeSyntheticDirEntry("grants")]];
+      return [await this.makeSyntheticDirEntry("/", namespace), [await this.makeSyntheticDirEntry("grants", namespace)]];
     }
 
     // /bundles/<bundleId>/grants
     if (normalizedPath === `/bundles/${namespace.bundleId}/grants`) {
       const grantEntries: WebDAVEntry[] = [];
       for (const grant of namespace.grants.values()) {
-        grantEntries.push(this.makeSyntheticDirEntry(grant.grantId));
+        grantEntries.push(await this.makeSyntheticDirEntry(grant.grantId));
       }
-      return [this.makeSyntheticDirEntry("grants"), grantEntries];
+      return [await this.makeSyntheticDirEntry("grants", namespace), grantEntries];
     }
 
     // /bundles/<bundleId>/grants/<grantId>/...
@@ -474,10 +490,10 @@ export class WebDAVServer {
 
       if (stats.isDirectory()) {
         const children = await this.listDirectoryEntries(hostPath);
-        return [this.makeDirEntryFromStats(hostPath, stats), children];
+        return [await this.makeDirEntryFromStats(hostPath, stats), children];
       }
 
-      return [this.makeFileEntryFromStats(hostPath, stats), []];
+      return [await this.makeFileEntryFromStats(hostPath, stats), []];
     }
 
     return null;
@@ -536,9 +552,9 @@ export class WebDAVServer {
         const stats = await statSafe(entryPath);
         if (!stats) continue;
         if (entry.isDirectory()) {
-          result.push(this.makeDirEntryFromStats(entryPath, stats));
+          result.push(await this.makeDirEntryFromStats(entryPath, stats));
         } else {
-          result.push(this.makeFileEntryFromStats(entryPath, stats));
+          result.push(await this.makeFileEntryFromStats(entryPath, stats));
         }
       }
       return result.sort((a, b) => a.name.localeCompare(b.name));
@@ -547,32 +563,248 @@ export class WebDAVServer {
     }
   }
 
-  private makeSyntheticDirEntry(name: string): WebDAVEntry {
+  private async makeSyntheticDirEntry(name: string, namespace?: WebDAVBundleNamespace): Promise<WebDAVEntry> {
+    const quota = await this.resolveNamespaceQuota(namespace);
     return {
       kind: "directory",
       name,
       hostPath: "",
       mtime: new Date().toUTCString(),
+      quotaAvailableBytes: quota?.available,
+      quotaUsedBytes: quota?.used,
     };
   }
 
-  private makeDirEntryFromStats(hostPath: string, stats: Stats): WebDAVEntry {
+  private async makeDirEntryFromStats(hostPath: string, stats: Stats): Promise<WebDAVEntry> {
+    const quota = await statfsUsageSafe(hostPath);
     return {
       kind: "directory",
       name: basename(hostPath),
       hostPath,
       mtime: stats.mtime.toUTCString(),
+      quotaAvailableBytes: quota?.available,
+      quotaUsedBytes: quota?.used,
     };
   }
 
-  private makeFileEntryFromStats(hostPath: string, stats: Stats): WebDAVEntry {
+  private async makeFileEntryFromStats(hostPath: string, stats: Stats): Promise<WebDAVEntry> {
+    const quota = await statfsUsageSafe(hostPath);
     return {
       kind: "file",
       name: basename(hostPath),
       hostPath,
       mtime: stats.mtime.toUTCString(),
       size: stats.size,
+      quotaAvailableBytes: quota?.available,
+      quotaUsedBytes: quota?.used,
     };
+  }
+
+  private async handleCopy(
+    req: IncomingMessage,
+    res: ServerResponse,
+    namespace: WebDAVBundleNamespace,
+  ): Promise<void> {
+    const sourceInfo = this.resolveWebDAVWritePath(decodeURIComponent(req.url ?? "/"), namespace);
+    if (!sourceInfo) {
+      res.statusCode = 404;
+      res.end("Not found");
+      return;
+    }
+    if (sourceInfo.isGrantRoot) {
+      res.statusCode = 403;
+      res.end("Cannot copy grant root");
+      return;
+    }
+
+    const destinationInfo = this.resolveDestinationWritePath(req, namespace);
+    if (!destinationInfo) {
+      res.statusCode = 409;
+      res.end("Invalid destination");
+      return;
+    }
+    if (destinationInfo.isReadOnly || destinationInfo.isGrantRoot) {
+      res.statusCode = 403;
+      res.end(destinationInfo.isReadOnly ? "Read-only destination grant" : "Cannot overwrite grant root");
+      return;
+    }
+
+    const sourceStats = await statSafe(sourceInfo.hostPath);
+    if (!sourceStats) {
+      res.statusCode = 404;
+      res.end("Not found");
+      return;
+    }
+
+    const overwrite = this.shouldOverwrite(req);
+    const destinationStats = await statSafe(destinationInfo.hostPath);
+    if (destinationStats) {
+      if (!overwrite) {
+        res.statusCode = 412;
+        res.end("Destination exists");
+        return;
+      }
+      await rm(destinationInfo.hostPath, {recursive: destinationStats.isDirectory(), force: false});
+    }
+
+    await mkdir(dirname(destinationInfo.hostPath), {recursive: true});
+    await copyPath(sourceInfo.hostPath, destinationInfo.hostPath, sourceStats);
+    res.statusCode = destinationStats ? 204 : 201;
+    res.end();
+  }
+
+  private async handleMove(
+    req: IncomingMessage,
+    res: ServerResponse,
+    namespace: WebDAVBundleNamespace,
+  ): Promise<void> {
+    const sourceInfo = this.resolveWebDAVWritePath(decodeURIComponent(req.url ?? "/"), namespace);
+    if (!sourceInfo) {
+      res.statusCode = 404;
+      res.end("Not found");
+      return;
+    }
+    if (sourceInfo.isReadOnly) {
+      res.statusCode = 403;
+      res.end("Read-only source grant");
+      return;
+    }
+    if (sourceInfo.isGrantRoot) {
+      res.statusCode = 403;
+      res.end("Cannot move grant root");
+      return;
+    }
+
+    const destinationInfo = this.resolveDestinationWritePath(req, namespace);
+    if (!destinationInfo) {
+      res.statusCode = 409;
+      res.end("Invalid destination");
+      return;
+    }
+    if (destinationInfo.isReadOnly || destinationInfo.isGrantRoot) {
+      res.statusCode = 403;
+      res.end(destinationInfo.isReadOnly ? "Read-only destination grant" : "Cannot overwrite grant root");
+      return;
+    }
+
+    const sourceStats = await statSafe(sourceInfo.hostPath);
+    if (!sourceStats) {
+      res.statusCode = 404;
+      res.end("Not found");
+      return;
+    }
+
+    const overwrite = this.shouldOverwrite(req);
+    const destinationStats = await statSafe(destinationInfo.hostPath);
+    if (destinationStats) {
+      if (!overwrite) {
+        res.statusCode = 412;
+        res.end("Destination exists");
+        return;
+      }
+      await rm(destinationInfo.hostPath, {recursive: destinationStats.isDirectory(), force: false});
+    }
+
+    await mkdir(dirname(destinationInfo.hostPath), {recursive: true});
+    try {
+      await rename(sourceInfo.hostPath, destinationInfo.hostPath);
+    } catch (error) {
+      if (!isCrossDeviceRenameError(error)) {
+        throw error;
+      }
+      await copyPath(sourceInfo.hostPath, destinationInfo.hostPath, sourceStats);
+      await rm(sourceInfo.hostPath, {recursive: sourceStats.isDirectory(), force: false});
+    }
+
+    res.statusCode = destinationStats ? 204 : 201;
+    res.end();
+  }
+
+  private async handleProppatch(
+    req: IncomingMessage,
+    res: ServerResponse,
+    namespace: WebDAVBundleNamespace,
+  ): Promise<void> {
+    const writeInfo = this.resolveWebDAVWritePath(decodeURIComponent(req.url ?? "/"), namespace);
+    if (!writeInfo) {
+      res.statusCode = 404;
+      res.end("Not found");
+      return;
+    }
+    if (writeInfo.isReadOnly) {
+      res.statusCode = 403;
+      res.end("Read-only grant");
+      return;
+    }
+    if (writeInfo.isGrantRoot) {
+      res.statusCode = 403;
+      res.end("Cannot modify grant root properties");
+      return;
+    }
+
+    const targetStats = await statSafe(writeInfo.hostPath);
+    if (!targetStats) {
+      res.statusCode = 404;
+      res.end("Not found");
+      return;
+    }
+
+    const body = await readRequestBody(req);
+    const requestedProperties = extractRequestedPropertyNames(body);
+    const modTime = extractRequestedModTime(body);
+
+    let successProperties: string[] = [];
+    let failedProperties = requestedProperties;
+
+    if (modTime !== null) {
+      await utimes(writeInfo.hostPath, targetStats.atime, modTime);
+      successProperties = requestedProperties.filter((property) => property === "getlastmodified");
+      failedProperties = requestedProperties.filter((property) => property !== "getlastmodified");
+    }
+
+    res.statusCode = 207;
+    res.setHeader("Content-Type", "application/xml; charset=utf-8");
+    res.end(buildProppatchResponse(decodeURIComponent(req.url ?? "/"), successProperties, failedProperties));
+  }
+
+  private resolveDestinationWritePath(
+    req: IncomingMessage,
+    namespace: WebDAVBundleNamespace,
+  ): {hostPath: string; isReadOnly: boolean; isGrantRoot: boolean} | null {
+    const destination = req.headers["destination"];
+    if (typeof destination !== "string" || destination.trim().length === 0) {
+      return null;
+    }
+
+    let destinationPath: string;
+    try {
+      destinationPath = decodeURIComponent(new URL(destination, `http://${req.headers["host"] ?? "localhost"}`).pathname);
+    } catch {
+      return null;
+    }
+
+    return this.resolveWebDAVWritePath(destinationPath, namespace);
+  }
+
+  private shouldOverwrite(req: IncomingMessage): boolean {
+    const overwrite = req.headers["overwrite"];
+    if (typeof overwrite !== "string") {
+      return true;
+    }
+    return overwrite.toUpperCase() !== "F";
+  }
+
+  private async resolveNamespaceQuota(
+    namespace?: WebDAVBundleNamespace,
+  ): Promise<{available: number; used: number} | null> {
+    if (!namespace) {
+      return null;
+    }
+    const grants = [...namespace.grants.values()];
+    if (grants.length !== 1) {
+      return null;
+    }
+    return await statfsUsageSafe(grants[0]!.hostPath);
   }
 }
 
@@ -582,6 +814,8 @@ type WebDAVEntry = {
   hostPath: string;
   mtime: string;
   size?: number;
+  quotaAvailableBytes?: number;
+  quotaUsedBytes?: number;
 };
 
 async function statSafe(path: string): Promise<Stats | null> {
@@ -599,4 +833,95 @@ function encodeXml(text: string): string {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
+}
+
+async function statfsUsageSafe(path: string): Promise<{available: number; used: number} | null> {
+  try {
+    const result = await statfs(path);
+    const total = result.bsize * result.blocks;
+    const free = result.bsize * result.bavail;
+    const used = total - (result.bsize * result.bfree);
+    return {available: free, used};
+  } catch {
+    return null;
+  }
+}
+
+async function copyPath(sourcePath: string, destinationPath: string, sourceStats: Stats): Promise<void> {
+  if (sourceStats.isDirectory()) {
+    await cp(sourcePath, destinationPath, {recursive: true, preserveTimestamps: true, force: false, errorOnExist: true});
+    return;
+  }
+  await copyFile(sourcePath, destinationPath);
+}
+
+function isCrossDeviceRenameError(error: unknown): boolean {
+  return error instanceof Error && "code" in error && error.code === "EXDEV";
+}
+
+async function readRequestBody(req: IncomingMessage): Promise<string> {
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of req) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+function extractRequestedPropertyNames(body: string): string[] {
+  const properties = new Set<string>();
+  for (const match of body.matchAll(/<[^>:/\s]+:([A-Za-z0-9_-]+)(?:\s[^>]*)?>|<([A-Za-z0-9_-]+)(?:\s[^>]*)?>/g)) {
+    const propertyName = (match[1] ?? match[2])?.toLowerCase();
+    if (!propertyName || ["propertyupdate", "set", "remove", "prop"].includes(propertyName)) {
+      continue;
+    }
+    properties.add(propertyName);
+  }
+  return [...properties];
+}
+
+function extractRequestedModTime(body: string): Date | null {
+  const match = body.match(/<[^>:/\s]+:getlastmodified(?:\s[^>]*)?>([^<]+)<\/[^>:/\s]+:getlastmodified>|<getlastmodified(?:\s[^>]*)?>([^<]+)<\/getlastmodified>/i);
+  const rawValue = match?.[1] ?? match?.[2];
+  if (!rawValue) {
+    return null;
+  }
+  const parsedTime = Date.parse(rawValue.trim());
+  if (Number.isNaN(parsedTime)) {
+    return null;
+  }
+  return new Date(parsedTime);
+}
+
+function buildProppatchResponse(href: string, successProperties: string[], failedProperties: string[]): string {
+  const bodyParts = [
+    '<?xml version="1.0" encoding="utf-8"?>',
+    '<D:multistatus xmlns:D="DAV:">',
+    '<D:response>',
+    `<D:href>${encodeXml(href)}</D:href>`,
+  ];
+
+  if (successProperties.length > 0) {
+    bodyParts.push(
+      '<D:propstat>',
+      '<D:prop>',
+      ...successProperties.map((property) => `<D:${property}/>`),
+      '</D:prop>',
+      '<D:status>HTTP/1.1 200 OK</D:status>',
+      '</D:propstat>',
+    );
+  }
+
+  if (failedProperties.length > 0) {
+    bodyParts.push(
+      '<D:propstat>',
+      '<D:prop>',
+      ...failedProperties.map((property) => `<D:${property}/>`),
+      '</D:prop>',
+      '<D:status>HTTP/1.1 409 Conflict</D:status>',
+      '</D:propstat>',
+    );
+  }
+
+  bodyParts.push('</D:response>', '</D:multistatus>');
+  return bodyParts.join('\n');
 }
