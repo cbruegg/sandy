@@ -51,6 +51,27 @@ function progressFromTodoList(item: TodoListItem): string | null {
   return messages.nextPlannedStep(next.text);
 }
 
+function truncateEventForLogging(event: ThreadEvent): ThreadEvent {
+  if (event.type !== "item.started" && event.type !== "item.updated" && event.type !== "item.completed") {
+    return event;
+  }
+  if (event.item.type !== "command_execution") {
+    return event;
+  }
+  const { aggregated_output } = event.item;
+  if (aggregated_output.length <= 1000) {
+    return event;
+  }
+  const cloned = structuredClone(event) as ThreadEvent;
+  if (cloned.type === "item.started" || cloned.type === "item.updated" || cloned.type === "item.completed") {
+    const item = cloned.item;
+    if (item.type === "command_execution") {
+      item.aggregated_output = aggregated_output.slice(0, 1000) + "... (truncated)";
+    }
+  }
+  return cloned;
+}
+
 async function streamTurn(thread: Thread, input: Input, mode: TurnMode = "task"): Promise<StreamTurnResult> {
   let sawTaskDone = false;
   let sawTerminalError = false;
@@ -58,7 +79,7 @@ async function streamTurn(thread: Thread, input: Input, mode: TurnMode = "task")
   const { events } = await thread.runStreamed(input);
 
   for await (const event of events) {
-    logger.debug("thread.event_received", { eventType: event.type, event });
+    logger.debug("thread.event_received", { eventType: event.type, event: truncateEventForLogging(event) });
     const disposition = mode === "summary"
       ? handleSummaryTurnEvent(event, summaryChunks)
       : handleTaskTurnEvent(event);
