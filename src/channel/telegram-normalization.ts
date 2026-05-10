@@ -164,7 +164,7 @@ function extractCallbackQueryMetadata(update: Update): TelegramUpdateMetadata | 
     senderUsername: normalizeTelegramUsername(update.callback_query.from.username),
   };
 
-  if (data.startsWith("approve:") || data.startsWith("approve_session:") || data.startsWith("approve_always:") || data.startsWith("deny:")) {
+  if (data.startsWith("approve:") || data.startsWith("approve_once:") || data.startsWith("approve_worker_session:") || data.startsWith("approve_always:") || data.startsWith("deny:") || data.startsWith("share_approve:") || data.startsWith("share_deny:")) {
     return { ...base, kind: "approval_response" };
   }
 
@@ -202,18 +202,28 @@ function normalizeCallbackQuery(update: Update): TelegramNormalizedChatEvent | n
     const event: TelegramNormalizedChatEvent = {
       ...base,
       kind: "approval_response",
-      decision: "approve_once",
+      decision: "approve",
       requestId: data.slice("approve:".length) || undefined,
     };
     return event;
   }
 
-  if (data.startsWith("approve_session:")) {
+  if (data.startsWith("approve_once:")) {
+    const event: TelegramNormalizedChatEvent = {
+      ...base,
+      kind: "approval_response",
+      decision: "approve_once",
+      requestId: data.slice("approve_once:".length) || undefined,
+    };
+    return event;
+  }
+
+  if (data.startsWith("approve_worker_session:")) {
     const event: TelegramNormalizedChatEvent = {
       ...base,
       kind: "approval_response",
       decision: "approve_worker_session",
-      requestId: data.slice("approve_session:".length) || undefined,
+      requestId: data.slice("approve_worker_session:".length) || undefined,
     };
     return event;
   }
@@ -234,6 +244,26 @@ function normalizeCallbackQuery(update: Update): TelegramNormalizedChatEvent | n
       kind: "approval_response",
       decision: "deny",
       requestId: data.slice("deny:".length) || undefined,
+    };
+    return event;
+  }
+
+  if (data.startsWith("share_approve:")) {
+    const event: TelegramNormalizedChatEvent = {
+      ...base,
+      kind: "approval_response",
+      decision: "approve",
+      requestId: data.slice("share_approve:".length) || undefined,
+    };
+    return event;
+  }
+
+  if (data.startsWith("share_deny:")) {
+    const event: TelegramNormalizedChatEvent = {
+      ...base,
+      kind: "approval_response",
+      decision: "deny",
+      requestId: data.slice("share_deny:".length) || undefined,
     };
     return event;
   }

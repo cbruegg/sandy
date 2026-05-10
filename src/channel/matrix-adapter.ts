@@ -2,9 +2,17 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
-import { buttonLabels, messages } from "../messages.js";
+import { messages } from "../messages.js";
 import { matrixHtmlAllowedTags, sanitizeMatrixHtml } from "./matrix-html.js";
 import { runWithMatrixSendRetry, sleepMs, type MatrixSleep } from "./matrix-send-retry.js";
+import {
+  buildPrivilegeControls,
+  buildReportControls,
+  buildShareDeletionControls,
+  buildTaskControls,
+  formatPrivilegeRequestType,
+  type ControlActionEvent,
+} from "./control-surface.js";
 
 import type {
   ChannelFormatting,
@@ -102,7 +110,7 @@ type MatrixAttachmentRef = {
 };
 
 type MatrixPollAction = {
-  event: MatrixPollEvent;
+  event: ControlActionEvent;
 };
 
 type MatrixPollRecord = {
@@ -123,12 +131,6 @@ type MatrixNormalizeDeps = {
   sendText: (chatId: string, text: string) => Promise<void>;
   saveAttachmentRef: (attachmentId: string, ref: MatrixAttachmentRef) => void;
 };
-
-type MatrixPollEvent =
-  | Omit<Extract<NormalizedChatEvent, { kind: "approval_response" }>, "chatId" | "messageId" | "timestamp">
-  | Omit<Extract<NormalizedChatEvent, { kind: "cancel_request" }>, "chatId" | "messageId" | "timestamp">
-  | Omit<Extract<NormalizedChatEvent, { kind: "mark_finished_request" }>, "chatId" | "messageId" | "timestamp">
-  | Omit<Extract<NormalizedChatEvent, { kind: "danger_report" }>, "chatId" | "messageId" | "timestamp">;
 
 const matrixFormatting: ChannelFormatting = {
   channelId: "matrix",
@@ -311,18 +313,8 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       textPreview: previewText(text),
     });
     await this.sendNotice(chatId, text);
-    await this.sendPoll(chatId, "Task controls", [
-      {
-        answerId: "cancel",
-        label: buttonLabels.abortTask,
-        event: { kind: "cancel_request" },
-      },
-      {
-        answerId: "mark_finished",
-        label: buttonLabels.markAsFinished,
-        event: { kind: "mark_finished_request" },
-      },
-    ]);
+    const controls = buildTaskControls();
+    await this.sendPoll(chatId, "Task controls", controls.rows.flat().map((a) => ({ answerId: a.actionId, label: a.label, event: a.event })));
   }
 
   async sendReportableText(chatId: string, text: string): Promise<void> {
@@ -332,149 +324,20 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     });
     this.discardRoomPolls(chatId);
     await this.sendNotice(chatId, text);
-    await this.sendPoll(chatId, "Output controls", [{
-      answerId: "report",
-      label: buttonLabels.reportDangerousOutput,
-      event: { kind: "danger_report" },
-    }]);
+    const controls = buildReportControls();
+    await this.sendPoll(chatId, "Output controls", controls.rows.flat().map((a) => ({ answerId: a.actionId, label: a.label, event: a.event })));
   }
 
   async sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void> {
-    let requestType: string;
-    switch (request.kind) {
-      case "host_operation":
-        requestType = request.payload.type;
-        break;
-      case "mcp_tool_call":
-        requestType = `${request.serverId}.${request.toolName}`;
-        break;
-      case "mcp_resource_read":
-        requestType = `resource:${request.serverId}:${request.uri}`;
-        break;
-      case "http_token_use":
-        requestType = `http:${request.tokenId}@${request.host}`;
-        break;
-      case "host_directory_access":
-        requestType = `host_directory_access:${request.path}:${request.level}`;
-        break;
-    }
+    const requestType = formatPrivilegeRequestType(request);
     logger.info("matrix.send_privilege_request", {
       chatId,
       requestId: request.requestId,
       requestType,
     });
     await this.sendNotice(chatId, messages.privilegeRequestPrompt(request));
-    await this.sendPoll(
-      chatId,
-      "Privilege request",
-      (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use")
-        && request.confirmsAutoApprovalForTask
-        ? [
-            {
-              answerId: "approve",
-              label: buttonLabels.approve,
-              event: { kind: "approval_response", decision: "approve", requestId: request.requestId },
-            },
-            {
-              answerId: "deny",
-              label: buttonLabels.deny,
-              event: { kind: "approval_response", decision: "deny", requestId: request.requestId },
-            },
-            {
-              answerId: "report",
-              label: buttonLabels.reportDangerousOutput,
-              event: { kind: "danger_report" },
-            },
-            {
-              answerId: "cancel",
-              label: buttonLabels.abortTask,
-              event: { kind: "cancel_request" },
-            },
-          ]
-        : request.kind === "host_directory_access"
-        ? [
-            {
-              answerId: "approve_worker_session",
-              label: buttonLabels.approveWorkerSession,
-              event: { kind: "approval_response", decision: "approve_worker_session", requestId: request.requestId },
-            },
-            {
-              answerId: "approve_always",
-              label: buttonLabels.approveAlwaysHostDirectory,
-              event: { kind: "approval_response", decision: "approve_always", requestId: request.requestId },
-            },
-            {
-              answerId: "deny",
-              label: buttonLabels.deny,
-              event: { kind: "approval_response", decision: "deny", requestId: request.requestId },
-            },
-            {
-              answerId: "report",
-              label: buttonLabels.reportDangerousOutput,
-              event: { kind: "danger_report" },
-            },
-            {
-              answerId: "cancel",
-              label: buttonLabels.abortTask,
-              event: { kind: "cancel_request" },
-            },
-          ]
-        : request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use"
-        ? [
-            {
-              answerId: "approve_once",
-              label: buttonLabels.approve,
-              event: { kind: "approval_response", decision: "approve_once", requestId: request.requestId },
-            },
-            {
-              answerId: "approve_worker_session",
-              label: buttonLabels.approveWorkerSession,
-              event: { kind: "approval_response", decision: "approve_worker_session", requestId: request.requestId },
-            },
-            {
-              answerId: "approve_always",
-              label: buttonLabels.approveAlways,
-              event: { kind: "approval_response", decision: "approve_always", requestId: request.requestId },
-            },
-            {
-              answerId: "deny",
-              label: buttonLabels.deny,
-              event: { kind: "approval_response", decision: "deny", requestId: request.requestId },
-            },
-            {
-              answerId: "report",
-              label: buttonLabels.reportDangerousOutput,
-              event: { kind: "danger_report" },
-            },
-            {
-              answerId: "cancel",
-              label: buttonLabels.abortTask,
-              event: { kind: "cancel_request" },
-            },
-          ]
-        : [
-            {
-              answerId: "approve",
-              label: buttonLabels.approve,
-              event: { kind: "approval_response", decision: "approve", requestId: request.requestId },
-            },
-            {
-              answerId: "deny",
-              label: buttonLabels.deny,
-              event: { kind: "approval_response", decision: "deny", requestId: request.requestId },
-            },
-            {
-              answerId: "report",
-              label: buttonLabels.reportDangerousOutput,
-              event: { kind: "danger_report" },
-            },
-            {
-              answerId: "cancel",
-              label: buttonLabels.abortTask,
-              event: { kind: "cancel_request" },
-            },
-          ],
-    );
+    const controls = buildPrivilegeControls(request);
+    await this.sendPoll(chatId, "Privilege request", controls.rows.flat().map((a) => ({ answerId: a.actionId, label: a.label, event: a.event })));
   }
 
   async sendShareDeletionRequest(chatId: string, requestId: string, taskName: string, summary: string): Promise<void> {
@@ -484,18 +347,8 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       taskName,
     });
     await this.sendNotice(chatId, messages.shareDeletionRequestPrompt(taskName, summary));
-    await this.sendPoll(chatId, "Shared workspace cleanup", [
-      {
-        answerId: "approve",
-        label: buttonLabels.approve,
-        event: { kind: "approval_response", decision: "approve", requestId },
-      },
-      {
-        answerId: "deny",
-        label: buttonLabels.deny,
-        event: { kind: "approval_response", decision: "deny", requestId },
-      },
-    ]);
+    const controls = buildShareDeletionControls(requestId);
+    await this.sendPoll(chatId, "Shared workspace cleanup", controls.rows.flat().map((a) => ({ answerId: a.actionId, label: a.label, event: a.event })));
   }
 
   private async sendNotice(chatId: string, text: string): Promise<void> {
@@ -511,7 +364,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     options: Array<{
       answerId: string;
       label: string;
-      event: MatrixPollEvent;
+      event: ControlActionEvent;
     }>,
   ): Promise<void> {
     const client = this.requireClient();

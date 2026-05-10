@@ -658,6 +658,80 @@ test("TelegramBotApiAdapter sends task updates with abort and mark-finished cont
   });
 });
 
+test("TelegramBotApiAdapter sends reportable text with a report control", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
+    token: "test-token",
+    botFactory: () => fakeBot,
+  });
+
+  await adapter.sendReportableText("7", "Task complete.");
+
+  assert.deepEqual(fakeBot.sentMessages[0], {
+    chatId: "7",
+    text: "Task complete.",
+    other: {
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: "Report dangerous output", callback_data: "report" },
+          ],
+        ],
+      },
+    },
+  });
+});
+
+test("TelegramBotApiAdapter sends privilege requests with appropriate controls", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
+    token: "test-token",
+    botFactory: () => fakeBot,
+  });
+
+  await adapter.sendPrivilegeRequest("7", {
+    kind: "host_operation",
+    requestId: "req-1",
+    payload: { type: "copy_into_share", sourcePath: "/tmp", targetPath: "/share", reason: "test" },
+  });
+
+  assert.equal(fakeBot.sentMessages.length, 1);
+  const markup = fakeBot.sentMessages[0]?.other?.["reply_markup"] as { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> };
+  assert.ok(markup);
+  assert.equal(markup.inline_keyboard.length, 2);
+  assert.equal(markup.inline_keyboard[0]?.[0]?.text, "Approve once");
+  assert.equal(markup.inline_keyboard[0]?.[0]?.callback_data, "approve:req-1");
+  assert.equal(markup.inline_keyboard[0]?.[1]?.text, "Deny");
+  assert.equal(markup.inline_keyboard[0]?.[1]?.callback_data, "deny:req-1");
+  assert.equal(markup.inline_keyboard[1]?.[0]?.text, "Report dangerous output");
+  assert.equal(markup.inline_keyboard[1]?.[0]?.callback_data, "report");
+  assert.equal(markup.inline_keyboard[1]?.[1]?.text, "Abort task");
+  assert.equal(markup.inline_keyboard[1]?.[1]?.callback_data, "cancel");
+});
+
+test("TelegramBotApiAdapter sends share deletion requests with approve and deny controls", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
+    token: "test-token",
+    botFactory: () => fakeBot,
+  });
+
+  await adapter.sendShareDeletionRequest("7", "del-req-1", "inspect", "report.txt");
+
+  assert.equal(fakeBot.sentMessages.length, 1);
+  const markup = fakeBot.sentMessages[0]?.other?.["reply_markup"] as { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> };
+  assert.ok(markup);
+  assert.equal(markup.inline_keyboard.length, 1);
+  assert.equal(markup.inline_keyboard[0]?.[0]?.text, "Approve once");
+  assert.equal(markup.inline_keyboard[0]?.[0]?.callback_data, "share_approve:del-req-1");
+  assert.equal(markup.inline_keyboard[0]?.[1]?.text, "Deny");
+  assert.equal(markup.inline_keyboard[0]?.[1]?.callback_data, "share_deny:del-req-1");
+});
+
 test("TelegramBotApiAdapter sends local files as Telegram documents", async () => {
   const fakeBot = new FakeTelegramBot();
   const adapter = new TelegramBotApiAdapter({
