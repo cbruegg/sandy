@@ -719,7 +719,7 @@ export class SandyOrchestrator {
     return {
       requestId: request.requestId,
       outcome: "approved",
-      message: `Host directory access granted. Use the path: ${result.grantPath}`,
+      message: `Use the path: ${result.grantPath}`,
     };
   }
 
@@ -835,7 +835,7 @@ export class SandyOrchestrator {
 
     return {
       ...result,
-      message,
+      message: `${message} ${result.message}`,
       scope,
     };
   }

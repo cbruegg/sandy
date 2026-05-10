@@ -57,6 +57,8 @@ test("HostfsVolumeManager uses webdav-prefixed rclone backend options", async ()
   assert.ok(invocation.includes("webdav-url=http://host.docker.internal:9876/bundles/bundle-1"));
   assert.ok(invocation.includes("webdav-vendor=other"));
   assert.ok(invocation.includes("webdav-user=sandy"));
+  assert.ok(invocation.includes("dir-cache-time=0s"));
+  assert.ok(invocation.includes("poll-interval=0"));
   assert.deepEqual(invocation.slice(-1), [
     "sandy-hostfs-bundle-1",
   ]);

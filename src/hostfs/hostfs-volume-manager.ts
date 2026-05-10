@@ -44,6 +44,8 @@ export class HostfsVolumeManager {
         "-o", "webdav-vendor=other",
         "-o", "webdav-user=sandy",
         "-o", `webdav-pass=${obscuredSecret}`,
+        "-o", "dir-cache-time=0s",
+        "-o", "poll-interval=0",
         volumeName,
       ]);
     } catch (error) {
@@ -60,6 +62,8 @@ export class HostfsVolumeManager {
           "-o", "webdav-vendor=other",
           "-o", "webdav-user=sandy",
           "-o", `webdav-pass=${obscuredSecret}`,
+          "-o", "dir-cache-time=0s",
+          "-o", "poll-interval=0",
           volumeName,
         ]);
       } else {

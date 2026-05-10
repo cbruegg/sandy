@@ -1641,7 +1641,7 @@ test("orchestrator creates a hostfs grant for worker-session host directory appr
   }]);
   assert.deepEqual(await toolCallPromise, {
     isError: false,
-    message: messages.hostDirectoryAccessAllowedForWorkerSession("/tmp", "read_only"),
+    message: `${messages.hostDirectoryAccessAllowedForWorkerSession("/tmp", "read_only")} Use the path: ${hostGrantsPrefix}/grant-1`,
   });
 });
 
