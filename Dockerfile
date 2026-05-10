@@ -103,12 +103,14 @@ RUN printf '#!/bin/sh\nexec sudo -u linuxbrew -H /home/linuxbrew/.linuxbrew/bin/
 
 ENV BUN_INSTALL="/root/.bun"
 # Keep this PATH in sync with scripts/worker-entrypoint.sh so worker startup
-# and later non-interactive shells see the same toolchain locations.
+# and later shells see the same toolchain locations, including login shells
+# via /etc/profile.local generated below.
 ENV PATH="${BUN_INSTALL}/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
 
 COPY --from=build /app/dist ./dist
 COPY scripts/worker-entrypoint.sh /usr/local/bin/sandy-worker-entrypoint
 COPY scripts/http-proxy-exec.sh /usr/local/bin/sandy-http-proxy-exec
-RUN chmod 0755 /usr/local/bin/sandy-worker-entrypoint /usr/local/bin/sandy-http-proxy-exec
+RUN printf '#!/bin/sh\nexport PATH="%s"\n' "$PATH" > /etc/profile.local \
+  && chmod 0755 /usr/local/bin/sandy-worker-entrypoint /usr/local/bin/sandy-http-proxy-exec /etc/profile.local
 
 ENTRYPOINT ["/usr/local/bin/sandy-worker-entrypoint"]
