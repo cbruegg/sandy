@@ -10,6 +10,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { DockerSandboxRunner } from "./docker-sandbox-runner.js";
 import { TaskBundleLauncherImpl, type TaskBundleLauncherOptions } from "./task-bundle-launcher.js";
 import { TaskBundlePoolImpl } from "./task-bundle-pool.js";
+import { SANDY_MANAGED_CONTAINER_LABEL } from "./container-label.js";
 import type { ChannelFormatting, HostCommand, SubAgentEvent, WorkerStartConfig } from "../types.js";
 
 const testFormatting: ChannelFormatting = {
@@ -1274,4 +1275,107 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
     invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-subagent:latest");
   assert.ok(workerRunInvocation);
   assert.ok(workerRunInvocation.args.includes(`container:${guardContainerName}`));
+});
+
+test("DockerSandboxRunner adds managed label to worker, guard and proxy containers", async () => {
+  const guardChild = new FakeChildProcess();
+  const proxyChild = new FakeChildProcess();
+  const taskChild = new FakeChildProcess();
+  const invocations: Array<{ command: string; args: string[] }> = [];
+  let runCount = 0;
+
+  const spawnImpl = ((command: string, args: readonly string[]) => {
+    invocations.push({ command, args: [...args] });
+    if (args[0] === "run") {
+      runCount += 1;
+      if (runCount === 1) {
+        queueMicrotask(() => {
+          guardChild.stdout.write("ready\n");
+        });
+        return guardChild as unknown as ChildProcessWithoutNullStreams;
+      }
+      if (runCount === 2) {
+        queueMicrotask(() => {
+          proxyChild.stdout.write('{"type":"ready"}\n');
+        });
+        return proxyChild as unknown as ChildProcessWithoutNullStreams;
+      }
+      return taskChild as unknown as ChildProcessWithoutNullStreams;
+    }
+
+    const cleanupChild = new FakeChildProcess();
+    queueMicrotask(() => {
+      cleanupChild.emit("exit", 0, null);
+    });
+    return cleanupChild as unknown as ChildProcessWithoutNullStreams;
+  }) as typeof import("node:child_process").spawn;
+
+  const launcherOptions: TaskBundleLauncherOptions = {
+    workerImage: "sandy-subagent:latest",
+    networkGuardImage: "sandy-network-guard:latest",
+    shareRoot: "/tmp/sandy-test-shares",
+    codexAuthFile: null,
+    skillsDirectory: null,
+    workerCodexBinaryPath: null,
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
+    httpProxyImage: "sandy-http-proxy:latest",
+    httpProxyCaCertPath: "/tmp/sandy-ca.pem",
+    httpProxyConfDirPath: "/tmp/sandy-mitmproxy-conf",
+    resolveHttpProxyRequest: async (request) => ({
+      type: "auth_response",
+      requestId: request.requestId,
+      outcome: "approved",
+      headers: request.headers,
+    }),
+    spawnImpl,
+  };
+  const runner = createRunner({
+    workerImage: "sandy-subagent:latest",
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
+    workerCodexConfigBuilder: () => ({
+      codexConfigToml: null,
+      environment: {},
+    }),
+    httpProxyUrlFactory: () => "http://Bearer:token@sandy-http-proxy:8081",
+    spawnImpl,
+  }, launcherOptions);
+
+  await runner.launchTask({
+    chatId: "chat-1",
+    taskId: "task-1",
+    taskName: "test-task",
+    taskLanguage: "English",
+    taskBrief: "Inspect the environment.",
+    channelFormatting: testFormatting,
+    initialInput: { text: "Inspect the environment.", images: [] },
+    workerStartConfig: {
+      ...defaultWorkerStartConfig,
+      httpTokens: [],
+      httpProxyWrapper: "/usr/local/bin/sandy-http-proxy-exec",
+    },
+  }, async () => {});
+
+  const guardRunInvocation = invocations.find((invocation) =>
+    invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-network-guard:latest");
+  assert.ok(guardRunInvocation);
+  assert.ok(guardRunInvocation.args.includes("--label"));
+  assert.ok(guardRunInvocation.args.includes(SANDY_MANAGED_CONTAINER_LABEL));
+
+  const proxyRunInvocation = invocations.find((invocation) =>
+    invocation.args[0] === "run" && invocation.args.some((arg) => arg.startsWith("sandy-http-proxy-")));
+  assert.ok(proxyRunInvocation);
+  assert.ok(proxyRunInvocation.args.includes("--label"));
+  assert.ok(proxyRunInvocation.args.includes(SANDY_MANAGED_CONTAINER_LABEL));
+
+  const workerRunInvocation = invocations.find((invocation) =>
+    invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-subagent:latest");
+  assert.ok(workerRunInvocation);
+  assert.ok(workerRunInvocation.args.includes("--label"));
+  assert.ok(workerRunInvocation.args.includes(SANDY_MANAGED_CONTAINER_LABEL));
 });

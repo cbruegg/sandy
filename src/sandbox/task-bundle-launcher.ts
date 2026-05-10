@@ -17,6 +17,7 @@ import {
 import {launchNetworkGuardContainer, type StartedNetworkGuard} from "./network-guard.js";
 import type {TaskBundle, TaskBundleLauncher} from "./task-bundle-types.js";
 import {createBundleSharePath} from "./task-bundle-share.js";
+import {SANDY_MANAGED_CONTAINER_LABEL} from "./container-label.js";
 import {randomUUID} from "node:crypto";
 
 const workerCodexSeedMountPath = "/run/sandy-codex-seed";
@@ -138,6 +139,8 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
         "-i",
         "--name",
         proxyContainerName,
+        "--label",
+        SANDY_MANAGED_CONTAINER_LABEL,
         "--network",
         `container:${networkGuard.containerName}`,
         "--cap-drop",
@@ -174,6 +177,8 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
       "-i",
       "--name",
       containerName,
+      "--label",
+      SANDY_MANAGED_CONTAINER_LABEL,
       "--cap-drop",
       "NET_ADMIN",
       "--cap-drop",

@@ -3,6 +3,7 @@ import type {WorkerNetworkConfig} from "../config.js";
 import {logger} from "../logger.js";
 import {mcpProxyContainerAlias} from "../mcp/proxy-route.js";
 import {createInterface} from "node:readline";
+import {SANDY_MANAGED_CONTAINER_LABEL} from "./container-label.js";
 
 const DEFAULT_NETWORK_GUARD_IMAGE = "sandy-network-guard:latest";
 
@@ -50,6 +51,8 @@ export async function launchNetworkGuardContainer(
     "-i",
     "--name",
     containerName,
+    "--label",
+    SANDY_MANAGED_CONTAINER_LABEL,
     "--cap-add",
     "NET_ADMIN",
     "--cap-drop",
