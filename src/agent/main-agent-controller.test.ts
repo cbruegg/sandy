@@ -348,6 +348,5 @@ test("buildMainAgentPrompt includes Sandy host-integration tools only on the ini
 
   assert.match(initialPrompt, /MCP server "sandy" available to the worker\/sub-agent exposes these host-integration tools:/);
   assert.match(initialPrompt, /send_file_to_channel/);
-  assert.match(initialPrompt, /complete_task/);
   assert.doesNotMatch(deltaPrompt, /MCP server "sandy" exposes these host-integration tools:/);
 });

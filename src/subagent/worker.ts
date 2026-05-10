@@ -8,7 +8,7 @@ import {configureLogger, logger} from "../logger.js";
 import {type HostCommand, type SubAgentEvent,} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {applyWorkerCodexConfigPatch, buildWorkerCodexEnvironment, workerCodexHomePath,} from "./worker-codex-config.js";
-import {sandyMcpServerId} from "./worker-tools.js";
+
 import {
   buildInitialTaskInput,
   buildPrivilegeResolutionInput,
@@ -129,11 +129,6 @@ function handleTaskTurnEvent(event: ThreadEvent): ThreadEventDisposition {
           type: "progress",
           message: messages.mcpToolProgress(event.item.status, event.item.server, event.item.tool, event.item.arguments),
         });
-        if (event.item.server === sandyMcpServerId
-          && event.item.tool === "complete_task"
-          && event.item.status === "completed") {
-          return "task_done";
-        }
       }
       return "none";
     case "turn.completed":

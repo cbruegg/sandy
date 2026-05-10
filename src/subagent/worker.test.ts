@@ -11,7 +11,7 @@ import {
 } from "./worker.js";
 import type { ChannelFormatting, PrivilegeResolutionResult } from "../types.js";
 import { parseSubAgentEvent } from "../types.js";
-import { parseWorkerToolPayload, sandyMcpServerId } from "./worker-tools.js";
+import { parseWorkerToolPayload } from "./worker-tools.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 
 test("buildInitialTaskInput tells the sub-agent where the shared workspace is", () => {
@@ -155,65 +155,6 @@ test("parseSubAgentEvent accepts task-summary events", () => {
     type: "task_summary",
     summary: "Task completed successfully",
   });
-});
-
-test("streamTurn stops after sandy.complete_task finishes", async () => {
-  const writes: string[] = [];
-  const originalWrite = process.stdout.write.bind(process.stdout);
-  const mockWrite: typeof process.stdout.write = (
-    chunk,
-    encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
-    callback?: (err?: Error | null) => void,
-  ) => {
-    writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
-    if (typeof encodingOrCallback === "function") {
-      encodingOrCallback();
-    } else {
-      callback?.();
-    }
-    return true;
-  };
-  process.stdout.write = mockWrite;
-
-  try {
-    const thread = {
-      async runStreamed() {
-        return {
-          events: (async function* () {
-            yield {
-              type: "item.updated",
-              item: {
-                type: "mcp_tool_call",
-                server: sandyMcpServerId,
-                tool: "complete_task",
-                status: "completed",
-                arguments: {},
-              },
-            };
-            yield {
-              type: "item.completed",
-              item: {
-                type: "agent_message",
-                text: "This should never be forwarded after completion.",
-              },
-            };
-          })(),
-        };
-      },
-    } as unknown as Thread;
-
-    const result = await streamTurn(thread, "Inspect the reel.");
-
-    assert.equal(result.sawTaskDone, true);
-    assert.equal(result.sawTerminalError, false);
-    assert.equal(writes.length, 1);
-    assert.deepEqual(parseSubAgentEvent(writes[0]!.trim()), {
-      type: "progress",
-      message: "MCP completed: sandy.complete_task {}",
-    });
-  } finally {
-    process.stdout.write = originalWrite;
-  }
 });
 
 test("streamTurn ignores empty assistant messages", async () => {

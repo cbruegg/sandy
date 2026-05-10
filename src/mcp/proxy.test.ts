@@ -342,20 +342,20 @@ test("SandyMcpProxy exposes native Sandy tools without external authorization", 
   const listResult = await listHandler?.({ method: "tools/list", params: {} }, undefined) as {
     tools: Array<{ name: string }>;
   };
-  assert.ok(listResult.tools.some((tool) => tool.name === "complete_task"));
+  assert.ok(listResult.tools.some((tool) => tool.name === "send_file_to_channel"));
 
   const callResult = await callHandler?.({
     method: "tools/call",
     params: {
-      name: "complete_task",
-      arguments: {},
+      name: "send_file_to_channel",
+      arguments: { path: "/workspace/share/test.txt" },
     },
   }, undefined) as { isError?: boolean; content: Array<{ text: string }> };
 
   assert.deepEqual(executeCalls, [{
     taskId: "task-1",
-    toolName: "complete_task",
-    arguments: {},
+    toolName: "send_file_to_channel",
+    arguments: { path: "/workspace/share/test.txt" },
   }]);
   assert.deepEqual(authorizationCalls, []);
   assert.equal(callResult.isError, false);

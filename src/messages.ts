@@ -67,7 +67,7 @@ export const messages = {
   taskNotActive: (taskId: string): string => `Task ${taskId} is not active.`,
   taskNoLongerActive: (taskId: string): string => `Task ${taskId} is no longer active.`,
   sharedFileSentToUser: (path: string): string => `Sent ${path} to the user.`,
-  taskCompletionAcknowledged: (): string => "Task completion acknowledged.",
+
   anotherPrivilegeRequestPendingForTask: (): string => "Another privilege request is already pending for this task.",
   unsupportedMcpPrivilegeRequest: (serverId: string, toolName: string): string =>
     `Unsupported MCP privilege request ${serverId}.${toolName}.`,

@@ -39,7 +39,6 @@ function defineWorkerTool<TName extends string, TSchema extends z.ZodObject<z.co
 const copyIntoShareToolName = "copy_into_share";
 const copyOutOfShareToolName = "copy_out_of_share";
 const sendFileToChannelToolName = "send_file_to_channel";
-const completeTaskToolName = "complete_task";
 const requestHttpTokenToolName = "request_http_token";
 const requestHostDirectoryAccessToolName = "request_host_directory_access";
 
@@ -61,10 +60,6 @@ const sendFileToChannelSchema = z.object({
   type: z.literal(sendFileToChannelToolName),
   path: z.string(),
   caption: z.string().optional(),
-}).strict();
-
-const completeTaskSchema = z.object({
-  type: z.literal(completeTaskToolName),
 }).strict();
 
 const requestHttpTokenSchema = z.object({
@@ -100,12 +95,6 @@ export const workerToolEntries = [
     sendFileToChannelSchema,
   ),
   defineWorkerTool(
-    completeTaskToolName,
-    "Signal to the host that the tasks the user stated so far are fully complete. You *must* emit this at the very end, but only after you have emitted the last user-facing message.",
-    false,
-    completeTaskSchema,
-  ),
-  defineWorkerTool(
     requestHttpTokenToolName,
     "Ask the host for permission to use a preconfigured HTTP token. Emit this tool call directly instead of asking the user in plain text. You must request approval before making HTTP requests that use placeholder headers like 'Authorization: Bearer SANDY_TOKEN_<tokenId>'. The host will inject the real token value into proxied HTTP requests if approved.",
     true,
@@ -125,7 +114,6 @@ export type WorkerToolPayload =
   | z.infer<typeof copyIntoShareSchema>
   | z.infer<typeof copyOutOfShareSchema>
   | z.infer<typeof sendFileToChannelSchema>
-  | z.infer<typeof completeTaskSchema>
   | z.infer<typeof requestHttpTokenSchema>
   | z.infer<typeof requestHostDirectoryAccessSchema>;
 export type PrivilegedWorkerToolPayload =

@@ -317,8 +317,8 @@ test("McpSidecarManager answers native Sandy tool calls over the control channel
       type: "native_tool_call_request",
       requestId: "request-1",
       taskId: "task-1",
-      toolName: "complete_task",
-      arguments: {},
+      toolName: "send_file_to_channel",
+      arguments: { path: "/workspace/share/test.txt" },
     }) + "\n",
   );
   await new Promise<void>((resolve) => setImmediateCallback(resolve));
@@ -383,8 +383,8 @@ test("McpSidecarManager returns a failed native tool call result when native too
       type: "native_tool_call_request",
       requestId: "request-1",
       taskId: "task-1",
-      toolName: "complete_task",
-      arguments: {},
+      toolName: "send_file_to_channel",
+      arguments: { path: "/workspace/share/test.txt" },
     }) + "\n",
   );
   await new Promise<void>((resolve) => setImmediateCallback(resolve));

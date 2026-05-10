@@ -37,9 +37,6 @@ const localTestInboundEventSchema = z.discriminatedUnion("kind", [
     kind: z.literal("cancel_request"),
   }).strict(),
   localTestSimpleInputSchema.extend({
-    kind: z.literal("mark_finished_request"),
-  }).strict(),
-  localTestSimpleInputSchema.extend({
     kind: z.literal("danger_report"),
   }).strict(),
   localTestApprovalInputSchema,

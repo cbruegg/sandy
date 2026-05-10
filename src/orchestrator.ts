@@ -241,13 +241,7 @@ export class SandyOrchestrator {
           level: call.level,
         });
       }
-      case "complete_task": {
-        return {
-          requestId: randomUUID(),
-          outcome: "approved",
-          message: messages.taskCompletionAcknowledged(),
-        };
-      }
+
     }
 
     assertNever(call); // would fail at compile-time
