@@ -10,6 +10,7 @@ type HostfsVolumeManagerOptions = {
 };
 
 const DEFAULT_VOLUME_PREFIX = "sandy-hostfs";
+const DEFAULT_DIR_CACHE_TIME = "500ms";
 const RCLONE_OBSCURE_KEY = Buffer.from([
   0x9c, 0x93, 0x5b, 0x48, 0x73, 0x0a, 0x55, 0x4d,
   0x6b, 0xfd, 0x7c, 0x63, 0xc8, 0x86, 0xa9, 0x2b,
@@ -44,7 +45,7 @@ export class HostfsVolumeManager {
         "-o", "webdav-vendor=other",
         "-o", "webdav-user=sandy",
         "-o", `webdav-pass=${obscuredSecret}`,
-        "-o", "dir-cache-time=0s",
+        "-o", `dir-cache-time=${DEFAULT_DIR_CACHE_TIME}`,
         "-o", "poll-interval=0",
         volumeName,
       ]);
@@ -62,7 +63,7 @@ export class HostfsVolumeManager {
           "-o", "webdav-vendor=other",
           "-o", "webdav-user=sandy",
           "-o", `webdav-pass=${obscuredSecret}`,
-          "-o", "dir-cache-time=0s",
+          "-o", `dir-cache-time=${DEFAULT_DIR_CACHE_TIME}`,
           "-o", "poll-interval=0",
           volumeName,
         ]);
