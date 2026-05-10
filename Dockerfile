@@ -102,6 +102,8 @@ RUN printf '#!/bin/sh\nexec sudo -u linuxbrew -H /home/linuxbrew/.linuxbrew/bin/
   && chmod 0755 /usr/local/bin/brew
 
 ENV BUN_INSTALL="/root/.bun"
+# Keep this PATH in sync with scripts/worker-entrypoint.sh so worker startup
+# and later non-interactive shells see the same toolchain locations.
 ENV PATH="${BUN_INSTALL}/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin:/home/linuxbrew/.linuxbrew/sbin:${PATH}"
 
 COPY --from=build /app/dist ./dist
