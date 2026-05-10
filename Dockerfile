@@ -87,6 +87,7 @@ RUN zypper --non-interactive refresh \
     tar \
     unzip \
     which \
+    ripgrep \
   && zypper clean --all
 
 RUN curl -fsSL https://bun.sh/install | bash
