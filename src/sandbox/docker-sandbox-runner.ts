@@ -464,6 +464,13 @@ export class DockerSandboxRunner implements SandboxRunner {
           error: error instanceof Error ? error.message : String(error),
         });
         await this.deleteTaskShareWithDocker(taskId, sharePath);
+        try {
+          await rm(sharePath, {recursive: true, force: true});
+        } catch (cleanupError) {
+          if (!isPermissionError(cleanupError)) {
+            throw cleanupError;
+          }
+        }
       } else {
         throw error;
       }
@@ -489,10 +496,10 @@ export class DockerSandboxRunner implements SandboxRunner {
         "-v",
         `${sharePath}:/target`,
         "--entrypoint",
-        "rm",
+        "sh",
         workerImage,
-        "-rf",
-        "/target",
+        "-lc",
+        "rm -rf /target/* /target/.[!.]* /target/..?*",
       ], {
         stdio: "ignore",
       });

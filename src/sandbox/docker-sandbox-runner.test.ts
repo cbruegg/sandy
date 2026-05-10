@@ -710,9 +710,10 @@ test("DockerSandboxRunner falls back to a root Docker container when host rm fai
   assert.ok(dockerRun, "Expected a docker run invocation for permission fallback cleanup");
   assert.ok(dockerRun.args.includes("--rm"));
   assert.ok(dockerRun.args.includes("--entrypoint"));
-  assert.ok(dockerRun.args.includes("rm"));
-  assert.ok(dockerRun.args.includes("-rf"));
-  assert.ok(dockerRun.args.includes("/target"));
+  assert.ok(dockerRun.args.includes("sh"));
+  assert.ok(dockerRun.args.includes(`${taskShare}:/target`));
+  assert.ok(dockerRun.args.includes("-lc"));
+  assert.ok(dockerRun.args.includes("rm -rf /target/* /target/.[!.]* /target/..?*"));
 });
 
 test("DockerSandboxRunner sends codex config TOML in start_task instead of mounting it", async () => {
