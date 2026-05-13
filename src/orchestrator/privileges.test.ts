@@ -1,20 +1,20 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { HostfsBroker } from "./hostfs/hostfs-broker.js";
-import type { HostDirectoryAccessLevel } from "./hostfs/path-policy.js";
-import { HttpTokenAuthorizer } from "./http/token-authorizer.js";
-import { messages } from "./messages.js";
+import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
+import type { HostDirectoryAccessLevel } from "../hostfs/path-policy.js";
+import { HttpTokenAuthorizer } from "../http/token-authorizer.js";
+import { messages } from "../messages.js";
 import {
   createTestOrchestrator,
   expectDefined,
   FakePrivilegeBroker,
   RecordingChannel,
   StubMainAgent,
-} from "./orchestrator-test-helpers.js";
-import { hostGrantsPrefix } from "./paths.js";
-import type { PersistentApprovalStore } from "./privilege/persistent-approval-store.js";
-import { TaskRegistry } from "./task-registry.js";
-import { sharedWorkspaceMountPath } from "./shared-workspace.js";
+} from "./test-helpers.js";
+import { hostGrantsPrefix } from "../paths.js";
+import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
+import { TaskRegistry } from "../task-registry.js";
+import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 
 test("orchestrator applies supported privilege requests deterministically and outside the main agent path", async () => {
   const privilegeBroker = new FakePrivilegeBroker();

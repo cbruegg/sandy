@@ -1,5 +1,5 @@
-import type { SandboxHandle } from "./sandbox/sandbox-runner.js";
-import type { PrivilegeResolutionResult } from "./types.js";
+import type { SandboxHandle } from "../sandbox/sandbox-runner.js";
+import type { PrivilegeResolutionResult } from "../types.js";
 
 type PrivilegeResolver = (result: PrivilegeResolutionResult) => void;
 

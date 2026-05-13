@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { isSupportedPrivilegeRequest } from "./privilege/privilege-broker.js";
-import { resolveTaskShareHostPath } from "./shared-workspace.js";
-import { logger } from "./logger.js";
-import { messages } from "./messages.js";
-import { OrchestratorRuntimeState } from "./orchestrator-runtime-state.js";
-import type { SandyOrchestratorDependencies } from "./orchestrator-shared.js";
-import { parseWorkerToolPayload } from "./subagent/worker-tools.js";
-import type { WorkerToolPayload } from "./subagent/worker-tools.js";
-import type { NormalizedChatEvent, PrivilegeRequest, PrivilegeResolutionResult, SessionState } from "./types.js";
+import { isSupportedPrivilegeRequest } from "../privilege/privilege-broker.js";
+import { resolveTaskShareHostPath } from "../shared-workspace.js";
+import { logger } from "../logger.js";
+import { messages } from "../messages.js";
+import { OrchestratorRuntimeState } from "./runtime-state.js";
+import type { SandyOrchestratorDependencies } from "./shared.js";
+import { parseWorkerToolPayload } from "../subagent/worker-tools.js";
+import type { WorkerToolPayload } from "../subagent/worker-tools.js";
+import type { NormalizedChatEvent, PrivilegeRequest, PrivilegeResolutionResult, SessionState } from "../types.js";
 
 export class OrchestratorPrivileges {
   constructor(

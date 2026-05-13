@@ -1,14 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { logger } from "./logger.js";
-import { messages } from "./messages.js";
+import { logger } from "../logger.js";
+import { messages } from "../messages.js";
 import {
   buildTaskBriefWithAttachments,
   buildTaskInputPayload,
   describeUserMessageForMainAgent,
-} from "./orchestrator-worker-input.js";
-import { stageSharedAttachments } from "./orchestrator-task-share.js";
-import { OrchestratorRuntimeState } from "./orchestrator-runtime-state.js";
-import type { ActiveTaskStatus, SandyOrchestratorDependencies, UserMessageEvent } from "./orchestrator-shared.js";
+} from "./worker-input.js";
+import { stageSharedAttachments } from "./task-share.js";
+import { OrchestratorRuntimeState } from "./runtime-state.js";
+import type { ActiveTaskStatus, SandyOrchestratorDependencies, UserMessageEvent } from "./shared.js";
 import type {
   MainAgentDecision,
   MainAgentTaskPolicy,
@@ -17,7 +17,7 @@ import type {
   SessionState,
   SubAgentEvent,
   TranscriptEntry,
-} from "./types.js";
+} from "../types.js";
 
 export class OrchestratorTaskLifecycle {
   constructor(

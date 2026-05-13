@@ -14,7 +14,7 @@ import { TaskRegistry } from "./task-registry.js";
 import { McpWorkerLaunchConfigBuilder } from "./mcp/worker-launch-config-builder.js";
 import { createMcpWorkerNetworkName } from "./mcp/worker-network-name.js";
 import { HostMcpServerRegistry } from "./mcp/host-server-registry.js";
-import { SandyOrchestrator } from "./orchestrator.js";
+import { SandyOrchestrator } from "./orchestrator/index.js";
 import { TomlPersistentApprovalStore } from "./privilege/persistent-approval-store.js";
 import { PrivilegeBrokerImpl } from "./privilege/privilege-broker.js";
 import {DockerSandboxRunner, type DockerSandboxRunnerOptions} from "./sandbox/docker-sandbox-runner.js";

@@ -1,13 +1,13 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { messages } from "./messages.js";
+import { messages } from "../messages.js";
 import {
   contextTexts,
   createTestOrchestrator,
   expectDefined,
   SequenceMainAgent,
   StubMainAgent,
-} from "./orchestrator-test-helpers.js";
+} from "./test-helpers.js";
 
 test("orchestrator stages attached files into the task share before launching the worker", async () => {
   const mainAgent = new StubMainAgent({

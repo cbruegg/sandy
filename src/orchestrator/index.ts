@@ -1,11 +1,11 @@
-import { logger } from "./logger.js";
-import { messages } from "./messages.js";
-import { OrchestratorPrivileges } from "./orchestrator-privileges.js";
-import { OrchestratorRuntimeState } from "./orchestrator-runtime-state.js";
-import type { SandyOrchestratorDependencies, SupportedChatEvent } from "./orchestrator-shared.js";
-import { OrchestratorTaskLifecycle, describeUserMessageForMainAgent } from "./orchestrator-task-lifecycle.js";
-import { buildWorkerFollowUpInput } from "./orchestrator-worker-input.js";
-import type { MainAgentDecision, NormalizedChatEvent, SessionState } from "./types.js";
+import { logger } from "../logger.js";
+import { messages } from "../messages.js";
+import { OrchestratorPrivileges } from "./privileges.js";
+import { OrchestratorRuntimeState } from "./runtime-state.js";
+import type { SandyOrchestratorDependencies, SupportedChatEvent } from "./shared.js";
+import { OrchestratorTaskLifecycle, describeUserMessageForMainAgent } from "./task-lifecycle.js";
+import { buildWorkerFollowUpInput } from "./worker-input.js";
+import type { MainAgentDecision, NormalizedChatEvent, SessionState } from "../types.js";
 
 export class SandyOrchestrator {
   private readonly channelFormatting: ReturnType<SandyOrchestratorDependencies["channel"]["getFormatting"]>;

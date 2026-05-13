@@ -1,11 +1,11 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { messages } from "./messages.js";
+import { messages } from "../messages.js";
 import {
   createTestOrchestrator,
   StubMainAgent,
-} from "./orchestrator-test-helpers.js";
-import type { MainAgentDecision } from "./types.js";
+} from "./test-helpers.js";
+import type { MainAgentDecision } from "../types.js";
 
 test("orchestrator accepts active-task output without storing host-side history", async () => {
   const mainAgent = new StubMainAgent({

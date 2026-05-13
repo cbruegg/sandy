@@ -1,18 +1,18 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
-import type { MainAgentController } from "./agent/main-agent-controller.js";
-import type { ChannelAdapter } from "./channel/channel-adapter.js";
-import { createNoopHostfsBroker } from "./hostfs/hostfs-broker.js";
-import type { HostfsBroker } from "./hostfs/hostfs-broker.js";
-import { SandyOrchestrator } from "./orchestrator.js";
-import type { PersistentApprovalStore } from "./privilege/persistent-approval-store.js";
-import { createNoopPersistentApprovalStore } from "./privilege/persistent-approval-store.js";
-import type { PrivilegeBroker, SupportedPrivilegeRequest } from "./privilege/privilege-broker.js";
-import { createNoopTaskBundleAssignmentRegistry } from "./sandbox/task-bundle-assignment-registry.js";
-import type { TaskBundleAssignmentLookup } from "./sandbox/task-bundle-assignment-registry.js";
-import type { LaunchTaskRequest, SandboxHandle, SandboxRunner } from "./sandbox/sandbox-runner.js";
-import { InMemorySessionStore } from "./session/in-memory-session-store.js";
-import { TaskRegistry } from "./task-registry.js";
+import type { MainAgentController } from "../agent/main-agent-controller.js";
+import type { ChannelAdapter } from "../channel/channel-adapter.js";
+import { createNoopHostfsBroker } from "../hostfs/hostfs-broker.js";
+import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
+import { SandyOrchestrator } from "./index.js";
+import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
+import { createNoopPersistentApprovalStore } from "../privilege/persistent-approval-store.js";
+import type { PrivilegeBroker, SupportedPrivilegeRequest } from "../privilege/privilege-broker.js";
+import { createNoopTaskBundleAssignmentRegistry } from "../sandbox/task-bundle-assignment-registry.js";
+import type { TaskBundleAssignmentLookup } from "../sandbox/task-bundle-assignment-registry.js";
+import type { LaunchTaskRequest, SandboxHandle, SandboxRunner } from "../sandbox/sandbox-runner.js";
+import { InMemorySessionStore } from "../session/in-memory-session-store.js";
+import { TaskRegistry } from "../task-registry.js";
 import type {
   ChannelFormatting,
   DecideContext,
@@ -23,7 +23,7 @@ import type {
   SavedAttachment,
   SubAgentEvent,
   TaskInputPayload,
-} from "./types.js";
+} from "../types.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",

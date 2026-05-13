@@ -1,5 +1,4 @@
-import type { MessageAttachment, SharedAttachment } from "./types.js";
-import type { TaskInputPayload } from "./types.js";
+import type { MessageAttachment, SharedAttachment, TaskInputPayload } from "../types.js";
 
 export function describeUserMessageForMainAgent(text: string, attachments: MessageAttachment[]): string {
   if (attachments.length === 0) {
