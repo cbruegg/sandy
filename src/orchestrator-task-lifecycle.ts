@@ -104,7 +104,6 @@ export class OrchestratorTaskLifecycle {
       await this.failActiveTaskFromEventHandling(session, taskId, message);
     }
 
-    this.deps.sessionStore.save(session);
   }
 
   async executeMainAgentDecision(

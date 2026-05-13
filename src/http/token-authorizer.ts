@@ -63,7 +63,6 @@ export class HttpTokenAuthorizer {
     );
     if (onceGrant) {
       onceGrant.consumed = true;
-      this.sessionStore.save(session);
       return Promise.resolve({
         requestId: randomUUID(),
         outcome: "approved",

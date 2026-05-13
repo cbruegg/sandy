@@ -60,7 +60,6 @@ export class OrchestratorPrivileges {
 
     try {
       const result = await this.executeWorkerToolCall(chatId, session, call);
-      this.deps.sessionStore.save(session);
       logger.info("task.native_tool_call_executed", {
         chatId,
         taskId: input.taskId,
@@ -281,7 +280,6 @@ export class OrchestratorPrivileges {
 
     activeTask.pendingPrivilegeRequest = request;
     activeTask.status = "awaiting_privilege_decision";
-    this.deps.sessionStore.save(session);
     await this.deps.channel.sendPrivilegeRequest(chatId, request);
 
     return await new Promise<PrivilegeResolutionResult>((resolve) => {
@@ -569,7 +567,6 @@ export class OrchestratorPrivileges {
     };
     activeTask.pendingPrivilegeRequest = request;
     activeTask.status = "awaiting_privilege_decision";
-    this.deps.sessionStore.save(session);
     await this.deps.channel.sendPrivilegeRequest(chatId, request);
 
     return await new Promise<PrivilegeResolutionResult>((resolve) => {
@@ -840,7 +837,6 @@ export class OrchestratorPrivileges {
     }
 
     onceGrant.consumed = true;
-    this.deps.sessionStore.save(session);
     return {
       requestId: request.requestId,
       outcome: "approved",

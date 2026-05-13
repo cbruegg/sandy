@@ -60,7 +60,6 @@ export class SandyOrchestrator {
       }
 
       await this.routeActiveTaskChatEvent(session, event);
-      this.deps.sessionStore.save(session);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown chat event handling failure.";
       logger.error("chat.event_handler_failed", {
@@ -158,7 +157,6 @@ export class SandyOrchestrator {
         });
 
         await this.taskLifecycle.executeMainAgentDecision(session, event, decision);
-        this.deps.sessionStore.save(session);
         return;
       }
     }

@@ -2,7 +2,6 @@ import type { SessionState } from "../types.js";
 
 export interface SessionStore {
   getOrCreate(chatId: string): SessionState;
-  save(session: SessionState): void;
   listSessions(): SessionState[];
 }
 
@@ -22,10 +21,6 @@ export class InMemorySessionStore implements SessionStore {
     };
     this.sessions.set(chatId, session);
     return session;
-  }
-
-  save(session: SessionState): void {
-    this.sessions.set(session.chatId, session);
   }
 
   listSessions(): SessionState[] {
