@@ -221,13 +221,13 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
   if (request.kind === "mcp_tool_call") {
     if (request.confirmsAutoApprovalForTask) {
       return [
-        `Previously auto-allowed for suitable tasks: ${request.serverId}.${request.toolName}`,
-        "Apply that auto-approval to this task?",
+        `A saved auto-approval matches this MCP tool: ${request.serverId}.${request.toolName}`,
+        "Apply that saved approval to this task?",
         `Arguments: ${JSON.stringify(request.arguments)}`,
       ].join("\n");
     }
     return [
-      `mcp_tool_call: ${request.serverId}.${request.toolName}`,
+      `MCP tool call: ${request.serverId}.${request.toolName}`,
       `Arguments: ${JSON.stringify(request.arguments)}`,
     ].join("\n");
   }
@@ -235,13 +235,13 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
   if (request.kind === "mcp_resource_read") {
     if (request.confirmsAutoApprovalForTask) {
       return [
-        `Previously auto-allowed for suitable tasks: ${request.serverId} resource`,
-        "Apply that auto-approval to this task?",
+        `A saved auto-approval matches this MCP resource read from ${request.serverId}.`,
+        "Apply that saved approval to this task?",
         `URI: ${request.uri}`,
       ].join("\n");
     }
     return [
-      `mcp_resource_read: ${request.serverId}`,
+      `MCP resource read from ${request.serverId}`,
       `URI: ${request.uri}`,
     ].join("\n");
   }
@@ -249,13 +249,13 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
   if (request.kind === "http_token_use") {
     if (request.confirmsAutoApprovalForTask) {
       return [
-        `Previously auto-allowed for suitable tasks: HTTP token ${request.tokenId} for ${request.host}`,
-        "Apply that auto-approval to this task?",
+        `A saved auto-approval matches HTTP token ${request.tokenId} for ${request.host}.`,
+        "Apply that saved approval to this task?",
         `Reason: ${request.reason}`,
       ].join("\n");
     }
     return [
-      `http_token_use: ${request.tokenId}`,
+      `HTTP token use: ${request.tokenId}`,
       `Host: ${request.host}`,
       `Reason: ${request.reason}`,
     ].join("\n");
@@ -263,17 +263,29 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
 
   if (request.kind === "host_directory_access") {
     return [
-      `host_directory_access: ${request.path}`,
-      `Level: ${request.level}`,
+      `Host directory access: ${request.path}`,
+      `Access level: ${describeHostDirectoryAccessLevel(request.level)}`,
     ].join("\n");
   }
 
   switch (request.payload.type) {
     case "copy_into_share":
+      return `Copy file into the shared workspace: ${request.payload.sourcePath} -> ${request.payload.targetPath}\nReason: ${request.payload.reason}`;
     case "copy_out_of_share":
-      return `${request.payload.type}: ${request.payload.sourcePath} -> ${request.payload.targetPath}\nReason: ${request.payload.reason}`;
+      return `Copy file out of the shared workspace: ${request.payload.sourcePath} -> ${request.payload.targetPath}\nReason: ${request.payload.reason}`;
     default:
-      return `host_operation: ${request.payload.type}`;
+      return `Host operation: ${request.payload.type}`;
+  }
+}
+
+function describeHostDirectoryAccessLevel(level: string): string {
+  switch (level) {
+    case "read_only":
+      return "read-only";
+    case "read_write":
+      return "read and write";
+    default:
+      return level;
   }
 }
 
