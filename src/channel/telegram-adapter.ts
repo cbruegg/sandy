@@ -10,7 +10,6 @@ import {
   buildShareDeletionControls,
   buildTaskControls,
   formatPrivilegeRequestLogType,
-  type ControlActionEvent,
   type ControlSurface,
 } from "./control-surface.js";
 import {
@@ -21,6 +20,7 @@ import {
 } from "./telegram-normalization.js";
 import { downloadTelegramFile, saveTelegramAttachments } from "./telegram-files.js";
 import { normalizeTelegramUsername } from "./telegram-user.js";
+import { serializeTelegramCallbackData } from "./telegram-callback-data.js";
 import type {
   ChannelFormatting,
   MessageAttachment,
@@ -296,16 +296,9 @@ function controlSurfaceToTelegramKeyboard(controls: ControlSurface): Array<Array
   return controls.rows.map((row) =>
     row.map((action) => ({
       text: action.label,
-      callback_data: encodeTelegramCallbackData(action.actionId, action.event),
+      callback_data: serializeTelegramCallbackData(action.actionId, action.event),
     }))
   );
-}
-
-function encodeTelegramCallbackData(actionId: string, event: ControlActionEvent): string {
-  if (event.kind === "approval_response" && event.requestId) {
-    return `${actionId}:${event.requestId}`;
-  }
-  return actionId;
 }
 
 function previewText(text: string): string {

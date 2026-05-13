@@ -7,6 +7,7 @@ import { logger } from "../logger.js";
 import { messages } from "../messages.js";
 import type { TranscriptionProvider } from "../transcription/transcription-provider.js";
 import { normalizeTelegramUsername } from "./telegram-user.js";
+import { parseTelegramCallbackData } from "./telegram-callback-data.js";
 
 type TelegramEventMetadata = {
   chatType: "private" | "group" | "supergroup" | "channel";
@@ -156,6 +157,7 @@ function extractCallbackQueryMetadata(update: Update): TelegramUpdateMetadata | 
   }
 
   const { data, message } = update.callback_query;
+  const callbackEvent = parseTelegramCallbackData(data);
   const base = {
     chatId: String(message.chat.id),
     chatType: message.chat.type,
@@ -164,20 +166,8 @@ function extractCallbackQueryMetadata(update: Update): TelegramUpdateMetadata | 
     senderUsername: normalizeTelegramUsername(update.callback_query.from.username),
   };
 
-  if (data.startsWith("approve:") || data.startsWith("approve_once:") || data.startsWith("approve_worker_session:") || data.startsWith("approve_always:") || data.startsWith("deny:") || data.startsWith("share_approve:") || data.startsWith("share_deny:")) {
-    return { ...base, kind: "approval_response" };
-  }
-
-  if (data === "report") {
-    return { ...base, kind: "danger_report" };
-  }
-
-  if (data === "cancel") {
-    return { ...base, kind: "cancel_request" };
-  }
-
-  if (data === "mark_finished") {
-    return { ...base, kind: "mark_finished_request" };
+  if (callbackEvent) {
+    return { ...base, kind: callbackEvent.kind };
   }
 
   return { ...base, kind: "unknown" };
@@ -189,6 +179,11 @@ function normalizeCallbackQuery(update: Update): TelegramNormalizedChatEvent | n
   }
 
   const { data, message } = update.callback_query;
+  const callbackEvent = parseTelegramCallbackData(data);
+  if (!callbackEvent) {
+    return null;
+  }
+
   const base = {
     chatId: String(message.chat.id),
     chatType: message.chat.type,
@@ -198,100 +193,10 @@ function normalizeCallbackQuery(update: Update): TelegramNormalizedChatEvent | n
     timestamp: nowFromUnix(message.date),
   };
 
-  if (data.startsWith("approve:")) {
-    const event: TelegramNormalizedChatEvent = {
-      ...base,
-      kind: "approval_response",
-      decision: "approve",
-      requestId: data.slice("approve:".length) || undefined,
-    };
-    return event;
-  }
-
-  if (data.startsWith("approve_once:")) {
-    const event: TelegramNormalizedChatEvent = {
-      ...base,
-      kind: "approval_response",
-      decision: "approve_once",
-      requestId: data.slice("approve_once:".length) || undefined,
-    };
-    return event;
-  }
-
-  if (data.startsWith("approve_worker_session:")) {
-    const event: TelegramNormalizedChatEvent = {
-      ...base,
-      kind: "approval_response",
-      decision: "approve_worker_session",
-      requestId: data.slice("approve_worker_session:".length) || undefined,
-    };
-    return event;
-  }
-
-  if (data.startsWith("approve_always:")) {
-    const event: TelegramNormalizedChatEvent = {
-      ...base,
-      kind: "approval_response",
-      decision: "approve_always",
-      requestId: data.slice("approve_always:".length) || undefined,
-    };
-    return event;
-  }
-
-  if (data.startsWith("deny:")) {
-    const event: TelegramNormalizedChatEvent = {
-      ...base,
-      kind: "approval_response",
-      decision: "deny",
-      requestId: data.slice("deny:".length) || undefined,
-    };
-    return event;
-  }
-
-  if (data.startsWith("share_approve:")) {
-    const event: TelegramNormalizedChatEvent = {
-      ...base,
-      kind: "approval_response",
-      decision: "approve",
-      requestId: data.slice("share_approve:".length) || undefined,
-    };
-    return event;
-  }
-
-  if (data.startsWith("share_deny:")) {
-    const event: TelegramNormalizedChatEvent = {
-      ...base,
-      kind: "approval_response",
-      decision: "deny",
-      requestId: data.slice("share_deny:".length) || undefined,
-    };
-    return event;
-  }
-
-  if (data === "report") {
-    const event: TelegramNormalizedChatEvent = {
-      ...base,
-      kind: "danger_report",
-    };
-    return event;
-  }
-
-  if (data === "cancel") {
-    return {
-      ...base,
-      kind: "cancel_request",
-    };
-  }
-
-  if (data === "mark_finished") {
-    const event: TelegramNormalizedChatEvent = {
-      ...base,
-      kind: "mark_finished_request",
-    };
-    return event;
-  }
-
-  return null;
+  return {
+    ...base,
+    ...callbackEvent,
+  };
 }
 
 async function normalizeVoiceMessage(
