@@ -2,8 +2,16 @@ import { basename } from "node:path";
 import { Bot, InputFile, type Context, type PollingOptions } from "grammy";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
-import { buttonLabels, messages } from "../messages.js";
+import { messages } from "../messages.js";
 import { sanitizeTelegramHtml, telegramHtmlAllowedTags } from "./telegram-html.js";
+import {
+  buildPrivilegeControls,
+  buildReportControls,
+  buildShareDeletionControls,
+  buildTaskControls,
+  formatPrivilegeRequestLogType,
+  type ControlSurface,
+} from "./control-surface.js";
 import {
   extractTelegramUpdateMetadata,
   normalizeTelegramUpdate,
@@ -12,6 +20,7 @@ import {
 } from "./telegram-normalization.js";
 import { downloadTelegramFile, saveTelegramAttachments } from "./telegram-files.js";
 import { normalizeTelegramUsername } from "./telegram-user.js";
+import { serializeTelegramCallbackData } from "./telegram-callback-data.js";
 import type {
   ChannelFormatting,
   MessageAttachment,
@@ -193,15 +202,9 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       chatId,
       textPreview: previewText(text),
     });
+    const controls = buildTaskControls();
     await this.sendFormattedMessage(chatId, text, {
-      reply_markup: {
-        inline_keyboard: [
-          [
-            { text: buttonLabels.abortTask, callback_data: "cancel" },
-            { text: buttonLabels.markAsFinished, callback_data: "mark_finished" },
-          ],
-        ],
-      },
+      reply_markup: { inline_keyboard: controlSurfaceToTelegramKeyboard(controls) },
     });
   }
 
@@ -210,43 +213,22 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       chatId,
       textPreview: previewText(text),
     });
+    const controls = buildReportControls();
     await this.sendFormattedMessage(chatId, text, {
-      reply_markup: {
-        inline_keyboard: [[
-          { text: buttonLabels.reportDangerousOutput, callback_data: "report" },
-        ]],
-      },
+      reply_markup: { inline_keyboard: controlSurfaceToTelegramKeyboard(controls) },
     });
   }
 
   async sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void> {
-    let requestType: string;
-    switch (request.kind) {
-      case "host_operation":
-        requestType = request.payload.type;
-        break;
-      case "mcp_tool_call":
-        requestType = `${request.serverId}.${request.toolName}`;
-        break;
-      case "mcp_resource_read":
-        requestType = `resource:${request.serverId}:${request.uri}`;
-        break;
-      case "http_token_use":
-        requestType = `http:${request.tokenId}@${request.host}`;
-        break;
-      case "host_directory_access":
-        requestType = `host_directory_access:${request.path}:${request.level}`;
-        break;
-    }
+    const requestType = formatPrivilegeRequestLogType(request);
     logger.info("telegram.send_privilege_request", {
       chatId,
       requestId: request.requestId,
       requestType,
     });
+    const controls = buildPrivilegeControls(request);
     await this.sendFormattedMessage(chatId, messages.privilegeRequestPrompt(request), {
-      reply_markup: {
-        inline_keyboard: buildPrivilegeKeyboard(request),
-      },
+      reply_markup: { inline_keyboard: controlSurfaceToTelegramKeyboard(controls) },
     });
   }
 
@@ -256,13 +238,9 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       requestId,
       taskName,
     });
+    const controls = buildShareDeletionControls(requestId);
     await this.sendFormattedMessage(chatId, messages.shareDeletionRequestPrompt(taskName, summary), {
-      reply_markup: {
-        inline_keyboard: [[
-          { text: buttonLabels.approve, callback_data: `approve:${requestId}` },
-          { text: buttonLabels.deny, callback_data: `deny:${requestId}` },
-        ]],
-      },
+      reply_markup: { inline_keyboard: controlSurfaceToTelegramKeyboard(controls) },
     });
   }
 
@@ -314,64 +292,13 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
   }
 }
 
-function buildPrivilegeKeyboard(request: PrivilegeRequest): Array<Array<{ text: string; callback_data: string }>> {
-  if ((request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use")
-    && request.confirmsAutoApprovalForTask) {
-    return [
-      [
-        { text: buttonLabels.approve, callback_data: `approve:${request.requestId}` },
-        { text: buttonLabels.deny, callback_data: `deny:${request.requestId}` },
-      ],
-      [
-        { text: buttonLabels.reportDangerousOutput, callback_data: "report" },
-        { text: buttonLabels.abortTask, callback_data: "cancel" },
-      ],
-    ];
-  }
-
-  if (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use") {
-    return [
-      [
-        { text: buttonLabels.approve, callback_data: `approve:${request.requestId}` },
-        { text: buttonLabels.approveWorkerSession, callback_data: `approve_session:${request.requestId}` },
-      ],
-      [
-        { text: buttonLabels.approveAlways, callback_data: `approve_always:${request.requestId}` },
-        { text: buttonLabels.deny, callback_data: `deny:${request.requestId}` },
-      ],
-      [
-        { text: buttonLabels.reportDangerousOutput, callback_data: "report" },
-        { text: buttonLabels.abortTask, callback_data: "cancel" },
-      ],
-    ];
-  }
-
-  if (request.kind === "host_directory_access") {
-    return [
-      [
-        { text: buttonLabels.approveWorkerSession, callback_data: `approve_session:${request.requestId}` },
-        { text: buttonLabels.approveAlwaysHostDirectory, callback_data: `approve_always:${request.requestId}` },
-      ],
-      [
-        { text: buttonLabels.deny, callback_data: `deny:${request.requestId}` },
-      ],
-      [
-        { text: buttonLabels.reportDangerousOutput, callback_data: "report" },
-        { text: buttonLabels.abortTask, callback_data: "cancel" },
-      ],
-    ];
-  }
-
-  return [
-    [
-      { text: buttonLabels.approve, callback_data: `approve:${request.requestId}` },
-      { text: buttonLabels.deny, callback_data: `deny:${request.requestId}` },
-    ],
-    [
-      { text: buttonLabels.reportDangerousOutput, callback_data: "report" },
-      { text: buttonLabels.abortTask, callback_data: "cancel" },
-    ],
-  ];
+function controlSurfaceToTelegramKeyboard(controls: ControlSurface): Array<Array<{ text: string; callback_data: string }>> {
+  return controls.rows.map((row) =>
+    row.map((action) => ({
+      text: action.label,
+      callback_data: serializeTelegramCallbackData(action.actionId, action.event),
+    }))
+  );
 }
 
 function previewText(text: string): string {
