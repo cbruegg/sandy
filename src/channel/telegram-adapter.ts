@@ -9,7 +9,7 @@ import {
   buildReportControls,
   buildShareDeletionControls,
   buildTaskControls,
-  formatPrivilegeRequestType,
+  formatPrivilegeRequestLogType,
   type ControlActionEvent,
   type ControlSurface,
 } from "./control-surface.js";
@@ -220,7 +220,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
   }
 
   async sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void> {
-    const requestType = formatPrivilegeRequestType(request);
+    const requestType = formatPrivilegeRequestLogType(request);
     logger.info("telegram.send_privilege_request", {
       chatId,
       requestId: request.requestId,

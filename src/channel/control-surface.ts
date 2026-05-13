@@ -114,7 +114,11 @@ export function buildPrivilegeControls(request: PrivilegeRequest): ControlSurfac
   return { rows };
 }
 
-export function formatPrivilegeRequestType(request: PrivilegeRequest): string {
+/**
+ * Returns a compact, stable identifier for privilege-request logs.
+ * User-facing descriptions live in messages.privilegeRequestPrompt().
+ */
+export function formatPrivilegeRequestLogType(request: PrivilegeRequest): string {
   switch (request.kind) {
     case "host_operation":
       return request.payload.type;

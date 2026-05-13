@@ -10,7 +10,7 @@ import {
   buildReportControls,
   buildShareDeletionControls,
   buildTaskControls,
-  formatPrivilegeRequestType,
+  formatPrivilegeRequestLogType,
   type ControlActionEvent,
 } from "./control-surface.js";
 
@@ -329,7 +329,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   }
 
   async sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void> {
-    const requestType = formatPrivilegeRequestType(request);
+    const requestType = formatPrivilegeRequestLogType(request);
     logger.info("matrix.send_privilege_request", {
       chatId,
       requestId: request.requestId,

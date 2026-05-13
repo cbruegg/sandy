@@ -5,7 +5,7 @@ import {
   buildReportControls,
   buildShareDeletionControls,
   buildTaskControls,
-  formatPrivilegeRequestType,
+  formatPrivilegeRequestLogType,
 } from "./control-surface.js";
 import { buttonLabels } from "../messages.js";
 
@@ -128,25 +128,25 @@ test("buildPrivilegeControls for host_directory_access returns session, always, 
   assert.equal(controls.rows[2]?.[1]?.actionId, "cancel");
 });
 
-test("formatPrivilegeRequestType formats each request kind", () => {
+test("formatPrivilegeRequestLogType formats each request kind", () => {
   assert.equal(
-    formatPrivilegeRequestType({ kind: "host_operation", requestId: "r1", payload: { type: "copy_into_share", sourcePath: "/tmp", targetPath: "/share", reason: "test" } }),
+    formatPrivilegeRequestLogType({ kind: "host_operation", requestId: "r1", payload: { type: "copy_into_share", sourcePath: "/tmp", targetPath: "/share", reason: "test" } }),
     "copy_into_share",
   );
   assert.equal(
-    formatPrivilegeRequestType({ kind: "mcp_tool_call", requestId: "r1", serverId: "fs", toolName: "read", arguments: {} }),
+    formatPrivilegeRequestLogType({ kind: "mcp_tool_call", requestId: "r1", serverId: "fs", toolName: "read", arguments: {} }),
     "fs.read",
   );
   assert.equal(
-    formatPrivilegeRequestType({ kind: "mcp_resource_read", requestId: "r1", serverId: "fs", uri: "file:///tmp" }),
+    formatPrivilegeRequestLogType({ kind: "mcp_resource_read", requestId: "r1", serverId: "fs", uri: "file:///tmp" }),
     "resource:fs:file:///tmp",
   );
   assert.equal(
-    formatPrivilegeRequestType({ kind: "http_token_use", requestId: "r1", tokenId: "api", host: "example.com", reason: "test" }),
+    formatPrivilegeRequestLogType({ kind: "http_token_use", requestId: "r1", tokenId: "api", host: "example.com", reason: "test" }),
     "http:api@example.com",
   );
   assert.equal(
-    formatPrivilegeRequestType({ kind: "host_directory_access", requestId: "r1", path: "/tmp", level: "read_write" }),
+    formatPrivilegeRequestLogType({ kind: "host_directory_access", requestId: "r1", path: "/tmp", level: "read_write" }),
     "host_directory_access:/tmp:read_write",
   );
 });
