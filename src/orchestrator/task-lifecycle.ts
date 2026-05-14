@@ -165,7 +165,6 @@ export class OrchestratorTaskLifecycle {
         );
 
         this.runtimeState.registerHandle(taskId, handle);
-        this.deps.taskRegistry.register(taskId, event.chatId);
         logger.info("task.started", {
           chatId: event.chatId,
           taskId,
@@ -331,7 +330,6 @@ export class OrchestratorTaskLifecycle {
     });
     this.failPendingPrivilegeRequestOnTaskClose(task);
     this.runtimeState.deleteHandle(task.taskId);
-    this.deps.taskRegistry.unregister(task.taskId);
     session.activeTask = null;
     await this.promptForShareDeletionIfNeeded(session, task.taskId, task.taskName);
   }

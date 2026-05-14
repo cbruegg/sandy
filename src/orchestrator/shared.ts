@@ -5,7 +5,6 @@ import type { PersistentApprovalStore } from "../privilege/persistent-approval-s
 import type { SandboxRunner } from "../sandbox/sandbox-runner.js";
 import type { TaskBundleAssignmentLookup } from "../sandbox/task-bundle-assignment-registry.js";
 import type { SessionStore } from "../session/in-memory-session-store.js";
-import type { TaskRegistry } from "../task-registry.js";
 import type { NormalizedChatEvent, SessionState, WorkerStartConfig } from "../types.js";
 import type { PrivilegeBroker } from "../privilege/privilege-broker.js";
 
@@ -20,7 +19,6 @@ export type SandyOrchestratorDependencies = {
   buildWorkerStartConfig: () => WorkerStartConfig;
   sessionStore: SessionStore;
   privilegeBroker: PrivilegeBroker;
-  taskRegistry: TaskRegistry;
   persistentApprovalStore: PersistentApprovalStore;
   hostfsBroker: HostfsBroker;
   taskBundleAssignmentRegistry: TaskBundleAssignmentLookup;

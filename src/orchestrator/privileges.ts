@@ -25,15 +25,15 @@ export class OrchestratorPrivileges {
     toolName: string;
     arguments: unknown;
   }): Promise<{ isError: boolean; message: string }> {
-    const chatId = this.deps.taskRegistry.getChatId(input.taskId);
-    if (!chatId) {
+    const session = this.deps.sessionStore.getByActiveTaskId(input.taskId);
+    if (!session) {
       return {
         isError: true,
         message: messages.taskNotActive(input.taskId),
       };
     }
 
-    const session = this.deps.sessionStore.getOrCreate(chatId);
+    const chatId = session.chatId;
     const activeTask = session.activeTask;
     if (!activeTask || activeTask.taskId !== input.taskId) {
       return {
@@ -515,8 +515,8 @@ export class OrchestratorPrivileges {
       buildRequest: (requestId: string) => Extract<PrivilegeRequest, { kind: "mcp_tool_call" | "mcp_resource_read" }>;
     },
   ): Promise<PrivilegeResolutionResult> {
-    const chatId = this.deps.taskRegistry.getChatId(taskId);
-    if (!chatId) {
+    const session = this.deps.sessionStore.getByActiveTaskId(taskId);
+    if (!session) {
       return {
         requestId: randomUUID(),
         outcome: "failed",
@@ -524,7 +524,7 @@ export class OrchestratorPrivileges {
       };
     }
 
-    const session = this.deps.sessionStore.getOrCreate(chatId);
+    const chatId = session.chatId;
     const activeTask = session.activeTask;
     if (!activeTask || activeTask.taskId !== taskId) {
       return {

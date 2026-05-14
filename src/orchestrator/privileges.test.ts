@@ -13,7 +13,6 @@ import {
 } from "./test-helpers.js";
 import { hostGrantsPrefix } from "../paths.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
-import { TaskRegistry } from "../task-registry.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 
 test("orchestrator applies supported privilege requests deterministically and outside the main agent path", async () => {
@@ -345,7 +344,6 @@ test("orchestrator confirms persisted mcp tool approval suitability and reuses i
 });
 
 test("orchestrator confirms persisted http token suitability and enables later proxy auto-approval", async () => {
-  const taskRegistry = new TaskRegistry();
   const persistentApprovalStore: PersistentApprovalStore = {
     isAlwaysAllowed: () => false,
     allowTool: async () => {},
@@ -357,7 +355,6 @@ test("orchestrator confirms persisted http token suitability and enables later p
     allowHostDirectory: async () => {},
   };
   const { orchestrator, runner, channel, store } = createTestOrchestrator({
-    taskRegistry,
     persistentApprovalStore,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -416,7 +413,7 @@ test("orchestrator confirms persisted http token suitability and enables later p
   const session = store.getOrCreate("chat-http-confirm");
   assert.deepEqual(session.activeTask?.taskPolicy.autoApproveHttpTokens, ["vid2text"]);
 
-  const authorizer = new HttpTokenAuthorizer(taskRegistry, store, persistentApprovalStore);
+  const authorizer = new HttpTokenAuthorizer(store, persistentApprovalStore);
   const proxyResult = await authorizer.authorizeHttpTokenUse({
     taskId,
     tokenId: "vid2text",
@@ -428,11 +425,9 @@ test("orchestrator confirms persisted http token suitability and enables later p
 });
 
 test("orchestrator creates a hostfs grant for worker-session host directory approval", async () => {
-  const taskRegistry = new TaskRegistry();
   const hostfsCalls: Array<{ bundleId: string; taskId: string; path: string; level: string }> = [];
   let launchedTaskId: string | null = null;
   const { orchestrator, runner, channel } = createTestOrchestrator({
-    taskRegistry,
     mainAgent: new StubMainAgent({
       action: "launch_task",
       taskBrief: "Inspect a host directory.",

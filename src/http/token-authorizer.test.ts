@@ -2,7 +2,6 @@ import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { HttpTokenAuthorizer } from "./token-authorizer.js";
 import { InMemorySessionStore } from "../session/in-memory-session-store.js";
-import { TaskRegistry } from "../task-registry.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 
 function createFakePersistentApprovalStore(
@@ -22,17 +21,14 @@ function createFakePersistentApprovalStore(
 }
 
 test("HttpTokenAuthorizer prefers worker_session grants over once grants", async () => {
-  const taskRegistry = new TaskRegistry();
   const sessionStore = new InMemorySessionStore();
   const authorizer = new HttpTokenAuthorizer(
-    taskRegistry,
     sessionStore,
     createFakePersistentApprovalStore(),
   );
 
   const chatId = "chat-1";
   const taskId = "task-1";
-  taskRegistry.register(taskId, chatId);
 
   const session = sessionStore.getOrCreate(chatId);
   session.activeTask = {
@@ -72,17 +68,14 @@ test("HttpTokenAuthorizer prefers worker_session grants over once grants", async
 });
 
 test("HttpTokenAuthorizer consumes once grants without affecting session grants", async () => {
-  const taskRegistry = new TaskRegistry();
   const sessionStore = new InMemorySessionStore();
   const authorizer = new HttpTokenAuthorizer(
-    taskRegistry,
     sessionStore,
     createFakePersistentApprovalStore(),
   );
 
   const chatId = "chat-1";
   const taskId = "task-1";
-  taskRegistry.register(taskId, chatId);
 
   const session = sessionStore.getOrCreate(chatId);
   session.activeTask = {
@@ -122,7 +115,6 @@ test("HttpTokenAuthorizer consumes once grants without affecting session grants"
 
 test("HttpTokenAuthorizer returns failed when task is not registered", async () => {
   const authorizer = new HttpTokenAuthorizer(
-    new TaskRegistry(),
     new InMemorySessionStore(),
     createFakePersistentApprovalStore(),
   );
@@ -137,17 +129,14 @@ test("HttpTokenAuthorizer returns failed when task is not registered", async () 
 });
 
 test("HttpTokenAuthorizer applies persistent approvals only when task policy enables token auto-approval", async () => {
-  const taskRegistry = new TaskRegistry();
   const sessionStore = new InMemorySessionStore();
   const authorizer = new HttpTokenAuthorizer(
-    taskRegistry,
     sessionStore,
     createFakePersistentApprovalStore([{ tokenId: "api-token", host: "api.example.com" }]),
   );
 
   const chatId = "chat-1";
   const taskId = "task-1";
-  taskRegistry.register(taskId, chatId);
 
   const session = sessionStore.getOrCreate(chatId);
   session.activeTask = {

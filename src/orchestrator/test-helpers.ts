@@ -12,7 +12,6 @@ import { createNoopTaskBundleAssignmentRegistry } from "../sandbox/task-bundle-a
 import type { TaskBundleAssignmentLookup } from "../sandbox/task-bundle-assignment-registry.js";
 import type { LaunchTaskRequest, SandboxHandle, SandboxRunner } from "../sandbox/sandbox-runner.js";
 import { InMemorySessionStore } from "../session/in-memory-session-store.js";
-import { TaskRegistry } from "../task-registry.js";
 import type {
   ChannelFormatting,
   DecideContext,
@@ -232,7 +231,6 @@ export function createTestOrchestrator(options: {
   sandboxRunner?: FakeSandboxRunner;
   sessionStore?: InMemorySessionStore;
   privilegeBroker?: PrivilegeBroker;
-  taskRegistry?: TaskRegistry;
   persistentApprovalStore?: PersistentApprovalStore;
   hostfsBroker?: HostfsBroker;
   taskBundleAssignmentRegistry?: TaskBundleAssignmentLookup;
@@ -241,7 +239,6 @@ export function createTestOrchestrator(options: {
   const runner = options.sandboxRunner ?? new FakeSandboxRunner();
   const store = options.sessionStore ?? new InMemorySessionStore();
   const privilegeBroker = options.privilegeBroker ?? new FakePrivilegeBroker();
-  const taskRegistry = options.taskRegistry ?? new TaskRegistry();
   const orchestrator = new SandyOrchestrator({
     channel,
     mainAgent: options.mainAgent,
@@ -249,7 +246,6 @@ export function createTestOrchestrator(options: {
     buildWorkerStartConfig: createTestWorkerStartConfig,
     sessionStore: store,
     privilegeBroker,
-    taskRegistry,
     persistentApprovalStore: options.persistentApprovalStore ?? createNoopPersistentApprovalStore(),
     hostfsBroker: options.hostfsBroker ?? createNoopHostfsBroker(),
     taskBundleAssignmentRegistry: options.taskBundleAssignmentRegistry ?? createNoopTaskBundleAssignmentRegistry(),
@@ -261,6 +257,5 @@ export function createTestOrchestrator(options: {
     runner,
     store,
     privilegeBroker,
-    taskRegistry,
   };
 }

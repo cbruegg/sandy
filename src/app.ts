@@ -10,7 +10,6 @@ import { validateOAuthStateFilesForStartup } from "./mcp/oauth-state-validator.j
 import { createCertificateAuthority } from "./http/ca.js";
 import { HttpTokenAuthorizer } from "./http/token-authorizer.js";
 import { ProxyAuthService } from "./http/proxy-auth-service.js";
-import { TaskRegistry } from "./task-registry.js";
 import { McpWorkerLaunchConfigBuilder } from "./mcp/worker-launch-config-builder.js";
 import { createMcpWorkerNetworkName } from "./mcp/worker-network-name.js";
 import { HostMcpServerRegistry } from "./mcp/host-server-registry.js";
@@ -134,7 +133,6 @@ export async function startApp(): Promise<void> {
   const workerNetworkName = createMcpWorkerNetworkName();
 
   const certificateAuthority = httpTokensEnabled ? await createCertificateAuthority() : null;
-  const taskRegistry = new TaskRegistry();
   const sessionStore = new InMemorySessionStore();
   const persistentApprovalStore = new TomlPersistentApprovalStore(
     config.configFilePath,
@@ -170,7 +168,6 @@ export async function startApp(): Promise<void> {
     });
   }
   const httpTokenAuthorizer = new HttpTokenAuthorizer(
-    taskRegistry,
     sessionStore,
     persistentApprovalStore,
   );
@@ -288,7 +285,6 @@ export async function startApp(): Promise<void> {
     }),
     sessionStore,
     privilegeBroker: new PrivilegeBrokerImpl(),
-    taskRegistry,
     persistentApprovalStore,
     hostfsBroker: hostfsServices?.broker ?? createNoopHostfsBroker(),
     taskBundleAssignmentRegistry,
