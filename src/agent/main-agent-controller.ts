@@ -239,6 +239,7 @@ export function buildMainAgentPrompt(input: {
     : [];
 
   return [
+    `Current date and time: ${new Date().toISOString()}`,
     ...intro,
     ...configuredSkillsSection,
     ...workerMcpSection,

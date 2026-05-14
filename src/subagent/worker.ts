@@ -10,6 +10,7 @@ import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {applyWorkerCodexConfigPatch, buildWorkerCodexEnvironment, workerCodexHomePath,} from "./worker-codex-config.js";
 
 import {
+  buildDateTimePrefix,
   buildInitialTaskInput,
   buildPrivilegeResolutionInput,
   buildTaskSummaryInput,
@@ -337,7 +338,10 @@ export async function main(): Promise<void> {
         }
         case "user_message":
           assertTaskStarted(taskStarted, command.type);
-          enqueueTurn(buildCodexInputWithImages(command.input.text, command.input.images));
+          enqueueTurn(buildCodexInputWithImages(
+            `${buildDateTimePrefix()}\n\n${command.input.text}`,
+            command.input.images,
+          ));
           break;
         case "privilege_result":
           assertTaskStarted(taskStarted, command.type);
