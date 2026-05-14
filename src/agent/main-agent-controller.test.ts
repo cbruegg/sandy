@@ -129,6 +129,30 @@ test("buildMainAgentPrompt includes only the new visible entries for incremental
   assert.match(initialPrompt, /"allowedTags"/);
 });
 
+test("buildMainAgentPrompt includes current date and time on every turn", () => {
+  const initialPrompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    isInitialTurn: true,
+    skills: [],
+    workerMcpServerIds: [],
+    httpTokens: {},
+  });
+  const deltaPrompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["follow-up"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    isInitialTurn: false,
+    skills: [],
+    workerMcpServerIds: [],
+    httpTokens: {},
+  });
+
+  assert.match(initialPrompt, /Current date and time: [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}/);
+  assert.match(deltaPrompt, /Current date and time: [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}/);
+});
+
 test("CodexMainAgentController starts threads in a unique temp directory with no approvals", async () => {
   const codex = new RecordingCodexClient([[replyDecision("hello")]]);
   const controller = new CodexMainAgentController(codex);

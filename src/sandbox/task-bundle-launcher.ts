@@ -189,6 +189,9 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
       dockerArgs.push("-e", `SANDY_LOG_LEVEL=${this.options.logLevel}`);
     }
 
+    const hostTz = process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
+    dockerArgs.push("-e", `TZ=${hostTz}`);
+
     if (this.options.workerCodexBinaryPath) {
       dockerArgs.push("-e", "SANDY_CODEX_PATH=/usr/local/bin/codex");
     }

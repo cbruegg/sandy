@@ -15,6 +15,7 @@ import {
   buildTaskSummaryInput,
   type ImageAttachment,
 } from "./worker-prompt.js";
+import { formatDateTimePrefix } from "../datetime-prefix.js";
 import {messages} from "../messages.js";
 
 type ThreadEventDisposition = "none" | "task_done" | "terminal_error";
@@ -337,7 +338,10 @@ export async function main(): Promise<void> {
         }
         case "user_message":
           assertTaskStarted(taskStarted, command.type);
-          enqueueTurn(buildCodexInputWithImages(command.input.text, command.input.images));
+          enqueueTurn(buildCodexInputWithImages(
+            `${formatDateTimePrefix()}\n\n${command.input.text}`,
+            command.input.images,
+          ));
           break;
         case "privilege_result":
           assertTaskStarted(taskStarted, command.type);

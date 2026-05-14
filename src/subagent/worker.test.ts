@@ -102,6 +102,23 @@ test("buildTaskSummaryInput requests a host-facing handoff summary", () => {
   assert.match(input, /Artifacts:/);
 });
 
+test("buildInitialTaskInput includes current date and time", () => {
+  const formatting: ChannelFormatting = {
+    channelId: "telegram",
+    markup: "telegram_html",
+    allowedTags: ["b", "i", "code", "pre"],
+    instructions: "Use simple Telegram HTML.",
+  };
+  const input = buildInitialTaskInput(
+    "Inspect the repository and leave a summary file.",
+    "English",
+    formatting,
+  );
+
+  const inputText: string = typeof input === "string" ? input : (Array.isArray(input) && input[0]?.type === "text" ? input[0].text : "");
+  assert.match(inputText, /Current date and time: [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}/);
+});
+
 test("mcpToolProgress includes payloads for completed MCP calls", () => {
   assert.equal(
     messages.mcpToolProgress("completed", "filesystem", "read_file", { path: "/tmp/report.txt" }),

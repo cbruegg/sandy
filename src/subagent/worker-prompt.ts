@@ -3,6 +3,7 @@ import type { ChannelFormatting, PrivilegeResolutionResult } from "../types.js";
 import { hostMountPath } from "../paths.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 import type { Input, UserInput } from "@openai/codex-sdk";
+import { formatDateTimePrefix } from "../datetime-prefix.js";
 import { sandyMcpServerId } from "./worker-tools.js";
 
 type HttpTokenPromptInput = {
@@ -58,6 +59,7 @@ export function buildInitialTaskInputWithCapabilities(
   httpProxyWrapper: string | null = null,
 ): string {
   const lines = [
+    formatDateTimePrefix(),
     "You are running inside a Sandy sub-agent container.",
     `Your shared workspace is mounted at ${sharedWorkspaceMountPath}.`,
     `Use ${sharedWorkspaceMountPath} for files that should remain available to the host after your task finishes.`,
