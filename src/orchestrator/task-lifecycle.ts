@@ -66,6 +66,13 @@ export class OrchestratorTaskLifecycle {
         case "task_summary":
           this.recordTaskSummary(session, event.summary);
           break;
+        case "task_done":
+          // Workers usually emit task_summary first, then task_done to publish that stored summary for review.
+          if (session.activeTask.status !== "completed") {
+            await this.sendTaskSummaryForReview(chatId, session);
+            await this.finishActiveTask(session, "completed");
+          }
+          break;
         case "final_result":
           this.recordTaskSummary(session, [
             `Summary: ${event.text}`,
@@ -74,12 +81,6 @@ export class OrchestratorTaskLifecycle {
           ].join("\n"));
           await this.sendTaskSummaryForReview(chatId, session);
           await this.finishActiveTask(session, "completed");
-          break;
-        case "task_done":
-          if (session.activeTask.status !== "completed") {
-            await this.sendTaskSummaryForReview(chatId, session);
-            await this.finishActiveTask(session, "completed");
-          }
           break;
         case "task_error":
           logger.error("task.failed", {
