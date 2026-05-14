@@ -10,12 +10,12 @@ import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {applyWorkerCodexConfigPatch, buildWorkerCodexEnvironment, workerCodexHomePath,} from "./worker-codex-config.js";
 
 import {
-  buildDateTimePrefix,
   buildInitialTaskInput,
   buildPrivilegeResolutionInput,
   buildTaskSummaryInput,
   type ImageAttachment,
 } from "./worker-prompt.js";
+import { formatDateTimePrefix } from "../datetime-prefix.js";
 import {messages} from "../messages.js";
 
 type ThreadEventDisposition = "none" | "task_done" | "terminal_error";
@@ -339,7 +339,7 @@ export async function main(): Promise<void> {
         case "user_message":
           assertTaskStarted(taskStarted, command.type);
           enqueueTurn(buildCodexInputWithImages(
-            `${buildDateTimePrefix()}\n\n${command.input.text}`,
+            `${formatDateTimePrefix()}\n\n${command.input.text}`,
             command.input.images,
           ));
           break;

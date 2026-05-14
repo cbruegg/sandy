@@ -116,7 +116,7 @@ test("buildInitialTaskInput includes current date and time", () => {
   );
 
   const inputText: string = typeof input === "string" ? input : (Array.isArray(input) && input[0]?.type === "text" ? input[0].text : "");
-  assert.match(inputText, /Current date and time: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  assert.match(inputText, /Current date and time: [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}/);
 });
 
 test("buildPrivilegeResolutionInput includes current date and time", () => {
@@ -127,12 +127,12 @@ test("buildPrivilegeResolutionInput includes current date and time", () => {
   };
 
   const input = buildPrivilegeResolutionInput(result);
-  assert.match(input, /Current date and time: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  assert.match(input, /Current date and time: [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}/);
 });
 
 test("buildTaskSummaryInput includes current date and time", () => {
   const input = buildTaskSummaryInput();
-  assert.match(input, /Current date and time: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  assert.match(input, /Current date and time: [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}/);
 });
 
 test("mcpToolProgress includes payloads for completed MCP calls", () => {

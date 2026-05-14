@@ -3,6 +3,7 @@ import type { ChannelFormatting, PrivilegeResolutionResult } from "../types.js";
 import { hostMountPath } from "../paths.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 import type { Input, UserInput } from "@openai/codex-sdk";
+import { formatDateTimePrefix } from "../datetime-prefix.js";
 import { sandyMcpServerId } from "./worker-tools.js";
 
 type HttpTokenPromptInput = {
@@ -49,10 +50,6 @@ export function buildInitialTaskInput(
   return inputs;
 }
 
-export function buildDateTimePrefix(): string {
-  return `Current date and time: ${new Date().toISOString()}`;
-}
-
 export function buildInitialTaskInputWithCapabilities(
   taskBrief: string,
   taskLanguage: string,
@@ -62,7 +59,7 @@ export function buildInitialTaskInputWithCapabilities(
   httpProxyWrapper: string | null = null,
 ): string {
   const lines = [
-    buildDateTimePrefix(),
+    formatDateTimePrefix(),
     "You are running inside a Sandy sub-agent container.",
     `Your shared workspace is mounted at ${sharedWorkspaceMountPath}.`,
     `Use ${sharedWorkspaceMountPath} for files that should remain available to the host after your task finishes.`,
@@ -114,7 +111,7 @@ export function buildInitialTaskInputWithCapabilities(
 
 export function buildPrivilegeResolutionInput(result: PrivilegeResolutionResult): string {
   return [
-    buildDateTimePrefix(),
+    formatDateTimePrefix(),
     `Host privilege request ${result.requestId} finished with outcome "${result.outcome}".`,
     result.message,
     "Continue the task from here.",
@@ -123,7 +120,7 @@ export function buildPrivilegeResolutionInput(result: PrivilegeResolutionResult)
 
 export function buildTaskSummaryInput(): string {
   return [
-    buildDateTimePrefix(),
+    formatDateTimePrefix(),
     "Your task work is complete.",
     "Write a short host-facing handoff summary of this task.",
     "Do not address the user directly.",

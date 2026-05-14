@@ -149,8 +149,8 @@ test("buildMainAgentPrompt includes current date and time on every turn", () => 
     httpTokens: {},
   });
 
-  assert.match(initialPrompt, /Current date and time: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
-  assert.match(deltaPrompt, /Current date and time: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  assert.match(initialPrompt, /Current date and time: [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}/);
+  assert.match(deltaPrompt, /Current date and time: [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}/);
 });
 
 test("CodexMainAgentController starts threads in a unique temp directory with no approvals", async () => {

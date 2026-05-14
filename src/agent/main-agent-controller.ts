@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ThreadOptions } from "@openai/codex-sdk";
 import { ZodError } from "zod";
+import { formatDateTimePrefix } from "../datetime-prefix.js";
 import { logger } from "../logger.js";
 import type { DecideContext, MainAgentDecision } from "../types.js";
 import type { SkillMetadata } from "../skills.js";
@@ -239,7 +240,7 @@ export function buildMainAgentPrompt(input: {
     : [];
 
   return [
-    `Current date and time: ${new Date().toISOString()}`,
+    formatDateTimePrefix(),
     ...intro,
     ...configuredSkillsSection,
     ...workerMcpSection,
