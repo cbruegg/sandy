@@ -3,7 +3,6 @@ import type { SessionStore } from "../session/in-memory-session-store.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 import type { PrivilegeResolutionResult } from "../types.js";
 import { messages } from "../messages.js";
-import type { TaskRegistry } from "../task-registry.js";
 import type { SessionState } from "../types/task-state.js";
 
 type AuthorizeHttpTokenUseInput = {
@@ -14,14 +13,13 @@ type AuthorizeHttpTokenUseInput = {
 
 export class HttpTokenAuthorizer {
   constructor(
-    private readonly taskRegistry: TaskRegistry,
     private readonly sessionStore: SessionStore,
     private readonly persistentApprovalStore: PersistentApprovalStore,
   ) {}
 
   authorizeHttpTokenUse(input: AuthorizeHttpTokenUseInput): Promise<PrivilegeResolutionResult> {
-    const chatId = this.taskRegistry.getChatId(input.taskId);
-    if (!chatId) {
+    const session = this.sessionStore.getByActiveTaskId(input.taskId);
+    if (!session) {
       return Promise.resolve({
         requestId: randomUUID(),
         outcome: "failed",
@@ -29,7 +27,6 @@ export class HttpTokenAuthorizer {
       });
     }
 
-    const session = this.sessionStore.getOrCreate(chatId);
     const activeTask = session.activeTask;
     if (!activeTask || activeTask.taskId !== input.taskId) {
       return Promise.resolve({
@@ -63,7 +60,6 @@ export class HttpTokenAuthorizer {
     );
     if (onceGrant) {
       onceGrant.consumed = true;
-      this.sessionStore.save(session);
       return Promise.resolve({
         requestId: randomUUID(),
         outcome: "approved",

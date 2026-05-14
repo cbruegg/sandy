@@ -1,8 +1,8 @@
 import { join } from "node:path";
-import type { ChannelAdapter } from "./channel/channel-adapter.js";
-import type { SandboxRunner } from "./sandbox/sandbox-runner.js";
-import type { MessageAttachment, SavedAttachment, SharedAttachment } from "./types.js";
-import { toSharedWorkspacePath } from "./shared-workspace.js";
+import type { ChannelAdapter } from "../channel/channel-adapter.js";
+import type { SandboxRunner } from "../sandbox/sandbox-runner.js";
+import type { MessageAttachment, SavedAttachment, SharedAttachment } from "../types.js";
+import { toSharedWorkspacePath } from "../shared-workspace.js";
 
 export async function stageSharedAttachments(input: {
   channel: ChannelAdapter;
