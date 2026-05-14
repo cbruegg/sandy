@@ -23,6 +23,7 @@ import type {
   SavedAttachment,
   SubAgentEvent,
   TaskInputPayload,
+  WorkerStartConfig,
 } from "../types.js";
 
 const testFormatting: ChannelFormatting = {
@@ -136,6 +137,16 @@ export function contextTexts(context: DecideContext): string[] {
   return context.newVisibleEntries.map((entry) => entry.text ?? "");
 }
 
+function createTestWorkerStartConfig(): WorkerStartConfig {
+  return {
+    openAiApiKey: null,
+    codexModel: null,
+    channelFormatting: testFormatting,
+    httpTokens: [],
+    httpProxyWrapper: null,
+  };
+}
+
 class FakeSandboxHandle implements SandboxHandle {
   public readonly userMessages: TaskInputPayload[] = [];
   public readonly privilegeResults: PrivilegeResolutionResult[] = [];
@@ -235,6 +246,7 @@ export function createTestOrchestrator(options: {
     channel,
     mainAgent: options.mainAgent,
     sandboxRunner: runner,
+    buildWorkerStartConfig: createTestWorkerStartConfig,
     sessionStore: store,
     privilegeBroker,
     taskRegistry,

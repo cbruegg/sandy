@@ -70,6 +70,7 @@ When code depends on process environment values, inject an env object at the fun
 ## Testing Guidelines
 
 Tests use Bun's test runner via `bun test`. Place tests next to the related code as `*.test.ts`. High test coverage is expected for orchestration behavior, normalization, privilege routing, and failure handling. Prefer small fakes over networked or Docker-backed integration in unit tests.
+Do not make properties or parameters nullable merely to avoid constructing fakes or dummies in tests. Prefer explicit test doubles at the boundary so production dependencies stay accurately typed.
 Do not commit without asking, unless the user specifically requested it.
 
 ## Maintenance

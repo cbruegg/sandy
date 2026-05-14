@@ -5,10 +5,10 @@ import { OrchestratorRuntimeState } from "./runtime-state.js";
 import type { SandyOrchestratorDependencies, SupportedChatEvent } from "./shared.js";
 import { OrchestratorTaskLifecycle, describeUserMessageForMainAgent } from "./task-lifecycle.js";
 import { buildWorkerFollowUpInput } from "./worker-input.js";
-import type { MainAgentDecision, NormalizedChatEvent, SessionState } from "../types.js";
+import type { ChannelFormatting, MainAgentDecision, NormalizedChatEvent, SessionState } from "../types.js";
 
 export class SandyOrchestrator {
-  private readonly channelFormatting: ReturnType<SandyOrchestratorDependencies["channel"]["getFormatting"]>;
+  private readonly channelFormatting: ChannelFormatting;
   private readonly runtimeState = new OrchestratorRuntimeState();
   private readonly taskLifecycle: OrchestratorTaskLifecycle;
   private readonly privileges: OrchestratorPrivileges;

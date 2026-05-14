@@ -10,6 +10,7 @@ import { stageSharedAttachments } from "./task-share.js";
 import { OrchestratorRuntimeState } from "./runtime-state.js";
 import type { ActiveTaskStatus, SandyOrchestratorDependencies, UserMessageEvent } from "./shared.js";
 import type {
+  ChannelFormatting,
   MainAgentDecision,
   MainAgentTaskPolicy,
   MainAgentTaskPolicyInput,
@@ -23,7 +24,7 @@ export class OrchestratorTaskLifecycle {
   constructor(
     private readonly deps: SandyOrchestratorDependencies,
     private readonly runtimeState: OrchestratorRuntimeState,
-    private readonly channelFormatting: ReturnType<SandyOrchestratorDependencies["channel"]["getFormatting"]>,
+    private readonly channelFormatting: ChannelFormatting,
   ) {}
 
   async routeSubAgentEvent(chatId: string, taskId: string, event: SubAgentEvent): Promise<void> {
@@ -158,13 +159,7 @@ export class OrchestratorTaskLifecycle {
             taskLanguage: decision.taskLanguage,
             channelFormatting: this.channelFormatting,
             initialInput,
-            workerStartConfig: this.deps.buildWorkerStartConfig?.() ?? {
-              openAiApiKey: null,
-              codexModel: null,
-              channelFormatting: this.channelFormatting,
-              httpTokens: [],
-              httpProxyWrapper: null,
-            },
+            workerStartConfig: this.deps.buildWorkerStartConfig(),
           },
           async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
         );
@@ -334,26 +329,7 @@ export class OrchestratorTaskLifecycle {
       taskId: task.taskId,
       status: task.status,
     });
-    if (task.pendingPrivilegeRequest) {
-      const failedResult = {
-        requestId: task.pendingPrivilegeRequest.requestId,
-        outcome: "failed" as const,
-        message: messages.taskEndedBeforePrivilegeRequestResolved(
-          task.taskId,
-          task.pendingPrivilegeRequest.requestId,
-        ),
-      };
-      if (task.pendingPrivilegeRequest.kind === "mcp_tool_call" || task.pendingPrivilegeRequest.kind === "mcp_resource_read") {
-        this.runtimeState.resolvePendingMcpPrivilege(task.pendingPrivilegeRequest.requestId, failedResult);
-      }
-      if (
-        task.pendingPrivilegeRequest.kind === "host_operation"
-        || task.pendingPrivilegeRequest.kind === "http_token_use"
-        || task.pendingPrivilegeRequest.kind === "host_directory_access"
-      ) {
-        this.runtimeState.resolvePendingNativeTool(task.pendingPrivilegeRequest.requestId, failedResult);
-      }
-    }
+    this.failPendingPrivilegeRequestOnTaskClose(task);
     this.runtimeState.deleteHandle(task.taskId);
     this.deps.taskRegistry.unregister(task.taskId);
     session.activeTask = null;
@@ -374,9 +350,33 @@ export class OrchestratorTaskLifecycle {
   private buildCompletedTaskFallbackSummary(task: NonNullable<SessionState["activeTask"]>): string {
     return [
       `The task ended without a worker-provided handoff summary. Task name: ${task.taskName}. Brief: ${task.taskBrief}`,
-      "Artifacts: unknown",
       "Open questions: Review the visible task updates above if more detail is needed.",
     ].join("\n");
+  }
+
+  private failPendingPrivilegeRequestOnTaskClose(task: NonNullable<SessionState["activeTask"]>): void {
+    if (!task.pendingPrivilegeRequest) {
+      return;
+    }
+
+    const failedResult = {
+      requestId: task.pendingPrivilegeRequest.requestId,
+      outcome: "failed" as const,
+      message: messages.taskEndedBeforePrivilegeRequestResolved(
+        task.taskId,
+        task.pendingPrivilegeRequest.requestId,
+      ),
+    };
+    if (task.pendingPrivilegeRequest.kind === "mcp_tool_call" || task.pendingPrivilegeRequest.kind === "mcp_resource_read") {
+      this.runtimeState.resolvePendingMcpPrivilege(task.pendingPrivilegeRequest.requestId, failedResult);
+    }
+    if (
+      task.pendingPrivilegeRequest.kind === "host_operation"
+      || task.pendingPrivilegeRequest.kind === "http_token_use"
+      || task.pendingPrivilegeRequest.kind === "host_directory_access"
+    ) {
+      this.runtimeState.resolvePendingNativeTool(task.pendingPrivilegeRequest.requestId, failedResult);
+    }
   }
 
   private async promptForShareDeletionIfNeeded(session: SessionState, taskId: string, taskName: string): Promise<void> {

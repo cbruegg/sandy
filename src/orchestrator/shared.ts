@@ -17,7 +17,7 @@ export type SandyOrchestratorDependencies = {
   channel: ChannelAdapter;
   mainAgent: MainAgentController;
   sandboxRunner: SandboxRunner;
-  buildWorkerStartConfig?: () => WorkerStartConfig;
+  buildWorkerStartConfig: () => WorkerStartConfig;
   sessionStore: SessionStore;
   privilegeBroker: PrivilegeBroker;
   taskRegistry: TaskRegistry;
