@@ -120,7 +120,7 @@ export class SandyOrchestrator {
             await this.deps.channel.sendText(event.chatId, messages.staleShareDeletionRequest());
             return;
           }
-          await this.taskLifecycle.resolvePendingShareDeletion(session, mapApprovalDecisionToBoolean(event.decision));
+          await this.taskLifecycle.resolvePendingShareDeletion(session, event.decision === "deny" ? "deny" : "approve");
           return;
         }
         await this.deps.channel.sendText(event.chatId, messages.noPendingPrivilegeRequest());
@@ -212,10 +212,4 @@ export class SandyOrchestrator {
         return;
     }
   }
-}
-
-function mapApprovalDecisionToBoolean(
-  decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
-): "approve" | "deny" {
-  return decision === "deny" ? "deny" : "approve";
 }
