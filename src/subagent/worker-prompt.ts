@@ -111,7 +111,6 @@ export function buildInitialTaskInputWithCapabilities(
 
 export function buildPrivilegeResolutionInput(result: PrivilegeResolutionResult): string {
   return [
-    formatDateTimePrefix(),
     `Host privilege request ${result.requestId} finished with outcome "${result.outcome}".`,
     result.message,
     "Continue the task from here.",
@@ -120,7 +119,6 @@ export function buildPrivilegeResolutionInput(result: PrivilegeResolutionResult)
 
 export function buildTaskSummaryInput(): string {
   return [
-    formatDateTimePrefix(),
     "Your task work is complete.",
     "Write a short host-facing handoff summary of this task.",
     "Do not address the user directly.",
