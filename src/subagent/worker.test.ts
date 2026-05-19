@@ -1,18 +1,26 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { Thread } from "@openai/codex-sdk";
+import { type Codex, type Thread } from "@openai/codex-sdk";
 import { messages } from "../messages.js";
 import {
   buildInitialTaskInput,
   buildInitialTaskInputWithCapabilities,
   buildPrivilegeResolutionInput,
   buildTaskSummaryInput,
+  createWorkerCommandProcessor,
   streamTurn,
 } from "./worker.js";
-import type { ChannelFormatting, PrivilegeResolutionResult } from "../types.js";
+import type { ChannelFormatting, HostCommand, PrivilegeResolutionResult, SubAgentEvent } from "../types.js";
 import { parseSubAgentEvent } from "../types.js";
 import { parseWorkerToolPayload } from "./worker-tools.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
+
+const testFormatting: ChannelFormatting = {
+  channelId: "telegram",
+  markup: "telegram_html",
+  allowedTags: ["b", "i", "code", "pre"],
+  instructions: "Use simple Telegram HTML.",
+};
 
 test("buildInitialTaskInput tells the sub-agent where the shared workspace is", () => {
   const formatting: ChannelFormatting = {
@@ -117,6 +125,71 @@ test("buildInitialTaskInput includes current date and time", () => {
 
   const inputText: string = typeof input === "string" ? input : (Array.isArray(input) && input[0]?.type === "text" ? input[0].text : "");
   assert.match(inputText, /Current date and time: [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}/);
+});
+
+test("worker processes follow-up commands after start_task initialization finishes", async () => {
+  const { promise: codexReady, resolve: resolveCodex } = Promise.withResolvers<void>();
+  const sentEvents: SubAgentEvent[] = [];
+  const turnInputs: unknown[] = [];
+  const thread = {
+    async runStreamed(input: unknown) {
+      turnInputs.push(input);
+      return {
+        events: (async function* () {})(),
+      };
+    },
+  } as unknown as Thread;
+  const startTaskCommand: Extract<HostCommand, { type: "start_task" }> = {
+    type: "start_task",
+    taskId: "task-1",
+    taskBrief: "Add the track to the DJ collection.",
+    input: { text: "Initial request", images: [] },
+    taskLanguage: "English",
+    config: {
+      openAiApiKey: null,
+      codexModel: null,
+      channelFormatting: testFormatting,
+      httpTokens: [],
+      httpProxyWrapper: null,
+    },
+    environment: {},
+    codexConfigToml: null,
+    httpProxyUrl: null,
+  };
+  const followUpCommand: Extract<HostCommand, { type: "user_message" }> = {
+    type: "user_message",
+    input: { text: "Use https://example.com/set", images: [] },
+  };
+  const processor = createWorkerCommandProcessor({
+    sendEvent: (event) => sentEvents.push(event),
+    env: {},
+    applyWorkerCodexConfigPatch: async () => {},
+    buildWorkerCodexEnvironment: () => ({}),
+    createCodexClient: async () => {
+      await codexReady;
+      return {
+        startThread: () => thread,
+      } as unknown as Codex;
+    },
+    onShutdown: () => {},
+  });
+
+  const startPromise = processor.handleLine(JSON.stringify(startTaskCommand));
+  const followUpPromise = processor.handleLine(JSON.stringify(followUpCommand));
+  await Promise.resolve();
+
+  assert.equal(sentEvents.length, 0);
+  assert.equal(turnInputs.length, 0);
+
+  resolveCodex();
+  await startPromise;
+  await followUpPromise;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(sentEvents.some((event) => event.type === "task_error"), false);
+  assert.equal(turnInputs.length, 2);
+  assert.match(String(turnInputs[0]), /Add the track to the DJ collection/);
+  assert.match(String(turnInputs[1]), /Use https:\/\/example\.com\/set/);
 });
 
 test("mcpToolProgress includes payloads for completed MCP calls", () => {
