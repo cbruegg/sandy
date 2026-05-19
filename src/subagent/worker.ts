@@ -38,6 +38,19 @@ function parseHostCommand(raw: string): HostCommand {
   return parsed;
 }
 
+type WorkerCommandProcessorOptions = {
+  sendEvent: (event: SubAgentEvent) => void;
+  env: NodeJS.ProcessEnv;
+  createCodexClientImpl?: typeof createCodexClient;
+  applyWorkerCodexConfigPatchImpl?: typeof applyWorkerCodexConfigPatch;
+  buildWorkerCodexEnvironmentImpl?: typeof buildWorkerCodexEnvironment;
+  onShutdown?: () => void;
+};
+
+type WorkerCommandProcessor = {
+  handleLine: (line: string) => Promise<void>;
+};
+
 function assertTaskStarted(taskStarted: boolean, commandType: HostCommand["type"]): void {
   if (!taskStarted) {
     throw new Error(`${commandType} command received before start_task`);
@@ -178,13 +191,13 @@ function normalizeSummaryText(chunks: string[]): string | null {
   return summary.length > 0 ? summary : null;
 }
 
-async function emitTaskSummary(thread: Thread): Promise<void> {
+async function emitTaskSummary(thread: Thread, sendEvent: (event: SubAgentEvent) => void = send): Promise<void> {
   const result = await streamTurn(thread, buildTaskSummaryInput(), "summary");
   if (result.sawTerminalError || !result.summaryText) {
     return;
   }
 
-  send({
+  sendEvent({
     type: "task_summary",
     summary: result.summaryText,
   });
@@ -208,28 +221,16 @@ function buildCodexInputWithImages(text: string, images: ImageAttachment[]): Inp
   return inputs;
 }
 
-function joinTaskSections(taskBrief: string, text: string): string {
-  const sections = [taskBrief.trim(), text.trim()].filter((section) => section.length > 0);
-  return sections.join("\n\n");
-}
-
-export async function main(): Promise<void> {
-  configureLogger({
-    forwardLog: (payload) => {
-      send({
-        type: "worker_log",
-        level: payload.level,
-        event: payload.event,
-        data: payload.data,
-      });
-    },
-  });
-
+function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): WorkerCommandProcessor {
   let thread: Thread | null = null;
-
   let currentAbort: AbortController | null = null;
-  let queue: Promise<void> = Promise.resolve();
+  let turnQueue: Promise<void> = Promise.resolve();
+  let commandQueue: Promise<void> = Promise.resolve();
   let taskStarted = false;
+
+  const createCodexClientForTask = options.createCodexClientImpl ?? createCodexClient;
+  const applyCodexConfigPatchForTask = options.applyWorkerCodexConfigPatchImpl ?? applyWorkerCodexConfigPatch;
+  const buildCodexEnvironmentForTask = options.buildWorkerCodexEnvironmentImpl ?? buildWorkerCodexEnvironment;
 
   const requireThread = (): Thread => {
     if (!thread) {
@@ -239,19 +240,19 @@ export async function main(): Promise<void> {
   };
 
   const enqueueTurn = (input: Input) => {
-    queue = queue.then(async () => {
+    turnQueue = turnQueue.then(async () => {
       currentAbort = new AbortController();
       try {
         const result = await streamTurn(requireThread(), input);
         if (result.sawTaskDone && !result.sawTerminalError) {
-          await emitTaskSummary(requireThread());
-          send({ type: "task_done" });
+          await emitTaskSummary(requireThread(), options.sendEvent);
+          options.sendEvent({ type: "task_done" });
         }
       } finally {
         currentAbort = null;
       }
     }).catch((error) => {
-      send({
+      options.sendEvent({
         type: "task_error",
         message: error instanceof Error ? error.message : "Sub-agent worker turn failed.",
       });
@@ -259,38 +260,23 @@ export async function main(): Promise<void> {
   };
 
   const enqueueMarkedFinish = () => {
-    queue = queue.then(async () => {
+    turnQueue = turnQueue.then(async () => {
       currentAbort = new AbortController();
       try {
-        await emitTaskSummary(requireThread());
-        send({ type: "task_done" });
+        await emitTaskSummary(requireThread(), options.sendEvent);
+        options.sendEvent({ type: "task_done" });
       } finally {
         currentAbort = null;
       }
     }).catch((error) => {
-      send({
+      options.sendEvent({
         type: "task_error",
         message: error instanceof Error ? error.message : "Sub-agent worker finalization failed.",
       });
     });
   };
 
-  const input = createInterface({
-    input: process.stdin,
-    crlfDelay: Infinity,
-  });
-  let shutdownResolver: (() => void) | null = null;
-  const waitForShutdown = new Promise<void>((resolve) => {
-    shutdownResolver = resolve;
-  });
-
-  // Keep the worker process alive after a turn finishes so the host can reply
-  // to privilege requests and send follow-up task input over stdin.
-  process.stdin.resume();
-
-  send({ type: "worker_connected" });
-
-  const handleLine = async (line: string): Promise<void> => {
+  const handleCommandLine = async (line: string): Promise<void> => {
     const trimmed = line.trim();
     if (!trimmed) {
       return;
@@ -303,20 +289,20 @@ export async function main(): Promise<void> {
             throw new Error("start_task command received after task already started");
           }
           for (const [name, value] of Object.entries(command.environment)) {
-            process.env[name] = value;
+            options.env[name] = value;
           }
           if (command.httpProxyUrl) {
-            process.env["SANDY_HTTP_PROXY_URL"] = command.httpProxyUrl;
+            options.env["SANDY_HTTP_PROXY_URL"] = command.httpProxyUrl;
           }
           if (command.codexConfigToml) {
             await mkdir(workerCodexHomePath, {recursive: true});
             await writeFile(join(workerCodexHomePath, "config.toml"), command.codexConfigToml, "utf8");
           }
-          await applyWorkerCodexConfigPatch();
-          const workerCodexEnvironment = buildWorkerCodexEnvironment();
+          await applyCodexConfigPatchForTask();
+          const workerCodexEnvironment = buildCodexEnvironmentForTask();
           const codex = command.config.openAiApiKey
-            ? await createCodexClient({ apiKey: command.config.openAiApiKey, env: workerCodexEnvironment })
-            : await createCodexClient({ env: workerCodexEnvironment });
+            ? await createCodexClientForTask({ apiKey: command.config.openAiApiKey, env: workerCodexEnvironment })
+            : await createCodexClientForTask({ env: workerCodexEnvironment });
           thread = codex.startThread({
             model: command.config.codexModel ?? undefined,
             workingDirectory: sharedWorkspaceMountPath,
@@ -353,19 +339,69 @@ export async function main(): Promise<void> {
           break;
         case "cancel":
           currentAbort?.abort();
-          shutdownResolver?.();
-          process.exit(0);
-        }
+          options.onShutdown?.();
+          break;
+      }
     } catch (error) {
-      send({
+      options.sendEvent({
         type: "task_error",
         message: error instanceof Error ? error.message : "Failed to parse host command.",
       });
     }
   };
 
+  return {
+    handleLine: (line: string) => {
+      commandQueue = commandQueue.then(() => handleCommandLine(line));
+      void commandQueue.catch(() => {});
+      return commandQueue;
+    },
+  };
+}
+
+function joinTaskSections(taskBrief: string, text: string): string {
+  const sections = [taskBrief.trim(), text.trim()].filter((section) => section.length > 0);
+  return sections.join("\n\n");
+}
+
+export async function main(): Promise<void> {
+  configureLogger({
+    forwardLog: (payload) => {
+      send({
+        type: "worker_log",
+        level: payload.level,
+        event: payload.event,
+        data: payload.data,
+      });
+    },
+  });
+
+  const input = createInterface({
+    input: process.stdin,
+    crlfDelay: Infinity,
+  });
+  let shutdownResolver: (() => void) | null = null;
+  const waitForShutdown = new Promise<void>((resolve) => {
+    shutdownResolver = resolve;
+  });
+
+  // Keep the worker process alive after a turn finishes so the host can reply
+  // to privilege requests and send follow-up task input over stdin.
+  process.stdin.resume();
+
+  send({ type: "worker_connected" });
+
+  const processor = createWorkerCommandProcessor({
+    sendEvent: send,
+    env: process.env,
+    onShutdown: () => {
+      shutdownResolver?.();
+      process.exit(0);
+    },
+  });
+
   input.on("line", (line) => {
-    void handleLine(line);
+    void processor.handleLine(line);
   });
 
   input.on("close", () => {
@@ -379,6 +415,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   await main();
 }
 export {
+  createWorkerCommandProcessor,
   streamTurn,
 };
 export {
