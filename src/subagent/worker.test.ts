@@ -163,14 +163,15 @@ test("worker processes follow-up commands after start_task initialization finish
   const processor = createWorkerCommandProcessor({
     sendEvent: (event) => sentEvents.push(event),
     env: {},
-    applyWorkerCodexConfigPatchImpl: async () => {},
-    buildWorkerCodexEnvironmentImpl: () => ({}),
-    createCodexClientImpl: async () => {
+    applyWorkerCodexConfigPatch: async () => {},
+    buildWorkerCodexEnvironment: () => ({}),
+    createCodexClient: async () => {
       await codexReady;
       return {
         startThread: () => thread,
       } as unknown as Codex;
     },
+    onShutdown: () => {},
   });
 
   const startPromise = processor.handleLine(JSON.stringify(startTaskCommand));

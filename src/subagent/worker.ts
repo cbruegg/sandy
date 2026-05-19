@@ -41,10 +41,10 @@ function parseHostCommand(raw: string): HostCommand {
 type WorkerCommandProcessorOptions = {
   sendEvent: (event: SubAgentEvent) => void;
   env: NodeJS.ProcessEnv;
-  createCodexClientImpl?: typeof createCodexClient;
-  applyWorkerCodexConfigPatchImpl?: typeof applyWorkerCodexConfigPatch;
-  buildWorkerCodexEnvironmentImpl?: typeof buildWorkerCodexEnvironment;
-  onShutdown?: () => void;
+  createCodexClient: typeof createCodexClient;
+  applyWorkerCodexConfigPatch: typeof applyWorkerCodexConfigPatch;
+  buildWorkerCodexEnvironment: typeof buildWorkerCodexEnvironment;
+  onShutdown: () => void;
 };
 
 type WorkerCommandProcessor = {
@@ -228,10 +228,6 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
   let commandQueue: Promise<void> = Promise.resolve();
   let taskStarted = false;
 
-  const createCodexClientForTask = options.createCodexClientImpl ?? createCodexClient;
-  const applyCodexConfigPatchForTask = options.applyWorkerCodexConfigPatchImpl ?? applyWorkerCodexConfigPatch;
-  const buildCodexEnvironmentForTask = options.buildWorkerCodexEnvironmentImpl ?? buildWorkerCodexEnvironment;
-
   const requireThread = (): Thread => {
     if (!thread) {
       throw new Error("Task thread has not been initialized.");
@@ -298,11 +294,11 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
             await mkdir(workerCodexHomePath, {recursive: true});
             await writeFile(join(workerCodexHomePath, "config.toml"), command.codexConfigToml, "utf8");
           }
-          await applyCodexConfigPatchForTask();
-          const workerCodexEnvironment = buildCodexEnvironmentForTask();
+          await options.applyWorkerCodexConfigPatch();
+          const workerCodexEnvironment = options.buildWorkerCodexEnvironment();
           const codex = command.config.openAiApiKey
-            ? await createCodexClientForTask({ apiKey: command.config.openAiApiKey, env: workerCodexEnvironment })
-            : await createCodexClientForTask({ env: workerCodexEnvironment });
+            ? await options.createCodexClient({ apiKey: command.config.openAiApiKey, env: workerCodexEnvironment })
+            : await options.createCodexClient({ env: workerCodexEnvironment });
           thread = codex.startThread({
             model: command.config.codexModel ?? undefined,
             workingDirectory: sharedWorkspaceMountPath,
@@ -339,7 +335,7 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
           break;
         case "cancel":
           currentAbort?.abort();
-          options.onShutdown?.();
+          options.onShutdown();
           break;
       }
     } catch (error) {
@@ -394,6 +390,9 @@ export async function main(): Promise<void> {
   const processor = createWorkerCommandProcessor({
     sendEvent: send,
     env: process.env,
+    createCodexClient,
+    applyWorkerCodexConfigPatch,
+    buildWorkerCodexEnvironment,
     onShutdown: () => {
       shutdownResolver?.();
       process.exit(0);
