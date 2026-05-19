@@ -348,8 +348,11 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
 
   return {
     handleLine: (line: string) => {
-      commandQueue = commandQueue.then(() => handleCommandLine(line));
-      void commandQueue.catch(() => {});
+      commandQueue = commandQueue.then(() => handleCommandLine(line)).catch((error) => {
+        logger.error("worker.command_queue_failed", {
+          message: error instanceof Error ? error.message : "Worker command queue failed.",
+        });
+      });
       return commandQueue;
     },
   };
