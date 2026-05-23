@@ -11,7 +11,6 @@ import { OrchestratorRuntimeState } from "./runtime-state.js";
 import type { ActiveTaskStatus, SandyOrchestratorDependencies, UserMessageEvent } from "./shared.js";
 import type {
   ChannelFormatting,
-  ChatGPTExternalTokens,
   MainAgentDecision,
   MainAgentTaskPolicy,
   MainAgentTaskPolicyInput,

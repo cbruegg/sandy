@@ -143,6 +143,7 @@ function createTestWorkerStartConfig(): WorkerStartConfig {
     channelFormatting: testFormatting,
     httpTokens: [],
     httpProxyWrapper: null,
+    chatgptExternalTokens: null,
   };
 }
 

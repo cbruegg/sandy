@@ -8,8 +8,6 @@ import {configureLogger, logger} from "../logger.js";
 import {type HostCommand, type SubAgentEvent, type ChatGPTExternalTokens} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {applyWorkerCodexConfigPatch, buildWorkerCodexEnvironment, workerCodexHomePath,} from "./worker-codex-config.js";
-import {workerToolDefinitions} from "./worker-tools.js";
-import {parseWorkerToolCall, workerToolCallToSubAgentEvent,} from "./worker-protocol.js";
 
 import {
   buildInitialTaskInput,
@@ -20,18 +18,12 @@ import {
 import {CodexAppServerClient} from "./app-server-client.js";
 import {messages} from "../messages.js";
 
-type ThreadEventDisposition = "none" | "privileged_tool_call" | "send_file_to_channel" | "task_done" | "terminal_error";
+type ThreadEventDisposition = "none" | "terminal_error";
 type TurnMode = "task" | "summary";
 type StreamTurnResult = {
-  sawPrivilegedToolCall: boolean;
-  sawTaskDone: boolean;
   sawTerminalError: boolean;
   summaryText: string | null;
 };
-type WorkerToolEventParseResult =
-  | { kind: "none" }
-  | { kind: "parsed"; event: Extract<SubAgentEvent, { type: "tool_call" }> | Extract<SubAgentEvent, { type: "task_done" }> }
-  | { kind: "invalid"; message: string };
 
 type WorkerAuthMode = { kind: "api_key"; apiKey: string | null } | { kind: "chatgpt_appserver" };
 
@@ -126,9 +118,6 @@ function joinTaskSections(taskBrief: string, text: string): string {
 // ---- codex exec helpers ----
 
 async function streamTurn(thread: Thread, input: Input, mode: TurnMode = "task"): Promise<StreamTurnResult> {
-  let sawPrivilegedToolCall = false;
-  let sawSendFileToChannel = false;
-  let sawTaskDone = false;
   let sawTerminalError = false;
   const summaryChunks: string[] = [];
   const { events } = await thread.runStreamed(input);
@@ -138,28 +127,14 @@ async function streamTurn(thread: Thread, input: Input, mode: TurnMode = "task")
     const disposition = mode === "summary"
       ? handleSummaryTurnEvent(event, summaryChunks)
       : handleTaskTurnEvent(event);
-    if (disposition === "privileged_tool_call" && sawPrivilegedToolCall) {
-      throw new Error("Only one privileged tool call is allowed per turn.");
-    }
-    sawPrivilegedToolCall = disposition === "privileged_tool_call" || sawPrivilegedToolCall;
-    if (disposition === "send_file_to_channel" && sawSendFileToChannel) {
-      throw new Error("Only one channel file send request is allowed per turn.");
-    }
-    sawSendFileToChannel = disposition === "send_file_to_channel" || sawSendFileToChannel;
-    if (disposition === "task_done" && sawTaskDone) {
-      throw new Error("Only one task completion signal is allowed per turn.");
-    }
-    sawTaskDone = disposition === "task_done" || sawTaskDone;
     sawTerminalError = disposition === "terminal_error" || sawTerminalError;
 
-    if (disposition === "privileged_tool_call" || disposition === "task_done" || disposition === "terminal_error") {
+    if (disposition === "terminal_error") {
       break;
     }
   }
 
   return {
-    sawPrivilegedToolCall,
-    sawTaskDone,
     sawTerminalError,
     summaryText: mode === "summary" ? normalizeSummaryText(summaryChunks) : null,
   };
@@ -170,18 +145,6 @@ function handleTaskTurnEvent(event: ThreadEvent): ThreadEventDisposition {
     case "item.completed":
     case "item.updated":
       if (event.item.type === "agent_message" && event.type === "item.completed") {
-        const toolEventResult = tryParseWorkerToolEvent(event.item.text);
-        if (toolEventResult.kind === "parsed") {
-          send(toolEventResult.event);
-          return classifyToolEventDisposition(toolEventResult.event);
-        }
-        if (toolEventResult.kind === "invalid") {
-          send({
-            type: "task_error",
-            message: toolEventResult.message,
-          });
-          return "terminal_error";
-        }
         if (!event.item.text.trim()) {
           return "none";
         }
@@ -233,10 +196,6 @@ function handleSummaryTurnEvent(event: ThreadEvent, summaryChunks: string[]): Th
     case "item.completed":
     case "item.updated":
       if (event.item.type === "agent_message" && event.type === "item.completed") {
-        const toolEventResult = tryParseWorkerToolEvent(event.item.text);
-        if (toolEventResult.kind !== "none") {
-          return "terminal_error";
-        }
         summaryChunks.push(event.item.text);
       }
       return "none";
@@ -259,7 +218,7 @@ function normalizeSummaryText(chunks: string[]): string | null {
 
 async function emitTaskSummary(thread: Thread, sendEvent: (event: SubAgentEvent) => void = send): Promise<void> {
   const result = await streamTurn(thread, buildTaskSummaryInput(), "summary");
-  if (result.sawPrivilegedToolCall || result.sawTerminalError || !result.summaryText) {
+  if (result.sawTerminalError || !result.summaryText) {
     return;
   }
 
@@ -300,15 +259,6 @@ function createAuthRefreshCallback(): (previousAccountId: string | null) => Prom
   };
 }
 
-function classifyAppServerToolEventDisposition(
-  event: Extract<SubAgentEvent, { type: "tool_call" }> | Extract<SubAgentEvent, { type: "task_done" }>,
-): ThreadEventDisposition {
-  if (event.type === "task_done") return "task_done";
-  const toolType = event.call.type;
-  if (toolType === "send_file_to_channel") return "send_file_to_channel";
-  return workerToolDefinitions[toolType].requiresPrivilegeEscalation ? "privileged_tool_call" : "none";
-}
-
 async function* streamAppServerTurn(
   appServer: CodexAppServerClient,
   threadId: string,
@@ -319,8 +269,6 @@ async function* streamAppServerTurn(
   result: StreamTurnResult;
   events: SubAgentEvent[];
 }> {
-  let sawPrivilegedToolCall = false;
-  let sawTaskDone = false;
   let sawTerminalError = false;
   const summaryChunks: string[] = [];
 
@@ -335,28 +283,7 @@ async function* streamAppServerTurn(
             break;
           }
 
-          const toolEventResult = tryParseWorkerToolEvent(event.text);
-          if (toolEventResult.kind === "parsed") {
-            const disposition = classifyAppServerToolEventDisposition(toolEventResult.event);
-            send(toolEventResult.event);
-            sawPrivilegedToolCall = disposition === "privileged_tool_call" || sawPrivilegedToolCall;
-            sawTaskDone = disposition === "task_done" || sawTaskDone;
-            if (sawPrivilegedToolCall || sawTaskDone) {
-              yield {
-                result: { sawPrivilegedToolCall, sawTaskDone, sawTerminalError, summaryText: null },
-                events: [],
-              };
-              return;
-            }
-          } else if (toolEventResult.kind === "invalid") {
-            send({ type: "task_error", message: toolEventResult.message });
-            sawTerminalError = true;
-            yield {
-              result: { sawPrivilegedToolCall: false, sawTaskDone: false, sawTerminalError: true, summaryText: null },
-              events: [],
-            };
-            return;
-          } else if (event.text.trim()) {
+          if (event.text.trim()) {
             send({ type: "assistant_output", text: event.text });
           }
           break;
@@ -369,7 +296,7 @@ async function* streamAppServerTurn(
           send({ type: "task_error", message: event.error });
           sawTerminalError = true;
           yield {
-            result: { sawPrivilegedToolCall: false, sawTaskDone: false, sawTerminalError: true, summaryText: null },
+            result: { sawTerminalError: true, summaryText: null },
             events: [],
           };
           return;
@@ -378,7 +305,7 @@ async function* streamAppServerTurn(
           send({ type: "task_error", message: event.message });
           sawTerminalError = true;
           yield {
-            result: { sawPrivilegedToolCall: false, sawTaskDone: false, sawTerminalError: true, summaryText: null },
+            result: { sawTerminalError: true, summaryText: null },
             events: [],
           };
           return;
@@ -392,8 +319,6 @@ async function* streamAppServerTurn(
 
   yield {
     result: {
-      sawPrivilegedToolCall,
-      sawTaskDone,
       sawTerminalError,
       summaryText: mode === "summary" ? normalizeSummaryText(summaryChunks) : null,
     },
@@ -406,45 +331,12 @@ async function emitAppServerTaskSummary(
   threadId: string,
 ): Promise<void> {
   for await (const { result } of streamAppServerTurn(appServer, threadId, buildTaskSummaryInput(), "summary")) {
-    if (result.sawPrivilegedToolCall || result.sawTerminalError || !result.summaryText) {
+    if (result.sawTerminalError || !result.summaryText) {
       return;
     }
     send({ type: "task_summary", summary: result.summaryText });
     return;
   }
-}
-
-function tryParseWorkerToolEvent(text: string): WorkerToolEventParseResult {
-  try {
-    const call = parseWorkerToolCall(text);
-    if (!call) {
-      return { kind: "none" };
-    }
-    return {
-      kind: "parsed",
-      event: workerToolCallToSubAgentEvent(call),
-    };
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "Unknown worker tool parse failure.";
-    return {
-      kind: "invalid",
-      message: `Invalid worker tool payload: ${detail}`,
-    };
-  }
-}
-
-function classifyToolEventDisposition(
-  event: Extract<SubAgentEvent, { type: "tool_call" }> | Extract<SubAgentEvent, { type: "task_done" }>,
-): ThreadEventDisposition {
-  if (event.type === "task_done") {
-    return "task_done";
-  }
-
-  const toolType = event.call.type;
-  if (toolType === "send_file_to_channel") {
-    return "send_file_to_channel";
-  }
-  return workerToolDefinitions[toolType].requiresPrivilegeEscalation ? "privileged_tool_call" : "none";
 }
 
 function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): WorkerCommandProcessor {
@@ -478,11 +370,7 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
     turnQueue = turnQueue.then(async () => {
       currentAbort = new AbortController();
       try {
-        const result = await streamTurn(requireThread(), input);
-        if (result.sawTaskDone && !result.sawTerminalError) {
-          await emitTaskSummary(requireThread(), options.sendEvent);
-          options.sendEvent({ type: "task_done" });
-        }
+        await streamTurn(requireThread(), input);
       } finally {
         currentAbort = null;
       }
@@ -522,9 +410,8 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
           mode,
           currentAbort.signal,
         )) {
-          if (result.sawTaskDone && !result.sawTerminalError) {
-            await emitAppServerTaskSummary(requireAppServer(), requireAppServerThreadId());
-            send({ type: "task_done" });
+          if (result.sawTerminalError) {
+            break;
           }
         }
       } finally {

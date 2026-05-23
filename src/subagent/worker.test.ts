@@ -151,6 +151,7 @@ test("worker processes follow-up commands after start_task initialization finish
       channelFormatting: testFormatting,
       httpTokens: [],
       httpProxyWrapper: null,
+      chatgptExternalTokens: null,
     },
     environment: {},
     codexConfigToml: null,
@@ -284,7 +285,6 @@ test("streamTurn ignores empty assistant messages", async () => {
 
     const result = await streamTurn(thread, "Inspect the reel.");
 
-    assert.equal(result.sawTaskDone, false);
     assert.equal(result.sawTerminalError, false);
     assert.deepEqual(writes, []);
   } finally {
