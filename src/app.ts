@@ -31,6 +31,7 @@ import { validateMatrixAuthStateForStartup, resolveMatrixAccessToken } from "./m
 import {createNoopHostfsBroker} from "./hostfs/hostfs-broker.js";
 import {initializeHostfs, type HostfsServices} from "./hostfs/index.js";
 import { CodexTokenBroker, type TokenBroker } from "./auth/token-broker.js";
+import type { ChatGptExternalTokens } from "./types.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -50,6 +51,7 @@ export async function startApp(): Promise<void> {
     shareRoot: config.shareRoot,
     agentModel: config.agentModel,
     authMode: config.authMode.mode,
+    codexAuthStrategy: config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthStrategy : null,
     sttEnabled: config.sttApiKey !== null,
     workerPreinstallCommandCount: config.workerPreinstall.commands.length,
     workerPreinstallRefresh: config.workerPreinstall.refresh,
@@ -114,8 +116,20 @@ export async function startApp(): Promise<void> {
   ]);
 
   const tokenBroker: TokenBroker | null = config.authMode.mode === "codex_auth_file"
+    && config.authMode.codexAuthStrategy === "external_tokens"
     ? new CodexTokenBroker(config.authMode.codexAuthFile)
     : null;
+
+  let initialChatGptExternalTokens: ChatGptExternalTokens | null = null;
+  if (tokenBroker) {
+    try {
+      initialChatGptExternalTokens = await tokenBroker.getInitialTokens();
+    } catch (error) {
+      logger.error("token_broker.initial_tokens_failed", {
+        message: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
 
   logger.info("worker_image.ready", {
     baseImage: config.workerImage,
@@ -223,7 +237,10 @@ export async function startApp(): Promise<void> {
     workerImage: config.workerImage,
     resolveWorkerImage: () => workerImageManager.getLaunchImage(),
     shareRoot: config.shareRoot,
-    codexAuthFile: config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthFile : null,
+    codexAuthFile: config.authMode.mode === "codex_auth_file"
+      && config.authMode.codexAuthStrategy === "copy_file"
+      ? config.authMode.codexAuthFile
+      : null,
     skillsDirectory: config.skillsDirectory,
     workerCodexBinaryPath,
     networkGuardImage: config.networkGuardImage,
@@ -278,17 +295,7 @@ export async function startApp(): Promise<void> {
     channel,
     mainAgent,
     sandboxRunner,
-    buildWorkerStartConfig: async () => {
-      let chatgptExternalTokens = null;
-      if (tokenBroker) {
-        try {
-          chatgptExternalTokens = await tokenBroker.getInitialTokens();
-        } catch (error) {
-          logger.error("token_broker.initial_tokens_failed", {
-            message: error instanceof Error ? error.message : "Unknown error",
-          });
-        }
-      }
+    buildWorkerStartConfig: () => {
       return {
         openAiApiKey: config.authMode.mode === "api_key" ? config.authMode.openAiApiKey : null,
         codexModel: config.agentModel,
@@ -298,10 +305,10 @@ export async function startApp(): Promise<void> {
           description: token.description,
         })),
         httpProxyWrapper: httpTokensEnabled ? "/usr/local/bin/sandy-http-proxy-exec" : null,
-        chatgptExternalTokens,
+        chatgptExternalTokens: initialChatGptExternalTokens,
       };
     },
-    refreshChatgptTokens: async (_taskId: string, previousAccountId: string | null) => {
+    refreshChatGptTokens: async (_taskId: string, previousAccountId: string | null) => {
       if (!tokenBroker) return null;
       try {
         return await tokenBroker.refreshTokens(previousAccountId);

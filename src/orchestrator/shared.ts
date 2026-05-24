@@ -5,7 +5,7 @@ import type { PersistentApprovalStore } from "../privilege/persistent-approval-s
 import type { SandboxRunner } from "../sandbox/sandbox-runner.js";
 import type { TaskBundleAssignmentLookup } from "../sandbox/task-bundle-assignment-registry.js";
 import type { SessionStore } from "../session/in-memory-session-store.js";
-import type { ChatGPTExternalTokens, NormalizedChatEvent, SessionState, WorkerStartConfig } from "../types.js";
+import type { ChatGptExternalTokens, NormalizedChatEvent, SessionState, WorkerStartConfig } from "../types.js";
 import type { PrivilegeBroker } from "../privilege/privilege-broker.js";
 
 export type SupportedChatEvent = Exclude<NormalizedChatEvent, { kind: "unsupported_input" }>;
@@ -17,7 +17,7 @@ export type SandyOrchestratorDependencies = {
   mainAgent: MainAgentController;
   sandboxRunner: SandboxRunner;
   buildWorkerStartConfig: () => WorkerStartConfig | Promise<WorkerStartConfig>;
-  refreshChatgptTokens?: (taskId: string, previousAccountId: string | null) => Promise<ChatGPTExternalTokens | null>;
+  refreshChatGptTokens?: (taskId: string, previousAccountId: string | null) => Promise<ChatGptExternalTokens | null>;
   sessionStore: SessionStore;
   privilegeBroker: PrivilegeBroker;
   persistentApprovalStore: PersistentApprovalStore;

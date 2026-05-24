@@ -1,6 +1,6 @@
 import type {
   ChannelFormatting,
-  ChatGPTExternalTokens,
+  ChatGptExternalTokens,
   PrivilegeResolutionResult,
   SubAgentEvent,
   TaskInputPayload,
@@ -29,7 +29,7 @@ export interface SandboxHandle {
   markFinished(): Promise<void>;
   close(): Promise<void>;
   cancel(reason: string): Promise<void>;
-  resolveAuthRefresh?(tokens: ChatGPTExternalTokens | null): Promise<void>;
+  resolveAuthRefresh?(tokens: ChatGptExternalTokens | null): Promise<void>;
 }
 
 export interface SandboxRunner {

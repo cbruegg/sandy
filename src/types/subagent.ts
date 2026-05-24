@@ -48,7 +48,7 @@ type WorkerLogEvent = {
   data?: Record<string, unknown>;
 };
 
-type ChatgptAuthRefreshRequestEvent = {
+type ChatGptAuthRefreshRequestEvent = {
   type: "chatgpt_auth_refresh_request";
   previousAccountId: string | null;
 };
@@ -63,14 +63,14 @@ export type SubAgentEvent =
   | WorkerConnectedEvent
   | WorkerDisconnectedEvent
   | WorkerLogEvent
-  | ChatgptAuthRefreshRequestEvent;
+  | ChatGptAuthRefreshRequestEvent;
 
 export type TaskInputPayload = {
   text: string;
   images: ImageAttachment[];
 };
 
-export type ChatGPTExternalTokens = {
+export type ChatGptExternalTokens = {
   accessToken: string;
   chatgptAccountId: string;
   chatgptPlanType: string | null;
@@ -85,7 +85,7 @@ export type WorkerStartConfig = {
     description: string;
   }>;
   httpProxyWrapper: string | null;
-  chatgptExternalTokens: ChatGPTExternalTokens | null;
+  chatgptExternalTokens: ChatGptExternalTokens | null;
 };
 
 export type HostCommand =
@@ -117,7 +117,7 @@ export type HostCommand =
     }
   | {
       type: "chatgpt_auth_refresh_result";
-      tokens: ChatGPTExternalTokens | null;
+      tokens: ChatGptExternalTokens | null;
       error: string | null;
     };
 

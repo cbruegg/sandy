@@ -54,6 +54,7 @@ allowed_user_id = "@cbruegg:matrix.org"
 
 [auth]
 # codex_auth_file = "~/.codex/auth.json"
+# codex_auth_strategy = "copy_file" # or "external_tokens" (experimental)
 # openai_api_key = "sk-..." # optional override, no default
 
 [agent]
@@ -199,7 +200,9 @@ Local test channel behavior:
 
 Codex auth behavior:
 
-- If the host already has Codex logged in with ChatGPT and `auth.codex_auth_file` exists, Sandy mounts that file into the sub-agent container automatically.
+- `auth.codex_auth_strategy` defaults to `"copy_file"`.
+- If the host already has Codex logged in with ChatGPT, `auth.codex_auth_file` exists, and `auth.codex_auth_strategy = "copy_file"`, Sandy copies that file into each sub-agent container.
+- `auth.codex_auth_strategy = "external_tokens"` is experimental. In that mode Sandy keeps `auth.json` on the host, extracts ChatGPT auth tokens from it, and refreshes them on the host when the worker asks.
 - If `auth.openai_api_key` is set and no Codex auth file is available, Sandy passes the API key to the main agent and sub-agent worker.
 - If both are present, Sandy prefers the Codex ChatGPT auth file and does not pass the API key.
 - OAuth for upstream MCP servers is handled on the host through the Sandy CLI, not inside channel chats.

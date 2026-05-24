@@ -18,8 +18,10 @@ const DEFAULT_STT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_STT_MODEL = "gpt-4o-mini-transcribe";
 const updateModeSchema = z.enum(["disabled", "relaunch", "exit"]);
 const workerPreinstallRefreshSchema = z.enum(["weekly", "manual"]);
+const codexAuthStrategySchema = z.enum(["copy_file", "external_tokens"]);
 const DEFAULT_UPDATE_MODE: z.infer<typeof updateModeSchema> = "disabled";
 const DEFAULT_WORKER_PREINSTALL_REFRESH: z.infer<typeof workerPreinstallRefreshSchema> = "weekly";
+const DEFAULT_CODEX_AUTH_STRATEGY: z.infer<typeof codexAuthStrategySchema> = "copy_file";
 const workerNetworkModeSchema = z.enum(["public_internet_only", "unrestricted"]);
 const DEFAULT_WORKER_NETWORK_MODE: z.infer<typeof workerNetworkModeSchema> = "public_internet_only";
 
@@ -120,8 +122,10 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
     auth: z.object({
       openai_api_key: z.string().min(1).nullable().optional(),
       codex_auth_file: z.string().min(1).nullable().default(defaultCodexAuthFilePath),
+      codex_auth_strategy: codexAuthStrategySchema.default(DEFAULT_CODEX_AUTH_STRATEGY),
     }).default({
       codex_auth_file: defaultCodexAuthFilePath,
+      codex_auth_strategy: DEFAULT_CODEX_AUTH_STRATEGY,
     }),
     agent: z.object({
       model: z.string().min(1).optional(),
@@ -251,7 +255,11 @@ export type WorkerNetworkConfig = {
 
 type SandyAuthMode =
   | { mode: "api_key"; openAiApiKey: string }
-  | { mode: "codex_auth_file"; codexAuthFile: string }
+  | {
+      mode: "codex_auth_file";
+      codexAuthFile: string;
+      codexAuthStrategy: z.infer<typeof codexAuthStrategySchema>;
+    }
   | { mode: "ambient_codex_auth" };
 
 export type SandyConfig = {
@@ -397,7 +405,11 @@ export function parseConfigToml(
   const codexAuthFile = resolveCodexAuthFile(parsed.auth.codex_auth_file, env);
   const rawApiKey = parsed.auth.openai_api_key ?? null;
   const authMode: SandyAuthMode = codexAuthFile
-    ? { mode: "codex_auth_file", codexAuthFile }
+    ? {
+      mode: "codex_auth_file",
+      codexAuthFile,
+      codexAuthStrategy: parsed.auth.codex_auth_strategy,
+    }
     : rawApiKey
       ? { mode: "api_key", openAiApiKey: rawApiKey }
       : { mode: "ambient_codex_auth" };

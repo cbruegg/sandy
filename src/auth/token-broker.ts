@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import { logger } from "../logger.js";
-import type { ChatGPTExternalTokens } from "../types.js";
+import type { ChatGptExternalTokens } from "../types.js";
 
 const AUTH_REFRESH_URL = "https://auth.openai.com/oauth/token";
 const CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
@@ -27,8 +27,8 @@ interface JwtClaims {
 }
 
 export interface TokenBroker {
-  getInitialTokens(): Promise<ChatGPTExternalTokens>;
-  refreshTokens(previousAccountId: string | null): Promise<ChatGPTExternalTokens>;
+  getInitialTokens(): Promise<ChatGptExternalTokens>;
+  refreshTokens(previousAccountId: string | null): Promise<ChatGptExternalTokens>;
 }
 
 function decodeJwtPayload(jwt: string): JwtClaims | null {
@@ -48,12 +48,12 @@ function decodeJwtPayload(jwt: string): JwtClaims | null {
 
 export class CodexTokenBroker implements TokenBroker {
   private authDotJson: AuthDotJson | null = null;
-  private refreshInFlight: Promise<ChatGPTExternalTokens> | null = null;
-  private cachedTokens: ChatGPTExternalTokens | null = null;
+  private refreshInFlight: Promise<ChatGptExternalTokens> | null = null;
+  private cachedTokens: ChatGptExternalTokens | null = null;
 
   constructor(private readonly authFilePath: string) {}
 
-  async getInitialTokens(): Promise<ChatGPTExternalTokens> {
+  async getInitialTokens(): Promise<ChatGptExternalTokens> {
     if (this.cachedTokens) {
       return this.cachedTokens;
     }
@@ -62,7 +62,7 @@ export class CodexTokenBroker implements TokenBroker {
     return tokens;
   }
 
-  async refreshTokens(_previousAccountId: string | null): Promise<ChatGPTExternalTokens> {
+  async refreshTokens(_previousAccountId: string | null): Promise<ChatGptExternalTokens> {
     if (this.refreshInFlight) {
       return this.refreshInFlight;
     }
@@ -76,7 +76,7 @@ export class CodexTokenBroker implements TokenBroker {
     }
   }
 
-  private async doRefreshTokens(_previousAccountId: string | null): Promise<ChatGPTExternalTokens> {
+  private async doRefreshTokens(_previousAccountId: string | null): Promise<ChatGptExternalTokens> {
     const auth = await this.loadAuthFile();
 
     if (auth.auth_mode === "chatgpt" && auth.tokens?.refresh_token) {
@@ -96,7 +96,7 @@ export class CodexTokenBroker implements TokenBroker {
     return extracted;
   }
 
-  private async loadAndExtractTokens(): Promise<ChatGPTExternalTokens> {
+  private async loadAndExtractTokens(): Promise<ChatGptExternalTokens> {
     const auth = await this.loadAuthFile();
     return this.extractTokens(auth);
   }
@@ -111,7 +111,7 @@ export class CodexTokenBroker implements TokenBroker {
     return parsed;
   }
 
-  private extractTokens(auth: AuthDotJson): ChatGPTExternalTokens {
+  private extractTokens(auth: AuthDotJson): ChatGptExternalTokens {
     const accessToken = auth.tokens?.access_token;
     if (!accessToken) {
       throw new Error("auth.json is missing access_token. Run 'codex login' first.");

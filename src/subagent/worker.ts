@@ -5,7 +5,7 @@ import {join} from "node:path";
 import {type Input, type Thread, type ThreadEvent, type TodoListItem, type UserInput} from "@openai/codex-sdk";
 import {createCodexClient} from "../codex-client.js";
 import {configureLogger, logger} from "../logger.js";
-import {type HostCommand, type SubAgentEvent, type ChatGPTExternalTokens} from "../types.js";
+import {type HostCommand, type SubAgentEvent, type ChatGptExternalTokens} from "../types.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
 import {applyWorkerCodexConfigPatch, buildWorkerCodexEnvironment, workerCodexHomePath,} from "./worker-codex-config.js";
 
@@ -30,7 +30,7 @@ type WorkerAuthMode = { kind: "api_key"; apiKey: string | null } | { kind: "chat
 // Auth refresh plumbing: when the worker needs fresh tokens from the host,
 // it sends a chatgpt_auth_refresh_request event and waits for the host to
 // respond with a chatgpt_auth_refresh_result command via stdin.
-let pendingAuthRefreshResolver: ((tokens: ChatGPTExternalTokens | null) => void) | null = null;
+  let pendingAuthRefreshResolver: ((tokens: ChatGptExternalTokens | null) => void) | null = null;
 
 function send(event: SubAgentEvent): void {
   process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -241,7 +241,7 @@ function createAuthRefreshCallback(): (previousAccountId: string | null) => Prom
       previousAccountId,
     });
 
-    const tokens: ChatGPTExternalTokens | null = await new Promise((resolve) => {
+    const tokens: ChatGptExternalTokens | null = await new Promise((resolve) => {
       pendingAuthRefreshResolver = resolve;
     });
 

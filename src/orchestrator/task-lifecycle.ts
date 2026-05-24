@@ -381,7 +381,7 @@ export class OrchestratorTaskLifecycle {
   }
 
   private async handleAuthRefresh(taskId: string, previousAccountId: string | null): Promise<void> {
-    const tokens = await this.deps.refreshChatgptTokens?.(taskId, previousAccountId) ?? null;
+    const tokens = await this.deps.refreshChatGptTokens?.(taskId, previousAccountId) ?? null;
     await this.runtimeState.getHandle(taskId)?.resolveAuthRefresh?.(tokens);
   }
 
