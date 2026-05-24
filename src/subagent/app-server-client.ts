@@ -50,14 +50,14 @@ const turnCompletedParamsSchema = z.object({
     status: z.string().optional(),
     error: z.object({
       message: z.string().optional(),
-    }).optional(),
+    }).nullable().optional(),
   }).optional(),
 }).passthrough();
 
 const turnFailedParamsSchema = z.object({
   error: z.object({
     message: z.string().optional(),
-  }).optional(),
+  }).nullable().optional(),
 }).passthrough();
 
 const errorParamsSchema = z.object({

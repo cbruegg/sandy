@@ -487,7 +487,16 @@ test("CodexAppServerClient ignores known benign notifications and item completio
       },
     })}\n`);
     await new Promise((resolve) => setImmediate(resolve));
-    child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method: "turn/completed", params: {} })}\n`);
+    child.stdout.write(`${JSON.stringify({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: {
+        turn: {
+          status: "completed",
+          error: null,
+        },
+      },
+    })}\n`);
 
     assert.deepEqual(await streamPromise, [{ type: "turn_completed" }]);
     assert.equal(logs.some((entry) => entry.event === "appserver.notification_unhandled"), false);
