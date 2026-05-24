@@ -32,9 +32,12 @@ const ignoredNotificationMethods = new Set([
 ]);
 
 const ignoredCompletedItemTypes = new Set([
+  "commandExecution",
   "command_execution",
+  "mcpToolCall",
   "mcp_tool_call",
   "reasoning",
+  "userMessage",
   "user_message",
 ]);
 
@@ -63,9 +66,9 @@ const errorParamsSchema = z.object({
 
 const itemCompletedParamsSchema = z.object({
   item: z.object({
-    id: z.string().optional(),
-    text: z.string().optional(),
-    type: z.string().optional(),
+    id: z.string().nullable().optional(),
+    text: z.string().nullable().optional(),
+    type: z.string().nullable().optional(),
   }).passthrough().optional(),
 }).passthrough();
 

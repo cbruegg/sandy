@@ -461,6 +461,26 @@ test("CodexAppServerClient ignores known benign notifications and item completio
       method: "item/completed",
       params: {
         item: {
+          type: "commandExecution",
+          text: null,
+        },
+      },
+    })}\n`);
+    child.stdout.write(`${JSON.stringify({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        item: {
+          type: "mcpToolCall",
+          text: null,
+        },
+      },
+    })}\n`);
+    child.stdout.write(`${JSON.stringify({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        item: {
           type: "reasoning",
           text: "thinking",
         },
