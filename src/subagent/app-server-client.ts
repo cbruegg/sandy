@@ -1,7 +1,9 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import { z } from "zod";
 import type { ChatGPTExternalTokens } from "../types.js";
 import { logger } from "../logger.js";
+import { buildAppServerThreadStartParams } from "./codex-task-runtime.js";
 
 type PendingRequest<T = unknown> = {
   resolve: (result: T) => void;
@@ -17,6 +19,7 @@ type AppServerEvent =
   | { type: "error"; message: string };
 
 const REFRESH_AUTH_METHOD = "account/chatgptAuthTokens/refresh";
+const JSON_RPC_METHOD_NOT_FOUND = -32601;
 
 const ignoredNotificationMethods = new Set([
   "account/rateLimits/updated",
@@ -29,14 +32,62 @@ const ignoredNotificationMethods = new Set([
 ]);
 
 const ignoredCompletedItemTypes = new Set([
-  "commandExecution",
   "command_execution",
-  "mcpToolCall",
   "mcp_tool_call",
   "reasoning",
-  "userMessage",
   "user_message",
 ]);
+
+const refreshAuthParamsSchema = z.object({
+  previousAccountId: z.string().nullable().optional(),
+}).passthrough();
+
+const turnCompletedParamsSchema = z.object({
+  turn: z.object({
+    status: z.string().optional(),
+    error: z.object({
+      message: z.string().optional(),
+    }).optional(),
+  }).optional(),
+}).passthrough();
+
+const turnFailedParamsSchema = z.object({
+  error: z.object({
+    message: z.string().optional(),
+  }).optional(),
+}).passthrough();
+
+const errorParamsSchema = z.object({
+  message: z.string().optional(),
+}).passthrough();
+
+const itemCompletedParamsSchema = z.object({
+  item: z.object({
+    id: z.string().optional(),
+    text: z.string().optional(),
+    type: z.string().optional(),
+  }).passthrough().optional(),
+}).passthrough();
+
+const agentMessageDeltaParamsSchema = z.object({
+  delta: z.string(),
+  itemId: z.string().optional(),
+}).passthrough();
+
+type ParsedAppServerNotification =
+  | { kind: "turn_completed"; status: string | null; errorMessage: string | null }
+  | { kind: "turn_failed"; errorMessage: string | null }
+  | { kind: "error"; message: string | null }
+  | {
+      kind: "item_completed";
+      item: {
+        id: string | null;
+        text: string | null;
+        type: string | null;
+      } | null;
+    }
+  | { kind: "agent_message_delta"; itemId: string | null; text: string }
+  | { kind: "ignored"; method: string; params: Record<string, unknown> | undefined };
 
 type AuthRefreshCallback = (
   previousAccountId: string | null,
@@ -44,6 +95,8 @@ type AuthRefreshCallback = (
 
 export class CodexAppServerClient {
   private child: ChildProcessWithoutNullStreams | null = null;
+  private activeNotificationHandler: ((method: string, params: unknown) => void) | null = null;
+  private activeAuthRefreshHandler: ((id: number, previousAccountId: string | null) => Promise<void>) | null = null;
   private nextId = 1;
   private pendingRequests = new Map<number, PendingRequest>();
   private initialized = false;
@@ -115,13 +168,13 @@ export class CodexAppServerClient {
 
   private processServerRequest(id: number, method: string, params: unknown): void {
     if (method === REFRESH_AUTH_METHOD) {
-      const p = params as { reason: string; previousAccountId: string | null } | undefined;
+      const parsed = refreshAuthParamsSchema.safeParse(params ?? {});
       if (this.activeAuthRefreshHandler) {
-        void this.activeAuthRefreshHandler(id, p?.["previousAccountId"] as string | null ?? null);
+        void this.activeAuthRefreshHandler(id, parsed.success ? parsed.data.previousAccountId ?? null : null);
       }
     } else {
       this.warnUnhandledServerRequest(method, params);
-      this.sendErrorResponse(id, -32601, `Method not found: ${method}`);
+      this.sendErrorResponse(id, JSON_RPC_METHOD_NOT_FOUND, `Method not found: ${method}`);
     }
   }
 
@@ -130,10 +183,6 @@ export class CodexAppServerClient {
       this.activeNotificationHandler(method, params);
     }
   }
-
-  private activeNotificationHandler: ((method: string, params: unknown) => void) | null = null;
-  private activeAuthRefreshHandler: ((id: number, previousAccountId: string | null) => Promise<void>) | null = null;
-
   private sendRequest(method: string, params?: unknown): number {
     if (!this.child) throw new Error("App-server not started");
     const id = this.nextId++;
@@ -192,13 +241,7 @@ export class CodexAppServerClient {
 
   async startThread(model?: string): Promise<string> {
     this.ensureReady("startThread");
-    const result = await this.request<{ thread: { id: string } }>("thread/start", {
-      ...(model ? { model } : {}),
-      cwd: "/workspace/share",
-      approvalPolicy: "never",
-      sandbox: "danger-full-access",
-      personality: "none",
-    });
+    const result = await this.request<{ thread: { id: string } }>("thread/start", buildAppServerThreadStartParams(model));
     return result.thread.id;
   }
 
@@ -297,57 +340,104 @@ export class CodexAppServerClient {
   }
 
   private parseNotification(method: string, p: Record<string, unknown> | undefined): AppServerEvent {
-    switch (method) {
-      case "turn/completed": {
-        const turn = p?.["turn"] as Record<string, unknown> | undefined;
-        const status = typeof turn?.["status"] === "string" ? turn["status"] : null;
-        if (status === "failed") {
-          const errorObj = turn?.["error"] as { message?: string } | undefined;
-          return { type: "turn_failed", error: errorObj?.message ?? "Unknown turn failure." };
+    const notification = this.parseAppServerNotification(method, p);
+
+    switch (notification.kind) {
+      case "turn_completed":
+        if (notification.status === "failed") {
+          return { type: "turn_failed", error: notification.errorMessage ?? "Unknown turn failure." };
         }
         return { type: "turn_completed" };
-      }
-
-      case "turn/failed": {
-        const errorObj = p?.["error"] as { message?: string } | undefined;
-        return { type: "turn_failed", error: errorObj?.["message"] ?? "Unknown turn failure." };
-      }
-
+      case "turn_failed":
+        return { type: "turn_failed", error: notification.errorMessage ?? "Unknown turn failure." };
       case "error":
         return {
           type: "error",
-          message: typeof p?.["message"] === "string" ? p["message"] : "Unknown app-server error.",
+          message: notification.message ?? "Unknown app-server error.",
         };
-
-      case "item/completed": {
-        const item = p?.["item"] as Record<string, unknown> | undefined;
-        const itemType = typeof item?.["type"] === "string" ? item["type"] : null;
-        const itemId = typeof item?.["id"] === "string" ? item["id"] : null;
-        if ((itemType === "agent_message" || itemType === "agentMessage") && typeof item?.["text"] === "string") {
-          return { type: "agent_message_completed", text: item["text"], itemId };
+      case "item_completed": {
+        const item = notification.item;
+        const itemType = item?.type ?? null;
+        if ((itemType === "agent_message" || itemType === "agentMessage") && item && item.text !== null) {
+          return { type: "agent_message_completed", text: item.text, itemId: item.id };
         }
         if (itemType && ignoredCompletedItemTypes.has(itemType)) {
           return { type: "noop" };
         }
-        this.warnUnhandledCompletedItemType(itemType, item);
+        this.warnUnhandledCompletedItemType(itemType, item ?? undefined);
         return { type: "noop" };
       }
+      case "agent_message_delta":
+        return {
+          type: "agent_message_delta",
+          text: notification.text,
+          itemId: notification.itemId,
+        };
+      case "ignored":
+        if (!ignoredNotificationMethods.has(notification.method)) {
+          this.warnUnhandledNotification(notification.method, notification.params);
+        }
+        return { type: "noop" };
+    }
+  }
 
-      case "item/agentMessage/delta":
-        return typeof p?.["delta"] === "string"
+  private parseAppServerNotification(
+    method: string,
+    params: Record<string, unknown> | undefined,
+  ): ParsedAppServerNotification {
+    switch (method) {
+      case "turn/completed": {
+        const parsed = turnCompletedParamsSchema.safeParse(params ?? {});
+        return {
+          kind: "turn_completed",
+          status: parsed.success ? parsed.data.turn?.status ?? null : null,
+          errorMessage: parsed.success ? parsed.data.turn?.error?.message ?? null : null,
+        };
+      }
+
+      case "turn/failed": {
+        const parsed = turnFailedParamsSchema.safeParse(params ?? {});
+        return {
+          kind: "turn_failed",
+          errorMessage: parsed.success ? parsed.data.error?.message ?? null : null,
+        };
+      }
+
+      case "error": {
+        const parsed = errorParamsSchema.safeParse(params ?? {});
+        return {
+          kind: "error",
+          message: parsed.success ? parsed.data.message ?? null : null,
+        };
+      }
+
+      case "item/completed": {
+        const parsed = itemCompletedParamsSchema.safeParse(params ?? {});
+        return {
+          kind: "item_completed",
+          item: parsed.success && parsed.data.item
+            ? {
+                id: parsed.data.item.id ?? null,
+                text: parsed.data.item.text ?? null,
+                type: parsed.data.item.type ?? null,
+              }
+            : null,
+        };
+      }
+
+      case "item/agentMessage/delta": {
+        const parsed = agentMessageDeltaParamsSchema.safeParse(params ?? {});
+        return parsed.success
           ? {
-            type: "agent_message_delta",
-            text: p["delta"],
-            itemId: typeof p?.["itemId"] === "string" ? p["itemId"] : null,
-          }
-          : { type: "noop" };
+              kind: "agent_message_delta",
+              text: parsed.data.delta,
+              itemId: parsed.data.itemId ?? null,
+            }
+          : { kind: "ignored", method, params };
+      }
 
       default:
-        if (ignoredNotificationMethods.has(method)) {
-          return { type: "noop" };
-        }
-        this.warnUnhandledNotification(method, p);
-        return { type: "noop" };
+        return { kind: "ignored", method, params };
     }
   }
 
@@ -362,7 +452,10 @@ export class CodexAppServerClient {
     });
   }
 
-  private warnUnhandledCompletedItemType(itemType: string | null, item: Record<string, unknown> | undefined): void {
+  private warnUnhandledCompletedItemType(
+    itemType: string | null,
+    item: { id: string | null; text: string | null; type: string | null } | undefined,
+  ): void {
     const key = itemType ?? "<missing>";
     if (this.warnedUnhandledCompletedItemTypes.has(key)) {
       return;

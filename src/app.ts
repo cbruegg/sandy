@@ -30,7 +30,7 @@ import { WorkerImageManager } from "./worker-image-manager.js";
 import { validateMatrixAuthStateForStartup, resolveMatrixAccessToken } from "./matrix/startup-validator.js";
 import {createNoopHostfsBroker} from "./hostfs/hostfs-broker.js";
 import {initializeHostfs, type HostfsServices} from "./hostfs/index.js";
-import { CodexTokenBroker, type TokenBroker } from "./auth/token-broker.js";
+import { ChatGPTTokenBroker } from "./auth/chatgpt-token-broker.js";
 import type { ChatGPTExternalTokens } from "./types.js";
 
 export async function startApp(): Promise<void> {
@@ -115,9 +115,9 @@ export async function startApp(): Promise<void> {
     workerImageManager.start(),
   ]);
 
-  const tokenBroker: TokenBroker | null = config.authMode.mode === "codex_auth_file"
+  const tokenBroker: ChatGPTTokenBroker | null = config.authMode.mode === "codex_auth_file"
     && config.authMode.codexAuthStrategy === "external_tokens"
-    ? new CodexTokenBroker(config.authMode.codexAuthFile)
+    ? new ChatGPTTokenBroker(config.authMode.codexAuthFile)
     : null;
 
   let initialChatGPTExternalTokens: ChatGPTExternalTokens | null = null;

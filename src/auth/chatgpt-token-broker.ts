@@ -26,11 +26,6 @@ interface JwtClaims {
   [key: string]: unknown;
 }
 
-export interface TokenBroker {
-  getInitialTokens(): Promise<ChatGPTExternalTokens>;
-  refreshTokens(previousAccountId: string | null): Promise<ChatGPTExternalTokens>;
-}
-
 function decodeJwtPayload(jwt: string): JwtClaims | null {
   try {
     const parts = jwt.split(".");
@@ -46,7 +41,7 @@ function decodeJwtPayload(jwt: string): JwtClaims | null {
   }
 }
 
-export class CodexTokenBroker implements TokenBroker {
+export class ChatGPTTokenBroker {
   private authDotJson: AuthDotJson | null = null;
   private refreshInFlight: Promise<ChatGPTExternalTokens> | null = null;
   private cachedTokens: ChatGPTExternalTokens | null = null;

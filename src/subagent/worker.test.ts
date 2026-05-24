@@ -2,6 +2,7 @@ import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { type Codex, type Thread } from "@openai/codex-sdk";
 import { messages } from "../messages.js";
+import { AppServerWorkerSession } from "./worker-app-server.js";
 import {
   buildInitialTaskInput,
   buildInitialTaskInputWithCapabilities,
@@ -287,7 +288,6 @@ test("streamTurn ignores empty assistant messages", async () => {
     const result = await streamTurn(thread, "Inspect the reel.");
 
     assert.equal(result.sawTerminalError, false);
-    assert.equal(result.sawTaskDone, false);
     assert.deepEqual(writes, []);
   } finally {
     process.stdout.write = originalWrite;
@@ -373,4 +373,41 @@ test("streamAppServerTurn does not duplicate completed messages after deltas", a
   } finally {
     process.stdout.write = originalWrite;
   }
+});
+
+test("AppServerWorkerSession accepts a synchronous auth refresh response", async () => {
+  const sentEvents: SubAgentEvent[] = [];
+  const refreshedTokens = {
+    accessToken: "refreshed-access-token",
+    chatgptAccountId: "acct-123",
+    chatgptPlanType: "plus",
+  };
+
+  const appServer = {
+    async close(): Promise<void> {},
+    async *streamTurn(
+      _threadId: string,
+      _inputText: string,
+      onAuthRefresh: (previousAccountId: string | null) => Promise<typeof refreshedTokens>,
+    ) {
+      const tokens = await onAuthRefresh("acct-123");
+      assert.deepEqual(tokens, refreshedTokens);
+      yield { type: "turn_completed" as const };
+    },
+  };
+
+  const session = new AppServerWorkerSession(appServer, "thread-1", (event) => {
+    sentEvents.push(event);
+    if (event.type === "chatgpt_auth_refresh_request") {
+      session.handleAuthRefreshResult(refreshedTokens);
+    }
+  });
+
+  const result = await session.streamTurn("hello");
+
+  assert.equal(result.sawTerminalError, false);
+  assert.deepEqual(sentEvents, [{
+    type: "chatgpt_auth_refresh_request",
+    previousAccountId: "acct-123",
+  }]);
 });
