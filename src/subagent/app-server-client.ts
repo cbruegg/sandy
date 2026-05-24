@@ -117,6 +117,12 @@ type AuthRefreshCallback = (
   previousAccountId: string | null,
 ) => Promise<{ accessToken: string; chatgptAccountId: string; chatgptPlanType: string | null }>;
 
+type CreateAuthenticatedClientOptions = {
+  codexPath: string;
+  tokens: ChatGPTExternalTokens;
+  spawnImpl?: typeof spawn;
+};
+
 export class CodexAppServerClient {
   private child: ChildProcessWithoutNullStreams | null = null;
   private activeNotificationHandler: ((method: string, params: unknown) => void) | null = null;
@@ -134,8 +140,14 @@ export class CodexAppServerClient {
     private readonly spawnImpl: typeof spawn = spawn,
   ) {}
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async start(): Promise<void> {
+  static async createAuthenticated(options: CreateAuthenticatedClientOptions): Promise<CodexAppServerClient> {
+    const client = new CodexAppServerClient(options.codexPath, options.spawnImpl);
+    await client.initialize();
+    await client.loginWithTokens(options.tokens);
+    return client;
+  }
+
+  start(): void {
     if (this.child) return;
 
     this.child = this.spawnImpl(this.codexPath, ["app-server", "--listen", "stdio://"], {
@@ -235,7 +247,7 @@ export class CodexAppServerClient {
   }
 
   async initialize(): Promise<void> {
-    await this.start();
+    this.start();
     await this.request<void>("initialize", {
       clientInfo: {
         name: "sandy_worker",
@@ -475,8 +487,7 @@ export class CodexAppServerClient {
     });
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async close(): Promise<void> {
+  close(): void {
     this.activeNotificationHandler = null;
     this.activeAuthRefreshHandler = null;
     if (this.child) {

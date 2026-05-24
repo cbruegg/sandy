@@ -294,6 +294,78 @@ test("streamTurn ignores empty assistant messages", async () => {
   }
 });
 
+test("worker emits task_done only after mark_finished", async () => {
+  const sentEvents: SubAgentEvent[] = [];
+  const thread = {
+    async runStreamed(input: unknown) {
+      const inputText = String(input);
+      return {
+        events: (async function* () {
+          if (inputText.includes("host-facing handoff summary")) {
+            yield {
+              type: "item.completed",
+              item: {
+                type: "agent_message",
+                text: "Summary for the host.",
+              },
+            };
+          }
+          yield {
+            type: "turn.completed",
+          };
+        })(),
+      };
+    },
+  } as unknown as Thread;
+  const processor = createWorkerCommandProcessor({
+    sendEvent: (event) => sentEvents.push(event),
+    env: {},
+    applyWorkerCodexConfigPatch: async () => {},
+    buildWorkerCodexEnvironment: () => ({}),
+    createCodexClient: async () => ({
+      startThread: () => thread,
+    }) as unknown as Codex,
+    onShutdown: () => {},
+  });
+
+  await processor.handleLine(JSON.stringify({
+    type: "start_task",
+    taskId: "task-1",
+    taskBrief: "Inspect the collection.",
+    input: { text: "Initial request", images: [] },
+    taskLanguage: "English",
+    config: {
+      openAiApiKey: null,
+      codexModel: null,
+      channelFormatting: testFormatting,
+      httpTokens: [],
+      httpProxyWrapper: null,
+      chatgptExternalTokens: null,
+    },
+    environment: {},
+    codexConfigToml: null,
+    httpProxyUrl: null,
+  } satisfies Extract<HostCommand, { type: "start_task" }>));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(sentEvents.some((event) => event.type === "task_done"), false);
+
+  await processor.handleLine(JSON.stringify({
+    type: "mark_finished",
+  } satisfies Extract<HostCommand, { type: "mark_finished" }>));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(sentEvents.slice(-2), [
+    {
+      type: "task_summary",
+      summary: "Summary for the host.",
+    },
+    {
+      type: "task_done",
+    },
+  ]);
+});
+
 test("streamAppServerTurn emits assistant output only after the message completes", async () => {
   const writes: string[] = [];
   const originalWrite = process.stdout.write.bind(process.stdout);

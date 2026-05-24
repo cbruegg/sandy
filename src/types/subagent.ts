@@ -48,7 +48,7 @@ const workerLogEventSchema = z.object({
   data: z.record(z.string(), z.unknown()).optional(),
 }).strict();
 
-const chatGptAuthRefreshRequestEventSchema = z.object({
+const chatGPTAuthRefreshRequestEventSchema = z.object({
   type: z.literal("chatgpt_auth_refresh_request"),
   previousAccountId: z.string().nullable(),
 }).strict();
@@ -119,7 +119,7 @@ const subAgentEventSchema = z.discriminatedUnion("type", [
   workerConnectedEventSchema,
   workerDisconnectedEventSchema,
   workerLogEventSchema,
-  chatGptAuthRefreshRequestEventSchema,
+  chatGPTAuthRefreshRequestEventSchema,
 ]);
 
 export type SubAgentEvent = z.infer<typeof subAgentEventSchema>;

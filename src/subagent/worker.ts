@@ -16,6 +16,7 @@ import {
   type ImageAttachment,
 } from "./worker-prompt.js";
 import {AppServerWorkerSession} from "./worker-app-server.js";
+import {writeSubAgentEvent} from "./subagent-event-writer.js";
 import {messages} from "../messages.js";
 
 type ThreadEventDisposition = "none" | "terminal_error";
@@ -26,10 +27,6 @@ type StreamTurnResult = {
 };
 
 type WorkerAuthMode = { kind: "api_key"; apiKey: string | null } | { kind: "chatgpt_appserver" };
-
-function send(event: SubAgentEvent): void {
-  process.stdout.write(`${JSON.stringify(event)}\n`);
-}
 
 function parseHostCommand(raw: string): HostCommand {
   const parsed = JSON.parse(raw) as HostCommand;
@@ -143,7 +140,7 @@ function handleTaskTurnEvent(event: ThreadEvent): ThreadEventDisposition {
         if (!event.item.text.trim()) {
           return "none";
         }
-        send({
+        writeSubAgentEvent({
           type: "assistant_output",
           text: event.item.text,
         });
@@ -152,14 +149,14 @@ function handleTaskTurnEvent(event: ThreadEvent): ThreadEventDisposition {
       if (event.item.type === "todo_list") {
         const message = progressFromTodoList(event.item);
         if (message) {
-          send({
+          writeSubAgentEvent({
             type: "progress",
             message,
           });
         }
       }
       if (event.item.type === "mcp_tool_call") {
-        send({
+        writeSubAgentEvent({
           type: "progress",
           message: messages.mcpToolProgress(event.item.status, event.item.server, event.item.tool, event.item.arguments),
         });
@@ -168,13 +165,13 @@ function handleTaskTurnEvent(event: ThreadEvent): ThreadEventDisposition {
     case "turn.completed":
       return "none";
     case "turn.failed":
-      send({
+      writeSubAgentEvent({
         type: "task_error",
         message: event.error.message,
       });
       return "terminal_error";
     case "error":
-      send({
+      writeSubAgentEvent({
         type: "task_error",
         message: event.message,
       });
@@ -211,7 +208,7 @@ function normalizeSummaryText(chunks: string[]): string | null {
   return summary.length > 0 ? summary : null;
 }
 
-async function emitTaskSummary(thread: Thread, sendEvent: (event: SubAgentEvent) => void = send): Promise<void> {
+async function emitTaskSummary(thread: Thread, sendEvent: (event: SubAgentEvent) => void = writeSubAgentEvent): Promise<void> {
   const result = await streamTurn(thread, buildTaskSummaryInput(), "summary");
   if (result.sawTerminalError || !result.summaryText) {
     return;
@@ -441,7 +438,7 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
 export async function main(): Promise<void> {
   configureLogger({
     forwardLog: (payload) => {
-      send({
+      writeSubAgentEvent({
         type: "worker_log",
         level: payload.level,
         event: payload.event,
@@ -463,10 +460,10 @@ export async function main(): Promise<void> {
   // to privilege requests and send follow-up task input over stdin.
   process.stdin.resume();
 
-  send({ type: "worker_connected" });
+  writeSubAgentEvent({ type: "worker_connected" });
 
   const processor = createWorkerCommandProcessor({
-    sendEvent: send,
+    sendEvent: writeSubAgentEvent,
     env: process.env,
     createCodexClient,
     applyWorkerCodexConfigPatch,

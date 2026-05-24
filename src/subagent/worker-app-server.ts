@@ -1,6 +1,7 @@
 import { logger } from "../logger.js";
 import type { ChatGPTExternalTokens, SubAgentEvent } from "../types.js";
 import { CodexAppServerClient } from "./app-server-client.js";
+import { writeSubAgentEvent } from "./subagent-event-writer.js";
 import { buildTaskSummaryInput } from "./worker-prompt.js";
 
 type TurnMode = "task" | "summary";
@@ -15,10 +16,6 @@ type AppServerTurnStreamer = Pick<CodexAppServerClient, "streamTurn">;
 type AuthRefreshCallback = (
   previousAccountId: string | null,
 ) => Promise<{ accessToken: string; chatgptAccountId: string; chatgptPlanType: string | null }>;
-
-function send(event: SubAgentEvent): void {
-  process.stdout.write(`${JSON.stringify(event)}\n`);
-}
 
 class AppServerMessageBuffer {
   private emittedText = "";
@@ -90,7 +87,7 @@ export async function* streamAppServerTurn(
   onAuthRefresh: AuthRefreshCallback = () => Promise.reject(
     new Error("App-server requested auth refresh without a configured handler."),
   ),
-  sendEvent: (event: SubAgentEvent) => void = send,
+  sendEvent: (event: SubAgentEvent) => void = writeSubAgentEvent,
 ): AsyncGenerator<{
   result: StreamTurnResult;
   events: SubAgentEvent[];
@@ -210,9 +207,10 @@ export class AppServerWorkerSession {
     model?: string;
     sendEvent: (event: SubAgentEvent) => void;
   }): Promise<AppServerWorkerSession> {
-    const appServer = new CodexAppServerClient(options.codexPath);
-    await appServer.initialize();
-    await appServer.loginWithTokens(options.initialTokens);
+    const appServer = await CodexAppServerClient.createAuthenticated({
+      codexPath: options.codexPath,
+      tokens: options.initialTokens,
+    });
     const threadId = await appServer.startThread(options.model);
     return new AppServerWorkerSession(appServer, threadId, options.sendEvent);
   }
@@ -267,9 +265,10 @@ export class AppServerWorkerSession {
     });
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
     this.cancelPendingAuthRefresh();
-    await this.appServer.close();
+    this.appServer.close();
+    return Promise.resolve();
   }
 
   private async requestAuthRefresh(previousAccountId: string | null): Promise<{
