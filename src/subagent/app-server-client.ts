@@ -1,6 +1,7 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { ChatGPTExternalTokens } from "../types.js";
+import { logger } from "../logger.js";
 
 type PendingRequest<T = unknown> = {
   resolve: (result: T) => void;
@@ -26,6 +27,9 @@ export class CodexAppServerClient {
   private pendingRequests = new Map<number, PendingRequest>();
   private initialized = false;
   private loggedIn = false;
+  private readonly warnedUnhandledNotificationMethods = new Set<string>();
+  private readonly warnedUnhandledCompletedItemTypes = new Set<string>();
+  private readonly warnedUnhandledServerRequestMethods = new Set<string>();
 
   constructor(
     private readonly codexPath: string,
@@ -95,6 +99,7 @@ export class CodexAppServerClient {
         void this.activeAuthRefreshHandler(id, p?.["previousAccountId"] as string | null ?? null);
       }
     } else {
+      this.warnUnhandledServerRequest(method, params);
       this.sendErrorResponse(id, -32601, `Method not found: ${method}`);
     }
   }
@@ -272,8 +277,15 @@ export class CodexAppServerClient {
 
   private parseNotification(method: string, p: Record<string, unknown> | undefined): AppServerEvent {
     switch (method) {
-      case "turn/completed":
+      case "turn/completed": {
+        const turn = p?.["turn"] as Record<string, unknown> | undefined;
+        const status = typeof turn?.["status"] === "string" ? turn["status"] : null;
+        if (status === "failed") {
+          const errorObj = turn?.["error"] as { message?: string } | undefined;
+          return { type: "turn_failed", error: errorObj?.message ?? "Unknown turn failure." };
+        }
         return { type: "turn_completed" };
+      }
 
       case "turn/failed": {
         const errorObj = p?.["error"] as { message?: string } | undefined;
@@ -288,15 +300,57 @@ export class CodexAppServerClient {
 
       case "item/completed": {
         const item = p?.["item"] as Record<string, unknown> | undefined;
-        if (item?.["type"] === "agent_message" && typeof item["text"] === "string") {
+        const itemType = typeof item?.["type"] === "string" ? item["type"] : null;
+        if ((itemType === "agent_message" || itemType === "agentMessage") && typeof item?.["text"] === "string") {
           return { type: "agent_message", text: item["text"] };
         }
+        this.warnUnhandledCompletedItemType(itemType, item);
         return { type: "noop" };
       }
 
+      case "item/agentMessage/delta":
+        return typeof p?.["delta"] === "string"
+          ? { type: "agent_message", text: p["delta"] }
+          : { type: "noop" };
+
       default:
+        this.warnUnhandledNotification(method, p);
         return { type: "noop" };
     }
+  }
+
+  private warnUnhandledNotification(method: string, params: Record<string, unknown> | undefined): void {
+    if (this.warnedUnhandledNotificationMethods.has(method)) {
+      return;
+    }
+    this.warnedUnhandledNotificationMethods.add(method);
+    logger.warn("appserver.notification_unhandled", {
+      method,
+      params,
+    });
+  }
+
+  private warnUnhandledCompletedItemType(itemType: string | null, item: Record<string, unknown> | undefined): void {
+    const key = itemType ?? "<missing>";
+    if (this.warnedUnhandledCompletedItemTypes.has(key)) {
+      return;
+    }
+    this.warnedUnhandledCompletedItemTypes.add(key);
+    logger.warn("appserver.item_completed_unhandled", {
+      itemType,
+      item,
+    });
+  }
+
+  private warnUnhandledServerRequest(method: string, params: unknown): void {
+    if (this.warnedUnhandledServerRequestMethods.has(method)) {
+      return;
+    }
+    this.warnedUnhandledServerRequestMethods.add(method);
+    logger.warn("appserver.server_request_unhandled", {
+      method,
+      params: params && typeof params === "object" ? params : { value: params },
+    });
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await

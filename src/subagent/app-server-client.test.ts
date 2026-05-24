@@ -167,12 +167,12 @@ test("CodexAppServerClient answers auth refresh requests during turns", async ()
   child.stdout.write(`${JSON.stringify({
     jsonrpc: "2.0",
     method: "item/completed",
-    params: {
-      item: {
-        type: "agent_message",
-        text: "done",
+      params: {
+        item: {
+          type: "agentMessage",
+          text: "done",
+        },
       },
-    },
   })}\n`);
   await new Promise((resolve) => setImmediate(resolve));
   child.stdout.write(`${JSON.stringify({
@@ -257,12 +257,12 @@ test("CodexAppServerClient handles auth refresh before turn-start RPC response",
   child.stdout.write(`${JSON.stringify({
     jsonrpc: "2.0",
     method: "item/completed",
-    params: {
-      item: {
-        type: "agent_message",
-        text: "done after early refresh",
+      params: {
+        item: {
+          type: "agentMessage",
+          text: "done after early refresh",
+        },
       },
-    },
   })}\n`);
   await new Promise((resolve) => setImmediate(resolve));
   child.stdout.write(`${JSON.stringify({
@@ -341,5 +341,122 @@ test("CodexAppServerClient ignores non-message item completions until turn compl
 
   assert.deepEqual(await streamPromise, [
     { type: "turn_completed" },
+  ]);
+});
+
+test("CodexAppServerClient emits agent message deltas", async () => {
+  const child = new FakeChildProcess();
+  const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
+  const client = new CodexAppServerClient("codex", spawnImpl);
+  const tokens: ChatGPTExternalTokens = {
+    accessToken: "access-token",
+    chatgptAccountId: "acct-123",
+    chatgptPlanType: "plus",
+  };
+
+  const initializePromise = client.initialize();
+  await Promise.resolve();
+  respond(child, 1, {});
+  await initializePromise;
+
+  const loginPromise = client.loginWithTokens(tokens);
+  await Promise.resolve();
+  respond(child, 2, {});
+  await loginPromise;
+
+  const startThreadPromise = client.startThread();
+  await Promise.resolve();
+  respond(child, 3, { thread: { id: "thread-1" } });
+  const threadId = await startThreadPromise;
+
+  const streamPromise = (async () => {
+    const events: Array<{ type: string; text?: string }> = [];
+    for await (const event of client.streamTurn(threadId, "hello", async () => tokens)) {
+      events.push(event);
+    }
+    return events;
+  })();
+
+  await Promise.resolve();
+  respond(child, 4, {});
+  await new Promise((resolve) => setImmediate(resolve));
+
+  child.stdout.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    method: "item/agentMessage/delta",
+    params: {
+      itemId: "item-1",
+      delta: "Hello",
+    },
+  })}\n`);
+  await new Promise((resolve) => setImmediate(resolve));
+  child.stdout.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    method: "turn/completed",
+    params: {
+      turn: {
+        status: "completed",
+      },
+    },
+  })}\n`);
+
+  assert.deepEqual(await streamPromise, [
+    { type: "agent_message", text: "Hello" },
+    { type: "turn_completed" },
+  ]);
+});
+
+test("CodexAppServerClient maps failed turn/completed notifications to turn_failed", async () => {
+  const child = new FakeChildProcess();
+  const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
+  const client = new CodexAppServerClient("codex", spawnImpl);
+  const tokens: ChatGPTExternalTokens = {
+    accessToken: "access-token",
+    chatgptAccountId: "acct-123",
+    chatgptPlanType: "plus",
+  };
+
+  const initializePromise = client.initialize();
+  await Promise.resolve();
+  respond(child, 1, {});
+  await initializePromise;
+
+  const loginPromise = client.loginWithTokens(tokens);
+  await Promise.resolve();
+  respond(child, 2, {});
+  await loginPromise;
+
+  const startThreadPromise = client.startThread();
+  await Promise.resolve();
+  respond(child, 3, { thread: { id: "thread-1" } });
+  const threadId = await startThreadPromise;
+
+  const streamPromise = (async () => {
+    const events: Array<{ type: string; error?: string }> = [];
+    for await (const event of client.streamTurn(threadId, "hello", async () => tokens)) {
+      events.push(event);
+    }
+    return events;
+  })();
+
+  await Promise.resolve();
+  respond(child, 4, {});
+  await new Promise((resolve) => setImmediate(resolve));
+
+  child.stdout.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    method: "turn/completed",
+    params: {
+      turn: {
+        status: "failed",
+        error: {
+          message: "turn exploded",
+        },
+      },
+    },
+  })}\n`);
+
+  assert.deepEqual(await streamPromise, [
+    { type: "turn_failed", error: "turn exploded" },
   ]);
 });
