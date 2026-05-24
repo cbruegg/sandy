@@ -26,6 +26,8 @@ type StreamTurnResult = {
   summaryText: string | null;
 };
 
+type AppServerTurnStreamer = Pick<CodexAppServerClient, "streamTurn">;
+
 type WorkerAuthMode = { kind: "api_key"; apiKey: string | null } | { kind: "chatgpt_appserver" };
 
 // Auth refresh plumbing: when the worker needs fresh tokens from the host,
@@ -232,6 +234,62 @@ async function emitTaskSummary(thread: Thread, sendEvent: (event: SubAgentEvent)
 
 // ---- app-server helpers ----
 
+class AppServerMessageBuffer {
+  private emittedText = "";
+  private pendingText = "";
+
+  appendDelta(text: string): string[] {
+    if (!text) {
+      return [];
+    }
+    this.pendingText += text;
+    return [];
+  }
+
+  appendCompleted(text: string): string[] {
+    if (!text) {
+      return this.flushAll();
+    }
+
+    const streamedText = this.emittedText + this.pendingText;
+    if (!streamedText) {
+      this.pendingText = text;
+      return this.flushAll();
+    }
+
+    if (text.startsWith(streamedText)) {
+      this.pendingText += text.slice(streamedText.length);
+      return this.flushAll();
+    }
+
+    if (streamedText.startsWith(text)) {
+      return this.flushAll();
+    }
+
+    this.emittedText = "";
+    this.pendingText = text;
+    return this.flushAll();
+  }
+
+  flushAll(): string[] {
+    if (!this.pendingText) {
+      return [];
+    }
+
+    const chunk = this.pendingText;
+    this.emittedText += chunk;
+    this.pendingText = "";
+    return [chunk];
+  }
+
+  takeCompletedText(): string | null {
+    const text = `${this.emittedText}${this.pendingText}`.trim();
+    this.emittedText = "";
+    this.pendingText = "";
+    return text.length > 0 ? text : null;
+  }
+}
+
 function createAuthRefreshCallback(): (previousAccountId: string | null) => Promise<{
   accessToken: string;
   chatgptAccountId: string;
@@ -262,7 +320,7 @@ function createAuthRefreshCallback(): (previousAccountId: string | null) => Prom
 }
 
 async function* streamAppServerTurn(
-  appServer: CodexAppServerClient,
+  appServer: AppServerTurnStreamer,
   threadId: string,
   input: string,
   mode: TurnMode = "task",
@@ -273,28 +331,59 @@ async function* streamAppServerTurn(
 }> {
   let sawTerminalError = false;
   const summaryChunks: string[] = [];
+  const messageBuffer = new AppServerMessageBuffer();
+
+  const flushBufferedTaskOutput = () => {
+    for (const chunk of messageBuffer.flushAll()) {
+      if (chunk.trim()) {
+        send({ type: "assistant_output", text: chunk });
+      }
+    }
+  };
+
+  const appendSummaryChunk = (text: string | null) => {
+    if (text) {
+      summaryChunks.push(text);
+    }
+  };
 
   try {
     for await (const event of appServer.streamTurn(threadId, input, createAuthRefreshCallback(), abortSignal)) {
       logger.debug("appserver.event_received", { eventType: event.type, event });
 
       switch (event.type) {
-        case "agent_message": {
+        case "agent_message_delta": {
+          messageBuffer.appendDelta(event.text);
+          break;
+        }
+
+        case "agent_message_completed": {
           if (mode === "summary") {
-            summaryChunks.push(event.text);
+            messageBuffer.appendCompleted(event.text);
+            appendSummaryChunk(messageBuffer.takeCompletedText());
             break;
           }
 
-          if (event.text.trim()) {
-            send({ type: "assistant_output", text: event.text });
+          for (const chunk of messageBuffer.appendCompleted(event.text)) {
+            if (chunk.trim()) {
+              send({ type: "assistant_output", text: chunk });
+            }
           }
           break;
         }
 
         case "turn_completed":
+          if (mode === "summary") {
+            appendSummaryChunk(messageBuffer.takeCompletedText());
+          } else {
+            flushBufferedTaskOutput();
+          }
           break;
 
         case "turn_failed":
+          if (mode !== "summary") {
+            flushBufferedTaskOutput();
+          }
           send({ type: "task_error", message: event.error });
           sawTerminalError = true;
           yield {
@@ -304,6 +393,9 @@ async function* streamAppServerTurn(
           return;
 
         case "error":
+          if (mode !== "summary") {
+            flushBufferedTaskOutput();
+          }
           send({ type: "task_error", message: event.message });
           sawTerminalError = true;
           yield {
@@ -314,9 +406,18 @@ async function* streamAppServerTurn(
       }
     }
   } catch (error) {
+    if (mode !== "summary") {
+      flushBufferedTaskOutput();
+    }
     const message = error instanceof Error ? error.message : "App-server turn failed.";
     send({ type: "task_error", message });
     sawTerminalError = true;
+  }
+
+  if (mode === "summary") {
+    appendSummaryChunk(messageBuffer.takeCompletedText());
+  } else {
+    flushBufferedTaskOutput();
   }
 
   yield {
@@ -330,7 +431,7 @@ async function* streamAppServerTurn(
 }
 
 async function emitAppServerTaskSummary(
-  appServer: CodexAppServerClient,
+  appServer: AppServerTurnStreamer,
   threadId: string,
 ): Promise<void> {
   for await (const { result } of streamAppServerTurn(appServer, threadId, buildTaskSummaryInput(), "summary")) {
@@ -638,6 +739,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 }
 export {
   createWorkerCommandProcessor,
+  streamAppServerTurn,
   streamTurn,
 };
 export {

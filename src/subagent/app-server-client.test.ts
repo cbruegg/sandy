@@ -5,6 +5,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { PassThrough, Writable } from "node:stream";
 import { CodexAppServerClient } from "./app-server-client.js";
 import type { ChatGPTExternalTokens } from "../types.js";
+import { configureLogger, type LogLevel } from "../logger.js";
 
 class CaptureWritable extends Writable {
   public readonly writes: string[] = [];
@@ -183,7 +184,7 @@ test("CodexAppServerClient answers auth refresh requests during turns", async ()
 
   const events = await streamPromise;
   assert.deepEqual(events, [
-    { type: "agent_message", text: "done" },
+    { type: "agent_message_completed", itemId: null, text: "done" },
     { type: "turn_completed" },
   ]);
 });
@@ -272,7 +273,7 @@ test("CodexAppServerClient handles auth refresh before turn-start RPC response",
   })}\n`);
 
   assert.deepEqual(await streamPromise, [
-    { type: "agent_message", text: "done after early refresh" },
+    { type: "agent_message_completed", itemId: null, text: "done after early refresh" },
     { type: "turn_completed" },
   ]);
 
@@ -401,9 +402,83 @@ test("CodexAppServerClient emits agent message deltas", async () => {
   })}\n`);
 
   assert.deepEqual(await streamPromise, [
-    { type: "agent_message", text: "Hello" },
+    { type: "agent_message_delta", itemId: "item-1", text: "Hello" },
     { type: "turn_completed" },
   ]);
+});
+
+test("CodexAppServerClient ignores known benign notifications and item completions", async () => {
+  const child = new FakeChildProcess();
+  const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
+  const client = new CodexAppServerClient("codex", spawnImpl);
+  const tokens: ChatGPTExternalTokens = {
+    accessToken: "access-token",
+    chatgptAccountId: "acct-123",
+    chatgptPlanType: "plus",
+  };
+  const logs: Array<{ level: LogLevel; event: string }> = [];
+
+  configureLogger({
+    minLevel: "debug",
+    forwardLog: (payload) => {
+      logs.push({ level: payload.level, event: payload.event });
+    },
+  });
+
+  try {
+    const initializePromise = client.initialize();
+    await Promise.resolve();
+    respond(child, 1, {});
+    await initializePromise;
+
+    const loginPromise = client.loginWithTokens(tokens);
+    await Promise.resolve();
+    respond(child, 2, {});
+    await loginPromise;
+
+    const startThreadPromise = client.startThread();
+    await Promise.resolve();
+    respond(child, 3, { thread: { id: "thread-1" } });
+    const threadId = await startThreadPromise;
+
+    const streamPromise = (async () => {
+      const events: Array<{ type: string }> = [];
+      for await (const event of client.streamTurn(threadId, "hello", async () => tokens)) {
+        events.push(event);
+      }
+      return events;
+    })();
+
+    await Promise.resolve();
+    respond(child, 4, {});
+    await new Promise((resolve) => setImmediate(resolve));
+
+    child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method: "thread/started", params: {} })}\n`);
+    child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method: "turn/started", params: {} })}\n`);
+    child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method: "account/rateLimits/updated", params: {} })}\n`);
+    child.stdout.write(`${JSON.stringify({
+      jsonrpc: "2.0",
+      method: "item/completed",
+      params: {
+        item: {
+          type: "reasoning",
+          text: "thinking",
+        },
+      },
+    })}\n`);
+    await new Promise((resolve) => setImmediate(resolve));
+    child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method: "turn/completed", params: {} })}\n`);
+
+    assert.deepEqual(await streamPromise, [{ type: "turn_completed" }]);
+    assert.equal(logs.some((entry) => entry.event === "appserver.notification_unhandled"), false);
+    assert.equal(logs.some((entry) => entry.event === "appserver.item_completed_unhandled"), false);
+  } finally {
+    configureLogger({
+      minLevel: "info",
+      outputMode: "split",
+      forwardLog: undefined,
+    });
+  }
 });
 
 test("CodexAppServerClient maps failed turn/completed notifications to turn_failed", async () => {

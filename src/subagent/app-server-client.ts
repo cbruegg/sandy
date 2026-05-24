@@ -9,13 +9,34 @@ type PendingRequest<T = unknown> = {
 };
 
 type AppServerEvent =
-  | { type: "agent_message"; text: string }
+  | { type: "agent_message_delta"; text: string; itemId: string | null }
+  | { type: "agent_message_completed"; text: string; itemId: string | null }
   | { type: "noop" }
   | { type: "turn_completed" }
   | { type: "turn_failed"; error: string }
   | { type: "error"; message: string };
 
 const REFRESH_AUTH_METHOD = "account/chatgptAuthTokens/refresh";
+
+const ignoredNotificationMethods = new Set([
+  "account/rateLimits/updated",
+  "item/started",
+  "mcpServer/startupStatus/updated",
+  "thread/started",
+  "thread/status/changed",
+  "thread/tokenUsage/updated",
+  "turn/started",
+]);
+
+const ignoredCompletedItemTypes = new Set([
+  "commandExecution",
+  "command_execution",
+  "mcpToolCall",
+  "mcp_tool_call",
+  "reasoning",
+  "userMessage",
+  "user_message",
+]);
 
 type AuthRefreshCallback = (
   previousAccountId: string | null,
@@ -301,8 +322,12 @@ export class CodexAppServerClient {
       case "item/completed": {
         const item = p?.["item"] as Record<string, unknown> | undefined;
         const itemType = typeof item?.["type"] === "string" ? item["type"] : null;
+        const itemId = typeof item?.["id"] === "string" ? item["id"] : null;
         if ((itemType === "agent_message" || itemType === "agentMessage") && typeof item?.["text"] === "string") {
-          return { type: "agent_message", text: item["text"] };
+          return { type: "agent_message_completed", text: item["text"], itemId };
+        }
+        if (itemType && ignoredCompletedItemTypes.has(itemType)) {
+          return { type: "noop" };
         }
         this.warnUnhandledCompletedItemType(itemType, item);
         return { type: "noop" };
@@ -310,10 +335,17 @@ export class CodexAppServerClient {
 
       case "item/agentMessage/delta":
         return typeof p?.["delta"] === "string"
-          ? { type: "agent_message", text: p["delta"] }
+          ? {
+            type: "agent_message_delta",
+            text: p["delta"],
+            itemId: typeof p?.["itemId"] === "string" ? p["itemId"] : null,
+          }
           : { type: "noop" };
 
       default:
+        if (ignoredNotificationMethods.has(method)) {
+          return { type: "noop" };
+        }
         this.warnUnhandledNotification(method, p);
         return { type: "noop" };
     }

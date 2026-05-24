@@ -8,6 +8,7 @@ import {
   buildPrivilegeResolutionInput,
   buildTaskSummaryInput,
   createWorkerCommandProcessor,
+  streamAppServerTurn,
   streamTurn,
 } from "./worker.js";
 import type { ChannelFormatting, HostCommand, PrivilegeResolutionResult, SubAgentEvent } from "../types.js";
@@ -288,6 +289,87 @@ test("streamTurn ignores empty assistant messages", async () => {
     assert.equal(result.sawTerminalError, false);
     assert.equal(result.sawTaskDone, false);
     assert.deepEqual(writes, []);
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+});
+
+test("streamAppServerTurn emits assistant output only after the message completes", async () => {
+  const writes: string[] = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  const mockWrite: typeof process.stdout.write = (
+    chunk,
+    encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
+    callback?: (err?: Error | null) => void,
+  ) => {
+    writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    if (typeof encodingOrCallback === "function") {
+      encodingOrCallback();
+    } else {
+      callback?.();
+    }
+    return true;
+  };
+  process.stdout.write = mockWrite;
+
+  try {
+    const appServer = {
+      async *streamTurn() {
+        yield { type: "agent_message_delta", itemId: "item-1", text: "Using" };
+        yield { type: "agent_message_delta", itemId: "item-1", text: " the" };
+        yield { type: "agent_message_delta", itemId: "item-1", text: " Todo" };
+        yield { type: "agent_message_delta", itemId: "item-1", text: "ist" };
+        yield { type: "agent_message_delta", itemId: "item-1", text: " skill." };
+        yield { type: "agent_message_completed", itemId: "item-1", text: "Using the Todoist skill." };
+        yield { type: "turn_completed" };
+      },
+    };
+
+    for await (const _result of streamAppServerTurn(appServer as Parameters<typeof streamAppServerTurn>[0], "thread-1", "hello")) {
+      // drain generator
+    }
+
+    const events = writes.map((entry) => JSON.parse(entry.trim()) as SubAgentEvent);
+    assert.deepEqual(events, [{ type: "assistant_output", text: "Using the Todoist skill." }]);
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+});
+
+test("streamAppServerTurn does not duplicate completed messages after deltas", async () => {
+  const writes: string[] = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  const mockWrite: typeof process.stdout.write = (
+    chunk,
+    encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
+    callback?: (err?: Error | null) => void,
+  ) => {
+    writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    if (typeof encodingOrCallback === "function") {
+      encodingOrCallback();
+    } else {
+      callback?.();
+    }
+    return true;
+  };
+  process.stdout.write = mockWrite;
+
+  try {
+    const appServer = {
+      async *streamTurn() {
+        yield { type: "agent_message_delta", itemId: "item-1", text: "Hello" };
+        yield { type: "agent_message_delta", itemId: "item-1", text: " world" };
+        yield { type: "agent_message_completed", itemId: "item-1", text: "Hello world" };
+        yield { type: "turn_completed" };
+      },
+    };
+
+    for await (const _result of streamAppServerTurn(appServer as Parameters<typeof streamAppServerTurn>[0], "thread-1", "hello")) {
+      // drain generator
+    }
+
+    const events = writes.map((entry) => JSON.parse(entry.trim()) as SubAgentEvent);
+    assert.deepEqual(events, [{ type: "assistant_output", text: "Hello world" }]);
   } finally {
     process.stdout.write = originalWrite;
   }
