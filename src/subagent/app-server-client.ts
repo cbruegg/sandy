@@ -9,6 +9,7 @@ type PendingRequest<T = unknown> = {
 
 type AppServerEvent =
   | { type: "agent_message"; text: string }
+  | { type: "noop" }
   | { type: "turn_completed" }
   | { type: "turn_failed"; error: string }
   | { type: "error"; message: string };
@@ -26,13 +27,16 @@ export class CodexAppServerClient {
   private initialized = false;
   private loggedIn = false;
 
-  constructor(private readonly codexPath: string) {}
+  constructor(
+    private readonly codexPath: string,
+    private readonly spawnImpl: typeof spawn = spawn,
+  ) {}
 
   // eslint-disable-next-line @typescript-eslint/require-await
   async start(): Promise<void> {
     if (this.child) return;
 
-    this.child = spawn(this.codexPath, ["app-server", "--listen", "stdio://"], {
+    this.child = this.spawnImpl(this.codexPath, ["app-server", "--listen", "stdio://"], {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env },
     });
@@ -166,7 +170,7 @@ export class CodexAppServerClient {
       ...(model ? { model } : {}),
       cwd: "/workspace/share",
       approvalPolicy: "never",
-      sandbox: "dangerFullAccess",
+      sandbox: "danger-full-access",
       personality: "none",
     });
     return result.thread.id;
@@ -180,80 +184,89 @@ export class CodexAppServerClient {
   ): AsyncGenerator<AppServerEvent> {
     this.ensureReady("streamTurn");
 
+    const pendingEvents: AppServerEvent[] = [];
+    let resolvePendingEvent: ((event: AppServerEvent | null) => void) | null = null;
+
+    const pushEvent = (event: AppServerEvent): void => {
+      if (resolvePendingEvent) {
+        const resolve = resolvePendingEvent;
+        resolvePendingEvent = null;
+        resolve(event);
+        return;
+      }
+      pendingEvents.push(event);
+    };
+
+    this.activeNotificationHandler = (method: string, params: unknown) => {
+      pushEvent(this.parseNotification(method, params as Record<string, unknown> | undefined));
+    };
+
+    this.activeAuthRefreshHandler = async (id: number, previousAccountId: string | null) => {
+      const tokens = await onAuthRefresh(previousAccountId);
+      this.sendResponse(id, {
+        accessToken: tokens.accessToken,
+        chatgptAccountId: tokens.chatgptAccountId,
+        chatgptPlanType: tokens.chatgptPlanType,
+      });
+    };
+
     await this.request("turn/start", {
       threadId,
       input: [{ type: "text", text: inputText }],
     });
 
-    let done = false;
-    while (!done) {
-      const event: AppServerEvent | null = await new Promise((resolve, reject) => {
-        const abortListener = () => resolve(null);
-        if (abortSignal) {
-          abortSignal.addEventListener("abort", abortListener, { once: true });
+    try {
+      let done = false;
+      while (!done) {
+        const event: AppServerEvent | null = await new Promise((resolve) => {
+          const abortListener = () => {
+            resolvePendingEvent = null;
+            resolve(null);
+          };
+          if (abortSignal) {
+            abortSignal.addEventListener("abort", abortListener, { once: true });
+          }
+
+          const queuedEvent = pendingEvents.shift();
+          if (queuedEvent) {
+            if (abortSignal) {
+              abortSignal.removeEventListener("abort", abortListener);
+            }
+            resolve(queuedEvent);
+            return;
+          }
+
+          resolvePendingEvent = (queued) => {
+            if (abortSignal) {
+              abortSignal.removeEventListener("abort", abortListener);
+            }
+            resolve(queued);
+          };
+        });
+
+        if (!event) {
+          try {
+            await this.request("turn/interrupt", { threadId });
+          } catch {
+            // best effort
+          }
+          return;
         }
 
-        this.activeNotificationHandler = (method: string, params: unknown) => {
-          if (abortSignal) {
-            abortSignal.removeEventListener("abort", abortListener);
-          }
-          try {
-            resolve(this.parseNotification(method, params as Record<string, unknown> | undefined));
-          } catch (err) {
-            reject(err instanceof Error ? err : new Error("Notification parse error"));
-          }
-        };
-
-        this.activeAuthRefreshHandler = async (id: number, previousAccountId: string | null) => {
-          if (abortSignal) {
-            abortSignal.removeEventListener("abort", abortListener);
-          }
-          try {
-            const tokens = await onAuthRefresh(previousAccountId);
-            this.sendResponse(id, {
-              accessToken: tokens.accessToken,
-              chatgptAccountId: tokens.chatgptAccountId,
-              chatgptPlanType: tokens.chatgptPlanType,
-            });
-            this.activeNotificationHandler = (method: string, params: unknown) => {
-              if (abortSignal) {
-                abortSignal.removeEventListener("abort", abortListener);
-              }
-              try {
-                resolve(this.parseNotification(method, params as Record<string, unknown> | undefined));
-              } catch (err) {
-                reject(err instanceof Error ? err : new Error("Notification parse error"));
-              }
-            };
-            this.activeAuthRefreshHandler = async (refreshId: number, prevAccountId: string | null) => {
-              const refreshedTokens = await onAuthRefresh(prevAccountId);
-              this.sendResponse(refreshId, {
-                accessToken: refreshedTokens.accessToken,
-                chatgptAccountId: refreshedTokens.chatgptAccountId,
-                chatgptPlanType: refreshedTokens.chatgptPlanType,
-              });
-            };
-          } catch (err) {
-            reject(err instanceof Error ? err : new Error("Auth refresh failed"));
-          }
-        };
-      });
-
-      if (!event) {
-        try {
-          await this.request("turn/interrupt", { threadId });
-        } catch {
-          // best effort
+        if (event.type === "noop") {
+          continue;
         }
-        return;
-      }
 
-      if (event.type === "turn_completed" || event.type === "turn_failed" || event.type === "error") {
-        done = true;
-        yield event;
-      } else {
-        yield event;
+        if (event.type === "turn_completed" || event.type === "turn_failed" || event.type === "error") {
+          done = true;
+          yield event;
+        } else {
+          yield event;
+        }
       }
+    } finally {
+      this.activeNotificationHandler = null;
+      this.activeAuthRefreshHandler = null;
     }
   }
 
@@ -278,11 +291,11 @@ export class CodexAppServerClient {
         if (item?.["type"] === "agent_message" && typeof item["text"] === "string") {
           return { type: "agent_message", text: item["text"] };
         }
-        return { type: "turn_completed" };
+        return { type: "noop" };
       }
 
       default:
-        return { type: "turn_completed" };
+        return { type: "noop" };
     }
   }
 
