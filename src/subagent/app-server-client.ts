@@ -77,20 +77,41 @@ const agentMessageDeltaParamsSchema = z.object({
   itemId: z.string().optional(),
 }).passthrough();
 
+const turnCompletedNotificationSchema = turnCompletedParamsSchema.transform((data) => ({
+  kind: "turn_completed" as const,
+  turn: data.turn,
+}));
+
+const turnFailedNotificationSchema = turnFailedParamsSchema.transform((data) => ({
+  kind: "turn_failed" as const,
+  error: data.error,
+}));
+
+const errorNotificationSchema = errorParamsSchema.transform((data) => ({
+  kind: "error" as const,
+  message: data.message,
+}));
+
+const itemCompletedNotificationSchema = itemCompletedParamsSchema.transform((data) => ({
+  kind: "item_completed" as const,
+  item: data.item,
+}));
+
+const agentMessageDeltaNotificationSchema = agentMessageDeltaParamsSchema.transform((data) => ({
+  kind: "agent_message_delta" as const,
+  text: data.delta,
+  itemId: data.itemId,
+}));
+
 type ParsedAppServerNotification =
-  | { kind: "turn_completed"; status: string | null; errorMessage: string | null }
-  | { kind: "turn_failed"; errorMessage: string | null }
-  | { kind: "error"; message: string | null }
-  | {
-      kind: "item_completed";
-      item: {
-        id: string | null;
-        text: string | null;
-        type: string | null;
-      } | null;
-    }
-  | { kind: "agent_message_delta"; itemId: string | null; text: string }
+  | z.infer<typeof turnCompletedNotificationSchema>
+  | z.infer<typeof turnFailedNotificationSchema>
+  | z.infer<typeof errorNotificationSchema>
+  | z.infer<typeof itemCompletedNotificationSchema>
+  | z.infer<typeof agentMessageDeltaNotificationSchema>
   | { kind: "ignored"; method: string; params: Record<string, unknown> | undefined };
+
+type ParsedCompletedItem = z.infer<typeof itemCompletedNotificationSchema>["item"];
 
 type AuthRefreshCallback = (
   previousAccountId: string | null,
@@ -347,34 +368,33 @@ export class CodexAppServerClient {
 
     switch (notification.kind) {
       case "turn_completed":
-        if (notification.status === "failed") {
-          return { type: "turn_failed", error: notification.errorMessage ?? "Unknown turn failure." };
+        if (notification.turn?.status === "failed") {
+          return { type: "turn_failed", error: notification.turn.error?.message ?? "Unknown turn failure." };
         }
         return { type: "turn_completed" };
       case "turn_failed":
-        return { type: "turn_failed", error: notification.errorMessage ?? "Unknown turn failure." };
+        return { type: "turn_failed", error: notification.error?.message ?? "Unknown turn failure." };
       case "error":
         return {
           type: "error",
           message: notification.message ?? "Unknown app-server error.",
         };
       case "item_completed": {
-        const item = notification.item;
-        const itemType = item?.type ?? null;
-        if ((itemType === "agent_message" || itemType === "agentMessage") && item && item.text !== null) {
-          return { type: "agent_message_completed", text: item.text, itemId: item.id };
+        const itemType = notification.item?.type ?? null;
+        if ((itemType === "agent_message" || itemType === "agentMessage") && typeof notification.item?.text === "string") {
+          return { type: "agent_message_completed", text: notification.item.text, itemId: notification.item.id ?? null };
         }
         if (itemType && ignoredCompletedItemTypes.has(itemType)) {
           return { type: "noop" };
         }
-        this.warnUnhandledCompletedItemType(itemType, item ?? undefined);
+        this.warnUnhandledCompletedItemType(itemType, notification.item);
         return { type: "noop" };
       }
       case "agent_message_delta":
         return {
           type: "agent_message_delta",
           text: notification.text,
-          itemId: notification.itemId,
+          itemId: notification.itemId ?? null,
         };
       case "ignored":
         if (!ignoredNotificationMethods.has(notification.method)) {
@@ -389,59 +409,33 @@ export class CodexAppServerClient {
     params: Record<string, unknown> | undefined,
   ): ParsedAppServerNotification {
     switch (method) {
-      case "turn/completed": {
-        const parsed = turnCompletedParamsSchema.safeParse(params ?? {});
-        return {
-          kind: "turn_completed",
-          status: parsed.success ? parsed.data.turn?.status ?? null : null,
-          errorMessage: parsed.success ? parsed.data.turn?.error?.message ?? null : null,
-        };
-      }
+      case "turn/completed":
+        return this.parseNotificationWithSchema(turnCompletedNotificationSchema, method, params);
 
-      case "turn/failed": {
-        const parsed = turnFailedParamsSchema.safeParse(params ?? {});
-        return {
-          kind: "turn_failed",
-          errorMessage: parsed.success ? parsed.data.error?.message ?? null : null,
-        };
-      }
+      case "turn/failed":
+        return this.parseNotificationWithSchema(turnFailedNotificationSchema, method, params);
 
-      case "error": {
-        const parsed = errorParamsSchema.safeParse(params ?? {});
-        return {
-          kind: "error",
-          message: parsed.success ? parsed.data.message ?? null : null,
-        };
-      }
+      case "error":
+        return this.parseNotificationWithSchema(errorNotificationSchema, method, params);
 
-      case "item/completed": {
-        const parsed = itemCompletedParamsSchema.safeParse(params ?? {});
-        return {
-          kind: "item_completed",
-          item: parsed.success && parsed.data.item
-            ? {
-                id: parsed.data.item.id ?? null,
-                text: parsed.data.item.text ?? null,
-                type: parsed.data.item.type ?? null,
-              }
-            : null,
-        };
-      }
+      case "item/completed":
+        return this.parseNotificationWithSchema(itemCompletedNotificationSchema, method, params);
 
-      case "item/agentMessage/delta": {
-        const parsed = agentMessageDeltaParamsSchema.safeParse(params ?? {});
-        return parsed.success
-          ? {
-              kind: "agent_message_delta",
-              text: parsed.data.delta,
-              itemId: parsed.data.itemId ?? null,
-            }
-          : { kind: "ignored", method, params };
-      }
+      case "item/agentMessage/delta":
+        return this.parseNotificationWithSchema(agentMessageDeltaNotificationSchema, method, params);
 
       default:
         return { kind: "ignored", method, params };
     }
+  }
+
+  private parseNotificationWithSchema<TSchema extends z.ZodTypeAny>(
+    schema: TSchema,
+    method: string,
+    params: Record<string, unknown> | undefined,
+  ): z.infer<TSchema> | { kind: "ignored"; method: string; params: Record<string, unknown> | undefined } {
+    const parsed = schema.safeParse(params ?? {});
+    return parsed.success ? parsed.data : { kind: "ignored", method, params };
   }
 
   private warnUnhandledNotification(method: string, params: Record<string, unknown> | undefined): void {
@@ -457,7 +451,7 @@ export class CodexAppServerClient {
 
   private warnUnhandledCompletedItemType(
     itemType: string | null,
-    item: { id: string | null; text: string | null; type: string | null } | undefined,
+    item: ParsedCompletedItem,
   ): void {
     const key = itemType ?? "<missing>";
     if (this.warnedUnhandledCompletedItemTypes.has(key)) {
