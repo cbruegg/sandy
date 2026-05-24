@@ -162,7 +162,7 @@ export class OrchestratorTaskLifecycle {
             taskLanguage: decision.taskLanguage,
             channelFormatting: this.channelFormatting,
             initialInput,
-            workerStartConfig: await this.deps.buildWorkerStartConfig(),
+            workerStartConfig: this.deps.buildWorkerStartConfig(),
           },
           async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
         );
@@ -381,7 +381,7 @@ export class OrchestratorTaskLifecycle {
   }
 
   private async handleAuthRefresh(taskId: string, previousAccountId: string | null): Promise<void> {
-    const tokens = await this.deps.refreshChatGptTokens?.(taskId, previousAccountId) ?? null;
+    const tokens = await this.deps.refreshChatGPTTokens?.(taskId, previousAccountId) ?? null;
     await this.runtimeState.getHandle(taskId)?.resolveAuthRefresh?.(tokens);
   }
 

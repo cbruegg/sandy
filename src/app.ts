@@ -31,7 +31,7 @@ import { validateMatrixAuthStateForStartup, resolveMatrixAccessToken } from "./m
 import {createNoopHostfsBroker} from "./hostfs/hostfs-broker.js";
 import {initializeHostfs, type HostfsServices} from "./hostfs/index.js";
 import { CodexTokenBroker, type TokenBroker } from "./auth/token-broker.js";
-import type { ChatGptExternalTokens } from "./types.js";
+import type { ChatGPTExternalTokens } from "./types.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -120,10 +120,10 @@ export async function startApp(): Promise<void> {
     ? new CodexTokenBroker(config.authMode.codexAuthFile)
     : null;
 
-  let initialChatGptExternalTokens: ChatGptExternalTokens | null = null;
+  let initialChatGPTExternalTokens: ChatGPTExternalTokens | null = null;
   if (tokenBroker) {
     try {
-      initialChatGptExternalTokens = await tokenBroker.getInitialTokens();
+      initialChatGPTExternalTokens = await tokenBroker.getInitialTokens();
     } catch (error) {
       logger.error("token_broker.initial_tokens_failed", {
         message: error instanceof Error ? error.message : "Unknown error",
@@ -305,10 +305,10 @@ export async function startApp(): Promise<void> {
           description: token.description,
         })),
         httpProxyWrapper: httpTokensEnabled ? "/usr/local/bin/sandy-http-proxy-exec" : null,
-        chatgptExternalTokens: initialChatGptExternalTokens,
+        chatgptExternalTokens: initialChatGPTExternalTokens,
       };
     },
-    refreshChatGptTokens: async (_taskId: string, previousAccountId: string | null) => {
+    refreshChatGPTTokens: async (_taskId: string, previousAccountId: string | null) => {
       if (!tokenBroker) return null;
       try {
         return await tokenBroker.refreshTokens(previousAccountId);

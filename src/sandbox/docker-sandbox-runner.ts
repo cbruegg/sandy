@@ -4,7 +4,7 @@ import {join} from "node:path";
 import {createInterface} from "node:readline";
 import type {WorkerNetworkConfig} from "../config.js";
 import {logger} from "../logger.js";
-import type {ChatGptExternalTokens, HostCommand, PrivilegeResolutionResult, SubAgentEvent, TaskInputPayload} from "../types.js";
+import type {ChatGPTExternalTokens, HostCommand, PrivilegeResolutionResult, SubAgentEvent, TaskInputPayload} from "../types.js";
 import {parseSubAgentEvent, serializeHostCommand} from "../types.js";
 import type {LaunchTaskRequest, SandboxHandle, SandboxRunner, ShareInspection} from "./sandbox-runner.js";
 import type {ReservedTaskBundle, TaskBundlePool} from "./task-bundle-types.js";
@@ -380,7 +380,7 @@ export class DockerSandboxRunner implements SandboxRunner {
           });
           await retireBundle();
         },
-        resolveAuthRefresh: async (tokens: ChatGptExternalTokens | null) => {
+        resolveAuthRefresh: async (tokens: ChatGPTExternalTokens | null) => {
           logger.info("sandbox.auth_refresh", {
             taskId: request.taskId,
             hasTokens: tokens !== null,

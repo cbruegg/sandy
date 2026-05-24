@@ -1,6 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import type { ChatGptExternalTokens } from "../types.js";
+import type { ChatGPTExternalTokens } from "../types.js";
 
 type PendingRequest<T = unknown> = {
   resolve: (result: T) => void;
@@ -149,7 +149,7 @@ export class CodexAppServerClient {
     this.initialized = true;
   }
 
-  async loginWithTokens(tokens: ChatGptExternalTokens): Promise<void> {
+  async loginWithTokens(tokens: ChatGPTExternalTokens): Promise<void> {
     this.ensureStarted("loginWithTokens");
     await this.request("account/login/start", {
       type: "chatgptAuthTokens",

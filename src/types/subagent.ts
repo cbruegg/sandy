@@ -3,74 +3,62 @@ import type {PrivilegeResolutionResult} from "./privilege.js";
 import type {ChannelFormatting} from "./channel.js";
 import type {ImageAttachment} from "../subagent/worker-prompt.js";
 
-type ProgressEvent = {
-  type: "progress";
-  message: string;
-};
+const progressEventSchema = z.object({
+  type: z.literal("progress"),
+  message: z.string(),
+}).strict();
 
-type AssistantOutputEvent = {
-  type: "assistant_output";
-  text: string;
-};
+const assistantOutputEventSchema = z.object({
+  type: z.literal("assistant_output"),
+  text: z.string(),
+}).strict();
 
-type FinalResultEvent = {
-  type: "final_result";
-  text: string;
-};
+const finalResultEventSchema = z.object({
+  type: z.literal("final_result"),
+  text: z.string(),
+}).strict();
 
-type TaskSummaryEvent = {
-  type: "task_summary";
-  summary: string;
-};
+const taskSummaryEventSchema = z.object({
+  type: z.literal("task_summary"),
+  summary: z.string(),
+}).strict();
 
-type TaskDoneEvent = {
-  type: "task_done";
-};
+const taskDoneEventSchema = z.object({
+  type: z.literal("task_done"),
+}).strict();
 
-type TaskErrorEvent = {
-  type: "task_error";
-  message: string;
-};
+const taskErrorEventSchema = z.object({
+  type: z.literal("task_error"),
+  message: z.string(),
+}).strict();
 
-type WorkerConnectedEvent = {
-  type: "worker_connected";
-};
+const workerConnectedEventSchema = z.object({
+  type: z.literal("worker_connected"),
+}).strict();
 
-type WorkerDisconnectedEvent = {
-  type: "worker_disconnected";
-  message: string;
-};
+const workerDisconnectedEventSchema = z.object({
+  type: z.literal("worker_disconnected"),
+  message: z.string(),
+}).strict();
 
-type WorkerLogEvent = {
-  type: "worker_log";
-  level: "debug" | "info" | "warn" | "error";
-  event: string;
-  data?: Record<string, unknown>;
-};
+const workerLogEventSchema = z.object({
+  type: z.literal("worker_log"),
+  level: z.enum(["debug", "info", "warn", "error"]),
+  event: z.string(),
+  data: z.record(z.string(), z.unknown()).optional(),
+}).strict();
 
-type ChatGptAuthRefreshRequestEvent = {
-  type: "chatgpt_auth_refresh_request";
-  previousAccountId: string | null;
-};
-
-export type SubAgentEvent =
-  | ProgressEvent
-  | AssistantOutputEvent
-  | FinalResultEvent
-  | TaskSummaryEvent
-  | TaskDoneEvent
-  | TaskErrorEvent
-  | WorkerConnectedEvent
-  | WorkerDisconnectedEvent
-  | WorkerLogEvent
-  | ChatGptAuthRefreshRequestEvent;
+const chatGptAuthRefreshRequestEventSchema = z.object({
+  type: z.literal("chatgpt_auth_refresh_request"),
+  previousAccountId: z.string().nullable(),
+}).strict();
 
 export type TaskInputPayload = {
   text: string;
   images: ImageAttachment[];
 };
 
-export type ChatGptExternalTokens = {
+export type ChatGPTExternalTokens = {
   accessToken: string;
   chatgptAccountId: string;
   chatgptPlanType: string | null;
@@ -85,7 +73,7 @@ export type WorkerStartConfig = {
     description: string;
   }>;
   httpProxyWrapper: string | null;
-  chatgptExternalTokens: ChatGptExternalTokens | null;
+  chatgptExternalTokens: ChatGPTExternalTokens | null;
 };
 
 export type HostCommand =
@@ -117,52 +105,24 @@ export type HostCommand =
     }
   | {
       type: "chatgpt_auth_refresh_result";
-      tokens: ChatGptExternalTokens | null;
+      tokens: ChatGPTExternalTokens | null;
       error: string | null;
     };
 
 const subAgentEventSchema = z.discriminatedUnion("type", [
-  z.object({
-    type: z.literal("progress"),
-    message: z.string(),
-  }).strict(),
-  z.object({
-    type: z.literal("assistant_output"),
-    text: z.string(),
-  }).strict(),
-  z.object({
-    type: z.literal("final_result"),
-    text: z.string(),
-  }).strict(),
-  z.object({
-    type: z.literal("task_summary"),
-    summary: z.string(),
-  }).strict(),
-  z.object({
-    type: z.literal("task_done"),
-  }).strict(),
-  z.object({
-    type: z.literal("task_error"),
-    message: z.string(),
-  }).strict(),
-  z.object({
-    type: z.literal("worker_connected"),
-  }).strict(),
-  z.object({
-    type: z.literal("worker_disconnected"),
-    message: z.string(),
-  }).strict(),
-  z.object({
-    type: z.literal("worker_log"),
-    level: z.enum(["debug", "info", "warn", "error"]),
-    event: z.string(),
-    data: z.record(z.string(), z.unknown()).optional(),
-  }).strict(),
-  z.object({
-    type: z.literal("chatgpt_auth_refresh_request"),
-    previousAccountId: z.string().nullable(),
-  }).strict(),
+  progressEventSchema,
+  assistantOutputEventSchema,
+  finalResultEventSchema,
+  taskSummaryEventSchema,
+  taskDoneEventSchema,
+  taskErrorEventSchema,
+  workerConnectedEventSchema,
+  workerDisconnectedEventSchema,
+  workerLogEventSchema,
+  chatGptAuthRefreshRequestEventSchema,
 ]);
+
+export type SubAgentEvent = z.infer<typeof subAgentEventSchema>;
 
 export function parseSubAgentEvent(raw: string): SubAgentEvent {
   return subAgentEventSchema.parse(JSON.parse(raw));

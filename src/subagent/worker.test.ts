@@ -286,6 +286,7 @@ test("streamTurn ignores empty assistant messages", async () => {
     const result = await streamTurn(thread, "Inspect the reel.");
 
     assert.equal(result.sawTerminalError, false);
+    assert.equal(result.sawTaskDone, false);
     assert.deepEqual(writes, []);
   } finally {
     process.stdout.write = originalWrite;
