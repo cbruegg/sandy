@@ -549,3 +549,90 @@ test("CodexAppServerClient initializes ambient auth without experimental API or 
   respond(child, 2, { thread: { id: "thread-1" } });
   assert.equal(await startThreadPromise, "thread-1");
 });
+
+test("CodexAppServerClient sends JSON-RPC error when auth refresh handler rejects", async () => {
+  const child = new FakeChildProcess();
+  const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
+  const tokens: ChatGPTExternalTokens = {
+    accessToken: "access-token",
+    chatgptAccountId: "acct-123",
+    chatgptPlanType: "plus",
+  };
+  const logs: Array<{ level: LogLevel; event: string; data?: Record<string, unknown> }> = [];
+
+  configureLogger({
+    minLevel: "debug",
+    forwardLog: (payload) => {
+      logs.push({ level: payload.level, event: payload.event, data: payload.data });
+    },
+  });
+
+  try {
+    const client = await createExternalTokensClient(spawnImpl, child, tokens);
+
+    const startThreadPromise = client.startThread();
+    await Promise.resolve();
+    respond(child, 3, { thread: { id: "thread-1" } });
+    const threadId = await startThreadPromise;
+
+    const streamPromise = (async () => {
+      const events: Array<{ type: string; text?: string }> = [];
+      for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async (previousAccountId) => {
+        assert.equal(previousAccountId, "acct-123");
+        throw new Error("Host refused to refresh tokens");
+      })) {
+        events.push(event);
+      }
+      return events;
+    })();
+
+    await Promise.resolve();
+    respond(child, 4, {});
+    await new Promise((resolve) => setImmediate(resolve));
+
+    child.stdout.write(`${JSON.stringify({
+      jsonrpc: "2.0",
+      id: 99,
+      method: "account/chatgptAuthTokens/refresh",
+      params: {
+        previousAccountId: "acct-123",
+        reason: "expired",
+      },
+    })}
+`);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const messages = parseWrittenJsonLines(child);
+    const lastMessage = messages.at(-1);
+    assert.deepEqual(lastMessage, {
+      jsonrpc: "2.0",
+      id: 99,
+      error: {
+        code: -32603,
+        message: "Auth refresh failed: Host refused to refresh tokens",
+      },
+    });
+
+    const errorLog = logs.find((entry) => entry.event === "appserver.auth_refresh_failed");
+    assert.ok(errorLog);
+    assert.equal(errorLog?.level, "error");
+    assert.equal(errorLog?.data?.["error"], "Host refused to refresh tokens");
+
+    // Complete the turn so the stream iterator can finish cleanly.
+    child.stdout.write(`${JSON.stringify({
+      jsonrpc: "2.0",
+      method: "turn/completed",
+      params: {},
+    })}
+`);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(await streamPromise, [{ type: "turn_completed" }]);
+  } finally {
+    configureLogger({
+      minLevel: "info",
+      outputMode: "split",
+      forwardLog: undefined,
+    });
+  }
+});

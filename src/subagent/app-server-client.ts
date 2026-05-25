@@ -20,6 +20,7 @@ type AppServerEvent =
 
 const REFRESH_AUTH_METHOD = "account/chatgptAuthTokens/refresh";
 const JSON_RPC_METHOD_NOT_FOUND = -32601;
+const JSON_RPC_INTERNAL_ERROR = -32603;
 
 const ignoredNotificationMethods = new Set([
   "account/rateLimits/updated",
@@ -370,7 +371,18 @@ export class CodexAppServerClient {
     if (method === REFRESH_AUTH_METHOD) {
       const parsed = refreshAuthParamsSchema.safeParse(params ?? {});
       if (this.activeAuthRefreshHandler) {
-        void this.activeAuthRefreshHandler(id, parsed.success ? parsed.data.previousAccountId ?? null : null);
+        this.activeAuthRefreshHandler(id, parsed.success ? parsed.data.previousAccountId ?? null : null)
+          .catch((error: Error) => {
+            logger.error("appserver.auth_refresh_failed", { error: error.message });
+            this.writeJsonRpcMessage({
+              jsonrpc: "2.0",
+              id,
+              error: {
+                code: JSON_RPC_INTERNAL_ERROR,
+                message: `Auth refresh failed: ${error.message}`,
+              },
+            });
+          });
       }
     } else {
       this.warnUnhandledServerRequest(method, params);
