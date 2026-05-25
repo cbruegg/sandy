@@ -138,12 +138,11 @@ export function contextTexts(context: DecideContext): string[] {
 
 function createTestWorkerStartConfig(): WorkerStartConfig {
   return {
-    openAiApiKey: null,
+    auth: { mode: "ambient_auth_file" },
     codexModel: null,
     channelFormatting: testFormatting,
     httpTokens: [],
     httpProxyWrapper: null,
-    chatgptExternalTokens: null,
   };
 }
 

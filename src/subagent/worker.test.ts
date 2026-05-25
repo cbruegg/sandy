@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { type Input, type Thread } from "@openai/codex-sdk";
+import { type Thread } from "@openai/codex-sdk";
 import { messages } from "../messages.js";
 import { AppServerWorkerSession } from "./worker-app-server.js";
 import {
@@ -12,7 +12,7 @@ import {
   streamAppServerTurn,
   streamTurn,
 } from "./worker.js";
-import type { ChannelFormatting, HostCommand, PrivilegeResolutionResult, SubAgentEvent } from "../types.js";
+import type { AppServerTurnInput, ChannelFormatting, HostCommand, PrivilegeResolutionResult, SubAgentEvent } from "../types.js";
 import { parseSubAgentEvent } from "../types.js";
 import { parseWorkerToolPayload } from "./worker-tools.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
@@ -25,7 +25,7 @@ const testFormatting: ChannelFormatting = {
 };
 
 function createAppServerSessionStarter(session: {
-  streamTurn: (input: Input, abortSignal?: AbortSignal) => Promise<boolean>;
+  streamTurn: (input: AppServerTurnInput, abortSignal?: AbortSignal) => Promise<boolean>;
   emitTaskSummary: () => Promise<void>;
   close: () => void;
   cancelPendingAuthRefresh: () => void;
@@ -108,18 +108,24 @@ test("buildPrivilegeResolutionInput explains the host privilege result to the su
 
   const input = buildPrivilegeResolutionInput(result);
 
-  assert.match(input, /req-1/);
-  assert.match(input, /approved/);
-  assert.match(input, /Copied \/tmp\/input.txt into the shared workspace\./);
-  assert.match(input, /Continue the task from here\./);
+  assert.equal(input.length, 1);
+  assert.equal(input[0]?.type, "text");
+  const text = input[0]?.type === "text" ? input[0].text : "";
+  assert.match(text, /req-1/);
+  assert.match(text, /approved/);
+  assert.match(text, /Copied \/tmp\/input.txt into the shared workspace\./);
+  assert.match(text, /Continue the task from here\./);
 });
 
 test("buildTaskSummaryInput requests a host-facing handoff summary", () => {
   const input = buildTaskSummaryInput();
 
-  assert.match(input, /host-facing handoff summary/);
-  assert.match(input, /Do not emit any Sandy tool calls/);
-  assert.match(input, /Artifacts:/);
+  assert.equal(input.length, 1);
+  assert.equal(input[0]?.type, "text");
+  const text = input[0]?.type === "text" ? input[0].text : "";
+  assert.match(text, /host-facing handoff summary/);
+  assert.match(text, /Do not emit any Sandy tool calls/);
+  assert.match(text, /Artifacts:/);
 });
 
 test("buildInitialTaskInput includes current date and time", () => {
@@ -142,7 +148,7 @@ test("buildInitialTaskInput includes current date and time", () => {
 test("worker processes follow-up commands after start_task initialization finishes", async () => {
   const { promise: sessionReady, resolve: resolveSession } = Promise.withResolvers<void>();
   const sentEvents: SubAgentEvent[] = [];
-  const turnInputs: string[] = [];
+  const turnInputs: AppServerTurnInput[] = [];
   const startTaskCommand: Extract<HostCommand, { type: "start_task" }> = {
     type: "start_task",
     taskId: "task-1",
@@ -150,12 +156,11 @@ test("worker processes follow-up commands after start_task initialization finish
     input: { text: "Initial request", images: [] },
     taskLanguage: "English",
     config: {
-      openAiApiKey: null,
+      auth: { mode: "ambient_auth_file" },
       codexModel: null,
       channelFormatting: testFormatting,
       httpTokens: [],
       httpProxyWrapper: null,
-      chatgptExternalTokens: null,
     },
     environment: {},
     codexConfigToml: null,
@@ -172,8 +177,8 @@ test("worker processes follow-up commands after start_task initialization finish
     startAppServerWorkerSession: async () => {
       await sessionReady;
       return {
-        async streamTurn(inputText: string) {
-          turnInputs.push(inputText);
+        async streamTurn(input: AppServerTurnInput) {
+          turnInputs.push(input);
           return false;
         },
         async emitTaskSummary() {},
@@ -199,8 +204,10 @@ test("worker processes follow-up commands after start_task initialization finish
 
   assert.equal(sentEvents.some((event) => event.type === "task_error"), false);
   assert.equal(turnInputs.length, 2);
-  assert.match(String(turnInputs[0]), /Add the track to the DJ collection/);
-  assert.match(String(turnInputs[1]), /Use https:\/\/example\.com\/set/);
+  const initialInputJson = JSON.stringify(turnInputs[0]);
+  assert.match(initialInputJson, /Add the track to the DJ collection/);
+  const followUpInputJson = JSON.stringify(turnInputs[1]);
+  assert.match(followUpInputJson, /Use https:\/\/example\.com\/set/);
 });
 
 test("worker requires SANDY_CODEX_PATH for app-server tasks", async () => {
@@ -222,16 +229,18 @@ test("worker requires SANDY_CODEX_PATH for app-server tasks", async () => {
     input: { text: "Initial request", images: [] },
     taskLanguage: "English",
     config: {
-      openAiApiKey: null,
+      auth: {
+        mode: "external_tokens",
+        tokens: {
+          accessToken: "access-token",
+          chatgptAccountId: "acct-123",
+          chatgptPlanType: "plus",
+        },
+      },
       codexModel: null,
       channelFormatting: testFormatting,
       httpTokens: [],
       httpProxyWrapper: null,
-      chatgptExternalTokens: {
-        accessToken: "access-token",
-        chatgptAccountId: "acct-123",
-        chatgptPlanType: "plus",
-      },
     },
     environment: {},
     codexConfigToml: null,
@@ -275,12 +284,11 @@ test("worker starts ambient app-server auth for api key mode and exports CODEX_A
     input: { text: "Initial request", images: [] },
     taskLanguage: "English",
     config: {
-      openAiApiKey: "api-key-123",
+      auth: { mode: "ambient_api_key", openAiApiKey: "api-key-123" },
       codexModel: null,
       channelFormatting: testFormatting,
       httpTokens: [],
       httpProxyWrapper: null,
-      chatgptExternalTokens: null,
     },
     environment: {},
     codexConfigToml: null,
@@ -295,7 +303,7 @@ test("worker starts ambient app-server auth for api key mode and exports CODEX_A
 });
 
 test("worker passes image attachments through app-server user_message turns", async () => {
-  const turnInputs: Input[] = [];
+  const turnInputs: AppServerTurnInput[] = [];
   const processor = createWorkerCommandProcessor({
     sendEvent: () => {},
     env: { SANDY_CODEX_PATH: "/usr/local/bin/codex" },
@@ -323,12 +331,11 @@ test("worker passes image attachments through app-server user_message turns", as
     },
     taskLanguage: "English",
     config: {
-      openAiApiKey: null,
+      auth: { mode: "ambient_auth_file" },
       codexModel: null,
       channelFormatting: testFormatting,
       httpTokens: [],
       httpProxyWrapper: null,
-      chatgptExternalTokens: null,
     },
     environment: {},
     codexConfigToml: null,
@@ -483,12 +490,11 @@ test("worker emits task_done only after mark_finished", async () => {
     input: { text: "Initial request", images: [] },
     taskLanguage: "English",
     config: {
-      openAiApiKey: null,
+      auth: { mode: "ambient_auth_file" },
       codexModel: null,
       channelFormatting: testFormatting,
       httpTokens: [],
       httpProxyWrapper: null,
-      chatgptExternalTokens: null,
     },
     environment: {},
     codexConfigToml: null,
@@ -543,7 +549,7 @@ test("streamAppServerTurn emits completed assistant messages", async () => {
     const sawTerminalError = await streamAppServerTurn({
       appServer: appServer as Parameters<typeof streamAppServerTurn>[0]["appServer"],
       threadId: "thread-1",
-      input: "hello",
+      input: [{ type: "text", text: "hello" }],
       onAuthRefresh: async () => {
         throw new Error("unexpected auth refresh");
       },
@@ -586,7 +592,7 @@ test("streamAppServerTurn ignores blank completed assistant messages", async () 
     const sawTerminalError = await streamAppServerTurn({
       appServer: appServer as Parameters<typeof streamAppServerTurn>[0]["appServer"],
       threadId: "thread-1",
-      input: "hello",
+      input: [{ type: "text", text: "hello" }],
       onAuthRefresh: async () => {
         throw new Error("unexpected auth refresh");
       },
@@ -612,7 +618,7 @@ test("AppServerWorkerSession accepts a synchronous auth refresh response", async
     close(): void {},
     async *streamTurn(
       _threadId: string,
-      _inputText: string,
+      _input: AppServerTurnInput,
       onAuthRefresh: (previousAccountId: string | null) => Promise<typeof refreshedTokens>,
     ) {
       const tokens = await onAuthRefresh("acct-123");
@@ -628,7 +634,7 @@ test("AppServerWorkerSession accepts a synchronous auth refresh response", async
     }
   }, true);
 
-  const sawTerminalError = await session.streamTurn("hello");
+  const sawTerminalError = await session.streamTurn([{ type: "text", text: "hello" }]);
 
   assert.equal(sawTerminalError, false);
   assert.deepEqual(sentEvents, [{

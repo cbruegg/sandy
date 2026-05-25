@@ -1,5 +1,6 @@
 import { CodexMainAgentController } from "./agent/main-agent-controller.js";
 import { createChannelAdapter } from "./channel/create-channel.js";
+import type { WorkerAuthConfig } from "./types.js";
 import { loadConfig } from "./config.js";
 import { createCodexClient, ensureManagedCodexPath } from "./codex-client.js";
 import { resolveSandyCacheRoot } from "./cache-paths.js";
@@ -296,8 +297,14 @@ export async function startApp(): Promise<void> {
     mainAgent,
     sandboxRunner,
     buildWorkerStartConfig: () => {
+      const auth: WorkerAuthConfig = config.authMode.mode === "api_key"
+        ? { mode: "ambient_api_key", openAiApiKey: config.authMode.openAiApiKey }
+        : initialChatGPTExternalTokens
+          ? { mode: "external_tokens", tokens: initialChatGPTExternalTokens }
+          : { mode: "ambient_auth_file" };
+
       return {
-        openAiApiKey: config.authMode.mode === "api_key" ? config.authMode.openAiApiKey : null,
+        auth,
         codexModel: config.agentModel,
         channelFormatting: channel.getFormatting(),
         httpTokens: Object.entries(config.httpTokens).map(([tokenId, token]) => ({
@@ -305,7 +312,6 @@ export async function startApp(): Promise<void> {
           description: token.description,
         })),
         httpProxyWrapper: httpTokensEnabled ? "/usr/local/bin/sandy-http-proxy-exec" : null,
-        chatgptExternalTokens: initialChatGPTExternalTokens,
       };
     },
     refreshChatGPTTokens: async (_taskId: string, previousAccountId: string | null) => {

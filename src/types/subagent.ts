@@ -64,8 +64,19 @@ export type ChatGPTExternalTokens = {
   chatgptPlanType: string | null;
 };
 
+export type WorkerAuthConfig =
+  | { mode: "ambient_api_key"; openAiApiKey: string }
+  | { mode: "ambient_auth_file" }
+  | { mode: "external_tokens"; tokens: ChatGPTExternalTokens };
+
+type AppServerTurnInputItem =
+  | { type: "text"; text: string }
+  | { type: "local_image"; path: string };
+
+export type AppServerTurnInput = AppServerTurnInputItem[];
+
 export type WorkerStartConfig = {
-  openAiApiKey: string | null;
+  auth: WorkerAuthConfig;
   codexModel: string | null;
   channelFormatting: ChannelFormatting | null;
   httpTokens: Array<{
@@ -73,7 +84,6 @@ export type WorkerStartConfig = {
     description: string;
   }>;
   httpProxyWrapper: string | null;
-  chatgptExternalTokens: ChatGPTExternalTokens | null;
 };
 
 export type HostCommand =

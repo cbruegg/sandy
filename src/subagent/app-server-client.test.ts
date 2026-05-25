@@ -131,7 +131,7 @@ test("CodexAppServerClient answers auth refresh requests during turns", async ()
 
   const streamPromise = (async () => {
     const events = [] as Array<{ type: string; text?: string }>;
-    for await (const event of client.streamTurn(threadId, "hello", async (previousAccountId) => {
+    for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async (previousAccountId) => {
       assert.equal(previousAccountId, "acct-123");
       return {
         accessToken: "refreshed-access-token",
@@ -218,7 +218,7 @@ test("CodexAppServerClient handles auth refresh before turn-start RPC response",
 
   const streamPromise = (async () => {
     const events: Array<{ type: string; text?: string }> = [];
-    for await (const event of client.streamTurn(threadId, "hello", async (previousAccountId) => {
+    for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async (previousAccountId) => {
       assert.equal(previousAccountId, "acct-123");
       return {
         accessToken: "refreshed-before-start-response",
@@ -300,7 +300,7 @@ test("CodexAppServerClient ignores non-message item completions until turn compl
 
   const streamPromise = (async () => {
     const events: Array<{ type: string; text?: string }> = [];
-    for await (const event of client.streamTurn(threadId, "hello", async () => ({
+    for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async () => ({
       accessToken: "refreshed-access-token",
       chatgptAccountId: "acct-123",
       chatgptPlanType: "plus",
@@ -354,7 +354,7 @@ test("CodexAppServerClient ignores agent message deltas until completion", async
 
   const streamPromise = (async () => {
     const events: Array<{ type: string; text?: string }> = [];
-    for await (const event of client.streamTurn(threadId, "hello", async () => tokens)) {
+    for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async () => tokens)) {
       events.push(event);
     }
     return events;
@@ -415,7 +415,7 @@ test("CodexAppServerClient ignores known benign notifications and item completio
 
     const streamPromise = (async () => {
       const events: Array<{ type: string }> = [];
-      for await (const event of client.streamTurn(threadId, "hello", async () => tokens)) {
+      for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async () => tokens)) {
         events.push(event);
       }
       return events;
@@ -499,7 +499,7 @@ test("CodexAppServerClient maps failed turn/completed notifications to turn_fail
 
   const streamPromise = (async () => {
     const events: Array<{ type: string; error?: string }> = [];
-    for await (const event of client.streamTurn(threadId, "hello", async () => tokens)) {
+    for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async () => tokens)) {
       events.push(event);
     }
     return events;

@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { CODEX_API_KEY_ENV, SANDY_CODEX_PATH_ENV } from "../codex-client.js";
 import { configureLogger, logger } from "../logger.js";
 import { messages } from "../messages.js";
-import { type HostCommand, type SubAgentEvent } from "../types.js";
+import { type AppServerTurnInput, type HostCommand, type SubAgentEvent } from "../types.js";
 import {
   buildInitialTaskInput,
   buildPrivilegeResolutionInput,
@@ -81,9 +81,9 @@ function joinTaskSections(taskBrief: string, text: string): string {
   return sections.join("\n\n");
 }
 
-function buildAppServerInputWithImages(text: string, images: ImageAttachment[]): Input {
+function buildAppServerInputWithImages(text: string, images: ImageAttachment[]): AppServerTurnInput {
   if (images.length === 0) {
-    return text;
+    return text.trim() ? [{ type: "text" as const, text: text.trim() }] : [];
   }
 
   return [
@@ -184,7 +184,7 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
     return appServerSession;
   };
 
-  const enqueueAppServerTurn = (input: Input): void => {
+  const enqueueAppServerTurn = (input: AppServerTurnInput): void => {
     turnQueue = turnQueue.then(async () => {
       currentAbort = new AbortController();
       try {
@@ -240,18 +240,23 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
             await writeFile(join(workerCodexHomePath, "config.toml"), command.codexConfigToml, "utf8");
           }
           await options.applyWorkerCodexConfigPatch();
-          if (command.config.openAiApiKey) {
-            options.env[CODEX_API_KEY_ENV] = command.config.openAiApiKey;
-          } else {
-            delete options.env[CODEX_API_KEY_ENV];
+          switch (command.config.auth.mode) {
+            case "ambient_api_key":
+              options.env[CODEX_API_KEY_ENV] = command.config.auth.openAiApiKey;
+              break;
+            case "ambient_auth_file":
+            case "external_tokens":
+              delete options.env[CODEX_API_KEY_ENV];
+              break;
           }
 
           const codexPath = requireConfiguredCodexPath(options.env);
+          const authMode = command.config.auth.mode === "external_tokens"
+            ? { kind: "external_tokens" as const, initialTokens: command.config.auth.tokens }
+            : { kind: "ambient" as const };
           appServerSession = await options.startAppServerWorkerSession({
             codexPath,
-            authMode: command.config.chatgptExternalTokens
-              ? { kind: "external_tokens", initialTokens: command.config.chatgptExternalTokens }
-              : { kind: "ambient" },
+            authMode,
             model: command.config.codexModel ?? undefined,
             sendEvent: options.sendEvent,
           });

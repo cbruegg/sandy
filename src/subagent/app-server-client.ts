@@ -1,8 +1,7 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
-import type { Input } from "@openai/codex-sdk";
 import { z } from "zod";
-import type { ChatGPTExternalTokens } from "../types.js";
+import type { AppServerTurnInput, ChatGPTExternalTokens } from "../types.js";
 import { logger } from "../logger.js";
 import { buildAppServerThreadStartParams } from "./codex-task-runtime.js";
 
@@ -124,24 +123,6 @@ type CreateAmbientAuthClientOptions = {
   codexPath: string;
   spawnImpl?: typeof spawn;
 };
-
-function normalizeTurnInput(input: Input): Array<{ type: "text"; text: string } | { type: "local_image"; path: string }> {
-  if (typeof input === "string") {
-    return [{ type: "text", text: input }];
-  }
-
-  const normalized: Array<{ type: "text"; text: string } | { type: "local_image"; path: string }> = [];
-  for (const item of input) {
-    if (item.type === "text") {
-      normalized.push({ type: "text", text: item.text });
-      continue;
-    }
-    if (item.type === "local_image") {
-      normalized.push({ type: "local_image", path: item.path });
-    }
-  }
-  return normalized;
-}
 
 export class CodexAppServerClient {
   private child: ChildProcessWithoutNullStreams | null = null;
@@ -317,7 +298,7 @@ export class CodexAppServerClient {
 
   async *streamTurn(
     threadId: string,
-    input: Input,
+    input: AppServerTurnInput,
     onAuthRefresh: AuthRefreshCallback,
     abortSignal?: AbortSignal,
   ): AsyncGenerator<AppServerEvent> {
@@ -351,7 +332,7 @@ export class CodexAppServerClient {
 
     await this.request("turn/start", {
       threadId,
-      input: normalizeTurnInput(input),
+      input,
     });
 
     try {

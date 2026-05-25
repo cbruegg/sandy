@@ -21,12 +21,11 @@ const testFormatting: ChannelFormatting = {
 };
 
 const defaultWorkerStartConfig: WorkerStartConfig = {
-  openAiApiKey: null,
+  auth: { mode: "ambient_auth_file" },
   codexModel: null,
   channelFormatting: testFormatting,
   httpTokens: [],
   httpProxyWrapper: null,
-  chatgptExternalTokens: null,
 };
 
 class FakeStdin {
