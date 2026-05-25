@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "bun:test";
-import { OpenAiTranscriptionProvider } from "./transcription/openai-transcription-provider.js";
+import { OpenAiTranscriptionProvider } from "./openai-transcription-provider.js";
 
 test("OpenAiTranscriptionProvider uses the default OpenAI endpoint and model", async () => {
   let requestUrl = "";

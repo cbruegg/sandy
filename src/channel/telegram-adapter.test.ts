@@ -1,9 +1,9 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import type { Update } from "grammy/types";
-import { sanitizeTelegramHtml } from "./channel/telegram-html.js";
-import { TelegramBotApiAdapter, normalizeTelegramUpdate } from "./channel/telegram-adapter.js";
-import type { TranscriptionProvider } from "./transcription/transcription-provider.js";
+import { sanitizeTelegramHtml } from "./telegram-html.js";
+import { TelegramBotApiAdapter, normalizeTelegramUpdate } from "./telegram-adapter.js";
+import type { TranscriptionProvider } from "../transcription/transcription-provider.js";
 
 const OWNER_ID = "5";
 const OWNER_USERNAME = "cbruegg";
