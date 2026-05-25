@@ -469,11 +469,8 @@ commands = ["   "]
 test("loadConfig reads the path from SANDY_CONFIG_FILE", async () => {
   const root = await mkdtemp(join(tmpdir(), "sandy-config-"));
   const configFilePath = join(root, "config.toml");
-  const skillsDirectory = join(root, "skills");
-  const todoistSkillDirectory = join(skillsDirectory, "todoist");
 
   try {
-    await mkdir(todoistSkillDirectory, { recursive: true });
     await writeFile(configFilePath, `
 [channel]
 kind = "telegram"
@@ -489,13 +486,6 @@ oauth_scopes = ["data:read"]
 
 [approvals.mcp.todoist]
 always_allow_tools = ["list_projects"]
-`);
-    await writeFile(join(todoistSkillDirectory, "SKILL.md"), `---
-name: Adding task to Todoist
-description: When the user asks you to add a task to Todoist, use this skill.
----
-
-Use the Todoist MCP.
 `);
 
     const config = loadConfig({
@@ -515,11 +505,6 @@ Use the Todoist MCP.
     assert.equal(config.workerImage, "sandy-subagent:latest");
     assert.equal(config.mcpSidecarImage, "sandy-mcp-proxy:latest");
     assert.equal(config.httpProxyImage, "sandy-http-proxy:latest");
-    assert.equal(config.skillsDirectory, skillsDirectory);
-    assert.deepEqual(config.skills, [{
-      name: "Adding task to Todoist",
-      description: "When the user asks you to add a task to Todoist, use this skill.",
-    }]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

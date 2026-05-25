@@ -25,24 +25,16 @@ type DeleteSkillInput = {
   skillId: string;
 };
 
-type DiscoveredSkills = {
-  skillsDirectory: string | null;
-  skills: SkillMetadata[];
-};
-
 type ParsedSkillFile = {
   name: string;
   description: string;
   body: string;
 };
 
-export function discoverSkills(configDirectory: string): DiscoveredSkills {
+function discoverSkills(configDirectory: string): SkillMetadata[] {
   const skillsDirectory = join(configDirectory, "skills");
   if (!existsSync(skillsDirectory)) {
-    return {
-      skillsDirectory: null,
-      skills: [],
-    };
+    return [];
   }
 
   let entries: Dirent[];
@@ -55,7 +47,7 @@ export function discoverSkills(configDirectory: string): DiscoveredSkills {
     throw new Error(`Failed to read Sandy skills directory at ${skillsDirectory}: ${detail}`, { cause: error });
   }
 
-  const skills = entries
+  return entries
     .filter((entry) => entry.isDirectory())
     .flatMap((entry) => {
       const skillFilePath = join(skillsDirectory, entry.name, "SKILL.md");
@@ -65,11 +57,6 @@ export function discoverSkills(configDirectory: string): DiscoveredSkills {
 
       return [parseSkillMetadata(readSkillFile(skillFilePath), skillFilePath)];
     });
-
-  return {
-    skillsDirectory,
-    skills,
-  };
 }
 
 function readSkillFile(skillFilePath: string): string {
@@ -191,7 +178,7 @@ export class SkillService {
   }
 
   getSkills(): SkillMetadata[] {
-    return discoverSkills(this.configDirectory).skills;
+    return discoverSkills(this.configDirectory);
   }
 
   async createSkill(input: CreateSkillInput): Promise<void> {

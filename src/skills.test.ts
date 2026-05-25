@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { discoverSkills, SkillService } from "./skills.js";
+import { SkillService } from "./skills.js";
 
 async function createTempConfigDirectory(): Promise<string> {
   return mkdtemp(join(tmpdir(), "sandy-skills-"));
@@ -20,20 +20,18 @@ async function createSkillOnDisk(
   await writeFile(join(skillDir, "SKILL.md"), content, "utf8");
 }
 
-test("discoverSkills returns no skills when the config directory has no skills folder", async () => {
+test("getSkills returns no skills when the config directory has no skills folder", async () => {
   const configDirectory = await createTempConfigDirectory();
 
   try {
-    assert.deepEqual(discoverSkills(configDirectory), {
-      skillsDirectory: null,
-      skills: [],
-    });
+    const service = new SkillService(configDirectory);
+    assert.deepEqual(service.getSkills(), []);
   } finally {
     await rm(configDirectory, { recursive: true, force: true });
   }
 });
 
-test("discoverSkills parses skill metadata from SKILL frontmatter", async () => {
+test("getSkills parses skill metadata from SKILL frontmatter", async () => {
   const configDirectory = await createTempConfigDirectory();
   const skillDirectory = join(configDirectory, "skills", "todoist");
 
@@ -47,19 +45,18 @@ description: When the user asks you to add a task to their Todoist, use this ski
 Use the Todoist MCP.
 `);
 
-    assert.deepEqual(discoverSkills(configDirectory), {
-      skillsDirectory: join(configDirectory, "skills"),
-      skills: [{
+    const service = new SkillService(configDirectory);
+    assert.deepEqual(service.getSkills(), [{
         name: "Adding task to Todoist",
         description: "When the user asks you to add a task to their Todoist, use this skill.",
       }],
-    });
+    );
   } finally {
     await rm(configDirectory, { recursive: true, force: true });
   }
 });
 
-test("discoverSkills ignores child directories without SKILL.md", async () => {
+test("getSkills ignores child directories without SKILL.md", async () => {
   const configDirectory = await createTempConfigDirectory();
   const alphaSkillDirectory = join(configDirectory, "skills", "alpha");
   const ignoredDirectory = join(configDirectory, "skills", "ignored");
@@ -73,7 +70,8 @@ description: This skill should be discovered.
 ---
 `);
 
-    assert.deepEqual(discoverSkills(configDirectory).skills, [
+    const service = new SkillService(configDirectory);
+    assert.deepEqual(service.getSkills(), [
       {
         name: "Alpha skill",
         description: "This skill should be discovered.",
@@ -84,7 +82,7 @@ description: This skill should be discovered.
   }
 });
 
-test("discoverSkills rejects malformed skill frontmatter", async () => {
+test("getSkills rejects malformed skill frontmatter", async () => {
   const configDirectory = await createTempConfigDirectory();
   const skillDirectory = join(configDirectory, "skills", "broken");
 
@@ -92,8 +90,9 @@ test("discoverSkills rejects malformed skill frontmatter", async () => {
     await mkdir(skillDirectory, { recursive: true });
     await writeFile(join(skillDirectory, "SKILL.md"), "name: Broken skill\n");
 
+    const service = new SkillService(configDirectory);
     assert.throws(
-      () => discoverSkills(configDirectory),
+      () => service.getSkills(),
       /must start with a frontmatter block/,
     );
   } finally {
@@ -101,7 +100,7 @@ test("discoverSkills rejects malformed skill frontmatter", async () => {
   }
 });
 
-test("discoverSkills rejects skills with missing required metadata", async () => {
+test("getSkills rejects skills with missing required metadata", async () => {
   const configDirectory = await createTempConfigDirectory();
   const skillDirectory = join(configDirectory, "skills", "broken");
 
@@ -112,8 +111,9 @@ name: Broken skill
 ---
 `);
 
+    const service = new SkillService(configDirectory);
     assert.throws(
-      () => discoverSkills(configDirectory),
+      () => service.getSkills(),
       /missing required frontmatter field "description"/,
     );
   } finally {
@@ -121,7 +121,7 @@ name: Broken skill
   }
 });
 
-test("discoverSkills rejects skills with a missing name", async () => {
+test("getSkills rejects skills with a missing name", async () => {
   const configDirectory = await createTempConfigDirectory();
   const skillDirectory = join(configDirectory, "skills", "broken");
 
@@ -132,8 +132,9 @@ description: Broken skill
 ---
 `);
 
+    const service = new SkillService(configDirectory);
     assert.throws(
-      () => discoverSkills(configDirectory),
+      () => service.getSkills(),
       /missing required frontmatter field "name"/,
     );
   } finally {

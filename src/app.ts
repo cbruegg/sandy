@@ -58,7 +58,6 @@ export async function startApp(): Promise<void> {
     workerPreinstallRefresh: config.workerPreinstall.refresh,
     workerNetworkMode: config.workerNetwork.mode,
     workerNetworkAllowLocalCidrs: config.workerNetwork.allowLocalCidrs,
-    configuredSkillCount: config.skills.length,
   });
 
   const transcriptionProvider = config.sttApiKey
