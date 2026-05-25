@@ -43,7 +43,17 @@ type HttpTokenUsePrivilegeRequest = {
   confirmsAutoApprovalForTask?: boolean;
 };
 
-export type PrivilegeRequest = HostOperationPrivilegeRequest | HostDirectoryAccessPrivilegeRequest | McpToolCallPrivilegeRequest | McpResourceReadPrivilegeRequest | HttpTokenUsePrivilegeRequest;
+type SkillMutationPrivilegeRequest = {
+  kind: "skill_mutation";
+  requestId: string;
+  operation: "create" | "update" | "delete";
+  skillId: string;
+  name?: string;
+  description?: string;
+  body?: string;
+};
+
+export type PrivilegeRequest = HostOperationPrivilegeRequest | HostDirectoryAccessPrivilegeRequest | McpToolCallPrivilegeRequest | McpResourceReadPrivilegeRequest | HttpTokenUsePrivilegeRequest | SkillMutationPrivilegeRequest;
 
 export const privilegeResolutionResultSchema = z.object({
   requestId: z.string().min(1),

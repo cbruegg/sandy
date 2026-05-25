@@ -35,7 +35,7 @@ const MAX_DECISION_VALIDATION_ATTEMPTS = 3;
 export class CodexMainAgentController implements MainAgentController {
   private readonly codex: CodexClient;
   private readonly model: string | null;
-  private readonly skills: SkillMetadata[];
+  private readonly getSkills: () => SkillMetadata[];
   private readonly workerMcpServerIds: string[];
   private readonly httpTokens: Record<string, HttpTokenConfig>;
   private readonly threads = new Map<string, MainAgentThread>();
@@ -44,13 +44,13 @@ export class CodexMainAgentController implements MainAgentController {
   constructor(
     codex: CodexClient,
     model: string | null = null,
-    skills: SkillMetadata[] = [],
+    getSkills: () => SkillMetadata[] = () => [],
     workerMcpServerIds: string[] = [],
     httpTokens: Record<string, HttpTokenConfig> = {},
   ) {
     this.codex = codex;
     this.model = model;
-    this.skills = skills;
+    this.getSkills = getSkills;
     this.workerMcpServerIds = [...workerMcpServerIds].sort();
     this.httpTokens = {...httpTokens};
   }
@@ -68,7 +68,7 @@ export class CodexMainAgentController implements MainAgentController {
       channelFormatting: context.channelFormatting,
       newVisibleEntries: context.newVisibleEntries,
       isInitialTurn,
-      skills: this.skills,
+      skills: this.getSkills(),
       workerMcpServerIds: this.workerMcpServerIds,
       httpTokens: this.httpTokens,
     });
@@ -199,7 +199,7 @@ export function buildMainAgentPrompt(input: {
         "Return exactly one JSON object that matches the provided schema.",
       ];
 
-  const configuredSkillsSection = input.isInitialTurn && input.skills.length > 0
+  const configuredSkillsSection = input.skills.length > 0
     ? [
         "",
         "Configured skills available to sub-agents:",
@@ -231,13 +231,19 @@ export function buildMainAgentPrompt(input: {
       ]
     : [];
 
-  const skillDecisionRules = input.isInitialTurn && input.skills.length > 0
+  const skillDecisionRules = input.skills.length > 0
     ? [
         "- You know configured skills only by the name and description listed above. Do not assume any other skill content.",
         "- If the user's request requires one of the configured skills, you must launch a sub-agent instead of replying directly.",
         "- When launching a task for a configured skill, mention the relevant skill name in the task brief when useful.",
       ]
     : [];
+
+  const skillManagementRules = [
+    "- If the user asks to add, edit, or remove a Sandy skill, you must launch a sub-agent task instead of replying directly.",
+    "- The sub-agent can use the create_skill, update_skill, and delete_skill host tools to perform skill changes.",
+    "- Every skill mutation requires explicit user approval and cannot be auto-approved.",
+  ];
 
   return [
     formatDateTimePrefix(),
@@ -275,5 +281,6 @@ export function buildMainAgentPrompt(input: {
     "- Example: if the user asks to inspect Todoist tasks and the configured MCP server identifier is \"todoist\", set taskPolicy.autoApproveMcpServers to [\"todoist\"]. If the task needs the configured HTTP token identifier \"vid2text\", set taskPolicy.autoApproveHttpTokens to [\"vid2text\"].",
     "- Any replyText you produce is user-visible. Follow the provided channel formatting instructions exactly.",
     ...skillDecisionRules,
+    ...skillManagementRules,
   ].join("\n");
 }

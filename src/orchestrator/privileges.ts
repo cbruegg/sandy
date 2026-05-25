@@ -104,6 +104,8 @@ export class OrchestratorPrivileges {
       result = await this.resolvePendingHttpTokenRequest(session, request, decision);
     } else if (request.kind === "host_directory_access") {
       result = await this.resolvePendingHostDirectoryRequest(session, request, decision);
+    } else if (request.kind === "skill_mutation") {
+      result = await this.resolvePendingSkillMutationRequest(session, request, decision);
     } else if (decision === "deny") {
       result = {
         requestId: request.requestId,
@@ -123,7 +125,7 @@ export class OrchestratorPrivileges {
       };
     }
 
-    if (request.kind === "host_operation" || request.kind === "http_token_use" || request.kind === "host_directory_access") {
+    if (request.kind === "host_operation" || request.kind === "http_token_use" || request.kind === "host_directory_access" || request.kind === "skill_mutation") {
       if (!this.runtimeState.resolvePendingNativeTool(request.requestId, result)) {
         await this.runtimeState.requireHandle(activeTask.taskId).resolvePrivilege(result);
       }
@@ -214,6 +216,33 @@ export class OrchestratorPrivileges {
           path: call.path,
           level: call.level,
         });
+      case "create_skill":
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+          kind: "skill_mutation",
+          requestId: randomUUID(),
+          operation: "create",
+          skillId: call.skillId,
+          name: call.name,
+          description: call.description,
+          body: call.body,
+        });
+      case "update_skill":
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+          kind: "skill_mutation",
+          requestId: randomUUID(),
+          operation: "update",
+          skillId: call.skillId,
+          name: call.name,
+          description: call.description,
+          body: call.body,
+        });
+      case "delete_skill":
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+          kind: "skill_mutation",
+          requestId: randomUUID(),
+          operation: "delete",
+          skillId: call.skillId,
+        });
     }
 
     assertNever(call);
@@ -240,7 +269,7 @@ export class OrchestratorPrivileges {
   private async awaitNativeToolPrivilegeResolution(
     chatId: string,
     session: SessionState,
-    request: Extract<PrivilegeRequest, { kind: "host_operation" | "http_token_use" | "host_directory_access" }>,
+    request: Extract<PrivilegeRequest, { kind: "host_operation" | "http_token_use" | "host_directory_access" | "skill_mutation" }>,
   ): Promise<PrivilegeResolutionResult> {
     const activeTask = session.activeTask;
     if (!activeTask) {
@@ -791,6 +820,61 @@ export class OrchestratorPrivileges {
         };
       default:
         assertNever(decision);
+    }
+  }
+
+  private async resolvePendingSkillMutationRequest(
+    session: SessionState,
+    request: Extract<PrivilegeRequest, { kind: "skill_mutation" }>,
+    decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
+  ): Promise<PrivilegeResolutionResult> {
+    const activeTask = session.activeTask;
+    if (!activeTask) {
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: messages.taskNoLongerActive(session.chatId),
+      };
+    }
+
+    if (decision !== "approve") {
+      return {
+        requestId: request.requestId,
+        outcome: "denied",
+        message: messages.skillMutationDenied(request.operation, request.skillId),
+      };
+    }
+
+    try {
+      if (request.operation === "create") {
+        await this.deps.skillService.createSkill({
+          skillId: request.skillId,
+          name: request.name ?? "",
+          description: request.description ?? "",
+          body: request.body ?? "",
+        });
+      } else if (request.operation === "update") {
+        await this.deps.skillService.updateSkill({
+          skillId: request.skillId,
+          name: request.name ?? "",
+          description: request.description ?? "",
+          body: request.body ?? "",
+        });
+      } else if (request.operation === "delete") {
+        await this.deps.skillService.deleteSkill({ skillId: request.skillId });
+      }
+      return {
+        requestId: request.requestId,
+        outcome: "approved",
+        message: messages.skillMutationApproved(request.operation, request.skillId),
+      };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Unknown skill mutation failure.";
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: messages.skillMutationFailed(request.operation, request.skillId, detail),
+      };
     }
   }
 

@@ -55,7 +55,7 @@ export type TaskBundleLauncherOptions = {
   networkGuardImage?: string;
   shareRoot: string;
   codexAuthFile: string | null;
-  skillsDirectory: string | null;
+  getSkillsDirectory: () => string | null;
   workerCodexBinaryPath: string;
   workerNetworkName?: string | null;
   workerNetwork: WorkerNetworkConfig;
@@ -226,8 +226,9 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
 
     dockerArgs.push("-v", `${this.options.workerCodexBinaryPath}:${workerCodexContainerPath}:ro`);
 
-    if (this.options.skillsDirectory) {
-      dockerArgs.push("-v", `${this.options.skillsDirectory}:${workerSkillsPath}:ro`);
+    const skillsDirectory = this.options.getSkillsDirectory();
+    if (skillsDirectory) {
+      dockerArgs.push("-v", `${skillsDirectory}:${workerSkillsPath}:ro`);
     }
 
     if (networkGuard) {

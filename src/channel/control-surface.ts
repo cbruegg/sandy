@@ -130,5 +130,7 @@ export function formatPrivilegeRequestLogType(request: PrivilegeRequest): string
       return `http:${request.tokenId}@${request.host}`;
     case "host_directory_access":
       return `host_directory_access:${request.path}:${request.level}`;
+    case "skill_mutation":
+      return `skill_mutation:${request.operation}:${request.skillId}`;
   }
 }

@@ -129,6 +129,12 @@ export const messages = {
     `Host directory access request for ${path} failed: ${error}`,
   hostDirectoryNotFound: (path: string): string =>
     `Host directory not found or not accessible: ${path}`,
+  skillMutationDenied: (operation: string, skillId: string): string =>
+    `Denied ${operation} skill "${skillId}".`,
+  skillMutationApproved: (operation: string, skillId: string): string =>
+    `Approved ${operation} skill "${skillId}".`,
+  skillMutationFailed: (operation: string, skillId: string, error: string): string =>
+    `Failed to ${operation} skill "${skillId}": ${error}`,
 } as const;
 
 export const mcpAdminMessages = {
@@ -265,6 +271,15 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
     return [
       `Host directory access: ${request.path}`,
       `Access level: ${describeHostDirectoryAccessLevel(request.level)}`,
+    ].join("\n");
+  }
+
+  if (request.kind === "skill_mutation") {
+    return [
+      `Skill mutation: ${request.operation}`,
+      `Skill ID: ${request.skillId}`,
+      ...(request.name ? [`Name: ${request.name}`] : []),
+      ...(request.description ? [`Description: ${request.description}`] : []),
     ].join("\n");
   }
 
