@@ -130,6 +130,10 @@ type AppServerTypedRpcHost = {
   writeJsonRpcMessage: (message: Record<string, unknown>) => void;
 };
 
+/**
+ * @see {@link https://developers.openai.com/codex/app-server#initialization App Server — Initialization}
+ * @see {@link https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/v2.rs Open-source protocol definitions (v2.rs)}
+ */
 type AppServerInitializeParams = {
   clientInfo: {
     name: string;
@@ -141,6 +145,10 @@ type AppServerInitializeParams = {
   };
 };
 
+/**
+ * @see {@link https://developers.openai.com/codex/app-server#authentication App Server — Authentication}
+ * @see {@link https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/v2.rs Open-source protocol definitions (v2.rs)}
+ */
 type AppServerLoginWithTokensParams = {
   type: "chatgptAuthTokens";
   accessToken: string;
@@ -148,6 +156,11 @@ type AppServerLoginWithTokensParams = {
   chatgptPlanType: string | null;
 };
 
+/**
+ * @see {@link https://developers.openai.com/codex/app-server#start-or-resume-a-thread App Server — Start or Resume a Thread}
+ * @see {@link https://developers.openai.com/codex/agent-approvals-security App Server — Agent Approvals & Security}
+ * @see {@link https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/v2.rs Open-source protocol definitions (v2.rs)}
+ */
 type AppServerThreadStartParams = ReturnType<typeof buildAppServerThreadStartParams>;
 
 type AppServerThreadStartResult = {
@@ -156,11 +169,20 @@ type AppServerThreadStartResult = {
   };
 };
 
+/**
+ * @see {@link https://developers.openai.com/codex/app-server#turnstart App Server — Turn Start}
+ * @see {@link https://developers.openai.com/codex/agent-approvals-security App Server — Agent Approvals & Security}
+ * @see {@link https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/v2.rs Open-source protocol definitions (v2.rs)}
+ */
 type AppServerTurnStartParams = {
   threadId: string;
   input: Input;
 };
 
+/**
+ * @see {@link https://developers.openai.com/codex/app-server#turninterrupt App Server — Turn Interrupt}
+ * @see {@link https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/v2.rs Open-source protocol definitions (v2.rs)}
+ */
 type AppServerTurnInterruptParams = {
   threadId: string;
 };
@@ -192,6 +214,15 @@ type JsonRpcInitializedNotification = {
   params: Record<string, never>;
 };
 
+/**
+ * Thin typed wrapper around Codex app-server JSON-RPC calls.
+ *
+ * Derived from the Codex app-server protocol v2 schemas and documentation.
+ *
+ * @see {@link https://developers.openai.com/codex/app-server App Server Protocol Overview}
+ * @see {@link https://developers.openai.com/codex/agent-approvals-security Agent Approvals & Security}
+ * @see {@link https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/v2.rs Open-source protocol definitions (v2.rs)}
+ */
 class AppServerTypedRpc {
   constructor(private readonly host: AppServerTypedRpcHost) {}
 
