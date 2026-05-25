@@ -29,6 +29,7 @@ const ignoredNotificationMethods = new Set([
   "item/agentMessage/delta",
   "item/started",
   "mcpServer/startupStatus/updated",
+  "skills/changed",
   "thread/started",
   "thread/status/changed",
   "thread/tokenUsage/updated",
