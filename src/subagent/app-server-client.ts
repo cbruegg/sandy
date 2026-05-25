@@ -11,7 +11,6 @@ type PendingRequest<T = unknown> = {
 };
 
 type AppServerEvent =
-  | { type: "agent_message_delta"; text: string; itemId: string | null }
   | { type: "agent_message_completed"; text: string; itemId: string | null }
   | { type: "noop" }
   | { type: "turn_completed" }
@@ -23,6 +22,9 @@ const JSON_RPC_METHOD_NOT_FOUND = -32601;
 
 const ignoredNotificationMethods = new Set([
   "account/rateLimits/updated",
+  // Sandy now treats item completion as the only host-visible source of
+  // assistant message text and ignores intermediate delta notifications.
+  "item/agentMessage/delta",
   "item/started",
   "mcpServer/startupStatus/updated",
   "thread/started",
@@ -72,11 +74,6 @@ const itemCompletedParamsSchema = z.object({
   }).passthrough().optional(),
 }).passthrough();
 
-const agentMessageDeltaParamsSchema = z.object({
-  delta: z.string(),
-  itemId: z.string().optional(),
-}).passthrough();
-
 const turnCompletedNotificationSchema = turnCompletedParamsSchema.transform((data) => ({
   kind: "turn_completed" as const,
   turn: data.turn,
@@ -97,18 +94,11 @@ const itemCompletedNotificationSchema = itemCompletedParamsSchema.transform((dat
   item: data.item,
 }));
 
-const agentMessageDeltaNotificationSchema = agentMessageDeltaParamsSchema.transform((data) => ({
-  kind: "agent_message_delta" as const,
-  text: data.delta,
-  itemId: data.itemId,
-}));
-
 type ParsedAppServerNotification =
   | z.infer<typeof turnCompletedNotificationSchema>
   | z.infer<typeof turnFailedNotificationSchema>
   | z.infer<typeof errorNotificationSchema>
   | z.infer<typeof itemCompletedNotificationSchema>
-  | z.infer<typeof agentMessageDeltaNotificationSchema>
   | {
     kind: "parse_failed";
     method: string;
@@ -408,12 +398,6 @@ export class CodexAppServerClient {
         this.warnUnhandledCompletedItemType(itemType, notification.item);
         return { type: "noop" };
       }
-      case "agent_message_delta":
-        return {
-          type: "agent_message_delta",
-          text: notification.text,
-          itemId: notification.itemId ?? null,
-        };
       case "parse_failed":
         logger.warn("appserver.notification_parse_failed", {
           method: notification.method,
@@ -445,9 +429,6 @@ export class CodexAppServerClient {
 
       case "item/completed":
         return this.parseNotificationWithSchema(itemCompletedNotificationSchema, method, params);
-
-      case "item/agentMessage/delta":
-        return this.parseNotificationWithSchema(agentMessageDeltaNotificationSchema, method, params);
 
       default:
         return { kind: "ignored", method, params };

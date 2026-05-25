@@ -32,83 +32,6 @@ type StreamAppServerSummaryOptions = {
   abortSignal?: AbortSignal;
 };
 
-class AppServerMessageBuffer {
-  // `emittedText` tracks text that has already been forwarded to the host for
-  // the current assistant message.
-  private emittedText = "";
-  // `pendingText` tracks newly streamed text that we have buffered locally but
-  // have not forwarded yet because the message has not been completed.
-  private pendingText = "";
-
-  appendDelta(text: string): void {
-    if (!text) {
-      return;
-    }
-    this.pendingText += text;
-  }
-
-  appendCompleted(text: string): string[] {
-    // The app-server streams deltas and then later emits the full completed
-    // message text for the same item. We only want to forward text that has not
-    // already been emitted.
-    //
-    // Example 1:
-    //   deltas:    "Hello" + " world"
-    //   completed: "Hello world"
-    //   output:    ["Hello world"]
-    //
-    // Example 2:
-    //   deltas:    "Hello world"
-    //   completed: "Hello"
-    //   output:    []
-    //
-    // Example 3:
-    //   deltas:    "Hello"
-    //   completed: "Rewritten answer"
-    //   output:    ["Rewritten answer"]
-    if (!text) {
-      return this.flushAll();
-    }
-
-    const streamedText = this.emittedText + this.pendingText;
-    if (!streamedText) {
-      this.pendingText = text;
-      return this.flushAll();
-    }
-
-    if (text.startsWith(streamedText)) {
-      this.pendingText += text.slice(streamedText.length);
-      return this.flushAll();
-    }
-
-    if (streamedText.startsWith(text)) {
-      return this.flushAll();
-    }
-
-    this.emittedText = "";
-    this.pendingText = text;
-    return this.flushAll();
-  }
-
-  flushAll(): string[] {
-    if (!this.pendingText) {
-      return [];
-    }
-
-    const chunk = this.pendingText;
-    this.emittedText += chunk;
-    this.pendingText = "";
-    return [chunk];
-  }
-
-  takeCompletedText(): string | null {
-    const text = `${this.emittedText}${this.pendingText}`.trim();
-    this.emittedText = "";
-    this.pendingText = "";
-    return text.length > 0 ? text : null;
-  }
-}
-
 function normalizeSummaryText(chunks: string[]): string | null {
   const summary = chunks.map((chunk) => chunk.trim()).filter((chunk) => chunk.length > 0).join("\n\n").trim();
   return summary.length > 0 ? summary : null;
@@ -118,20 +41,12 @@ function normalizeSummaryText(chunks: string[]): string | null {
  * Streams one ongoing app-server task turn.
  *
  * Use this for normal live conversation turns while the sub-agent is actively
- * working through the task in the current thread.
+ * working through the task in the current thread. Completed assistant messages
+ * are the only host-visible output path for app-server-backed turns.
  */
 export async function streamAppServerTurn(options: StreamAppServerTaskTurnOptions): Promise<boolean> {
   const sendEvent = options.sendEvent ?? writeSubAgentEvent;
-  const messageBuffer = new AppServerMessageBuffer();
   let sawTerminalError = false;
-
-  const flushBufferedTaskOutput = (): void => {
-    for (const chunk of messageBuffer.flushAll()) {
-      if (chunk.trim()) {
-        sendEvent({ type: "assistant_output", text: chunk });
-      }
-    }
-  };
 
   try {
     for await (const event of options.appServer.streamTurn(
@@ -143,43 +58,32 @@ export async function streamAppServerTurn(options: StreamAppServerTaskTurnOption
       logger.debug("appserver.event_received", { eventType: event.type, event });
 
       switch (event.type) {
-        case "agent_message_delta":
-          messageBuffer.appendDelta(event.text);
-          break;
-
         case "agent_message_completed":
-          for (const chunk of messageBuffer.appendCompleted(event.text)) {
-            if (chunk.trim()) {
-              sendEvent({ type: "assistant_output", text: chunk });
-            }
+          if (event.text.trim()) {
+            sendEvent({ type: "assistant_output", text: event.text });
           }
           break;
 
         case "turn_completed":
-          flushBufferedTaskOutput();
           break;
 
         case "turn_failed":
-          flushBufferedTaskOutput();
           sendEvent({ type: "task_error", message: event.error });
           sawTerminalError = true;
           return sawTerminalError;
 
         case "error":
-          flushBufferedTaskOutput();
           sendEvent({ type: "task_error", message: event.message });
           sawTerminalError = true;
           return sawTerminalError;
       }
     }
   } catch (error) {
-    flushBufferedTaskOutput();
     const message = error instanceof Error ? error.message : "App-server turn failed.";
     sendEvent({ type: "task_error", message });
     sawTerminalError = true;
   }
 
-  flushBufferedTaskOutput();
   return sawTerminalError;
 }
 
@@ -191,14 +95,7 @@ export async function streamAppServerTurn(options: StreamAppServerTaskTurnOption
  */
 async function streamAppServerSummary(options: StreamAppServerSummaryOptions): Promise<StreamTurnResult> {
   const summaryChunks: string[] = [];
-  const messageBuffer = new AppServerMessageBuffer();
   let sawTerminalError = false;
-
-  const appendSummaryChunk = (text: string | null): void => {
-    if (text) {
-      summaryChunks.push(text);
-    }
-  };
 
   try {
     for await (const event of options.appServer.streamTurn(
@@ -210,17 +107,13 @@ async function streamAppServerSummary(options: StreamAppServerSummaryOptions): P
       logger.debug("appserver.event_received", { eventType: event.type, event });
 
       switch (event.type) {
-        case "agent_message_delta":
-          messageBuffer.appendDelta(event.text);
-          break;
-
         case "agent_message_completed":
-          messageBuffer.appendCompleted(event.text);
-          appendSummaryChunk(messageBuffer.takeCompletedText());
+          if (event.text.trim()) {
+            summaryChunks.push(event.text);
+          }
           break;
 
         case "turn_completed":
-          appendSummaryChunk(messageBuffer.takeCompletedText());
           break;
 
         case "turn_failed":
@@ -236,7 +129,6 @@ async function streamAppServerSummary(options: StreamAppServerSummaryOptions): P
     sawTerminalError = true;
   }
 
-  appendSummaryChunk(messageBuffer.takeCompletedText());
   return {
     sawTerminalError,
     summaryText: normalizeSummaryText(summaryChunks),

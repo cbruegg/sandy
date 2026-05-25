@@ -366,7 +366,7 @@ test("worker emits task_done only after mark_finished", async () => {
   ]);
 });
 
-test("streamAppServerTurn emits assistant output only after the message completes", async () => {
+test("streamAppServerTurn emits completed assistant messages", async () => {
   const writes: string[] = [];
   const originalWrite = process.stdout.write.bind(process.stdout);
   const mockWrite: typeof process.stdout.write = (
@@ -387,11 +387,6 @@ test("streamAppServerTurn emits assistant output only after the message complete
   try {
     const appServer = {
       async *streamTurn() {
-        yield { type: "agent_message_delta", itemId: "item-1", text: "Using" };
-        yield { type: "agent_message_delta", itemId: "item-1", text: " the" };
-        yield { type: "agent_message_delta", itemId: "item-1", text: " Todo" };
-        yield { type: "agent_message_delta", itemId: "item-1", text: "ist" };
-        yield { type: "agent_message_delta", itemId: "item-1", text: " skill." };
         yield { type: "agent_message_completed", itemId: "item-1", text: "Using the Todoist skill." };
         yield { type: "turn_completed" };
       },
@@ -414,7 +409,7 @@ test("streamAppServerTurn emits assistant output only after the message complete
   }
 });
 
-test("streamAppServerTurn does not duplicate completed messages after deltas", async () => {
+test("streamAppServerTurn ignores blank completed assistant messages", async () => {
   const writes: string[] = [];
   const originalWrite = process.stdout.write.bind(process.stdout);
   const mockWrite: typeof process.stdout.write = (
@@ -435,9 +430,7 @@ test("streamAppServerTurn does not duplicate completed messages after deltas", a
   try {
     const appServer = {
       async *streamTurn() {
-        yield { type: "agent_message_delta", itemId: "item-1", text: "Hello" };
-        yield { type: "agent_message_delta", itemId: "item-1", text: " world" };
-        yield { type: "agent_message_completed", itemId: "item-1", text: "Hello world" };
+        yield { type: "agent_message_completed", itemId: "item-1", text: "   " };
         yield { type: "turn_completed" };
       },
     };
@@ -453,7 +446,7 @@ test("streamAppServerTurn does not duplicate completed messages after deltas", a
 
     const events = writes.map((entry) => JSON.parse(entry.trim()) as SubAgentEvent);
     assert.equal(sawTerminalError, false);
-    assert.deepEqual(events, [{ type: "assistant_output", text: "Hello world" }]);
+    assert.deepEqual(events, []);
   } finally {
     process.stdout.write = originalWrite;
   }

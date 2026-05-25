@@ -323,7 +323,7 @@ test("CodexAppServerClient ignores non-message item completions until turn compl
   ]);
 });
 
-test("CodexAppServerClient emits agent message deltas", async () => {
+test("CodexAppServerClient ignores agent message deltas until completion", async () => {
   const child = new FakeChildProcess();
   const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
   const tokens: ChatGPTExternalTokens = {
@@ -370,7 +370,6 @@ test("CodexAppServerClient emits agent message deltas", async () => {
   })}\n`);
 
   assert.deepEqual(await streamPromise, [
-    { type: "agent_message_delta", itemId: "item-1", text: "Hello" },
     { type: "turn_completed" },
   ]);
 });
