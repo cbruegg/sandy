@@ -43,8 +43,10 @@ const workerCapabilityArgs = [
   "--cap-add", "SETGID",
 ] as const;
 const proxyCapabilityArgs = [
-  // The HTTP proxy only needs ordinary file and socket operations.
-  "--cap-drop", "ALL",
+  // Keep the proxy on the pre-change capability set until we can confirm
+  // whether mitmproxy startup on Linux is sensitive to dropping everything.
+  "--cap-drop", "NET_ADMIN",
+  "--cap-drop", "NET_RAW",
 ] as const;
 
 export type TaskBundleLauncherOptions = {

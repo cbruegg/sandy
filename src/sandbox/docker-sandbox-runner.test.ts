@@ -1156,7 +1156,8 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
   assert.ok(proxyRunInvocation.args.includes("--network"));
   assert.ok(proxyRunInvocation.args.includes(`container:${guardContainerName}`));
   assert.ok(proxyRunInvocation.args.includes("--cap-drop"));
-  assert.ok(proxyRunInvocation.args.includes("ALL"));
+  assert.ok(proxyRunInvocation.args.includes("NET_ADMIN"));
+  assert.ok(proxyRunInvocation.args.includes("NET_RAW"));
   assert.ok(!proxyRunInvocation.args.includes("--cap-add"));
   assert.ok(proxyRunInvocation.args.includes("sandy-http-proxy:latest"));
   assert.ok(proxyRunInvocation.args.includes("/tmp/sandy-mitmproxy-conf:/run/sandy-mitmproxy-conf:ro"));
