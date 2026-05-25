@@ -24,6 +24,28 @@ import {SANDY_CODEX_PATH_ENV} from "../codex-client.ts";
 const workerCodexSeedMountPath = "/run/sandy-codex-seed";
 const workerCodexContainerPath = "/usr/local/bin/codex";
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 300_000;
+const workerCapabilityArgs = [
+  // Keep the worker rootful enough for package managers, sudo, and Homebrew,
+  // while dropping every other default Docker capability.
+  "--cap-drop", "ALL",
+  // Lets root bypass host-managed file mode checks on writable mounts such as
+  // /workspace and /root so package managers can update their own state.
+  "--cap-add", "DAC_OVERRIDE",
+  // Allows tools to change file ownership inside the container.
+  "--cap-add", "CHOWN",
+  // Allows ownership-sensitive file operations such as preserving writable
+  // access while package managers rewrite files they own.
+  "--cap-add", "FOWNER",
+  // Required by sudo/su to switch credentials from the root container user to
+  // another uid when toolchains such as Homebrew invoke them.
+  "--cap-add", "SETUID",
+  // Required alongside SETUID so sudo/su can also switch group credentials.
+  "--cap-add", "SETGID",
+] as const;
+const proxyCapabilityArgs = [
+  // The HTTP proxy only needs ordinary file and socket operations.
+  "--cap-drop", "ALL",
+] as const;
 
 export type TaskBundleLauncherOptions = {
   workerImage: string;
@@ -144,10 +166,7 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
         SANDY_MANAGED_CONTAINER_LABEL,
         "--network",
         `container:${networkGuard.containerName}`,
-        "--cap-drop",
-        "NET_ADMIN",
-        "--cap-drop",
-        "NET_RAW",
+        ...proxyCapabilityArgs,
         "-v",
         `${this.options.httpProxyConfDirPath}:/run/sandy-mitmproxy-conf:ro`,
         "-e",
@@ -180,10 +199,7 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
       containerName,
       "--label",
       SANDY_MANAGED_CONTAINER_LABEL,
-      "--cap-drop",
-      "NET_ADMIN",
-      "--cap-drop",
-      "NET_RAW",
+      ...workerCapabilityArgs,
     ];
 
     if (this.options.logLevel) {

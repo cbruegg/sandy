@@ -872,6 +872,7 @@ test("DockerSandboxRunner launches a network guard and shares its network namesp
   const guardRunInvocation = invocations.find((invocation) =>
     invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-network-guard:latest");
   assert.ok(guardRunInvocation);
+  assert.ok(guardRunInvocation.args.includes("ALL"));
   assert.ok(guardRunInvocation.args.includes("--cap-add"));
   assert.ok(guardRunInvocation.args.includes("NET_ADMIN"));
   assert.ok(guardRunInvocation.args.includes("--network"));
@@ -888,7 +889,12 @@ test("DockerSandboxRunner launches a network guard and shares its network namesp
   assert.ok(workerRunInvocation.args.includes("--network"));
   assert.ok(workerRunInvocation.args.includes(`container:${guardContainerName}`));
   assert.ok(workerRunInvocation.args.includes("--cap-drop"));
-  assert.ok(workerRunInvocation.args.includes("NET_RAW"));
+  assert.ok(workerRunInvocation.args.includes("ALL"));
+  assert.ok(workerRunInvocation.args.includes("DAC_OVERRIDE"));
+  assert.ok(workerRunInvocation.args.includes("CHOWN"));
+  assert.ok(workerRunInvocation.args.includes("FOWNER"));
+  assert.ok(workerRunInvocation.args.includes("SETUID"));
+  assert.ok(workerRunInvocation.args.includes("SETGID"));
   assert.ok(!workerRunInvocation.args.includes("sandy-mcp-net"));
 });
 
@@ -1150,7 +1156,8 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
   assert.ok(proxyRunInvocation.args.includes("--network"));
   assert.ok(proxyRunInvocation.args.includes(`container:${guardContainerName}`));
   assert.ok(proxyRunInvocation.args.includes("--cap-drop"));
-  assert.ok(proxyRunInvocation.args.includes("NET_ADMIN"));
+  assert.ok(proxyRunInvocation.args.includes("ALL"));
+  assert.ok(!proxyRunInvocation.args.includes("--cap-add"));
   assert.ok(proxyRunInvocation.args.includes("sandy-http-proxy:latest"));
   assert.ok(proxyRunInvocation.args.includes("/tmp/sandy-mitmproxy-conf:/run/sandy-mitmproxy-conf:ro"));
   assert.ok(proxyRunInvocation.args.includes("MITMPROXY_CONFDIR=/run/sandy-mitmproxy-conf"));
