@@ -13,6 +13,7 @@ import { logger } from "./logger.js";
 export { resolveCodexCacheRoot } from "./cache-paths.js";
 
 export const SANDY_CODEX_PATH_ENV = "SANDY_CODEX_PATH";
+export const CODEX_API_KEY_ENV = "CODEX_API_KEY";
 const CODEX_RELEASE_REPOSITORY = "openai/codex";
 const CODEX_RELEASE_TAG_PREFIX = "rust-v";
 const CODEX_NPM_NAME = "@openai/codex";

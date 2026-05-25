@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { type Codex, type Thread } from "@openai/codex-sdk";
+import { type Thread } from "@openai/codex-sdk";
 import { messages } from "../messages.js";
 import { AppServerWorkerSession } from "./worker-app-server.js";
 import {
@@ -23,6 +23,16 @@ const testFormatting: ChannelFormatting = {
   allowedTags: ["b", "i", "code", "pre"],
   instructions: "Use simple Telegram HTML.",
 };
+
+function createAppServerSessionStarter(session: {
+  streamTurn: (inputText: string, abortSignal?: AbortSignal) => Promise<boolean>;
+  emitTaskSummary: () => Promise<void>;
+  close: () => void;
+  cancelPendingAuthRefresh: () => void;
+  handleAuthRefreshResult: (tokens: unknown) => void;
+}): typeof AppServerWorkerSession.start {
+  return async () => session as unknown as AppServerWorkerSession;
+}
 
 test("buildInitialTaskInput tells the sub-agent where the shared workspace is", () => {
   const formatting: ChannelFormatting = {
@@ -130,17 +140,9 @@ test("buildInitialTaskInput includes current date and time", () => {
 });
 
 test("worker processes follow-up commands after start_task initialization finishes", async () => {
-  const { promise: codexReady, resolve: resolveCodex } = Promise.withResolvers<void>();
+  const { promise: sessionReady, resolve: resolveSession } = Promise.withResolvers<void>();
   const sentEvents: SubAgentEvent[] = [];
-  const turnInputs: unknown[] = [];
-  const thread = {
-    async runStreamed(input: unknown) {
-      turnInputs.push(input);
-      return {
-        events: (async function* () {})(),
-      };
-    },
-  } as unknown as Thread;
+  const turnInputs: string[] = [];
   const startTaskCommand: Extract<HostCommand, { type: "start_task" }> = {
     type: "start_task",
     taskId: "task-1",
@@ -165,14 +167,20 @@ test("worker processes follow-up commands after start_task initialization finish
   };
   const processor = createWorkerCommandProcessor({
     sendEvent: (event) => sentEvents.push(event),
-    env: {},
+    env: { SANDY_CODEX_PATH: "/usr/local/bin/codex" },
     applyWorkerCodexConfigPatch: async () => {},
-    buildWorkerCodexEnvironment: () => ({}),
-    createCodexClient: async () => {
-      await codexReady;
+    startAppServerWorkerSession: async () => {
+      await sessionReady;
       return {
-        startThread: () => thread,
-      } as unknown as Codex;
+        async streamTurn(inputText: string) {
+          turnInputs.push(inputText);
+          return false;
+        },
+        async emitTaskSummary() {},
+        close() {},
+        cancelPendingAuthRefresh() {},
+        handleAuthRefreshResult() {},
+      } as unknown as AppServerWorkerSession;
     },
     onShutdown: () => {},
   });
@@ -184,7 +192,7 @@ test("worker processes follow-up commands after start_task initialization finish
   assert.equal(sentEvents.length, 0);
   assert.equal(turnInputs.length, 0);
 
-  resolveCodex();
+  resolveSession();
   await startPromise;
   await followUpPromise;
   await new Promise((resolve) => setImmediate(resolve));
@@ -195,15 +203,14 @@ test("worker processes follow-up commands after start_task initialization finish
   assert.match(String(turnInputs[1]), /Use https:\/\/example\.com\/set/);
 });
 
-test("worker requires SANDY_CODEX_PATH for chatgpt app-server tasks", async () => {
+test("worker requires SANDY_CODEX_PATH for app-server tasks", async () => {
   const sentEvents: SubAgentEvent[] = [];
   const processor = createWorkerCommandProcessor({
     sendEvent: (event) => sentEvents.push(event),
     env: {},
     applyWorkerCodexConfigPatch: async () => {},
-    buildWorkerCodexEnvironment: () => ({}),
-    createCodexClient: async () => {
-      throw new Error("createCodexClient should not be called");
+    startAppServerWorkerSession: async () => {
+      throw new Error("startAppServerWorkerSession should not be called");
     },
     onShutdown: () => {},
   });
@@ -235,6 +242,56 @@ test("worker requires SANDY_CODEX_PATH for chatgpt app-server tasks", async () =
     type: "task_error",
     message: "SANDY_CODEX_PATH must be configured for app-server workers.",
   }]);
+});
+
+test("worker starts ambient app-server auth for api key mode and exports CODEX_API_KEY", async () => {
+  const sessionStarts: Array<Parameters<typeof AppServerWorkerSession.start>[0]> = [];
+  const env: NodeJS.ProcessEnv = {
+    SANDY_CODEX_PATH: "/usr/local/bin/codex",
+  };
+  const processor = createWorkerCommandProcessor({
+    sendEvent: () => {},
+    env,
+    applyWorkerCodexConfigPatch: async () => {},
+    startAppServerWorkerSession: async (options) => {
+      sessionStarts.push(options);
+      return {
+        async streamTurn() {
+          return false;
+        },
+        async emitTaskSummary() {},
+        close() {},
+        cancelPendingAuthRefresh() {},
+        handleAuthRefreshResult() {},
+      } as unknown as AppServerWorkerSession;
+    },
+    onShutdown: () => {},
+  });
+
+  await processor.handleLine(JSON.stringify({
+    type: "start_task",
+    taskId: "task-1",
+    taskBrief: "Inspect the collection.",
+    input: { text: "Initial request", images: [] },
+    taskLanguage: "English",
+    config: {
+      openAiApiKey: "api-key-123",
+      codexModel: null,
+      channelFormatting: testFormatting,
+      httpTokens: [],
+      httpProxyWrapper: null,
+      chatgptExternalTokens: null,
+    },
+    environment: {},
+    codexConfigToml: null,
+    httpProxyUrl: null,
+  } satisfies Extract<HostCommand, { type: "start_task" }>));
+
+  assert.equal(env["CODEX_API_KEY"], "api-key-123");
+  assert.equal(sessionStarts.length, 1);
+  assert.equal(sessionStarts[0]?.codexPath, "/usr/local/bin/codex");
+  assert.deepEqual(sessionStarts[0]?.authMode, { kind: "ambient" });
+  assert.equal(sessionStarts[0]?.model, undefined);
 });
 
 test("mcpToolProgress includes payloads for completed MCP calls", () => {
@@ -338,35 +395,24 @@ test("streamTurn ignores empty assistant messages", async () => {
 
 test("worker emits task_done only after mark_finished", async () => {
   const sentEvents: SubAgentEvent[] = [];
-  const thread = {
-    async runStreamed(input: unknown) {
-      const inputText = String(input);
-      return {
-        events: (async function* () {
-          if (inputText.includes("host-facing handoff summary")) {
-            yield {
-              type: "item.completed",
-              item: {
-                type: "agent_message",
-                text: "Summary for the host.",
-              },
-            };
-          }
-          yield {
-            type: "turn.completed",
-          };
-        })(),
-      };
-    },
-  } as unknown as Thread;
   const processor = createWorkerCommandProcessor({
     sendEvent: (event) => sentEvents.push(event),
-    env: {},
+    env: { SANDY_CODEX_PATH: "/usr/local/bin/codex" },
     applyWorkerCodexConfigPatch: async () => {},
-    buildWorkerCodexEnvironment: () => ({}),
-    createCodexClient: async () => ({
-      startThread: () => thread,
-    }) as unknown as Codex,
+    startAppServerWorkerSession: createAppServerSessionStarter({
+      async streamTurn() {
+        return false;
+      },
+      async emitTaskSummary() {
+        sentEvents.push({
+          type: "task_summary",
+          summary: "Summary for the host.",
+        });
+      },
+      close() {},
+      cancelPendingAuthRefresh() {},
+      handleAuthRefreshResult() {},
+    }),
     onShutdown: () => {},
   });
 
@@ -520,7 +566,7 @@ test("AppServerWorkerSession accepts a synchronous auth refresh response", async
     if (event.type === "chatgpt_auth_refresh_request") {
       session.handleAuthRefreshResult(refreshedTokens);
     }
-  });
+  }, true);
 
   const sawTerminalError = await session.streamTurn("hello");
 

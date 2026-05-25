@@ -43,12 +43,12 @@ function respond(child: FakeChildProcess, id: number, result: unknown): void {
   child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`);
 }
 
-async function createAuthenticatedClient(
+async function createExternalTokensClient(
   spawnImpl: typeof import("node:child_process").spawn,
   child: FakeChildProcess,
   tokens: ChatGPTExternalTokens,
 ): Promise<CodexAppServerClient> {
-  const clientPromise = CodexAppServerClient.createAuthenticated({
+  const clientPromise = CodexAppServerClient.createWithExternalTokens({
     codexPath: "codex",
     spawnImpl,
     tokens,
@@ -58,6 +58,20 @@ async function createAuthenticatedClient(
   respond(child, 1, {});
   await new Promise((resolve) => setImmediate(resolve));
   respond(child, 2, {});
+  return clientPromise;
+}
+
+async function createAmbientAuthClient(
+  spawnImpl: typeof import("node:child_process").spawn,
+  child: FakeChildProcess,
+): Promise<CodexAppServerClient> {
+  const clientPromise = CodexAppServerClient.createWithAmbientAuth({
+    codexPath: "codex",
+    spawnImpl,
+  });
+
+  await Promise.resolve();
+  respond(child, 1, {});
   return clientPromise;
 }
 
@@ -74,7 +88,7 @@ test("CodexAppServerClient starts threads with kebab-case sandbox mode", async (
     chatgptAccountId: "acct-123",
     chatgptPlanType: "plus",
   };
-  const client = await createAuthenticatedClient(spawnImpl, child, tokens);
+  const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
   const startThreadPromise = client.startThread("gpt-5.4-mini");
   await Promise.resolve();
@@ -108,7 +122,7 @@ test("CodexAppServerClient answers auth refresh requests during turns", async ()
     chatgptAccountId: "acct-123",
     chatgptPlanType: "plus",
   };
-  const client = await createAuthenticatedClient(spawnImpl, child, tokens);
+  const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
   const startThreadPromise = client.startThread();
   await Promise.resolve();
@@ -195,7 +209,7 @@ test("CodexAppServerClient handles auth refresh before turn-start RPC response",
     chatgptAccountId: "acct-123",
     chatgptPlanType: "plus",
   };
-  const client = await createAuthenticatedClient(spawnImpl, child, tokens);
+  const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
   const startThreadPromise = client.startThread();
   await Promise.resolve();
@@ -277,7 +291,7 @@ test("CodexAppServerClient ignores non-message item completions until turn compl
     chatgptAccountId: "acct-123",
     chatgptPlanType: "plus",
   };
-  const client = await createAuthenticatedClient(spawnImpl, child, tokens);
+  const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
   const startThreadPromise = client.startThread();
   await Promise.resolve();
@@ -331,7 +345,7 @@ test("CodexAppServerClient ignores agent message deltas until completion", async
     chatgptAccountId: "acct-123",
     chatgptPlanType: "plus",
   };
-  const client = await createAuthenticatedClient(spawnImpl, child, tokens);
+  const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
   const startThreadPromise = client.startThread();
   await Promise.resolve();
@@ -392,7 +406,7 @@ test("CodexAppServerClient ignores known benign notifications and item completio
   });
 
   try {
-    const client = await createAuthenticatedClient(spawnImpl, child, tokens);
+    const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
     const startThreadPromise = client.startThread();
     await Promise.resolve();
@@ -476,7 +490,7 @@ test("CodexAppServerClient maps failed turn/completed notifications to turn_fail
     chatgptAccountId: "acct-123",
     chatgptPlanType: "plus",
   };
-  const client = await createAuthenticatedClient(spawnImpl, child, tokens);
+  const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
   const startThreadPromise = client.startThread();
   await Promise.resolve();
@@ -511,4 +525,27 @@ test("CodexAppServerClient maps failed turn/completed notifications to turn_fail
   assert.deepEqual(await streamPromise, [
     { type: "turn_failed", error: "turn exploded" },
   ]);
+});
+
+test("CodexAppServerClient initializes ambient auth without experimental API or explicit login", async () => {
+  const child = new FakeChildProcess();
+  const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
+  const client = await createAmbientAuthClient(spawnImpl, child);
+
+  const messages = parseWrittenJsonLines(child);
+  assert.equal(messages[0]?.["method"], "initialize");
+  assert.deepEqual(messages[0]?.["params"], {
+    clientInfo: {
+      name: "sandy_worker",
+      title: "Sandy Worker",
+      version: "1.0.0",
+    },
+    capabilities: {},
+  });
+  assert.equal(messages.some((message) => message["method"] === "account/login/start"), false);
+
+  const startThreadPromise = client.startThread();
+  await Promise.resolve();
+  respond(child, 2, { thread: { id: "thread-1" } });
+  assert.equal(await startThreadPromise, "thread-1");
 });

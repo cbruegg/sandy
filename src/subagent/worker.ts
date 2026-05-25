@@ -1,30 +1,24 @@
-import { type Input, type Thread, type ThreadEvent, type TodoListItem, type UserInput } from "@openai/codex-sdk";
+import { type Input, type Thread, type ThreadEvent, type TodoListItem } from "@openai/codex-sdk";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
-import {createCodexClient, SANDY_CODEX_PATH_ENV} from "../codex-client.js";
+import { CODEX_API_KEY_ENV, SANDY_CODEX_PATH_ENV } from "../codex-client.js";
 import { configureLogger, logger } from "../logger.js";
 import { messages } from "../messages.js";
 import { type HostCommand, type SubAgentEvent } from "../types.js";
-import { buildCodexExecThreadOptions } from "./codex-task-runtime.js";
 import {
   buildInitialTaskInput,
   buildPrivilegeResolutionInput,
-  buildTaskSummaryInput,
-  type ImageAttachment,
 } from "./worker-prompt.js";
 import { AppServerWorkerSession, streamAppServerTurn } from "./worker-app-server.js";
 import {
   applyWorkerCodexConfigPatch,
-  buildWorkerCodexEnvironment,
   workerCodexHomePath,
 } from "./worker-codex-config.js";
 import { writeSubAgentEvent } from "./subagent-event-writer.js";
 
 type ThreadEventDisposition = "none" | "terminal_error";
-
-type WorkerAuthMode = { kind: "api_key"; apiKey: string | null } | { kind: "chatgpt_appserver" };
 
 function parseHostCommand(raw: string): HostCommand {
   const parsed = JSON.parse(raw) as HostCommand;
@@ -37,9 +31,8 @@ function parseHostCommand(raw: string): HostCommand {
 type WorkerCommandProcessorOptions = {
   sendEvent: (event: SubAgentEvent) => void;
   env: NodeJS.ProcessEnv;
-  createCodexClient: typeof createCodexClient;
   applyWorkerCodexConfigPatch: typeof applyWorkerCodexConfigPatch;
-  buildWorkerCodexEnvironment: typeof buildWorkerCodexEnvironment;
+  startAppServerWorkerSession: typeof AppServerWorkerSession.start;
   onShutdown: () => void;
 };
 
@@ -80,24 +73,6 @@ function truncateEventForLogging(event: ThreadEvent): ThreadEvent {
     }
   }
   return cloned;
-}
-
-function buildCodexInputWithImages(text: string, images: ImageAttachment[]): Input {
-  if (images.length === 0) {
-    return text;
-  }
-
-  const inputs: UserInput[] = [];
-
-  if (text.trim()) {
-    inputs.push({ type: "text", text: text.trim() });
-  }
-
-  for (const image of images) {
-    inputs.push({ type: "local_image", path: image.sharePath });
-  }
-
-  return inputs;
 }
 
 function joinTaskSections(taskBrief: string, text: string): string {
@@ -183,118 +158,18 @@ function handleTaskTurnEvent(event: ThreadEvent): ThreadEventDisposition {
   }
 }
 
-function handleSummaryTurnEvent(event: ThreadEvent, summaryChunks: string[]): ThreadEventDisposition {
-  switch (event.type) {
-    case "item.completed":
-    case "item.updated":
-      if (event.item.type === "agent_message" && event.type === "item.completed") {
-        summaryChunks.push(event.item.text);
-      }
-      return "none";
-    case "turn.completed":
-      return "none";
-    case "turn.failed":
-    case "error":
-      return "terminal_error";
-    case "thread.started":
-    case "turn.started":
-    case "item.started":
-      return "none";
-  }
-}
-
-function normalizeSummaryText(chunks: string[]): string | null {
-  const summary = chunks.map((chunk) => chunk.trim()).filter((chunk) => chunk.length > 0).join("\n\n").trim();
-  return summary.length > 0 ? summary : null;
-}
-
-async function collectTaskSummary(thread: Thread): Promise<{ sawTerminalError: boolean; summaryText: string | null }> {
-  let sawTerminalError = false;
-  const summaryChunks: string[] = [];
-  const { events } = await thread.runStreamed(buildTaskSummaryInput());
-
-  for await (const event of events) {
-    logger.debug("thread.event_received", { eventType: event.type, event: truncateEventForLogging(event) });
-    const disposition = handleSummaryTurnEvent(event, summaryChunks);
-    sawTerminalError = disposition === "terminal_error" || sawTerminalError;
-
-    if (disposition === "terminal_error") {
-      break;
-    }
-  }
-
-  return {
-    sawTerminalError,
-    summaryText: normalizeSummaryText(summaryChunks),
-  };
-}
-
-async function emitTaskSummary(thread: Thread, sendEvent: (event: SubAgentEvent) => void = writeSubAgentEvent): Promise<void> {
-  const result = await collectTaskSummary(thread);
-  if (result.sawTerminalError || !result.summaryText) {
-    return;
-  }
-
-  sendEvent({
-    type: "task_summary",
-    summary: result.summaryText,
-  });
-}
-
 function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): WorkerCommandProcessor {
-  let thread: Thread | null = null;
   let appServerSession: AppServerWorkerSession | null = null;
-  let authMode: WorkerAuthMode | null = null;
   let currentAbort: AbortController | null = null;
   let turnQueue: Promise<void> = Promise.resolve();
   let commandQueue: Promise<void> = Promise.resolve();
   let taskStarted = false;
-
-  const requireThread = (): Thread => {
-    if (!thread) {
-      throw new Error("Task thread has not been initialized.");
-    }
-    return thread;
-  };
 
   const requireAppServerSession = (): AppServerWorkerSession => {
     if (!appServerSession) {
       throw new Error("App-server has not been initialized.");
     }
     return appServerSession;
-  };
-
-  const enqueueCodexExecTurn = (input: Input): void => {
-    turnQueue = turnQueue.then(async () => {
-      currentAbort = new AbortController();
-      try {
-        await streamTurn(requireThread(), input);
-      } finally {
-        currentAbort = null;
-      }
-    }).catch((error) => {
-      options.sendEvent({
-        type: "task_error",
-        message: error instanceof Error ? error.message : "Sub-agent worker turn failed.",
-      });
-    });
-  };
-
-  const enqueueCodexExecMarkedFinish = (): void => {
-    turnQueue = turnQueue.then(async () => {
-      currentAbort = new AbortController();
-      try {
-        await emitTaskSummary(requireThread(), options.sendEvent);
-        options.sendEvent({ type: "task_done" });
-      } finally {
-        currentAbort = null;
-      }
-    }).catch((error) => {
-      options.sendEvent({
-        type: "task_error",
-        message: error instanceof Error ? error.message : "Sub-agent worker finalization failed.",
-      });
-    });
   };
 
   const enqueueAppServerTurn = (inputText: string): void => {
@@ -353,80 +228,48 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
             await writeFile(join(workerCodexHomePath, "config.toml"), command.codexConfigToml, "utf8");
           }
           await options.applyWorkerCodexConfigPatch();
-          const workerCodexEnvironment = options.buildWorkerCodexEnvironment();
-
-          if (command.config.chatgptExternalTokens) {
-            const tokens = command.config.chatgptExternalTokens;
-            authMode = { kind: "chatgpt_appserver" };
-
-            const codexPath = requireConfiguredCodexPath(options.env);
-            appServerSession = await AppServerWorkerSession.start({
-              codexPath,
-              initialTokens: tokens,
-              model: command.config.codexModel ?? undefined,
-              sendEvent: options.sendEvent,
-            });
-
-            taskStarted = true;
-            const initialInput = buildInitialTaskInput(
-              joinTaskSections(command.taskBrief, command.input.text),
-              command.taskLanguage,
-              command.config.channelFormatting,
-              command.config.httpTokens,
-              command.config.httpProxyWrapper,
-              command.input.images,
-            );
-            const inputText = typeof initialInput === "string"
-              ? initialInput
-              : joinTaskSections(command.taskBrief, command.input.text);
-            enqueueAppServerTurn(inputText);
+          if (command.config.openAiApiKey) {
+            options.env[CODEX_API_KEY_ENV] = command.config.openAiApiKey;
           } else {
-            authMode = { kind: "api_key", apiKey: command.config.openAiApiKey };
-
-            const codex = command.config.openAiApiKey
-              ? await options.createCodexClient({ apiKey: command.config.openAiApiKey, env: workerCodexEnvironment })
-              : await options.createCodexClient({ env: workerCodexEnvironment });
-            thread = codex.startThread(buildCodexExecThreadOptions(command.config.codexModel ?? undefined));
-            taskStarted = true;
-            enqueueCodexExecTurn(
-              buildInitialTaskInput(
-                joinTaskSections(command.taskBrief, command.input.text),
-                command.taskLanguage,
-                command.config.channelFormatting,
-                command.config.httpTokens,
-                command.config.httpProxyWrapper,
-                command.input.images,
-              ),
-            );
+            delete options.env[CODEX_API_KEY_ENV];
           }
+
+          const codexPath = requireConfiguredCodexPath(options.env);
+          appServerSession = await options.startAppServerWorkerSession({
+            codexPath,
+            authMode: command.config.chatgptExternalTokens
+              ? { kind: "external_tokens", initialTokens: command.config.chatgptExternalTokens }
+              : { kind: "ambient" },
+            model: command.config.codexModel ?? undefined,
+            sendEvent: options.sendEvent,
+          });
+
+          taskStarted = true;
+          const initialInput = buildInitialTaskInput(
+            joinTaskSections(command.taskBrief, command.input.text),
+            command.taskLanguage,
+            command.config.channelFormatting,
+            command.config.httpTokens,
+            command.config.httpProxyWrapper,
+            command.input.images,
+          );
+          const inputText = typeof initialInput === "string"
+            ? initialInput
+            : joinTaskSections(command.taskBrief, command.input.text);
+          enqueueAppServerTurn(inputText);
           break;
         }
         case "user_message":
           assertTaskStarted(taskStarted, command.type);
-
-          if (authMode?.kind === "chatgpt_appserver") {
-            enqueueAppServerTurn(command.input.text);
-          } else {
-            enqueueCodexExecTurn(buildCodexInputWithImages(command.input.text, command.input.images));
-          }
+          enqueueAppServerTurn(command.input.text);
           break;
         case "privilege_result":
           assertTaskStarted(taskStarted, command.type);
-
-          if (authMode?.kind === "chatgpt_appserver") {
-            enqueueAppServerTurn(buildPrivilegeResolutionInput(command.result));
-          } else {
-            enqueueCodexExecTurn(buildPrivilegeResolutionInput(command.result));
-          }
+          enqueueAppServerTurn(buildPrivilegeResolutionInput(command.result));
           break;
         case "mark_finished":
           assertTaskStarted(taskStarted, command.type);
-
-          if (authMode?.kind === "chatgpt_appserver") {
-            enqueueAppServerMarkedFinish();
-          } else {
-            enqueueCodexExecMarkedFinish();
-          }
+          enqueueAppServerMarkedFinish();
           break;
         case "cancel":
           currentAbort?.abort();
@@ -489,9 +332,8 @@ export async function main(): Promise<void> {
   const processor = createWorkerCommandProcessor({
     sendEvent: writeSubAgentEvent,
     env: process.env,
-    createCodexClient,
     applyWorkerCodexConfigPatch,
-    buildWorkerCodexEnvironment,
+    startAppServerWorkerSession: async (options) => await AppServerWorkerSession.start(options),
     onShutdown: () => {
       shutdownResolver?.();
       process.exit(0);

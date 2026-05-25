@@ -113,9 +113,14 @@ type AuthRefreshCallback = (
   previousAccountId: string | null,
 ) => Promise<{ accessToken: string; chatgptAccountId: string; chatgptPlanType: string | null }>;
 
-type CreateAuthenticatedClientOptions = {
+type CreateExternalTokensClientOptions = {
   codexPath: string;
   tokens: ChatGPTExternalTokens;
+  spawnImpl?: typeof spawn;
+};
+
+type CreateAmbientAuthClientOptions = {
+  codexPath: string;
   spawnImpl?: typeof spawn;
 };
 
@@ -136,10 +141,17 @@ export class CodexAppServerClient {
     private readonly spawnImpl: typeof spawn = spawn,
   ) {}
 
-  static async createAuthenticated(options: CreateAuthenticatedClientOptions): Promise<CodexAppServerClient> {
+  static async createWithExternalTokens(options: CreateExternalTokensClientOptions): Promise<CodexAppServerClient> {
     const client = new CodexAppServerClient(options.codexPath, options.spawnImpl);
-    await client.initialize();
+    await client.initialize(true);
     await client.loginWithTokens(options.tokens);
+    return client;
+  }
+
+  static async createWithAmbientAuth(options: CreateAmbientAuthClientOptions): Promise<CodexAppServerClient> {
+    const client = new CodexAppServerClient(options.codexPath, options.spawnImpl);
+    await client.initialize(false);
+    client.loggedIn = true;
     return client;
   }
 
@@ -242,7 +254,7 @@ export class CodexAppServerClient {
     });
   }
 
-  async initialize(): Promise<void> {
+  private async initialize(enableExperimentalApi: boolean): Promise<void> {
     this.start();
     await this.request<void>("initialize", {
       clientInfo: {
@@ -250,9 +262,11 @@ export class CodexAppServerClient {
         title: "Sandy Worker",
         version: "1.0.0",
       },
-      capabilities: {
-        experimentalApi: true,
-      },
+      capabilities: enableExperimentalApi
+        ? {
+            experimentalApi: true,
+          }
+        : {},
     });
     if (this.child) {
       this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "initialized", params: {} }) + "\n");
@@ -510,7 +524,7 @@ export class CodexAppServerClient {
   private ensureReady(method: string): void {
     this.ensureStarted(method);
     if (!this.loggedIn) {
-      throw new Error(`${method}: app-server not logged in. Call loginWithTokens() first.`);
+      throw new Error(`${method}: app-server authentication not ready.`);
     }
   }
 }

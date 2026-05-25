@@ -15,6 +15,10 @@ type AuthRefreshCallback = (
   previousAccountId: string | null,
 ) => Promise<{ accessToken: string; chatgptAccountId: string; chatgptPlanType: string | null }>;
 
+type AppServerSessionAuthMode =
+  | { kind: "ambient" }
+  | { kind: "external_tokens"; initialTokens: ChatGPTExternalTokens };
+
 type StreamAppServerTaskTurnOptions = {
   appServer: AppServerTurnStreamer;
   threadId: string;
@@ -142,20 +146,31 @@ export class AppServerWorkerSession {
     private readonly appServer: Pick<CodexAppServerClient, "streamTurn" | "close">,
     private readonly threadId: string,
     private readonly sendEvent: (event: SubAgentEvent) => void,
+    private readonly supportsAuthRefresh: boolean = true,
   ) {}
 
   static async start(options: {
     codexPath: string;
-    initialTokens: ChatGPTExternalTokens;
+    authMode: AppServerSessionAuthMode;
     model?: string;
     sendEvent: (event: SubAgentEvent) => void;
   }): Promise<AppServerWorkerSession> {
-    const appServer = await CodexAppServerClient.createAuthenticated({
-      codexPath: options.codexPath,
-      tokens: options.initialTokens,
-    });
+    const appServer = options.authMode.kind === "external_tokens"
+      ? await CodexAppServerClient.createWithExternalTokens({
+        codexPath: options.codexPath,
+        tokens: options.authMode.initialTokens,
+      })
+      : await CodexAppServerClient.createWithAmbientAuth({
+        codexPath: options.codexPath,
+      });
     const threadId = await appServer.startThread(options.model);
-    return new AppServerWorkerSession(appServer, threadId, options.sendEvent);
+    const session = new AppServerWorkerSession(
+      appServer,
+      threadId,
+      options.sendEvent,
+      options.authMode.kind === "external_tokens",
+    );
+    return session;
   }
 
   handleAuthRefreshResult(tokens: ChatGPTExternalTokens | null): void {
@@ -209,6 +224,10 @@ export class AppServerWorkerSession {
     chatgptAccountId: string;
     chatgptPlanType: string | null;
   }> {
+    if (!this.supportsAuthRefresh) {
+      throw new Error("App-server requested auth refresh for non-external auth mode.");
+    }
+
     if (this.pendingAuthRefreshResolver) {
       throw new Error("Auth refresh already in progress.");
     }
