@@ -31,34 +31,6 @@ type ParsedSkillFile = {
   body: string;
 };
 
-function discoverSkills(configDirectory: string): SkillMetadata[] {
-  const skillsDirectory = join(configDirectory, "skills");
-  if (!existsSync(skillsDirectory)) {
-    return [];
-  }
-
-  let entries: Dirent[];
-  try {
-    entries = readdirSync(skillsDirectory, {
-      withFileTypes: true,
-    });
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "Unknown skills directory read failure.";
-    throw new Error(`Failed to read Sandy skills directory at ${skillsDirectory}: ${detail}`, { cause: error });
-  }
-
-  return entries
-    .filter((entry) => entry.isDirectory())
-    .flatMap((entry) => {
-      const skillFilePath = join(skillsDirectory, entry.name, "SKILL.md");
-      if (!existsSync(skillFilePath)) {
-        return [];
-      }
-
-      return [parseSkillMetadata(readSkillFile(skillFilePath), skillFilePath)];
-    });
-}
-
 function readSkillFile(skillFilePath: string): string {
   try {
     return readFileSync(skillFilePath, "utf8");
@@ -165,11 +137,9 @@ async function parseExistingSkillFile(skillFilePath: string): Promise<ParsedSkil
 }
 
 export class SkillService {
-  private readonly configDirectory: string;
   private readonly skillsDirectory: string;
 
   constructor(configDirectory: string) {
-    this.configDirectory = configDirectory;
     this.skillsDirectory = join(configDirectory, "skills");
   }
 
@@ -178,7 +148,30 @@ export class SkillService {
   }
 
   getSkills(): SkillMetadata[] {
-    return discoverSkills(this.configDirectory);
+    if (!existsSync(this.skillsDirectory)) {
+      return [];
+    }
+
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(this.skillsDirectory, {
+        withFileTypes: true,
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Unknown skills directory read failure.";
+      throw new Error(`Failed to read Sandy skills directory at ${this.skillsDirectory}: ${detail}`, { cause: error });
+    }
+
+    return entries
+      .filter((entry) => entry.isDirectory())
+      .flatMap((entry) => {
+        const skillFilePath = join(this.skillsDirectory, entry.name, "SKILL.md");
+        if (!existsSync(skillFilePath)) {
+          return [];
+        }
+
+        return [parseSkillMetadata(readSkillFile(skillFilePath), skillFilePath)];
+      });
   }
 
   async createSkill(input: CreateSkillInput): Promise<void> {
