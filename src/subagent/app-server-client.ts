@@ -182,6 +182,7 @@ export class CodexAppServerClient {
   private loggedIn = false;
   private readonly warnedUnhandledNotificationMethods = new Set<string>();
   private readonly warnedUnhandledCompletedItemTypes = new Set<string>();
+  private readonly warnedUnhandledServerRequestMethods = new Set<string>();
   private readonly rpc: AppServerTypedRpc;
 
   private constructor(
@@ -233,6 +234,92 @@ export class CodexAppServerClient {
         // non-JSON line, ignore
       }
     });
+  }
+
+  private processMessage(msg: Record<string, unknown>): void {
+    // JSON-RPC response to one of our requests
+    if (typeof msg["id"] === "number" && msg["method"] === undefined) {
+      const id = msg["id"];
+      const pending = this.pendingRequests.get(id);
+      if (pending) {
+        this.pendingRequests.delete(id);
+        if (msg["error"] !== undefined) {
+          const err = msg["error"] as { code: number; message: string };
+          pending.reject(new Error(`RPC error ${err.code}: ${err.message}`));
+        } else {
+          pending.resolve(msg["result"]);
+        }
+      }
+      return;
+    }
+
+    // JSON-RPC request from server to client
+    if (typeof msg["id"] === "number" && typeof msg["method"] === "string") {
+      this.processServerRequest(msg["id"], msg["method"], msg["params"]);
+      return;
+    }
+
+    // JSON-RPC notification from server to client
+    if (typeof msg["method"] === "string" && msg["id"] === undefined) {
+      this.processNotification(msg["method"], msg["params"]);
+      return;
+    }
+  }
+
+  private processServerRequest(id: number, method: string, params: unknown): void {
+    if (method === REFRESH_AUTH_METHOD) {
+      const parsed = refreshAuthParamsSchema.safeParse(params ?? {});
+      if (this.activeAuthRefreshHandler) {
+        void this.activeAuthRefreshHandler(id, parsed.success ? parsed.data.previousAccountId ?? null : null);
+      }
+    } else {
+      this.warnUnhandledServerRequest(method, params);
+      this.sendErrorResponse(id, JSON_RPC_METHOD_NOT_FOUND, `Method not found: ${method}`);
+    }
+  }
+
+  private processNotification(method: string, params: unknown): void {
+    if (this.activeNotificationHandler) {
+      this.activeNotificationHandler(method, params);
+    }
+  }
+
+  private sendRequest(method: string, params?: unknown): number {
+    if (!this.child) throw new Error("App-server not started");
+    const id = this.nextId++;
+    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method, id, params }) + "\n");
+    return id;
+  }
+
+  private sendResponse(id: number, result: unknown): void {
+    if (!this.child) return;
+    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
+  }
+
+  private sendErrorResponse(id: number, code: number, message: string): void {
+    if (!this.child) return;
+    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }) + "\n");
+  }
+
+  private sendInitializedNotification(): void {
+    if (!this.child) return;
+    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "initialized", params: {} }) + "\n");
+  }
+
+  private async request<T = unknown>(method: string, params?: unknown): Promise<T> {
+    const id = this.sendRequest(method, params);
+    return new Promise<T>((resolve, reject) => {
+      this.pendingRequests.set(id, {
+        resolve: resolve as (result: unknown) => void,
+        reject,
+      });
+    });
+  }
+
+  private async initialize(enableExperimentalApi: boolean): Promise<void> {
+    this.start();
+    await this.rpc.initialize(enableExperimentalApi);
+    this.initialized = true;
   }
 
   async loginWithTokens(tokens: ChatGPTExternalTokens): Promise<void> {
@@ -336,91 +423,6 @@ export class CodexAppServerClient {
       this.activeNotificationHandler = null;
       this.activeAuthRefreshHandler = null;
     }
-  }
-
-  private processMessage(msg: Record<string, unknown>): void {
-    // JSON-RPC response to one of our requests
-    if (typeof msg["id"] === "number" && msg["method"] === undefined) {
-      const id = msg["id"];
-      const pending = this.pendingRequests.get(id);
-      if (pending) {
-        this.pendingRequests.delete(id);
-        if (msg["error"] !== undefined) {
-          const err = msg["error"] as { code: number; message: string };
-          pending.reject(new Error(`RPC error ${err.code}: ${err.message}`));
-        } else {
-          pending.resolve(msg["result"]);
-        }
-      }
-      return;
-    }
-
-    // JSON-RPC request from server to client
-    if (typeof msg["id"] === "number" && typeof msg["method"] === "string") {
-      this.processServerRequest(msg["id"], msg["method"], msg["params"]);
-      return;
-    }
-
-    // JSON-RPC notification from server to client
-    if (typeof msg["method"] === "string" && msg["id"] === undefined) {
-      this.processNotification(msg["method"], msg["params"]);
-      return;
-    }
-  }
-
-  private processServerRequest(id: number, method: string, params: unknown): void {
-    if (method === REFRESH_AUTH_METHOD) {
-      const parsed = refreshAuthParamsSchema.safeParse(params ?? {});
-      if (this.activeAuthRefreshHandler) {
-        void this.activeAuthRefreshHandler(id, parsed.success ? parsed.data.previousAccountId ?? null : null);
-      }
-    } else {
-      this.sendErrorResponse(id, JSON_RPC_METHOD_NOT_FOUND, `Method not found: ${method}`);
-    }
-  }
-
-  private processNotification(method: string, params: unknown): void {
-    if (this.activeNotificationHandler) {
-      this.activeNotificationHandler(method, params);
-    }
-  }
-
-  private sendRequest(method: string, params?: unknown): number {
-    if (!this.child) throw new Error("App-server not started");
-    const id = this.nextId++;
-    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method, id, params }) + "\n");
-    return id;
-  }
-
-  private sendResponse(id: number, result: unknown): void {
-    if (!this.child) return;
-    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
-  }
-
-  private sendErrorResponse(id: number, code: number, message: string): void {
-    if (!this.child) return;
-    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }) + "\n");
-  }
-
-  private sendInitializedNotification(): void {
-    if (!this.child) return;
-    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "initialized", params: {} }) + "\n");
-  }
-
-  private async request<T = unknown>(method: string, params?: unknown): Promise<T> {
-    const id = this.sendRequest(method, params);
-    return new Promise<T>((resolve, reject) => {
-      this.pendingRequests.set(id, {
-        resolve: resolve as (result: unknown) => void,
-        reject,
-      });
-    });
-  }
-
-  private async initialize(enableExperimentalApi: boolean): Promise<void> {
-    this.start();
-    await this.rpc.initialize(enableExperimentalApi);
-    this.initialized = true;
   }
 
   private parseNotification(method: string, p: Record<string, unknown> | undefined): AppServerEvent {
@@ -529,6 +531,17 @@ export class CodexAppServerClient {
     logger.warn("appserver.item_completed_unhandled", {
       itemType,
       item,
+    });
+  }
+
+  private warnUnhandledServerRequest(method: string, params: unknown): void {
+    if (this.warnedUnhandledServerRequestMethods.has(method)) {
+      return;
+    }
+    this.warnedUnhandledServerRequestMethods.add(method);
+    logger.warn("appserver.server_request_unhandled", {
+      method,
+      params: params && typeof params === "object" ? params : { value: params },
     });
   }
 
