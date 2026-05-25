@@ -11,158 +11,15 @@ type PendingRequest<T = unknown> = {
   reject: (error: Error) => void;
 };
 
-const REFRESH_AUTH_METHOD = "account/chatgptAuthTokens/refresh";
-const JSON_RPC_METHOD_NOT_FOUND = -32601;
-
-const refreshAuthParamsSchema = z.object({
-  previousAccountId: z.string().nullable().optional(),
-}).passthrough();
-
-/**
- * Low-level JSON-RPC transport for the Codex app-server.
- *
- * Handles process lifecycle, request/response correlation, and dispatch of
- * server-to-client requests and notifications. The generic {@link request}
- * method is dynamically typed; compile-time safety is provided by the typed
- * wrapper {@link CodexAppServerClient}.
- */
-class AppServerRpcClient {
-  private child: ChildProcessWithoutNullStreams | null = null;
-  private nextId = 1;
-  private pendingRequests = new Map<number, PendingRequest>();
-  private notificationHandler: ((method: string, params: unknown) => void) | null = null;
-  private authRefreshHandler: ((id: number, previousAccountId: string | null) => Promise<void>) | null = null;
-
-  constructor(
-    private readonly codexPath: string,
-    private readonly spawnImpl: typeof spawn = spawn,
-  ) {}
-
-  start(): void {
-    if (this.child) return;
-
-    this.child = this.spawnImpl(this.codexPath, ["app-server", "--listen", "stdio://"], {
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env },
-    });
-
-    const stdout = createInterface({
-      input: this.child.stdout,
-      crlfDelay: Infinity,
-    });
-
-    stdout.on("line", (line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
-      try {
-        const msg: Record<string, unknown> = JSON.parse(trimmed) as Record<string, unknown>;
-        this.processMessage(msg);
-      } catch {
-        // non-JSON line, ignore
-      }
-    });
-  }
-
-  close(): void {
-    this.notificationHandler = null;
-    this.authRefreshHandler = null;
-    if (this.child) {
-      this.child.stdin.end();
-      this.child.kill("SIGTERM");
-      this.child = null;
-    }
-  }
-
-  async request<T = unknown>(method: string, params?: unknown): Promise<T> {
-    const id = this.sendRequest(method, params);
-    return new Promise<T>((resolve, reject) => {
-      this.pendingRequests.set(id, {
-        resolve: resolve as (result: unknown) => void,
-        reject,
-      });
-    });
-  }
-
-  sendResponse(id: number, result: unknown): void {
-    if (!this.child) return;
-    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
-  }
-
-  setNotificationHandler(handler: ((method: string, params: unknown) => void) | null): void {
-    this.notificationHandler = handler;
-  }
-
-  setAuthRefreshHandler(handler: ((id: number, previousAccountId: string | null) => Promise<void>) | null): void {
-    this.authRefreshHandler = handler;
-  }
-
-  sendInitializedNotification(): void {
-    if (!this.child) return;
-    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "initialized", params: {} }) + "\n");
-  }
-
-  private sendRequest(method: string, params?: unknown): number {
-    if (!this.child) throw new Error("App-server not started");
-    const id = this.nextId++;
-    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method, id, params }) + "\n");
-    return id;
-  }
-
-  private processMessage(msg: Record<string, unknown>): void {
-    // JSON-RPC response to one of our requests
-    if (typeof msg["id"] === "number" && msg["method"] === undefined) {
-      const id = msg["id"];
-      const pending = this.pendingRequests.get(id);
-      if (pending) {
-        this.pendingRequests.delete(id);
-        if (msg["error"] !== undefined) {
-          const err = msg["error"] as { code: number; message: string };
-          pending.reject(new Error(`RPC error ${err.code}: ${err.message}`));
-        } else {
-          pending.resolve(msg["result"]);
-        }
-      }
-      return;
-    }
-
-    // JSON-RPC request from server to client
-    if (typeof msg["id"] === "number" && typeof msg["method"] === "string") {
-      this.processServerRequest(msg["id"], msg["method"], msg["params"]);
-      return;
-    }
-
-    // JSON-RPC notification from server to client
-    if (typeof msg["method"] === "string" && msg["id"] === undefined) {
-      if (this.notificationHandler) {
-        this.notificationHandler(msg["method"], msg["params"]);
-      }
-      return;
-    }
-  }
-
-  private processServerRequest(id: number, method: string, params: unknown): void {
-    if (method === REFRESH_AUTH_METHOD) {
-      const parsed = refreshAuthParamsSchema.safeParse(params ?? {});
-      if (this.authRefreshHandler) {
-        void this.authRefreshHandler(id, parsed.success ? parsed.data.previousAccountId ?? null : null);
-      }
-    } else {
-      this.sendErrorResponse(id, JSON_RPC_METHOD_NOT_FOUND, `Method not found: ${method}`);
-    }
-  }
-
-  private sendErrorResponse(id: number, code: number, message: string): void {
-    if (!this.child) return;
-    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }) + "\n");
-  }
-}
-
 type AppServerEvent =
   | { type: "agent_message_completed"; text: string; itemId: string | null }
   | { type: "noop" }
   | { type: "turn_completed" }
   | { type: "turn_failed"; error: string }
   | { type: "error"; message: string };
+
+const REFRESH_AUTH_METHOD = "account/chatgptAuthTokens/refresh";
+const JSON_RPC_METHOD_NOT_FOUND = -32601;
 
 const ignoredNotificationMethods = new Set([
   "account/rateLimits/updated",
@@ -186,6 +43,10 @@ const ignoredCompletedItemTypes = new Set([
   "userMessage",
   "user_message",
 ]);
+
+const refreshAuthParamsSchema = z.object({
+  previousAccountId: z.string().nullable().optional(),
+}).passthrough();
 
 const turnCompletedParamsSchema = z.object({
   turn: z.object({
@@ -264,25 +125,74 @@ type CreateAmbientAuthClientOptions = {
   spawnImpl?: typeof spawn;
 };
 
-/**
- * Typed wrapper around {@link AppServerRpcClient}.
- *
- * Provides compile-time safety for the subset of app-server RPC methods Sandy
- * actually uses. This is intentionally not an exhaustive mapping of the
- * app-server protocol; new methods should be added here as needed rather than
- * calling the low-level {@link AppServerRpcClient.request} directly.
- */
+class AppServerTypedRpc {
+  constructor(
+    private readonly request: <T>(method: string, params?: unknown) => Promise<T>,
+    private readonly sendInitializedNotification: () => void,
+  ) {}
+
+  async initialize(enableExperimentalApi: boolean): Promise<void> {
+    await this.request<void>("initialize", {
+      clientInfo: {
+        name: "sandy_worker",
+        title: "Sandy Worker",
+        version: "1.0.0",
+      },
+      capabilities: enableExperimentalApi
+        ? {
+            experimentalApi: true,
+          }
+        : {},
+    });
+    this.sendInitializedNotification();
+  }
+
+  async loginWithTokens(tokens: ChatGPTExternalTokens): Promise<void> {
+    await this.request<void>("account/login/start", {
+      type: "chatgptAuthTokens",
+      accessToken: tokens.accessToken,
+      chatgptAccountId: tokens.chatgptAccountId,
+      chatgptPlanType: tokens.chatgptPlanType,
+    });
+  }
+
+  async startThread(model?: string): Promise<{ thread: { id: string } }> {
+    return await this.request<{ thread: { id: string } }>("thread/start", buildAppServerThreadStartParams(model));
+  }
+
+  async turnStart(threadId: string, input: Input): Promise<void> {
+    const wireInput = typeof input === "string"
+      ? [{ type: "text" as const, text: input }]
+      : input;
+    await this.request<void>("turn/start", { threadId, input: wireInput });
+  }
+
+  async turnInterrupt(threadId: string): Promise<void> {
+    await this.request<void>("turn/interrupt", { threadId });
+  }
+}
+
 export class CodexAppServerClient {
+  private child: ChildProcessWithoutNullStreams | null = null;
+  private activeNotificationHandler: ((method: string, params: unknown) => void) | null = null;
+  private activeAuthRefreshHandler: ((id: number, previousAccountId: string | null) => Promise<void>) | null = null;
+  private nextId = 1;
+  private pendingRequests = new Map<number, PendingRequest>();
   private initialized = false;
   private loggedIn = false;
   private readonly warnedUnhandledNotificationMethods = new Set<string>();
   private readonly warnedUnhandledCompletedItemTypes = new Set<string>();
+  private readonly rpc: AppServerTypedRpc;
 
-  private constructor(private readonly rpc: AppServerRpcClient) {}
+  private constructor(
+    private readonly codexPath: string,
+    private readonly spawnImpl: typeof spawn = spawn,
+  ) {
+    this.rpc = new AppServerTypedRpc(this.request.bind(this), this.sendInitializedNotification.bind(this));
+  }
 
   static async createWithExternalTokens(options: CreateExternalTokensClientOptions): Promise<CodexAppServerClient> {
-    const rpc = new AppServerRpcClient(options.codexPath, options.spawnImpl);
-    const client = new CodexAppServerClient(rpc);
+    const client = new CodexAppServerClient(options.codexPath, options.spawnImpl);
     await client.initialize(true);
     await client.loginWithTokens(options.tokens);
     return client;
@@ -294,27 +204,46 @@ export class CodexAppServerClient {
   // opt into the experimental app-server auth APIs or send an explicit login
   // request over JSON-RPC.
   static async createWithAmbientAuth(options: CreateAmbientAuthClientOptions): Promise<CodexAppServerClient> {
-    const rpc = new AppServerRpcClient(options.codexPath, options.spawnImpl);
-    const client = new CodexAppServerClient(rpc);
+    const client = new CodexAppServerClient(options.codexPath, options.spawnImpl);
     await client.initialize(false);
     client.loggedIn = true;
     return client;
   }
 
+  start(): void {
+    if (this.child) return;
+
+    this.child = this.spawnImpl(this.codexPath, ["app-server", "--listen", "stdio://"], {
+      stdio: ["pipe", "pipe", "pipe"],
+      env: { ...process.env },
+    });
+
+    const stdout = createInterface({
+      input: this.child.stdout,
+      crlfDelay: Infinity,
+    });
+
+    stdout.on("line", (line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      try {
+        const msg: Record<string, unknown> = JSON.parse(trimmed) as Record<string, unknown>;
+        this.processMessage(msg);
+      } catch {
+        // non-JSON line, ignore
+      }
+    });
+  }
+
   async loginWithTokens(tokens: ChatGPTExternalTokens): Promise<void> {
     this.ensureStarted("loginWithTokens");
-    await this.rpc.request<void>("account/login/start", {
-      type: "chatgptAuthTokens",
-      accessToken: tokens.accessToken,
-      chatgptAccountId: tokens.chatgptAccountId,
-      chatgptPlanType: tokens.chatgptPlanType,
-    });
+    await this.rpc.loginWithTokens(tokens);
     this.loggedIn = true;
   }
 
   async startThread(model?: string): Promise<string> {
     this.ensureReady("startThread");
-    const result = await this.rpc.request<{ thread: { id: string } }>("thread/start", buildAppServerThreadStartParams(model));
+    const result = await this.rpc.startThread(model);
     return result.thread.id;
   }
 
@@ -339,23 +268,20 @@ export class CodexAppServerClient {
       pendingEvents.push(event);
     };
 
-    this.rpc.setNotificationHandler((method: string, params: unknown) => {
+    this.activeNotificationHandler = (method: string, params: unknown) => {
       pushEvent(this.parseNotification(method, params as Record<string, unknown> | undefined));
-    });
+    };
 
-    this.rpc.setAuthRefreshHandler(async (id: number, previousAccountId: string | null) => {
+    this.activeAuthRefreshHandler = async (id: number, previousAccountId: string | null) => {
       const tokens = await onAuthRefresh(previousAccountId);
-      this.rpc.sendResponse(id, {
+      this.sendResponse(id, {
         accessToken: tokens.accessToken,
         chatgptAccountId: tokens.chatgptAccountId,
         chatgptPlanType: tokens.chatgptPlanType,
       });
-    });
+    };
 
-    const wireInput = typeof input === "string"
-      ? [{ type: "text" as const, text: input }]
-      : input;
-    await this.rpc.request<void>("turn/start", { threadId, input: wireInput });
+    await this.rpc.turnStart(threadId, input);
 
     try {
       let done = false;
@@ -388,7 +314,7 @@ export class CodexAppServerClient {
 
         if (!event) {
           try {
-            await this.rpc.request<void>("turn/interrupt", { threadId });
+            await this.rpc.turnInterrupt(threadId);
           } catch {
             // best effort
           }
@@ -407,30 +333,93 @@ export class CodexAppServerClient {
         }
       }
     } finally {
-      this.rpc.setNotificationHandler(null);
-      this.rpc.setAuthRefreshHandler(null);
+      this.activeNotificationHandler = null;
+      this.activeAuthRefreshHandler = null;
     }
   }
 
-  close(): void {
-    this.rpc.close();
+  private processMessage(msg: Record<string, unknown>): void {
+    // JSON-RPC response to one of our requests
+    if (typeof msg["id"] === "number" && msg["method"] === undefined) {
+      const id = msg["id"];
+      const pending = this.pendingRequests.get(id);
+      if (pending) {
+        this.pendingRequests.delete(id);
+        if (msg["error"] !== undefined) {
+          const err = msg["error"] as { code: number; message: string };
+          pending.reject(new Error(`RPC error ${err.code}: ${err.message}`));
+        } else {
+          pending.resolve(msg["result"]);
+        }
+      }
+      return;
+    }
+
+    // JSON-RPC request from server to client
+    if (typeof msg["id"] === "number" && typeof msg["method"] === "string") {
+      this.processServerRequest(msg["id"], msg["method"], msg["params"]);
+      return;
+    }
+
+    // JSON-RPC notification from server to client
+    if (typeof msg["method"] === "string" && msg["id"] === undefined) {
+      this.processNotification(msg["method"], msg["params"]);
+      return;
+    }
+  }
+
+  private processServerRequest(id: number, method: string, params: unknown): void {
+    if (method === REFRESH_AUTH_METHOD) {
+      const parsed = refreshAuthParamsSchema.safeParse(params ?? {});
+      if (this.activeAuthRefreshHandler) {
+        void this.activeAuthRefreshHandler(id, parsed.success ? parsed.data.previousAccountId ?? null : null);
+      }
+    } else {
+      this.sendErrorResponse(id, JSON_RPC_METHOD_NOT_FOUND, `Method not found: ${method}`);
+    }
+  }
+
+  private processNotification(method: string, params: unknown): void {
+    if (this.activeNotificationHandler) {
+      this.activeNotificationHandler(method, params);
+    }
+  }
+
+  private sendRequest(method: string, params?: unknown): number {
+    if (!this.child) throw new Error("App-server not started");
+    const id = this.nextId++;
+    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method, id, params }) + "\n");
+    return id;
+  }
+
+  private sendResponse(id: number, result: unknown): void {
+    if (!this.child) return;
+    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
+  }
+
+  private sendErrorResponse(id: number, code: number, message: string): void {
+    if (!this.child) return;
+    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }) + "\n");
+  }
+
+  private sendInitializedNotification(): void {
+    if (!this.child) return;
+    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "initialized", params: {} }) + "\n");
+  }
+
+  private async request<T = unknown>(method: string, params?: unknown): Promise<T> {
+    const id = this.sendRequest(method, params);
+    return new Promise<T>((resolve, reject) => {
+      this.pendingRequests.set(id, {
+        resolve: resolve as (result: unknown) => void,
+        reject,
+      });
+    });
   }
 
   private async initialize(enableExperimentalApi: boolean): Promise<void> {
-    this.rpc.start();
-    await this.rpc.request<void>("initialize", {
-      clientInfo: {
-        name: "sandy_worker",
-        title: "Sandy Worker",
-        version: "1.0.0",
-      },
-      capabilities: enableExperimentalApi
-        ? {
-            experimentalApi: true,
-          }
-        : {},
-    });
-    this.rpc.sendInitializedNotification();
+    this.start();
+    await this.rpc.initialize(enableExperimentalApi);
     this.initialized = true;
   }
 
@@ -541,6 +530,16 @@ export class CodexAppServerClient {
       itemType,
       item,
     });
+  }
+
+  close(): void {
+    this.activeNotificationHandler = null;
+    this.activeAuthRefreshHandler = null;
+    if (this.child) {
+      this.child.stdin.end();
+      this.child.kill("SIGTERM");
+      this.child = null;
+    }
   }
 
   private ensureStarted(method: string): void {
