@@ -162,7 +162,7 @@ export class OrchestratorTaskLifecycle {
             taskLanguage: decision.taskLanguage,
             channelFormatting: this.channelFormatting,
             initialInput,
-            workerStartConfig: this.deps.buildWorkerStartConfig(),
+            workerStartConfig: await this.deps.buildWorkerStartConfig(),
           },
           async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
         );

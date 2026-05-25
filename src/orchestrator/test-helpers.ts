@@ -243,7 +243,7 @@ export function createTestOrchestrator(options: {
     channel,
     mainAgent: options.mainAgent,
     sandboxRunner: runner,
-    buildWorkerStartConfig: createTestWorkerStartConfig,
+    buildWorkerStartConfig: () => Promise.resolve(createTestWorkerStartConfig()),
     sessionStore: store,
     privilegeBroker,
     persistentApprovalStore: options.persistentApprovalStore ?? createNoopPersistentApprovalStore(),

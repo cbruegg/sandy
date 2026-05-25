@@ -32,7 +32,6 @@ import { validateMatrixAuthStateForStartup, resolveMatrixAccessToken } from "./m
 import {createNoopHostfsBroker} from "./hostfs/hostfs-broker.js";
 import {initializeHostfs, type HostfsServices} from "./hostfs/index.js";
 import { ChatGPTTokenBroker } from "./auth/chatgpt-token-broker.js";
-import type { ChatGPTExternalTokens } from "./types.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -120,17 +119,6 @@ export async function startApp(): Promise<void> {
     && config.authMode.codexAuthStrategy === "external_tokens"
     ? new ChatGPTTokenBroker(config.authMode.codexAuthFile)
     : null;
-
-  let initialChatGPTExternalTokens: ChatGPTExternalTokens | null = null;
-  if (tokenBroker) {
-    try {
-      initialChatGPTExternalTokens = await tokenBroker.getInitialTokens();
-    } catch (error) {
-      logger.error("token_broker.initial_tokens_failed", {
-        message: error instanceof Error ? error.message : "Unknown error",
-      });
-    }
-  }
 
   logger.info("worker_image.ready", {
     baseImage: config.workerImage,
@@ -296,12 +284,26 @@ export async function startApp(): Promise<void> {
     channel,
     mainAgent,
     sandboxRunner,
-    buildWorkerStartConfig: () => {
-      const auth: WorkerAuthConfig = config.authMode.mode === "api_key"
-        ? { mode: "ambient_api_key", openAiApiKey: config.authMode.openAiApiKey }
-        : initialChatGPTExternalTokens
-          ? { mode: "external_tokens", tokens: initialChatGPTExternalTokens }
-          : { mode: "ambient_auth_file" };
+    buildWorkerStartConfig: async () => {
+      let auth: WorkerAuthConfig;
+
+      if (config.authMode.mode === "api_key") {
+        auth = { mode: "ambient_api_key", openAiApiKey: config.authMode.openAiApiKey };
+      } else if (tokenBroker) {
+        try {
+          auth = {
+            mode: "external_tokens",
+            tokens: await tokenBroker.getInitialTokens(),
+          };
+        } catch (error) {
+          logger.error("token_broker.worker_launch_tokens_failed", {
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+          auth = { mode: "ambient_auth_file" };
+        }
+      } else {
+        auth = { mode: "ambient_auth_file" };
+      }
 
       return {
         auth,

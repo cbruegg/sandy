@@ -16,7 +16,7 @@ export type SandyOrchestratorDependencies = {
   channel: ChannelAdapter;
   mainAgent: MainAgentController;
   sandboxRunner: SandboxRunner;
-  buildWorkerStartConfig: () => WorkerStartConfig;
+  buildWorkerStartConfig: () => Promise<WorkerStartConfig>;
   refreshChatGPTTokens?: (taskId: string, previousAccountId: string | null) => Promise<ChatGPTExternalTokens | null>;
   sessionStore: SessionStore;
   privilegeBroker: PrivilegeBroker;
