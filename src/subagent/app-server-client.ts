@@ -130,79 +130,101 @@ type AppServerTypedRpcHost = {
   writeJsonRpcMessage: (message: Record<string, unknown>) => void;
 };
 
+type AppServerInitializeParams = {
+  clientInfo: {
+    name: string;
+    title: string;
+    version: string;
+  };
+  capabilities: {
+    experimentalApi?: boolean;
+  };
+};
+
+type AppServerLoginWithTokensParams = {
+  type: "chatgptAuthTokens";
+  accessToken: string;
+  chatgptAccountId: string;
+  chatgptPlanType: string | null;
+};
+
+type AppServerThreadStartParams = ReturnType<typeof buildAppServerThreadStartParams>;
+
+type AppServerThreadStartResult = {
+  thread: {
+    id: string;
+  };
+};
+
+type AppServerTurnStartParams = {
+  threadId: string;
+  input: Input;
+};
+
+type AppServerTurnInterruptParams = {
+  threadId: string;
+};
+
+type AppServerAuthRefreshResult = {
+  accessToken: string;
+  chatgptAccountId: string;
+  chatgptPlanType: string | null;
+};
+
+type JsonRpcSuccessResponse = {
+  jsonrpc: "2.0";
+  id: number;
+  result: unknown;
+};
+
+type JsonRpcErrorResponse = {
+  jsonrpc: "2.0";
+  id: number;
+  error: {
+    code: number;
+    message: string;
+  };
+};
+
+type JsonRpcInitializedNotification = {
+  jsonrpc: "2.0";
+  method: "initialized";
+  params: Record<string, never>;
+};
+
 class AppServerTypedRpc {
   constructor(private readonly host: AppServerTypedRpcHost) {}
 
-  private async request<T>(method: string, params?: unknown): Promise<T> {
-    return await this.host.requestRaw<T>(method, params);
+  async initialize(params: AppServerInitializeParams): Promise<void> {
+    await this.host.requestRaw<void>("initialize", params);
   }
 
-  private writeJsonRpcMessage(message: Record<string, unknown>): void {
+  sendInitializedNotification(message: JsonRpcInitializedNotification): void {
     this.host.writeJsonRpcMessage(message);
   }
 
-  private sendResponse(id: number, result: unknown): void {
-    this.writeJsonRpcMessage({ jsonrpc: "2.0", id, result });
+  async loginWithTokens(params: AppServerLoginWithTokensParams): Promise<void> {
+    await this.host.requestRaw<void>("account/login/start", params);
   }
 
-  private sendErrorResponse(id: number, code: number, message: string): void {
-    this.writeJsonRpcMessage({ jsonrpc: "2.0", id, error: { code, message } });
+  async startThread(params: AppServerThreadStartParams): Promise<AppServerThreadStartResult> {
+    return await this.host.requestRaw<AppServerThreadStartResult>("thread/start", params);
   }
 
-  private sendInitializedNotification(): void {
-    this.writeJsonRpcMessage({ jsonrpc: "2.0", method: "initialized", params: {} });
+  async turnStart(params: AppServerTurnStartParams): Promise<void> {
+    await this.host.requestRaw<void>("turn/start", params);
   }
 
-  async initialize(enableExperimentalApi: boolean): Promise<void> {
-    await this.request<void>("initialize", {
-      clientInfo: {
-        name: "sandy_worker",
-        title: "Sandy Worker",
-        version: "1.0.0",
-      },
-      capabilities: enableExperimentalApi
-        ? {
-            experimentalApi: true,
-          }
-        : {},
-    });
-    this.sendInitializedNotification();
+  async turnInterrupt(params: AppServerTurnInterruptParams): Promise<void> {
+    await this.host.requestRaw<void>("turn/interrupt", params);
   }
 
-  async loginWithTokens(tokens: ChatGPTExternalTokens): Promise<void> {
-    await this.request<void>("account/login/start", {
-      type: "chatgptAuthTokens",
-      accessToken: tokens.accessToken,
-      chatgptAccountId: tokens.chatgptAccountId,
-      chatgptPlanType: tokens.chatgptPlanType,
-    });
+  respondAuthRefresh(message: JsonRpcSuccessResponse): void {
+    this.host.writeJsonRpcMessage(message);
   }
 
-  async startThread(model?: string): Promise<{ thread: { id: string } }> {
-    return await this.request<{ thread: { id: string } }>("thread/start", buildAppServerThreadStartParams(model));
-  }
-
-  async turnStart(threadId: string, input: Input): Promise<void> {
-    const wireInput = typeof input === "string"
-      ? [{ type: "text" as const, text: input }]
-      : input;
-    await this.request<void>("turn/start", { threadId, input: wireInput });
-  }
-
-  async turnInterrupt(threadId: string): Promise<void> {
-    await this.request<void>("turn/interrupt", { threadId });
-  }
-
-  respondAuthRefresh(id: number, tokens: { accessToken: string; chatgptAccountId: string; chatgptPlanType: string | null }): void {
-    this.sendResponse(id, {
-      accessToken: tokens.accessToken,
-      chatgptAccountId: tokens.chatgptAccountId,
-      chatgptPlanType: tokens.chatgptPlanType,
-    });
-  }
-
-  respondMethodNotFound(id: number, method: string): void {
-    this.sendErrorResponse(id, JSON_RPC_METHOD_NOT_FOUND, `Method not found: ${method}`);
+  respondMethodNotFound(message: JsonRpcErrorResponse): void {
+    this.host.writeJsonRpcMessage(message);
   }
 }
 
@@ -308,7 +330,14 @@ export class CodexAppServerClient {
       }
     } else {
       this.warnUnhandledServerRequest(method, params);
-      this.rpc.respondMethodNotFound(id, method);
+      this.rpc.respondMethodNotFound({
+        jsonrpc: "2.0",
+        id,
+        error: {
+          code: JSON_RPC_METHOD_NOT_FOUND,
+          message: `Method not found: ${method}`,
+        },
+      });
     }
   }
 
@@ -338,19 +367,40 @@ export class CodexAppServerClient {
 
   private async initialize(enableExperimentalApi: boolean): Promise<void> {
     this.start();
-    await this.rpc.initialize(enableExperimentalApi);
+    await this.rpc.initialize({
+      clientInfo: {
+        name: "sandy_worker",
+        title: "Sandy Worker",
+        version: "1.0.0",
+      },
+      capabilities: enableExperimentalApi
+        ? {
+            experimentalApi: true,
+          }
+        : {},
+    });
+    this.rpc.sendInitializedNotification({
+      jsonrpc: "2.0",
+      method: "initialized",
+      params: {},
+    });
     this.initialized = true;
   }
 
   async loginWithTokens(tokens: ChatGPTExternalTokens): Promise<void> {
     this.ensureStarted("loginWithTokens");
-    await this.rpc.loginWithTokens(tokens);
+    await this.rpc.loginWithTokens({
+      type: "chatgptAuthTokens",
+      accessToken: tokens.accessToken,
+      chatgptAccountId: tokens.chatgptAccountId,
+      chatgptPlanType: tokens.chatgptPlanType,
+    });
     this.loggedIn = true;
   }
 
   async startThread(model?: string): Promise<string> {
     this.ensureReady("startThread");
-    const result = await this.rpc.startThread(model);
+    const result = await this.rpc.startThread(buildAppServerThreadStartParams(model));
     return result.thread.id;
   }
 
@@ -381,10 +431,18 @@ export class CodexAppServerClient {
 
     this.activeAuthRefreshHandler = async (id: number, previousAccountId: string | null) => {
       const tokens = await onAuthRefresh(previousAccountId);
-      this.rpc.respondAuthRefresh(id, tokens);
+      this.rpc.respondAuthRefresh({
+        jsonrpc: "2.0",
+        id,
+        result: {
+          accessToken: tokens.accessToken,
+          chatgptAccountId: tokens.chatgptAccountId,
+          chatgptPlanType: tokens.chatgptPlanType,
+        } satisfies AppServerAuthRefreshResult,
+      });
     };
 
-    await this.rpc.turnStart(threadId, input);
+    await this.rpc.turnStart({ threadId, input });
 
     try {
       let done = false;
@@ -417,7 +475,7 @@ export class CodexAppServerClient {
 
         if (!event) {
           try {
-            await this.rpc.turnInterrupt(threadId);
+            await this.rpc.turnInterrupt({ threadId });
           } catch {
             // best effort
           }
