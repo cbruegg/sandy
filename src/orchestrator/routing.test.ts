@@ -2,7 +2,6 @@ import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { messages } from "../messages.js";
 import {
-  createDefaultTestSkillService,
   createTestOrchestrator,
   StubMainAgent,
 } from "./test-helpers.js";
@@ -15,7 +14,7 @@ test("orchestrator accepts active-task output without storing host-side history"
     taskName: "issue-investigation",
     taskLanguage: "English",
   });
-  const { orchestrator, runner, store } = createTestOrchestrator({ mainAgent, skillService: createDefaultTestSkillService() });
+  const { orchestrator, runner, store } = createTestOrchestrator({ mainAgent });
 
   await orchestrator.handleChatEvent({
     kind: "user_message",
@@ -50,7 +49,6 @@ test("orchestrator accepts active-task output without storing host-side history"
 
 test("orchestrator reports top-level chat event failures back to the user", async () => {
   const { orchestrator, channel, store } = createTestOrchestrator({
-    skillService: createDefaultTestSkillService(),
     mainAgent: {
       async decide(): Promise<MainAgentDecision> {
         throw new Error("You've hit your usage limit.");

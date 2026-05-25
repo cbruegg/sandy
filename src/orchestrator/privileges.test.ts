@@ -5,7 +5,6 @@ import type { HostDirectoryAccessLevel } from "../hostfs/path-policy.js";
 import { HttpTokenAuthorizer } from "../http/token-authorizer.js";
 import { messages } from "../messages.js";
 import {
-  createDefaultTestSkillService,
   createTestOrchestrator,
   expectDefined,
   FakePrivilegeBroker,
@@ -19,7 +18,6 @@ import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 test("orchestrator applies supported privilege requests deterministically and outside the main agent path", async () => {
   const privilegeBroker = new FakePrivilegeBroker();
   const { orchestrator, runner, channel } = createTestOrchestrator({
-    skillService: createDefaultTestSkillService(),
     mainAgent: new StubMainAgent({
       action: "launch_task",
       taskBrief: "Need a host file copied into the share.",
@@ -81,7 +79,6 @@ test("orchestrator applies supported privilege requests deterministically and ou
 
 test("orchestrator sends worker-requested shared files back through the channel", async () => {
   const { orchestrator, runner, channel } = createTestOrchestrator({
-    skillService: createDefaultTestSkillService(),
     mainAgent: new StubMainAgent({
       action: "launch_task",
       taskBrief: "Generate a file.",
@@ -120,7 +117,6 @@ test("orchestrator fails the active task if channel file delivery fails", async 
   const channel = new RecordingChannel();
   channel.sendFileError = new Error("Telegram upload failed.");
   const { orchestrator, runner, store } = createTestOrchestrator({
-    skillService: createDefaultTestSkillService(),
     channel,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -171,7 +167,6 @@ test("orchestrator authorizes mcp resource reads from persistent config", async 
     allowHostDirectory: async () => {},
   };
   const { orchestrator, runner } = createTestOrchestrator({
-    skillService: createDefaultTestSkillService(),
     persistentApprovalStore,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -220,7 +215,6 @@ test("orchestrator does not apply persistent mcp approvals when task policy omit
     allowHostDirectory: async () => {},
   };
   const { orchestrator, runner, channel } = createTestOrchestrator({
-    skillService: createDefaultTestSkillService(),
     persistentApprovalStore,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -282,7 +276,6 @@ test("orchestrator confirms persisted mcp tool approval suitability and reuses i
     allowHostDirectory: async () => {},
   };
   const { orchestrator, runner, channel, store } = createTestOrchestrator({
-    skillService: createDefaultTestSkillService(),
     persistentApprovalStore,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -362,7 +355,6 @@ test("orchestrator confirms persisted http token suitability and enables later p
     allowHostDirectory: async () => {},
   };
   const { orchestrator, runner, channel, store } = createTestOrchestrator({
-    skillService: createDefaultTestSkillService(),
     persistentApprovalStore,
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -436,7 +428,6 @@ test("orchestrator creates a hostfs grant for worker-session host directory appr
   const hostfsCalls: Array<{ bundleId: string; taskId: string; path: string; level: string }> = [];
   let launchedTaskId: string | null = null;
   const { orchestrator, runner, channel } = createTestOrchestrator({
-    skillService: createDefaultTestSkillService(),
     mainAgent: new StubMainAgent({
       action: "launch_task",
       taskBrief: "Inspect a host directory.",
@@ -518,7 +509,6 @@ test("orchestrator creates a hostfs grant for worker-session host directory appr
 
 test("orchestrator sends mcp resource read privilege request to user when not pre-approved", async () => {
   const { orchestrator, runner, channel, store } = createTestOrchestrator({
-    skillService: createDefaultTestSkillService(),
     mainAgent: new StubMainAgent({
       action: "launch_task",
       taskBrief: "Read a resource.",

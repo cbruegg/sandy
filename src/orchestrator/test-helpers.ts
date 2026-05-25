@@ -42,10 +42,6 @@ export function expectDefined<T>(value: T | null | undefined, message: string): 
   return value as NonNullable<T>;
 }
 
-export function createDefaultTestSkillService(): SkillService {
-  return new SkillService(mkdtempSync(join(tmpdir(), "sandy-test-config-")));
-}
-
 export class RecordingChannel implements ChannelAdapter {
   public readonly sentTexts: Array<{ chatId: string; text: string }> = [];
   public readonly taskUpdates: Array<{ chatId: string; text: string }> = [];
@@ -242,13 +238,13 @@ export function createTestOrchestrator(options: {
   persistentApprovalStore?: PersistentApprovalStore;
   hostfsBroker?: HostfsBroker;
   taskBundleAssignmentRegistry?: TaskBundleAssignmentLookup;
-  skillService: SkillService;
+  skillService?: SkillService;
 }) {
   const channel = options.channel ?? new RecordingChannel();
   const runner = options.sandboxRunner ?? new FakeSandboxRunner();
   const store = options.sessionStore ?? new InMemorySessionStore();
   const privilegeBroker = options.privilegeBroker ?? new FakePrivilegeBroker();
-  const skillService = options.skillService;
+  const skillService = options.skillService ?? new SkillService(mkdtempSync(join(tmpdir(), "sandy-test-config-")));
   const orchestrator = new SandyOrchestrator({
     channel,
     mainAgent: options.mainAgent,
@@ -259,7 +255,7 @@ export function createTestOrchestrator(options: {
     persistentApprovalStore: options.persistentApprovalStore ?? createNoopPersistentApprovalStore(),
     hostfsBroker: options.hostfsBroker ?? createNoopHostfsBroker(),
     taskBundleAssignmentRegistry: options.taskBundleAssignmentRegistry ?? createNoopTaskBundleAssignmentRegistry(),
-    skillService: options.skillService,
+    skillService,
   });
 
   return {
