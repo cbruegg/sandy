@@ -1,5 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import type { Input } from "@openai/codex-sdk";
 import { z } from "zod";
 import type { ChatGPTExternalTokens } from "../types.js";
 import { logger } from "../logger.js";
@@ -124,6 +125,24 @@ type CreateAmbientAuthClientOptions = {
   spawnImpl?: typeof spawn;
 };
 
+function normalizeTurnInput(input: Input): Array<{ type: "text"; text: string } | { type: "local_image"; path: string }> {
+  if (typeof input === "string") {
+    return [{ type: "text", text: input }];
+  }
+
+  const normalized: Array<{ type: "text"; text: string } | { type: "local_image"; path: string }> = [];
+  for (const item of input) {
+    if (item.type === "text") {
+      normalized.push({ type: "text", text: item.text });
+      continue;
+    }
+    if (item.type === "local_image") {
+      normalized.push({ type: "local_image", path: item.path });
+    }
+  }
+  return normalized;
+}
+
 export class CodexAppServerClient {
   private child: ChildProcessWithoutNullStreams | null = null;
   private activeNotificationHandler: ((method: string, params: unknown) => void) | null = null;
@@ -148,6 +167,11 @@ export class CodexAppServerClient {
     return client;
   }
 
+  // Ambient auth means the worker container already has its Codex credentials
+  // injected before startup, either via CODEX_API_KEY for API-key mode or via a
+  // seeded auth.json for auth-file copy mode. In those modes Sandy should not
+  // opt into the experimental app-server auth APIs or send an explicit login
+  // request over JSON-RPC.
   static async createWithAmbientAuth(options: CreateAmbientAuthClientOptions): Promise<CodexAppServerClient> {
     const client = new CodexAppServerClient(options.codexPath, options.spawnImpl);
     await client.initialize(false);
@@ -293,7 +317,7 @@ export class CodexAppServerClient {
 
   async *streamTurn(
     threadId: string,
-    inputText: string,
+    input: Input,
     onAuthRefresh: AuthRefreshCallback,
     abortSignal?: AbortSignal,
   ): AsyncGenerator<AppServerEvent> {
@@ -327,7 +351,7 @@ export class CodexAppServerClient {
 
     await this.request("turn/start", {
       threadId,
-      input: [{ type: "text", text: inputText }],
+      input: normalizeTurnInput(input),
     });
 
     try {

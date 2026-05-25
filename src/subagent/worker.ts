@@ -10,6 +10,7 @@ import { type HostCommand, type SubAgentEvent } from "../types.js";
 import {
   buildInitialTaskInput,
   buildPrivilegeResolutionInput,
+  type ImageAttachment,
 } from "./worker-prompt.js";
 import { AppServerWorkerSession, streamAppServerTurn } from "./worker-app-server.js";
 import {
@@ -78,6 +79,17 @@ function truncateEventForLogging(event: ThreadEvent): ThreadEvent {
 function joinTaskSections(taskBrief: string, text: string): string {
   const sections = [taskBrief.trim(), text.trim()].filter((section) => section.length > 0);
   return sections.join("\n\n");
+}
+
+function buildAppServerInputWithImages(text: string, images: ImageAttachment[]): Input {
+  if (images.length === 0) {
+    return text;
+  }
+
+  return [
+    ...(text.trim() ? [{ type: "text" as const, text: text.trim() }] : []),
+    ...images.map((image) => ({ type: "local_image" as const, path: image.sharePath })),
+  ];
 }
 
 function requireConfiguredCodexPath(env: NodeJS.ProcessEnv): string {
@@ -172,11 +184,11 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
     return appServerSession;
   };
 
-  const enqueueAppServerTurn = (inputText: string): void => {
+  const enqueueAppServerTurn = (input: Input): void => {
     turnQueue = turnQueue.then(async () => {
       currentAbort = new AbortController();
       try {
-        await requireAppServerSession().streamTurn(inputText, currentAbort.signal);
+        await requireAppServerSession().streamTurn(input, currentAbort.signal);
       } finally {
         currentAbort = null;
       }
@@ -253,15 +265,12 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
             command.config.httpProxyWrapper,
             command.input.images,
           );
-          const inputText = typeof initialInput === "string"
-            ? initialInput
-            : joinTaskSections(command.taskBrief, command.input.text);
-          enqueueAppServerTurn(inputText);
+          enqueueAppServerTurn(initialInput);
           break;
         }
         case "user_message":
           assertTaskStarted(taskStarted, command.type);
-          enqueueAppServerTurn(command.input.text);
+          enqueueAppServerTurn(buildAppServerInputWithImages(command.input.text, command.input.images));
           break;
         case "privilege_result":
           assertTaskStarted(taskStarted, command.type);

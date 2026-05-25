@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { type Thread } from "@openai/codex-sdk";
+import { type Input, type Thread } from "@openai/codex-sdk";
 import { messages } from "../messages.js";
 import { AppServerWorkerSession } from "./worker-app-server.js";
 import {
@@ -25,7 +25,7 @@ const testFormatting: ChannelFormatting = {
 };
 
 function createAppServerSessionStarter(session: {
-  streamTurn: (inputText: string, abortSignal?: AbortSignal) => Promise<boolean>;
+  streamTurn: (input: Input, abortSignal?: AbortSignal) => Promise<boolean>;
   emitTaskSummary: () => Promise<void>;
   close: () => void;
   cancelPendingAuthRefresh: () => void;
@@ -292,6 +292,66 @@ test("worker starts ambient app-server auth for api key mode and exports CODEX_A
   assert.equal(sessionStarts[0]?.codexPath, "/usr/local/bin/codex");
   assert.deepEqual(sessionStarts[0]?.authMode, { kind: "ambient" });
   assert.equal(sessionStarts[0]?.model, undefined);
+});
+
+test("worker passes image attachments through app-server user_message turns", async () => {
+  const turnInputs: Input[] = [];
+  const processor = createWorkerCommandProcessor({
+    sendEvent: () => {},
+    env: { SANDY_CODEX_PATH: "/usr/local/bin/codex" },
+    applyWorkerCodexConfigPatch: async () => {},
+    startAppServerWorkerSession: createAppServerSessionStarter({
+      async streamTurn(input) {
+        turnInputs.push(input);
+        return false;
+      },
+      async emitTaskSummary() {},
+      close() {},
+      cancelPendingAuthRefresh() {},
+      handleAuthRefreshResult() {},
+    }),
+    onShutdown: () => {},
+  });
+
+  await processor.handleLine(JSON.stringify({
+    type: "start_task",
+    taskId: "task-1",
+    taskBrief: "Inspect the collection.",
+    input: {
+      text: "Initial request",
+      images: [{ sharePath: "/workspace/share/cover.png", fileName: "cover.png" }],
+    },
+    taskLanguage: "English",
+    config: {
+      openAiApiKey: null,
+      codexModel: null,
+      channelFormatting: testFormatting,
+      httpTokens: [],
+      httpProxyWrapper: null,
+      chatgptExternalTokens: null,
+    },
+    environment: {},
+    codexConfigToml: null,
+    httpProxyUrl: null,
+  } satisfies Extract<HostCommand, { type: "start_task" }>));
+
+  await processor.handleLine(JSON.stringify({
+    type: "user_message",
+    input: {
+      text: "Look at this image too",
+      images: [{ sharePath: "/workspace/share/photo.jpg", fileName: "photo.jpg" }],
+    },
+  } satisfies Extract<HostCommand, { type: "user_message" }>));
+
+  assert.equal(turnInputs.length, 2);
+  const initialInputJson = JSON.stringify(turnInputs[0]);
+  assert.match(initialInputJson, /"type":"text"/);
+  assert.match(initialInputJson, /Initial request/);
+  assert.match(initialInputJson, /"path":"\/workspace\/share\/cover\.png"/);
+  assert.deepEqual(turnInputs[1], [
+    { type: "text", text: "Look at this image too" },
+    { type: "local_image", path: "/workspace/share/photo.jpg" },
+  ]);
 });
 
 test("mcpToolProgress includes payloads for completed MCP calls", () => {
