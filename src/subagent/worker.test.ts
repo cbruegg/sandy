@@ -1,13 +1,15 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { type Codex, type Thread } from "@openai/codex-sdk";
+import { type Input, type Thread } from "@openai/codex-sdk";
 import { messages } from "../messages.js";
+import { AppServerWorkerSession, type StreamTurnResult } from "./worker-app-server.js";
 import {
   buildInitialTaskInput,
   buildInitialTaskInputWithCapabilities,
   buildPrivilegeResolutionInput,
   buildTaskSummaryInput,
   createWorkerCommandProcessor,
+  streamAppServerTurn,
   streamTurn,
 } from "./worker.js";
 import type { ChannelFormatting, HostCommand, PrivilegeResolutionResult, SubAgentEvent } from "../types.js";
@@ -21,6 +23,16 @@ const testFormatting: ChannelFormatting = {
   allowedTags: ["b", "i", "code", "pre"],
   instructions: "Use simple Telegram HTML.",
 };
+
+function createAppServerSessionStarter(session: {
+  streamTurn: (input: Input, abortSignal?: AbortSignal) => Promise<StreamTurnResult>;
+  emitTaskSummary: () => Promise<void>;
+  close: () => void;
+  cancelPendingAuthRefresh: () => void;
+  handleAuthRefreshResult: (tokens: unknown) => void;
+}): typeof AppServerWorkerSession.start {
+  return async () => session as unknown as AppServerWorkerSession;
+}
 
 test("buildInitialTaskInput tells the sub-agent where the shared workspace is", () => {
   const formatting: ChannelFormatting = {
@@ -37,7 +49,7 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
     "/usr/local/bin/sandy-http-proxy-exec",
   );
 
-  const inputText: string = typeof input === "string" ? input : (Array.isArray(input) && input[0]?.type === "text" ? input[0].text : "");
+  const inputText = Array.isArray(input) && input[0]?.type === "text" ? input[0].text : "";
   assert.match(inputText, /\/workspace\/share/);
   assert.match(inputText, /shared workspace is mounted/);
   assert.match(inputText, /send the user-visible text first and then call the tool separately/i);
@@ -123,22 +135,23 @@ test("buildInitialTaskInput includes current date and time", () => {
     formatting,
   );
 
-  const inputText: string = typeof input === "string" ? input : (Array.isArray(input) && input[0]?.type === "text" ? input[0].text : "");
+  const inputText = Array.isArray(input) && input[0]?.type === "text" ? input[0].text : "";
   assert.match(inputText, /Current date and time: [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}/);
 });
 
+test("buildInitialTaskInput always returns a user-input sequence", () => {
+  const input = buildInitialTaskInput("Inspect the repository.", "English", testFormatting);
+  const inputText = Array.isArray(input) && input[0]?.type === "text" ? input[0].text : "";
+
+  assert.equal(Array.isArray(input), true);
+  assert.deepEqual(input, [{ type: "text", text: inputText }]);
+  assert.match(inputText, /Inspect the repository\./);
+});
+
 test("worker processes follow-up commands after start_task initialization finishes", async () => {
-  const { promise: codexReady, resolve: resolveCodex } = Promise.withResolvers<void>();
+  const { promise: sessionReady, resolve: resolveSession } = Promise.withResolvers<void>();
   const sentEvents: SubAgentEvent[] = [];
-  const turnInputs: unknown[] = [];
-  const thread = {
-    async runStreamed(input: unknown) {
-      turnInputs.push(input);
-      return {
-        events: (async function* () {})(),
-      };
-    },
-  } as unknown as Thread;
+  const turnInputs: Input[] = [];
   const startTaskCommand: Extract<HostCommand, { type: "start_task" }> = {
     type: "start_task",
     taskId: "task-1",
@@ -146,7 +159,7 @@ test("worker processes follow-up commands after start_task initialization finish
     input: { text: "Initial request", images: [] },
     taskLanguage: "English",
     config: {
-      openAiApiKey: null,
+      auth: { mode: "ambient_auth_file" },
       codexModel: null,
       channelFormatting: testFormatting,
       httpTokens: [],
@@ -162,14 +175,20 @@ test("worker processes follow-up commands after start_task initialization finish
   };
   const processor = createWorkerCommandProcessor({
     sendEvent: (event) => sentEvents.push(event),
-    env: {},
+    env: { SANDY_CODEX_PATH: "/usr/local/bin/codex" },
     applyWorkerCodexConfigPatch: async () => {},
-    buildWorkerCodexEnvironment: () => ({}),
-    createCodexClient: async () => {
-      await codexReady;
+    startAppServerWorkerSession: async () => {
+      await sessionReady;
       return {
-        startThread: () => thread,
-      } as unknown as Codex;
+        async streamTurn(input: Input) {
+          turnInputs.push(input);
+          return { sawTerminalError: false };
+        },
+        async emitTaskSummary() {},
+        close() {},
+        cancelPendingAuthRefresh() {},
+        handleAuthRefreshResult() {},
+      } as unknown as AppServerWorkerSession;
     },
     onShutdown: () => {},
   });
@@ -181,15 +200,167 @@ test("worker processes follow-up commands after start_task initialization finish
   assert.equal(sentEvents.length, 0);
   assert.equal(turnInputs.length, 0);
 
-  resolveCodex();
+  resolveSession();
   await startPromise;
   await followUpPromise;
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.equal(sentEvents.some((event) => event.type === "task_error"), false);
   assert.equal(turnInputs.length, 2);
-  assert.match(String(turnInputs[0]), /Add the track to the DJ collection/);
-  assert.match(String(turnInputs[1]), /Use https:\/\/example\.com\/set/);
+  assert.equal(Array.isArray(turnInputs[0]), true);
+  assert.deepEqual(turnInputs[1], [{ type: "text", text: "Use https://example.com/set" }]);
+  assert.match(JSON.stringify(turnInputs[0]), /Add the track to the DJ collection/);
+});
+
+test("worker requires SANDY_CODEX_PATH for app-server tasks", async () => {
+  const sentEvents: SubAgentEvent[] = [];
+  const processor = createWorkerCommandProcessor({
+    sendEvent: (event) => sentEvents.push(event),
+    env: {},
+    applyWorkerCodexConfigPatch: async () => {},
+    startAppServerWorkerSession: async () => {
+      throw new Error("startAppServerWorkerSession should not be called");
+    },
+    onShutdown: () => {},
+  });
+
+  await processor.handleLine(JSON.stringify({
+    type: "start_task",
+    taskId: "task-1",
+    taskBrief: "Inspect the collection.",
+    input: { text: "Initial request", images: [] },
+    taskLanguage: "English",
+    config: {
+      auth: {
+        mode: "external_tokens",
+        tokens: {
+          accessToken: "access-token",
+          chatgptAccountId: "acct-123",
+          chatgptPlanType: "plus",
+        },
+      },
+      codexModel: null,
+      channelFormatting: testFormatting,
+      httpTokens: [],
+      httpProxyWrapper: null,
+    },
+    environment: {},
+    codexConfigToml: null,
+    httpProxyUrl: null,
+  } satisfies Extract<HostCommand, { type: "start_task" }>));
+
+  assert.deepEqual(sentEvents, [{
+    type: "task_error",
+    message: "SANDY_CODEX_PATH must be configured for app-server workers.",
+  }]);
+});
+
+test("worker starts ambient app-server auth for api key mode and exports CODEX_API_KEY", async () => {
+  const sessionStarts: Array<Parameters<typeof AppServerWorkerSession.start>[0]> = [];
+  const env: NodeJS.ProcessEnv = {
+    SANDY_CODEX_PATH: "/usr/local/bin/codex",
+  };
+  const processor = createWorkerCommandProcessor({
+    sendEvent: () => {},
+    env,
+    applyWorkerCodexConfigPatch: async () => {},
+    startAppServerWorkerSession: async (options) => {
+      sessionStarts.push(options);
+      return {
+        async streamTurn() {
+          return { sawTerminalError: false };
+        },
+        async emitTaskSummary() {},
+        close() {},
+        cancelPendingAuthRefresh() {},
+        handleAuthRefreshResult() {},
+      } as unknown as AppServerWorkerSession;
+    },
+    onShutdown: () => {},
+  });
+
+  await processor.handleLine(JSON.stringify({
+    type: "start_task",
+    taskId: "task-1",
+    taskBrief: "Inspect the collection.",
+    input: { text: "Initial request", images: [] },
+    taskLanguage: "English",
+    config: {
+      auth: { mode: "ambient_api_key", openAiApiKey: "api-key-123" },
+      codexModel: null,
+      channelFormatting: testFormatting,
+      httpTokens: [],
+      httpProxyWrapper: null,
+    },
+    environment: {},
+    codexConfigToml: null,
+    httpProxyUrl: null,
+  } satisfies Extract<HostCommand, { type: "start_task" }>));
+
+  assert.equal(env["CODEX_API_KEY"], "api-key-123");
+  assert.equal(sessionStarts.length, 1);
+  assert.equal(sessionStarts[0]?.codexPath, "/usr/local/bin/codex");
+  assert.deepEqual(sessionStarts[0]?.authMode, { kind: "ambient" });
+  assert.equal(sessionStarts[0]?.model, undefined);
+});
+
+test("worker passes image attachments through app-server user_message turns", async () => {
+  const turnInputs: Input[] = [];
+  const processor = createWorkerCommandProcessor({
+    sendEvent: () => {},
+    env: { SANDY_CODEX_PATH: "/usr/local/bin/codex" },
+    applyWorkerCodexConfigPatch: async () => {},
+    startAppServerWorkerSession: createAppServerSessionStarter({
+      async streamTurn(input) {
+        turnInputs.push(input);
+        return { sawTerminalError: false };
+      },
+      async emitTaskSummary() {},
+      close() {},
+      cancelPendingAuthRefresh() {},
+      handleAuthRefreshResult() {},
+    }),
+    onShutdown: () => {},
+  });
+
+  await processor.handleLine(JSON.stringify({
+    type: "start_task",
+    taskId: "task-1",
+    taskBrief: "Inspect the collection.",
+    input: {
+      text: "Initial request",
+      images: [{ sharePath: "/workspace/share/cover.png", fileName: "cover.png" }],
+    },
+    taskLanguage: "English",
+    config: {
+      auth: { mode: "ambient_auth_file" },
+      codexModel: null,
+      channelFormatting: testFormatting,
+      httpTokens: [],
+      httpProxyWrapper: null,
+    },
+    environment: {},
+    codexConfigToml: null,
+    httpProxyUrl: null,
+  } satisfies Extract<HostCommand, { type: "start_task" }>));
+
+  await processor.handleLine(JSON.stringify({
+    type: "user_message",
+    input: {
+      text: "Look at this image too",
+      images: [{ sharePath: "/workspace/share/photo.jpg", fileName: "photo.jpg" }],
+    },
+  } satisfies Extract<HostCommand, { type: "user_message" }>));
+
+  assert.equal(turnInputs.length, 2);
+  const initialInputJson = JSON.stringify(turnInputs[0]);
+  assert.match(initialInputJson, /"type":"text"/);
+  assert.match(initialInputJson, /Initial request/);
+  assert.match(initialInputJson, /"path":"\/workspace\/share\/cover\.png"/);
+  assert.deepEqual(turnInputs[1], [
+    { type: "text", text: "Look at this image too" },
+    { type: "local_image", path: "/workspace/share/photo.jpg" },
+  ]);
 });
 
 test("mcpToolProgress includes payloads for completed MCP calls", () => {
@@ -282,12 +453,194 @@ test("streamTurn ignores empty assistant messages", async () => {
       },
     } as unknown as Thread;
 
-    const result = await streamTurn(thread, "Inspect the reel.");
+    const sawTerminalError = await streamTurn(thread, "Inspect the reel.");
 
-    assert.equal(result.sawTaskDone, false);
-    assert.equal(result.sawTerminalError, false);
+    assert.equal(sawTerminalError.sawTerminalError, false);
     assert.deepEqual(writes, []);
   } finally {
     process.stdout.write = originalWrite;
   }
+});
+
+test("worker emits task_done only after mark_finished", async () => {
+  const sentEvents: SubAgentEvent[] = [];
+  const processor = createWorkerCommandProcessor({
+    sendEvent: (event) => sentEvents.push(event),
+    env: { SANDY_CODEX_PATH: "/usr/local/bin/codex" },
+    applyWorkerCodexConfigPatch: async () => {},
+    startAppServerWorkerSession: createAppServerSessionStarter({
+      async streamTurn() {
+        return { sawTerminalError: false };
+      },
+      async emitTaskSummary() {
+        sentEvents.push({
+          type: "task_summary",
+          summary: "Summary for the host.",
+        });
+      },
+      close() {},
+      cancelPendingAuthRefresh() {},
+      handleAuthRefreshResult() {},
+    }),
+    onShutdown: () => {},
+  });
+
+  await processor.handleLine(JSON.stringify({
+    type: "start_task",
+    taskId: "task-1",
+    taskBrief: "Inspect the collection.",
+    input: { text: "Initial request", images: [] },
+    taskLanguage: "English",
+    config: {
+      auth: { mode: "ambient_auth_file" },
+      codexModel: null,
+      channelFormatting: testFormatting,
+      httpTokens: [],
+      httpProxyWrapper: null,
+    },
+    environment: {},
+    codexConfigToml: null,
+    httpProxyUrl: null,
+  } satisfies Extract<HostCommand, { type: "start_task" }>));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(sentEvents.some((event) => event.type === "task_done"), false);
+
+  await processor.handleLine(JSON.stringify({
+    type: "mark_finished",
+  } satisfies Extract<HostCommand, { type: "mark_finished" }>));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(sentEvents.slice(-2), [
+    {
+      type: "task_summary",
+      summary: "Summary for the host.",
+    },
+    {
+      type: "task_done",
+    },
+  ]);
+});
+
+test("streamAppServerTurn emits completed assistant messages", async () => {
+  const writes: string[] = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  const mockWrite: typeof process.stdout.write = (
+    chunk,
+    encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
+    callback?: (err?: Error | null) => void,
+  ) => {
+    writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    if (typeof encodingOrCallback === "function") {
+      encodingOrCallback();
+    } else {
+      callback?.();
+    }
+    return true;
+  };
+  process.stdout.write = mockWrite;
+
+  try {
+    const appServer = {
+      async *streamTurn() {
+        yield { type: "agent_message_completed", itemId: "item-1", text: "Using the Todoist skill." };
+        yield { type: "turn_completed" };
+      },
+    };
+
+    const sawTerminalError = await streamAppServerTurn({
+      appServer: appServer as Parameters<typeof streamAppServerTurn>[0]["appServer"],
+      threadId: "thread-1",
+      input: [{ type: "text", text: "hello" }],
+      onAuthRefresh: async () => {
+        throw new Error("unexpected auth refresh");
+      },
+    });
+
+    const events = writes.map((entry) => JSON.parse(entry.trim()) as SubAgentEvent);
+    assert.equal(sawTerminalError.sawTerminalError, false);
+    assert.deepEqual(events, [{ type: "assistant_output", text: "Using the Todoist skill." }]);
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+});
+
+test("streamAppServerTurn ignores blank completed assistant messages", async () => {
+  const writes: string[] = [];
+  const originalWrite = process.stdout.write.bind(process.stdout);
+  const mockWrite: typeof process.stdout.write = (
+    chunk,
+    encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
+    callback?: (err?: Error | null) => void,
+  ) => {
+    writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
+    if (typeof encodingOrCallback === "function") {
+      encodingOrCallback();
+    } else {
+      callback?.();
+    }
+    return true;
+  };
+  process.stdout.write = mockWrite;
+
+  try {
+    const appServer = {
+      async *streamTurn() {
+        yield { type: "agent_message_completed", itemId: "item-1", text: "   " };
+        yield { type: "turn_completed" };
+      },
+    };
+
+    const sawTerminalError = await streamAppServerTurn({
+      appServer: appServer as Parameters<typeof streamAppServerTurn>[0]["appServer"],
+      threadId: "thread-1",
+      input: [{ type: "text", text: "hello" }],
+      onAuthRefresh: async () => {
+        throw new Error("unexpected auth refresh");
+      },
+    });
+
+    const events = writes.map((entry) => JSON.parse(entry.trim()) as SubAgentEvent);
+    assert.equal(sawTerminalError.sawTerminalError, false);
+    assert.deepEqual(events, []);
+  } finally {
+    process.stdout.write = originalWrite;
+  }
+});
+
+test("AppServerWorkerSession accepts a synchronous auth refresh response", async () => {
+  const sentEvents: SubAgentEvent[] = [];
+  const refreshedTokens = {
+    accessToken: "refreshed-access-token",
+    chatgptAccountId: "acct-123",
+    chatgptPlanType: "plus",
+  };
+
+  const appServer = {
+    close(): void {},
+    async *streamTurn(
+      _threadId: string,
+      _input: Input,
+      onAuthRefresh: (previousAccountId: string | null) => Promise<typeof refreshedTokens>,
+    ) {
+      const tokens = await onAuthRefresh("acct-123");
+      assert.deepEqual(tokens, refreshedTokens);
+      yield { type: "turn_completed" as const };
+    },
+  };
+
+  const session = new AppServerWorkerSession(appServer, "thread-1", (event) => {
+    sentEvents.push(event);
+    if (event.type === "chatgpt_auth_refresh_request") {
+      session.handleAuthRefreshResult(refreshedTokens);
+    }
+  }, true);
+
+  const sawTerminalError = await session.streamTurn("hello");
+
+  assert.equal(sawTerminalError.sawTerminalError, false);
+  assert.deepEqual(sentEvents, [{
+    type: "chatgpt_auth_refresh_request",
+    previousAccountId: "acct-123",
+  }]);
 });

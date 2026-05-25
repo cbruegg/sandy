@@ -4,7 +4,7 @@ import {join} from "node:path";
 import {createInterface} from "node:readline";
 import type {WorkerNetworkConfig} from "../config.js";
 import {logger} from "../logger.js";
-import type {HostCommand, PrivilegeResolutionResult, SubAgentEvent, TaskInputPayload} from "../types.js";
+import type {ChatGPTExternalTokens, HostCommand, PrivilegeResolutionResult, SubAgentEvent, TaskInputPayload} from "../types.js";
 import {parseSubAgentEvent, serializeHostCommand} from "../types.js";
 import type {LaunchTaskRequest, SandboxHandle, SandboxRunner, ShareInspection} from "./sandbox-runner.js";
 import type {ReservedTaskBundle, TaskBundlePool} from "./task-bundle-types.js";
@@ -379,6 +379,24 @@ export class DockerSandboxRunner implements SandboxRunner {
             reason,
           });
           await retireBundle();
+        },
+        resolveAuthRefresh: async (tokens: ChatGPTExternalTokens | null) => {
+          logger.info("sandbox.auth_refresh", {
+            taskId: request.taskId,
+            hasTokens: tokens !== null,
+          });
+          try {
+            await this.sendToWorker(child, {
+              type: "chatgpt_auth_refresh_result",
+              tokens,
+              error: tokens ? null : "Token refresh failed.",
+            });
+          } catch (error) {
+            logger.error("sandbox.auth_refresh_write_failed", {
+              taskId: request.taskId,
+              message: this.describeWriteFailure(error),
+            });
+          }
         },
       };
     } catch (error) {

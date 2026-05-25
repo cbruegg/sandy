@@ -65,8 +65,10 @@ Keep all user-facing strings in `messages.ts` instead of scattering literals thr
 
 There is no formatter or linter configured yet, so keep style consistent with the existing code and avoid unrelated reformatting, especially w.r.t. to indentation.
 Keep the runtime dependency graph acyclic. Do not introduce circular construction or callback wiring between core services when a direct dependency order or extracted helper can express the relationship cleanly.
+Avoid module-scope mutable runtime state. Keep mutable coordination state inside explicit objects or function scopes so concurrent work does not share hidden globals.
 When code depends on process environment values, inject an env object at the function boundary so tests do not need to mutate the global `process.env`.
 Do not make dependencies optional merely so production code can fall back to globals while tests override them. If a function or class needs injectable collaborators, require them explicitly and provide production values at the composition boundary.
+Do not make functions return a Promise when they can complete synchronously. Prefer plain synchronous return types unless the implementation actually needs asynchronous behavior.
 
 ## Testing Guidelines
 

@@ -138,7 +138,7 @@ export function contextTexts(context: DecideContext): string[] {
 
 function createTestWorkerStartConfig(): WorkerStartConfig {
   return {
-    openAiApiKey: null,
+    auth: { mode: "ambient_auth_file" },
     codexModel: null,
     channelFormatting: testFormatting,
     httpTokens: [],
@@ -243,7 +243,7 @@ export function createTestOrchestrator(options: {
     channel,
     mainAgent: options.mainAgent,
     sandboxRunner: runner,
-    buildWorkerStartConfig: createTestWorkerStartConfig,
+    buildWorkerStartConfig: () => Promise.resolve(createTestWorkerStartConfig()),
     sessionStore: store,
     privilegeBroker,
     persistentApprovalStore: options.persistentApprovalStore ?? createNoopPersistentApprovalStore(),

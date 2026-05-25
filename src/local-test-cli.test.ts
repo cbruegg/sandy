@@ -47,6 +47,19 @@ test("local-test CLI writes approval and denial events", async () => {
   }
 });
 
+test("local-test CLI writes mark-finished events", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sandy-local-cli-"));
+  try {
+    await runLocalTestCli(["mark-finished", "--spool-root", root]);
+    const files = await readdir(join(root, "inbox"));
+    assert.equal(files.length, 1);
+    const event = inboxEventSchema.parse(JSON.parse(await readFile(join(root, "inbox", files[0]!), "utf8")) as unknown);
+    assert.equal(event.kind, "mark_finished_request");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("local-test CLI rejects unknown commands", async () => {
   const root = await mkdtemp(join(tmpdir(), "sandy-local-cli-"));
   try {

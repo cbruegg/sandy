@@ -612,6 +612,13 @@ test("sanitizeTelegramHtml preserves only the supported Telegram tags", () => {
   );
 });
 
+test("sanitizeTelegramHtml escapes unmatched allowed tags", () => {
+  assert.equal(
+    sanitizeTelegramHtml('Task failed: can\'t parse entities: Can\'t find end tag corresponding to start tag "pre" <pre>'),
+    'Task failed: can\'t parse entities: Can\'t find end tag corresponding to start tag "pre" &lt;pre&gt;',
+  );
+});
+
 test("TelegramBotApiAdapter sends sanitized HTML with parse_mode", async () => {
   const fakeBot = new FakeTelegramBot();
   const adapter = new TelegramBotApiAdapter({

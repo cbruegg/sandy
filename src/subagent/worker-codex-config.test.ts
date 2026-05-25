@@ -7,25 +7,8 @@ import * as toml from "@iarna/toml";
 import {
   applyWorkerCodexConfigPatch,
   buildWorkerCodexConfigPatch,
-  buildWorkerCodexEnvironment,
   workerCodexHomePath,
 } from "./worker-codex-config.js";
-
-test("buildWorkerCodexEnvironment preserves the live worker PATH and string env vars", () => {
-  assert.deepEqual(
-    buildWorkerCodexEnvironment({
-      PATH: "/root/.bun/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin",
-      HOME: "/root",
-      EMPTY: "",
-      IGNORED: undefined,
-    }),
-    {
-      PATH: "/root/.bun/bin:/home/linuxbrew/.linuxbrew/bin:/usr/bin:/bin",
-      HOME: "/root",
-      EMPTY: "",
-    },
-  );
-});
 
 test("buildWorkerCodexConfigPatch maps the live worker PATH and configured model into Codex config", () => {
   assert.deepEqual(

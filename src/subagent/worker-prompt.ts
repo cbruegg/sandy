@@ -1,8 +1,8 @@
 import { spawnSync } from "node:child_process";
+import type { Input, UserInput } from "@openai/codex-sdk";
 import type { ChannelFormatting, PrivilegeResolutionResult } from "../types.js";
 import { hostMountPath } from "../paths.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
-import type { Input, UserInput } from "@openai/codex-sdk";
 import { formatDateTimePrefix } from "../datetime-prefix.js";
 import { sandyMcpServerId } from "./worker-tools.js";
 
@@ -32,21 +32,17 @@ export function buildInitialTaskInput(
     httpTokens,
     httpProxyWrapper,
   );
-  
-  if (images.length === 0) {
-    return textInput;
-  }
-  
+
   const inputs: UserInput[] = [];
-  
+
   if (textInput.trim()) {
     inputs.push({ type: "text", text: textInput.trim() });
   }
-  
+
   for (const image of images) {
     inputs.push({ type: "local_image", path: image.sharePath });
   }
-  
+
   return inputs;
 }
 

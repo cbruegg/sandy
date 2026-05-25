@@ -16,6 +16,7 @@ type LocalTestCliCommand =
   | "approve"
   | "deny"
   | "cancel"
+  | "mark-finished"
   | "report-danger"
   | "tail"
   | "wait-for"
@@ -83,6 +84,9 @@ export async function runLocalTestCli(args: string[], io: CliIo = {
     case "cancel":
       await writeSimpleEvent(spoolRoot, "cancel_request", options);
       return;
+    case "mark-finished":
+      await writeSimpleEvent(spoolRoot, "mark_finished_request", options);
+      return;
     case "report-danger":
       await writeSimpleEvent(spoolRoot, "danger_report", options);
       return;
@@ -114,6 +118,7 @@ function parseCommand(raw: string | undefined): LocalTestCliCommand | undefined 
     case "approve":
     case "deny":
     case "cancel":
+    case "mark-finished":
     case "report-danger":
     case "tail":
     case "wait-for":
@@ -126,7 +131,7 @@ function parseCommand(raw: string | undefined): LocalTestCliCommand | undefined 
 
 async function writeSimpleEvent(
   spoolRoot: string,
-  kind: "cancel_request" | "danger_report",
+  kind: "cancel_request" | "mark_finished_request" | "danger_report",
   options: Record<string, string | string[]>,
 ): Promise<void> {
   await writeInboxEvent(spoolRoot, {

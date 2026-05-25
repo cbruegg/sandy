@@ -25,6 +25,7 @@ codex_auth_file = "/tmp/codex-auth.json"
   assert.deepEqual(config.authMode, {
     mode: "codex_auth_file",
     codexAuthFile: "/tmp/codex-auth.json",
+    codexAuthStrategy: "copy_file",
   });
   assert.equal(config.sttApiKey, null);
   assert.equal(config.sttBaseUrl, "https://api.openai.com/v1");
@@ -78,6 +79,27 @@ model = "gpt-5.5"
 `);
 
   assert.equal(config.agentModel, "gpt-5.5");
+});
+
+test("parseConfigToml accepts the experimental codex auth strategy override", () => {
+  const config = parseConfigToml(`
+[channel]
+kind = "telegram"
+
+[channel.telegram]
+bot_token = "telegram-token"
+allowed_user = "123456"
+
+[auth]
+codex_auth_file = "/tmp/codex-auth.json"
+codex_auth_strategy = "external_tokens"
+`);
+
+  assert.deepEqual(config.authMode, {
+    mode: "codex_auth_file",
+    codexAuthFile: "/tmp/codex-auth.json",
+    codexAuthStrategy: "external_tokens",
+  });
 });
 
 test("parseConfigToml accepts telegram allowed_user usernames", () => {
@@ -526,6 +548,7 @@ allowed_user = "123456"
     assert.deepEqual(config.authMode, {
       mode: "codex_auth_file",
       codexAuthFile: authFilePath,
+      codexAuthStrategy: "copy_file",
     });
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -559,6 +582,7 @@ codex_auth_file = "~/.codex/auth.json"
     assert.deepEqual(config.authMode, {
       mode: "codex_auth_file",
       codexAuthFile: authFilePath,
+      codexAuthStrategy: "copy_file",
     });
   } finally {
     await rm(root, { recursive: true, force: true });

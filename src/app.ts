@@ -1,5 +1,6 @@
 import { CodexMainAgentController } from "./agent/main-agent-controller.js";
 import { createChannelAdapter } from "./channel/create-channel.js";
+import type { WorkerAuthConfig } from "./types.js";
 import { loadConfig } from "./config.js";
 import { createCodexClient, ensureManagedCodexPath } from "./codex-client.js";
 import { resolveSandyCacheRoot } from "./cache-paths.js";
@@ -30,6 +31,7 @@ import { WorkerImageManager } from "./worker-image-manager.js";
 import { validateMatrixAuthStateForStartup, resolveMatrixAccessToken } from "./matrix/startup-validator.js";
 import {createNoopHostfsBroker} from "./hostfs/hostfs-broker.js";
 import {initializeHostfs, type HostfsServices} from "./hostfs/index.js";
+import { ChatGPTTokenBroker } from "./auth/chatgpt-token-broker.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -49,6 +51,7 @@ export async function startApp(): Promise<void> {
     shareRoot: config.shareRoot,
     agentModel: config.agentModel,
     authMode: config.authMode.mode,
+    codexAuthStrategy: config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthStrategy : null,
     sttEnabled: config.sttApiKey !== null,
     workerPreinstallCommandCount: config.workerPreinstall.commands.length,
     workerPreinstallRefresh: config.workerPreinstall.refresh,
@@ -111,6 +114,11 @@ export async function startApp(): Promise<void> {
     }),
     workerImageManager.start(),
   ]);
+
+  const tokenBroker: ChatGPTTokenBroker | null = config.authMode.mode === "codex_auth_file"
+    && config.authMode.codexAuthStrategy === "external_tokens"
+    ? new ChatGPTTokenBroker(config.authMode.codexAuthFile)
+    : null;
 
   logger.info("worker_image.ready", {
     baseImage: config.workerImage,
@@ -218,7 +226,10 @@ export async function startApp(): Promise<void> {
     workerImage: config.workerImage,
     resolveWorkerImage: () => workerImageManager.getLaunchImage(),
     shareRoot: config.shareRoot,
-    codexAuthFile: config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthFile : null,
+    codexAuthFile: config.authMode.mode === "codex_auth_file"
+      && config.authMode.codexAuthStrategy === "copy_file"
+      ? config.authMode.codexAuthFile
+      : null,
     skillsDirectory: config.skillsDirectory,
     workerCodexBinaryPath,
     networkGuardImage: config.networkGuardImage,
@@ -273,16 +284,49 @@ export async function startApp(): Promise<void> {
     channel,
     mainAgent,
     sandboxRunner,
-    buildWorkerStartConfig: () => ({
-      openAiApiKey: config.authMode.mode === "api_key" ? config.authMode.openAiApiKey : null,
-      codexModel: config.agentModel,
-      channelFormatting: channel.getFormatting(),
-      httpTokens: Object.entries(config.httpTokens).map(([tokenId, token]) => ({
-        tokenId,
-        description: token.description,
-      })),
-      httpProxyWrapper: httpTokensEnabled ? "/usr/local/bin/sandy-http-proxy-exec" : null,
-    }),
+    buildWorkerStartConfig: async () => {
+      let auth: WorkerAuthConfig;
+
+      if (config.authMode.mode === "api_key") {
+        auth = { mode: "ambient_api_key", openAiApiKey: config.authMode.openAiApiKey };
+      } else if (tokenBroker) {
+        try {
+          auth = {
+            mode: "external_tokens",
+            tokens: await tokenBroker.getInitialTokens(),
+          };
+        } catch (error) {
+          logger.error("token_broker.worker_launch_tokens_failed", {
+            message: error instanceof Error ? error.message : "Unknown error",
+          });
+          auth = { mode: "ambient_auth_file" };
+        }
+      } else {
+        auth = { mode: "ambient_auth_file" };
+      }
+
+      return {
+        auth,
+        codexModel: config.agentModel,
+        channelFormatting: channel.getFormatting(),
+        httpTokens: Object.entries(config.httpTokens).map(([tokenId, token]) => ({
+          tokenId,
+          description: token.description,
+        })),
+        httpProxyWrapper: httpTokensEnabled ? "/usr/local/bin/sandy-http-proxy-exec" : null,
+      };
+    },
+    refreshChatGPTTokens: async (_taskId: string, previousAccountId: string | null) => {
+      if (!tokenBroker) return null;
+      try {
+        return await tokenBroker.refreshTokens(previousAccountId);
+      } catch (error) {
+        logger.error("token_broker.refresh_failed", {
+          message: error instanceof Error ? error.message : "Unknown error",
+        });
+        return null;
+      }
+    },
     sessionStore,
     privilegeBroker: new PrivilegeBrokerImpl(),
     persistentApprovalStore,
