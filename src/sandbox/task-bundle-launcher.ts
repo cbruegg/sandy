@@ -19,6 +19,7 @@ import type {TaskBundle, TaskBundleLauncher} from "./task-bundle-types.js";
 import {createBundleSharePath} from "./task-bundle-share.js";
 import {SANDY_MANAGED_CONTAINER_LABEL} from "./container-label.js";
 import {randomUUID} from "node:crypto";
+import {SANDY_CODEX_PATH_ENV} from "../codex-client.ts";
 
 const workerCodexSeedMountPath = "/run/sandy-codex-seed";
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 300_000;
@@ -193,7 +194,7 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
     dockerArgs.push("-e", `TZ=${hostTz}`);
 
     if (this.options.workerCodexBinaryPath) {
-      dockerArgs.push("-e", "SANDY_CODEX_PATH=/usr/local/bin/codex");
+      dockerArgs.push("-e", `${SANDY_CODEX_PATH_ENV}=/usr/local/bin/codex`);
     }
 
     if (this.options.httpProxyCaCertPath && this.options.httpProxyImage) {

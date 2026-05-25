@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
-import { createCodexClient } from "../codex-client.js";
+import {createCodexClient, SANDY_CODEX_PATH_ENV} from "../codex-client.js";
 import { configureLogger, logger } from "../logger.js";
 import { messages } from "../messages.js";
 import { type HostCommand, type SubAgentEvent } from "../types.js";
@@ -103,6 +103,14 @@ function buildCodexInputWithImages(text: string, images: ImageAttachment[]): Inp
 function joinTaskSections(taskBrief: string, text: string): string {
   const sections = [taskBrief.trim(), text.trim()].filter((section) => section.length > 0);
   return sections.join("\n\n");
+}
+
+function requireConfiguredCodexPath(env: NodeJS.ProcessEnv): string {
+  const codexPath = env[SANDY_CODEX_PATH_ENV]?.trim();
+  if (!codexPath) {
+    throw new Error("SANDY_CODEX_PATH must be configured for app-server workers.");
+  }
+  return codexPath;
 }
 
 // ---- codex exec helpers ----
@@ -351,7 +359,7 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
             const tokens = command.config.chatgptExternalTokens;
             authMode = { kind: "chatgpt_appserver" };
 
-            const codexPath = options.env["SANDY_CODEX_PATH"]?.trim() || "codex";
+            const codexPath = requireConfiguredCodexPath(options.env);
             appServerSession = await AppServerWorkerSession.start({
               codexPath,
               initialTokens: tokens,

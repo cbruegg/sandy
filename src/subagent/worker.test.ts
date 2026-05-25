@@ -195,6 +195,48 @@ test("worker processes follow-up commands after start_task initialization finish
   assert.match(String(turnInputs[1]), /Use https:\/\/example\.com\/set/);
 });
 
+test("worker requires SANDY_CODEX_PATH for chatgpt app-server tasks", async () => {
+  const sentEvents: SubAgentEvent[] = [];
+  const processor = createWorkerCommandProcessor({
+    sendEvent: (event) => sentEvents.push(event),
+    env: {},
+    applyWorkerCodexConfigPatch: async () => {},
+    buildWorkerCodexEnvironment: () => ({}),
+    createCodexClient: async () => {
+      throw new Error("createCodexClient should not be called");
+    },
+    onShutdown: () => {},
+  });
+
+  await processor.handleLine(JSON.stringify({
+    type: "start_task",
+    taskId: "task-1",
+    taskBrief: "Inspect the collection.",
+    input: { text: "Initial request", images: [] },
+    taskLanguage: "English",
+    config: {
+      openAiApiKey: null,
+      codexModel: null,
+      channelFormatting: testFormatting,
+      httpTokens: [],
+      httpProxyWrapper: null,
+      chatgptExternalTokens: {
+        accessToken: "access-token",
+        chatgptAccountId: "acct-123",
+        chatgptPlanType: "plus",
+      },
+    },
+    environment: {},
+    codexConfigToml: null,
+    httpProxyUrl: null,
+  } satisfies Extract<HostCommand, { type: "start_task" }>));
+
+  assert.deepEqual(sentEvents, [{
+    type: "task_error",
+    message: "SANDY_CODEX_PATH must be configured for app-server workers.",
+  }]);
+});
+
 test("mcpToolProgress includes payloads for completed MCP calls", () => {
   assert.equal(
     messages.mcpToolProgress("completed", "filesystem", "read_file", { path: "/tmp/report.txt" }),
