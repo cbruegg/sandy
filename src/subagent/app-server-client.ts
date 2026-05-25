@@ -125,11 +125,33 @@ type CreateAmbientAuthClientOptions = {
   spawnImpl?: typeof spawn;
 };
 
+type AppServerTypedRpcHost = {
+  requestRaw: <T>(method: string, params?: unknown) => Promise<T>;
+  writeJsonRpcMessage: (message: Record<string, unknown>) => void;
+};
+
 class AppServerTypedRpc {
-  constructor(
-    private readonly request: <T>(method: string, params?: unknown) => Promise<T>,
-    private readonly sendInitializedNotification: () => void,
-  ) {}
+  constructor(private readonly host: AppServerTypedRpcHost) {}
+
+  private async request<T>(method: string, params?: unknown): Promise<T> {
+    return await this.host.requestRaw<T>(method, params);
+  }
+
+  private writeJsonRpcMessage(message: Record<string, unknown>): void {
+    this.host.writeJsonRpcMessage(message);
+  }
+
+  private sendResponse(id: number, result: unknown): void {
+    this.writeJsonRpcMessage({ jsonrpc: "2.0", id, result });
+  }
+
+  private sendErrorResponse(id: number, code: number, message: string): void {
+    this.writeJsonRpcMessage({ jsonrpc: "2.0", id, error: { code, message } });
+  }
+
+  private sendInitializedNotification(): void {
+    this.writeJsonRpcMessage({ jsonrpc: "2.0", method: "initialized", params: {} });
+  }
 
   async initialize(enableExperimentalApi: boolean): Promise<void> {
     await this.request<void>("initialize", {
@@ -170,6 +192,18 @@ class AppServerTypedRpc {
   async turnInterrupt(threadId: string): Promise<void> {
     await this.request<void>("turn/interrupt", { threadId });
   }
+
+  respondAuthRefresh(id: number, tokens: { accessToken: string; chatgptAccountId: string; chatgptPlanType: string | null }): void {
+    this.sendResponse(id, {
+      accessToken: tokens.accessToken,
+      chatgptAccountId: tokens.chatgptAccountId,
+      chatgptPlanType: tokens.chatgptPlanType,
+    });
+  }
+
+  respondMethodNotFound(id: number, method: string): void {
+    this.sendErrorResponse(id, JSON_RPC_METHOD_NOT_FOUND, `Method not found: ${method}`);
+  }
 }
 
 export class CodexAppServerClient {
@@ -189,7 +223,7 @@ export class CodexAppServerClient {
     private readonly codexPath: string,
     private readonly spawnImpl: typeof spawn = spawn,
   ) {
-    this.rpc = new AppServerTypedRpc(this.request.bind(this), this.sendInitializedNotification.bind(this));
+    this.rpc = new AppServerTypedRpc(this);
   }
 
   static async createWithExternalTokens(options: CreateExternalTokensClientOptions): Promise<CodexAppServerClient> {
@@ -274,7 +308,7 @@ export class CodexAppServerClient {
       }
     } else {
       this.warnUnhandledServerRequest(method, params);
-      this.sendErrorResponse(id, JSON_RPC_METHOD_NOT_FOUND, `Method not found: ${method}`);
+      this.rpc.respondMethodNotFound(id, method);
     }
   }
 
@@ -284,36 +318,22 @@ export class CodexAppServerClient {
     }
   }
 
-  private sendRequest(method: string, params?: unknown): number {
+  requestRaw<T>(method: string, params?: unknown): Promise<T> {
     if (!this.child) throw new Error("App-server not started");
     const id = this.nextId++;
-    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method, id, params }) + "\n");
-    return id;
-  }
+    this.writeJsonRpcMessage({ jsonrpc: "2.0", method, id, params });
 
-  private sendResponse(id: number, result: unknown): void {
-    if (!this.child) return;
-    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\n");
-  }
-
-  private sendErrorResponse(id: number, code: number, message: string): void {
-    if (!this.child) return;
-    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }) + "\n");
-  }
-
-  private sendInitializedNotification(): void {
-    if (!this.child) return;
-    this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "initialized", params: {} }) + "\n");
-  }
-
-  private async request<T = unknown>(method: string, params?: unknown): Promise<T> {
-    const id = this.sendRequest(method, params);
     return new Promise<T>((resolve, reject) => {
       this.pendingRequests.set(id, {
         resolve: resolve as (result: unknown) => void,
         reject,
       });
     });
+  }
+
+  writeJsonRpcMessage(message: Record<string, unknown>): void {
+    if (!this.child) return;
+    this.child.stdin.write(JSON.stringify(message) + "\n");
   }
 
   private async initialize(enableExperimentalApi: boolean): Promise<void> {
@@ -361,11 +381,7 @@ export class CodexAppServerClient {
 
     this.activeAuthRefreshHandler = async (id: number, previousAccountId: string | null) => {
       const tokens = await onAuthRefresh(previousAccountId);
-      this.sendResponse(id, {
-        accessToken: tokens.accessToken,
-        chatgptAccountId: tokens.chatgptAccountId,
-        chatgptPlanType: tokens.chatgptPlanType,
-      });
+      this.rpc.respondAuthRefresh(id, tokens);
     };
 
     await this.rpc.turnStart(threadId, input);
