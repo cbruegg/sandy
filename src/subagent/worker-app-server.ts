@@ -5,8 +5,11 @@ import { CodexAppServerClient } from "./app-server-client.js";
 import { writeSubAgentEvent } from "./subagent-event-writer.js";
 import { buildTaskSummaryInput } from "./worker-prompt.js";
 
-type StreamTurnResult = {
+export type StreamTurnResult = {
   sawTerminalError: boolean;
+};
+
+type StreamAppServerSummaryResult = StreamTurnResult & {
   summaryText: string | null;
 };
 
@@ -49,7 +52,7 @@ function normalizeSummaryText(chunks: string[]): string | null {
  * working through the task in the current thread. Completed assistant messages
  * are the only host-visible output path for app-server-backed turns.
  */
-export async function streamAppServerTurn(options: StreamAppServerTaskTurnOptions): Promise<boolean> {
+export async function streamAppServerTurn(options: StreamAppServerTaskTurnOptions): Promise<StreamTurnResult> {
   const sendEvent = options.sendEvent ?? writeSubAgentEvent;
   let sawTerminalError = false;
 
@@ -75,12 +78,12 @@ export async function streamAppServerTurn(options: StreamAppServerTaskTurnOption
         case "turn_failed":
           sendEvent({ type: "task_error", message: event.error });
           sawTerminalError = true;
-          return sawTerminalError;
+          return { sawTerminalError };
 
         case "error":
           sendEvent({ type: "task_error", message: event.message });
           sawTerminalError = true;
-          return sawTerminalError;
+          return { sawTerminalError };
       }
     }
   } catch (error) {
@@ -89,7 +92,7 @@ export async function streamAppServerTurn(options: StreamAppServerTaskTurnOption
     sawTerminalError = true;
   }
 
-  return sawTerminalError;
+  return { sawTerminalError };
 }
 
 /**
@@ -98,7 +101,7 @@ export async function streamAppServerTurn(options: StreamAppServerTaskTurnOption
  * Use this only after task completion when asking the sub-agent to summarize
  * the whole conversation/thread for the final handoff.
  */
-async function streamAppServerSummary(options: StreamAppServerSummaryOptions): Promise<StreamTurnResult> {
+async function streamAppServerSummary(options: StreamAppServerSummaryOptions): Promise<StreamAppServerSummaryResult> {
   const summaryChunks: string[] = [];
   let sawTerminalError = false;
 
@@ -187,7 +190,7 @@ export class AppServerWorkerSession {
     this.handleAuthRefreshResult(null);
   }
 
-  async streamTurn(input: Input, abortSignal?: AbortSignal): Promise<boolean> {
+  async streamTurn(input: Input, abortSignal?: AbortSignal): Promise<StreamTurnResult> {
     return streamAppServerTurn({
       appServer: this.appServer,
       threadId: this.threadId,

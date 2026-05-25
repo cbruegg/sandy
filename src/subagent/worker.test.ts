@@ -2,7 +2,7 @@ import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { type Input, type Thread } from "@openai/codex-sdk";
 import { messages } from "../messages.js";
-import { AppServerWorkerSession } from "./worker-app-server.js";
+import { AppServerWorkerSession, type StreamTurnResult } from "./worker-app-server.js";
 import {
   buildInitialTaskInput,
   buildInitialTaskInputWithCapabilities,
@@ -25,7 +25,7 @@ const testFormatting: ChannelFormatting = {
 };
 
 function createAppServerSessionStarter(session: {
-  streamTurn: (input: Input, abortSignal?: AbortSignal) => Promise<boolean>;
+  streamTurn: (input: Input, abortSignal?: AbortSignal) => Promise<StreamTurnResult>;
   emitTaskSummary: () => Promise<void>;
   close: () => void;
   cancelPendingAuthRefresh: () => void;
@@ -173,7 +173,7 @@ test("worker processes follow-up commands after start_task initialization finish
       return {
         async streamTurn(input: Input) {
           turnInputs.push(input);
-          return false;
+          return { sawTerminalError: false };
         },
         async emitTaskSummary() {},
         close() {},
@@ -258,7 +258,7 @@ test("worker starts ambient app-server auth for api key mode and exports CODEX_A
       sessionStarts.push(options);
       return {
         async streamTurn() {
-          return false;
+          return { sawTerminalError: false };
         },
         async emitTaskSummary() {},
         close() {},
@@ -303,7 +303,7 @@ test("worker passes image attachments through app-server user_message turns", as
     startAppServerWorkerSession: createAppServerSessionStarter({
       async streamTurn(input) {
         turnInputs.push(input);
-        return false;
+        return { sawTerminalError: false };
       },
       async emitTaskSummary() {},
       close() {},
@@ -445,7 +445,7 @@ test("streamTurn ignores empty assistant messages", async () => {
 
     const sawTerminalError = await streamTurn(thread, "Inspect the reel.");
 
-    assert.equal(sawTerminalError, false);
+    assert.equal(sawTerminalError.sawTerminalError, false);
     assert.deepEqual(writes, []);
   } finally {
     process.stdout.write = originalWrite;
@@ -460,7 +460,7 @@ test("worker emits task_done only after mark_finished", async () => {
     applyWorkerCodexConfigPatch: async () => {},
     startAppServerWorkerSession: createAppServerSessionStarter({
       async streamTurn() {
-        return false;
+        return { sawTerminalError: false };
       },
       async emitTaskSummary() {
         sentEvents.push({
@@ -548,7 +548,7 @@ test("streamAppServerTurn emits completed assistant messages", async () => {
     });
 
     const events = writes.map((entry) => JSON.parse(entry.trim()) as SubAgentEvent);
-    assert.equal(sawTerminalError, false);
+    assert.equal(sawTerminalError.sawTerminalError, false);
     assert.deepEqual(events, [{ type: "assistant_output", text: "Using the Todoist skill." }]);
   } finally {
     process.stdout.write = originalWrite;
@@ -591,7 +591,7 @@ test("streamAppServerTurn ignores blank completed assistant messages", async () 
     });
 
     const events = writes.map((entry) => JSON.parse(entry.trim()) as SubAgentEvent);
-    assert.equal(sawTerminalError, false);
+    assert.equal(sawTerminalError.sawTerminalError, false);
     assert.deepEqual(events, []);
   } finally {
     process.stdout.write = originalWrite;
@@ -628,7 +628,7 @@ test("AppServerWorkerSession accepts a synchronous auth refresh response", async
 
   const sawTerminalError = await session.streamTurn("hello");
 
-  assert.equal(sawTerminalError, false);
+  assert.equal(sawTerminalError.sawTerminalError, false);
   assert.deepEqual(sentEvents, [{
     type: "chatgpt_auth_refresh_request",
     previousAccountId: "acct-123",

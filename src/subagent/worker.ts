@@ -12,7 +12,7 @@ import {
   buildPrivilegeResolutionInput,
   type ImageAttachment,
 } from "./worker-prompt.js";
-import { AppServerWorkerSession, streamAppServerTurn } from "./worker-app-server.js";
+import { AppServerWorkerSession, streamAppServerTurn, type StreamTurnResult } from "./worker-app-server.js";
 import {
   applyWorkerCodexConfigPatch,
   workerCodexHomePath,
@@ -102,7 +102,7 @@ function requireConfiguredCodexPath(env: NodeJS.ProcessEnv): string {
 
 // ---- codex exec helpers ----
 
-async function streamTurn(thread: Thread, input: Input): Promise<boolean> {
+async function streamTurn(thread: Thread, input: Input): Promise<StreamTurnResult> {
   let sawTerminalError = false;
   const { events } = await thread.runStreamed(input);
 
@@ -116,7 +116,7 @@ async function streamTurn(thread: Thread, input: Input): Promise<boolean> {
     }
   }
 
-  return sawTerminalError;
+  return { sawTerminalError };
 }
 
 function handleTaskTurnEvent(event: ThreadEvent): ThreadEventDisposition {
