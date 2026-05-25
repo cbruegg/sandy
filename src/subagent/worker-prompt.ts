@@ -33,10 +33,6 @@ export function buildInitialTaskInput(
     httpProxyWrapper,
   );
 
-  if (images.length === 0) {
-    return textInput;
-  }
-
   const inputs: UserInput[] = [];
 
   if (textInput.trim()) {

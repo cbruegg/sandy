@@ -49,7 +49,7 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
     "/usr/local/bin/sandy-http-proxy-exec",
   );
 
-  const inputText: string = typeof input === "string" ? input : (Array.isArray(input) && input[0]?.type === "text" ? input[0].text : "");
+  const inputText = Array.isArray(input) && input[0]?.type === "text" ? input[0].text : "";
   assert.match(inputText, /\/workspace\/share/);
   assert.match(inputText, /shared workspace is mounted/);
   assert.match(inputText, /send the user-visible text first and then call the tool separately/i);
@@ -135,8 +135,17 @@ test("buildInitialTaskInput includes current date and time", () => {
     formatting,
   );
 
-  const inputText: string = typeof input === "string" ? input : (Array.isArray(input) && input[0]?.type === "text" ? input[0].text : "");
+  const inputText = Array.isArray(input) && input[0]?.type === "text" ? input[0].text : "";
   assert.match(inputText, /Current date and time: [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}/);
+});
+
+test("buildInitialTaskInput always returns a user-input sequence", () => {
+  const input = buildInitialTaskInput("Inspect the repository.", "English", testFormatting);
+  const inputText = Array.isArray(input) && input[0]?.type === "text" ? input[0].text : "";
+
+  assert.equal(Array.isArray(input), true);
+  assert.deepEqual(input, [{ type: "text", text: inputText }]);
+  assert.match(inputText, /Inspect the repository\./);
 });
 
 test("worker processes follow-up commands after start_task initialization finishes", async () => {
@@ -198,8 +207,9 @@ test("worker processes follow-up commands after start_task initialization finish
 
   assert.equal(sentEvents.some((event) => event.type === "task_error"), false);
   assert.equal(turnInputs.length, 2);
+  assert.equal(Array.isArray(turnInputs[0]), true);
+  assert.deepEqual(turnInputs[1], [{ type: "text", text: "Use https://example.com/set" }]);
   assert.match(JSON.stringify(turnInputs[0]), /Add the track to the DJ collection/);
-  assert.match(JSON.stringify(turnInputs[1]), /Use https:\/\/example\.com\/set/);
 });
 
 test("worker requires SANDY_CODEX_PATH for app-server tasks", async () => {

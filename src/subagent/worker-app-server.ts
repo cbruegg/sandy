@@ -5,6 +5,10 @@ import { CodexAppServerClient } from "./app-server-client.js";
 import { writeSubAgentEvent } from "./subagent-event-writer.js";
 import { buildTaskSummaryInput } from "./worker-prompt.js";
 
+function buildTextInput(text: string): Input {
+  return text.trim() ? [{ type: "text", text: text.trim() }] : [];
+}
+
 export type StreamTurnResult = {
   sawTerminalError: boolean;
 };
@@ -205,7 +209,7 @@ export class AppServerWorkerSession {
     const result = await streamAppServerSummary({
       appServer: this.appServer,
       threadId: this.threadId,
-      input: buildTaskSummaryInput(),
+      input: buildTextInput(buildTaskSummaryInput()),
       onAuthRefresh: async (previousAccountId) => await this.requestAuthRefresh(previousAccountId),
     });
     if (result.sawTerminalError || !result.summaryText) {

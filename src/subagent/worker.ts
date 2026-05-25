@@ -82,10 +82,6 @@ function joinTaskSections(taskBrief: string, text: string): string {
 }
 
 function buildAppServerInputWithImages(text: string, images: ImageAttachment[]): Input {
-  if (images.length === 0) {
-    return text;
-  }
-
   return [
     ...(text.trim() ? [{ type: "text" as const, text: text.trim() }] : []),
     ...images.map((image) => ({ type: "local_image" as const, path: image.sharePath })),
@@ -279,7 +275,7 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
           break;
         case "privilege_result":
           assertTaskStarted(taskStarted, command.type);
-          enqueueAppServerTurn(buildPrivilegeResolutionInput(command.result));
+          enqueueAppServerTurn(buildAppServerInputWithImages(buildPrivilegeResolutionInput(command.result), []));
           break;
         case "mark_finished":
           assertTaskStarted(taskStarted, command.type);
