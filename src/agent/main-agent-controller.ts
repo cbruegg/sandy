@@ -241,7 +241,7 @@ export function buildMainAgentPrompt(input: {
 
   const skillManagementRules = input.isInitialTurn
     ? [
-        "- If the user asks to add, edit, or remove a Sandy skill, you must launch a sub-agent task instead of replying directly.",
+        "- If the user asks to list, add, edit, or remove Sandy skills, you must launch a sub-agent task instead of replying directly.",
         "- The sub-agent can use the create_skill, update_skill, and delete_skill host tools to perform skill changes.",
         "- Every skill mutation requires explicit user approval and cannot be auto-approved.",
       ]

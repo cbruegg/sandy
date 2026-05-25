@@ -132,19 +132,19 @@ export const workerToolEntries = [
   ),
   defineWorkerTool(
     createSkillToolName,
-    "Ask the host to create a new Sandy skill. This requires explicit user approval. Provide the skillId, name, description, and body.",
+    "Ask the host to create a new Sandy skill. Provide the skillId, name, description, and body.",
     true,
     createSkillSchema,
   ),
   defineWorkerTool(
     updateSkillToolName,
-    "Ask the host to update an existing Sandy skill. This requires explicit user approval. Provide the skillId, name, description, and body.",
+    "Ask the host to update an existing Sandy skill. Provide the skillId, name, description, and body.",
     true,
     updateSkillSchema,
   ),
   defineWorkerTool(
     deleteSkillToolName,
-    "Ask the host to delete an existing Sandy skill. This requires explicit user approval. Provide the skillId.",
+    "Ask the host to delete an existing Sandy skill. Provide the skillId.",
     true,
     deleteSkillSchema,
   ),
