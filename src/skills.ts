@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, readFileSync, type Dirent } from "node:fs";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 export type SkillMetadata = {
@@ -6,9 +7,33 @@ export type SkillMetadata = {
   description: string;
 };
 
+type CreateSkillInput = {
+  skillId: string;
+  name: string;
+  description: string;
+  body: string;
+};
+
+type UpdateSkillInput = {
+  skillId: string;
+  name?: string;
+  description?: string;
+  body?: string;
+};
+
+type DeleteSkillInput = {
+  skillId: string;
+};
+
 type DiscoveredSkills = {
   skillsDirectory: string | null;
   skills: SkillMetadata[];
+};
+
+type ParsedSkillFile = {
+  name: string;
+  description: string;
+  body: string;
 };
 
 export function discoverSkills(configDirectory: string): DiscoveredSkills {
@@ -57,6 +82,15 @@ function readSkillFile(skillFilePath: string): string {
 }
 
 function parseSkillMetadata(raw: string, skillFilePath: string): SkillMetadata {
+  const { name, description } = parseSkillFrontmatter(raw, skillFilePath);
+
+  return {
+    name,
+    description,
+  };
+}
+
+function parseSkillFrontmatter(raw: string, skillFilePath: string): SkillMetadata {
   const normalizedRaw = raw.replace(/^\uFEFF/, "");
   const match = normalizedRaw.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
   if (!match) {
@@ -90,10 +124,7 @@ function parseSkillMetadata(raw: string, skillFilePath: string): SkillMetadata {
     throw new Error(`Sandy skill file ${skillFilePath} is missing required frontmatter field "description".`);
   }
 
-  return {
-    name,
-    description,
-  };
+  return { name, description };
 }
 
 function normalizeFrontmatterScalar(value: string): string {
@@ -105,4 +136,97 @@ function normalizeFrontmatterScalar(value: string): string {
     }
   }
   return value;
+}
+
+function assertValidSkillId(skillId: string): void {
+  if (!skillId) {
+    throw new Error("skillId is required.");
+  }
+  if (/[\\/]/.test(skillId) || skillId === "." || skillId === "..") {
+    throw new Error(`Invalid skillId "${skillId}".`);
+  }
+}
+
+function assertNonEmptyString(value: string, field: string): void {
+  if (!value || !value.trim()) {
+    throw new Error(`${field} is required.`);
+  }
+}
+
+function renderSkillFile(name: string, description: string, body: string): string {
+  assertNonEmptyString(name, "name");
+  assertNonEmptyString(description, "description");
+  if (name.includes("\n") || description.includes("\n")) {
+    throw new Error("Skill name and description must not contain newlines.");
+  }
+  return `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}`;
+}
+
+async function parseExistingSkillFile(skillFilePath: string): Promise<ParsedSkillFile> {
+  const raw = await readFile(skillFilePath, "utf8");
+  const normalizedRaw = raw.replace(/^\uFEFF/, "");
+  const match = normalizedRaw.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  if (!match) {
+    throw new Error(`Sandy skill file ${skillFilePath} must start with a frontmatter block delimited by "---".`);
+  }
+
+  const { name, description } = parseSkillFrontmatter(normalizedRaw, skillFilePath);
+  const endOfFrontmatter = (match.index ?? 0) + match[0].length;
+  const body = normalizedRaw.slice(endOfFrontmatter).trimStart();
+
+  return { name, description, body };
+}
+
+export class SkillService {
+  private readonly configDirectory: string;
+  private readonly skillsDirectory: string;
+
+  constructor(configDirectory: string) {
+    this.configDirectory = configDirectory;
+    this.skillsDirectory = join(configDirectory, "skills");
+  }
+
+  getSkillsDirectory(): string {
+    return this.skillsDirectory;
+  }
+
+  getSkills(): SkillMetadata[] {
+    return discoverSkills(this.configDirectory).skills;
+  }
+
+  async createSkill(input: CreateSkillInput): Promise<void> {
+    assertValidSkillId(input.skillId);
+    const skillDir = join(this.skillsDirectory, input.skillId);
+    if (existsSync(skillDir)) {
+      throw new Error(`Skill "${input.skillId}" already exists.`);
+    }
+    const content = renderSkillFile(input.name, input.description, input.body);
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(join(skillDir, "SKILL.md"), content, "utf8");
+  }
+
+  async updateSkill(input: UpdateSkillInput): Promise<void> {
+    assertValidSkillId(input.skillId);
+    const skillDir = join(this.skillsDirectory, input.skillId);
+    if (!existsSync(skillDir)) {
+      throw new Error(`Skill "${input.skillId}" does not exist.`);
+    }
+    const skillFilePath = join(skillDir, "SKILL.md");
+    const existing = await parseExistingSkillFile(skillFilePath);
+    const content = renderSkillFile(
+      input.name ?? existing.name,
+      input.description ?? existing.description,
+      input.body ?? existing.body,
+    );
+    await writeFile(skillFilePath, content, "utf8");
+  }
+
+  async deleteSkill(input: DeleteSkillInput): Promise<void> {
+    assertValidSkillId(input.skillId);
+    const skillDir = join(this.skillsDirectory, input.skillId);
+    if (!existsSync(skillDir)) {
+      throw new Error(`Skill "${input.skillId}" does not exist.`);
+    }
+    await rm(skillDir, { recursive: true, force: true });
+  }
 }

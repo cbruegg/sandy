@@ -32,7 +32,7 @@ import { validateMatrixAuthStateForStartup, resolveMatrixAccessToken } from "./m
 import {createNoopHostfsBroker} from "./hostfs/hostfs-broker.js";
 import {initializeHostfs, type HostfsServices} from "./hostfs/index.js";
 import { ChatGPTTokenBroker } from "./auth/chatgpt-token-broker.js";
-import { SkillService } from "./skills-service.js";
+import { SkillService } from "./skills.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();

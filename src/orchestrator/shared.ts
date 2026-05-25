@@ -7,7 +7,7 @@ import type { TaskBundleAssignmentLookup } from "../sandbox/task-bundle-assignme
 import type { SessionStore } from "../session/in-memory-session-store.js";
 import type { ChatGPTExternalTokens, NormalizedChatEvent, SessionState, WorkerStartConfig } from "../types.js";
 import type { PrivilegeBroker } from "../privilege/privilege-broker.js";
-import type { SkillService } from "../skills-service.js";
+import type { SkillService } from "../skills.js";
 
 export type SupportedChatEvent = Exclude<NormalizedChatEvent, { kind: "unsupported_input" }>;
 export type UserMessageEvent = Extract<NormalizedChatEvent, { kind: "user_message" }>;

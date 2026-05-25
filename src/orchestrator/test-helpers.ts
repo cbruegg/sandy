@@ -27,7 +27,7 @@ import type {
   TaskInputPayload,
   WorkerStartConfig,
 } from "../types.js";
-import { SkillService } from "../skills-service.js";
+import { SkillService } from "../skills.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
