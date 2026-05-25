@@ -89,9 +89,9 @@ const createSkillSchema = z.object({
 const updateSkillSchema = z.object({
   type: z.literal(updateSkillToolName),
   skillId: z.string(),
-  name: z.string(),
-  description: z.string(),
-  body: z.string(),
+  name: z.string().optional(),
+  description: z.string().optional(),
+  body: z.string().optional(),
 }).strict();
 
 const deleteSkillSchema = z.object({

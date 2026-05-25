@@ -856,9 +856,9 @@ export class OrchestratorPrivileges {
       } else if (request.operation === "update") {
         await this.deps.skillService.updateSkill({
           skillId: request.skillId,
-          name: request.name ?? "",
-          description: request.description ?? "",
-          body: request.body ?? "",
+          ...(request.name !== undefined ? { name: request.name } : {}),
+          ...(request.description !== undefined ? { description: request.description } : {}),
+          ...(request.body !== undefined ? { body: request.body } : {}),
         });
       } else if (request.operation === "delete") {
         await this.deps.skillService.deleteSkill({ skillId: request.skillId });

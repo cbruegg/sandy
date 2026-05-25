@@ -231,7 +231,7 @@ export function buildMainAgentPrompt(input: {
       ]
     : [];
 
-  const skillDecisionRules = input.skills.length > 0
+  const skillDecisionRules = input.isInitialTurn && input.skills.length > 0
     ? [
         "- You know configured skills only by the name and description listed above. Do not assume any other skill content.",
         "- If the user's request requires one of the configured skills, you must launch a sub-agent instead of replying directly.",
@@ -239,11 +239,13 @@ export function buildMainAgentPrompt(input: {
       ]
     : [];
 
-  const skillManagementRules = [
-    "- If the user asks to add, edit, or remove a Sandy skill, you must launch a sub-agent task instead of replying directly.",
-    "- The sub-agent can use the create_skill, update_skill, and delete_skill host tools to perform skill changes.",
-    "- Every skill mutation requires explicit user approval and cannot be auto-approved.",
-  ];
+  const skillManagementRules = input.isInitialTurn
+    ? [
+        "- If the user asks to add, edit, or remove a Sandy skill, you must launch a sub-agent task instead of replying directly.",
+        "- The sub-agent can use the create_skill, update_skill, and delete_skill host tools to perform skill changes.",
+        "- Every skill mutation requires explicit user approval and cannot be auto-approved.",
+      ]
+    : [];
 
   return [
     formatDateTimePrefix(),

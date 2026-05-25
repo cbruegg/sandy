@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { messages } from "../messages.js";
 import {
   contextTexts,
+  createDefaultTestSkillService,
   createTestOrchestrator,
   expectDefined,
   SequenceMainAgent,
@@ -16,7 +17,7 @@ test("orchestrator stages attached files into the task share before launching th
     taskName: "file-analysis",
     taskLanguage: "English",
   });
-  const { orchestrator, channel, runner } = createTestOrchestrator({ mainAgent });
+  const { orchestrator, channel, runner } = createTestOrchestrator({ mainAgent, skillService: createDefaultTestSkillService() });
 
   await orchestrator.handleChatEvent({
     kind: "user_message",
@@ -43,6 +44,7 @@ test("orchestrator stages attached files into the task share before launching th
 
 test("orchestrator stages attached files into the active task share and notifies the worker", async () => {
   const { orchestrator, channel, runner } = createTestOrchestrator({
+    skillService: createDefaultTestSkillService(),
     mainAgent: new StubMainAgent({
       action: "launch_task",
       taskBrief: "Wait for files.",
@@ -82,6 +84,7 @@ test("orchestrator stages attached files into the active task share and notifies
 
 test("orchestrator keeps completed-task summary pending until the user sends another message", async () => {
   const { orchestrator, runner, store } = createTestOrchestrator({
+    skillService: createDefaultTestSkillService(),
     mainAgent: new StubMainAgent({
       action: "launch_task",
       taskBrief: "Inspect the environment.",
@@ -125,6 +128,7 @@ test("orchestrator keeps completed-task summary pending until the user sends ano
 
 test("orchestrator closes the sandbox handle on normal task completion", async () => {
   const { orchestrator, runner } = createTestOrchestrator({
+    skillService: createDefaultTestSkillService(),
     mainAgent: new StubMainAgent({
       action: "launch_task",
       taskBrief: "Inspect the environment.",
@@ -150,6 +154,7 @@ test("orchestrator closes the sandbox handle on normal task completion", async (
 
 test("orchestrator asks the worker to finalize when the user marks the task as finished", async () => {
   const { orchestrator, runner, store } = createTestOrchestrator({
+    skillService: createDefaultTestSkillService(),
     mainAgent: new StubMainAgent({
       action: "launch_task",
       taskBrief: "Inspect the environment.",
@@ -201,6 +206,7 @@ test("orchestrator asks the worker to finalize when the user marks the task as f
 
 test("orchestrator uses the task name in task_done completion messages", async () => {
   const { orchestrator, runner, channel } = createTestOrchestrator({
+    skillService: createDefaultTestSkillService(),
     mainAgent: new StubMainAgent({
       action: "launch_task",
       taskBrief: "Inspect the environment.",
@@ -246,7 +252,7 @@ test("orchestrator releases completed-task output only when the user continues n
       replyText: "Continuing with the next step.",
     },
   ]);
-  const { orchestrator, runner, store } = createTestOrchestrator({ mainAgent });
+  const { orchestrator, runner, store } = createTestOrchestrator({ mainAgent, skillService: createDefaultTestSkillService() });
 
   await orchestrator.handleChatEvent({
     kind: "user_message",
@@ -288,6 +294,7 @@ test("orchestrator releases completed-task output only when the user continues n
 
 test("orchestrator discards completed-task output when the user sends a danger report next", async () => {
   const { orchestrator, runner, store, channel } = createTestOrchestrator({
+    skillService: createDefaultTestSkillService(),
     mainAgent: new StubMainAgent({
       action: "launch_task",
       taskBrief: "Inspect the filesystem.",
@@ -343,7 +350,7 @@ test("orchestrator keeps final_result output pending until the user continues no
       replyText: "Continuing with the next step.",
     },
   ]);
-  const { orchestrator, runner, store, channel } = createTestOrchestrator({ mainAgent });
+  const { orchestrator, runner, store, channel } = createTestOrchestrator({ mainAgent, skillService: createDefaultTestSkillService() });
 
   await orchestrator.handleChatEvent({
     kind: "user_message",
@@ -398,6 +405,7 @@ test("orchestrator keeps final_result output pending until the user continues no
 
 test("orchestrator marks worker disconnects as task failure and clears the task", async () => {
   const { orchestrator, runner, store, channel } = createTestOrchestrator({
+    skillService: createDefaultTestSkillService(),
     mainAgent: new StubMainAgent({
       action: "launch_task",
       taskBrief: "Inspect the filesystem.",
@@ -428,6 +436,7 @@ test("orchestrator marks worker disconnects as task failure and clears the task"
 
 test("orchestrator prompts before deleting a non-empty shared workspace", async () => {
   const { orchestrator, runner, store, channel } = createTestOrchestrator({
+    skillService: createDefaultTestSkillService(),
     mainAgent: new StubMainAgent({
       action: "launch_task",
       taskBrief: "Inspect the filesystem.",
@@ -477,7 +486,7 @@ test("orchestrator deletes or preserves a finished task share based on user conf
       taskLanguage: "English",
     },
   ]);
-  const { orchestrator, runner, channel } = createTestOrchestrator({ mainAgent });
+  const { orchestrator, runner, channel } = createTestOrchestrator({ mainAgent, skillService: createDefaultTestSkillService() });
 
   await orchestrator.handleChatEvent({
     kind: "user_message",
@@ -559,7 +568,7 @@ test("orchestrator blocks new idle input while shared workspace deletion is pend
       replyText: "This should not be reached yet.",
     },
   ]);
-  const { orchestrator, runner, channel } = createTestOrchestrator({ mainAgent });
+  const { orchestrator, runner, channel } = createTestOrchestrator({ mainAgent, skillService: createDefaultTestSkillService() });
 
   await orchestrator.handleChatEvent({
     kind: "user_message",
