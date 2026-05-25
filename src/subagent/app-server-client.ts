@@ -22,7 +22,7 @@ const JSON_RPC_METHOD_NOT_FOUND = -32601;
 
 const ignoredNotificationMethods = new Set([
   "account/rateLimits/updated",
-  // Sandy now treats item completion as the only host-visible source of
+  // Sandy treats item completion as the only host-visible source of
   // assistant message text and ignores intermediate delta notifications.
   "item/agentMessage/delta",
   "item/started",
