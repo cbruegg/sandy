@@ -41,6 +41,9 @@ const copyOutOfShareToolName = "copy_out_of_share";
 const sendFileToChannelToolName = "send_file_to_channel";
 const requestHttpTokenToolName = "request_http_token";
 const requestHostDirectoryAccessToolName = "request_host_directory_access";
+const createSkillToolName = "create_skill";
+const updateSkillToolName = "update_skill";
+const deleteSkillToolName = "delete_skill";
 
 const copyIntoShareSchema = z.object({
   type: z.literal(copyIntoShareToolName),
@@ -75,6 +78,27 @@ const requestHostDirectoryAccessSchema = z.object({
   level: z.enum(["read_only", "read_write"]),
 }).strict();
 
+const createSkillSchema = z.object({
+  type: z.literal(createSkillToolName),
+  skillId: z.string(),
+  name: z.string(),
+  description: z.string(),
+  body: z.string(),
+}).strict();
+
+const updateSkillSchema = z.object({
+  type: z.literal(updateSkillToolName),
+  skillId: z.string(),
+  name: z.string().optional(),
+  description: z.string().optional(),
+  body: z.string().optional(),
+}).strict();
+
+const deleteSkillSchema = z.object({
+  type: z.literal(deleteSkillToolName),
+  skillId: z.string(),
+}).strict();
+
 export const workerToolEntries = [
   defineWorkerTool(
     copyIntoShareToolName,
@@ -106,6 +130,24 @@ export const workerToolEntries = [
     true,
     requestHostDirectoryAccessSchema,
   ),
+  defineWorkerTool(
+    createSkillToolName,
+    "Ask the host to create a new Sandy skill. Provide the skillId, name, description, and body.",
+    true,
+    createSkillSchema,
+  ),
+  defineWorkerTool(
+    updateSkillToolName,
+    "Ask the host to update an existing Sandy skill. Provide the skillId, name, description, and body.",
+    true,
+    updateSkillSchema,
+  ),
+  defineWorkerTool(
+    deleteSkillToolName,
+    "Ask the host to delete an existing Sandy skill. Provide the skillId.",
+    true,
+    deleteSkillSchema,
+  ),
 ] as const satisfies readonly WorkerToolDefinition[];
 
 // Public API
@@ -115,12 +157,18 @@ export type WorkerToolPayload =
   | z.infer<typeof copyOutOfShareSchema>
   | z.infer<typeof sendFileToChannelSchema>
   | z.infer<typeof requestHttpTokenSchema>
-  | z.infer<typeof requestHostDirectoryAccessSchema>;
+  | z.infer<typeof requestHostDirectoryAccessSchema>
+  | z.infer<typeof createSkillSchema>
+  | z.infer<typeof updateSkillSchema>
+  | z.infer<typeof deleteSkillSchema>;
 export type PrivilegedWorkerToolPayload =
   | z.infer<typeof copyIntoShareSchema>
   | z.infer<typeof copyOutOfShareSchema>
   | z.infer<typeof requestHttpTokenSchema>
-  | z.infer<typeof requestHostDirectoryAccessSchema>;
+  | z.infer<typeof requestHostDirectoryAccessSchema>
+  | z.infer<typeof createSkillSchema>
+  | z.infer<typeof updateSkillSchema>
+  | z.infer<typeof deleteSkillSchema>;
 
 export function parseWorkerToolPayload(name: string, argumentsValue: unknown): WorkerToolPayload {
   const definition = workerToolEntries.find((entry) => entry.name === name);

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { MainAgentController } from "../agent/main-agent-controller.js";
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
 import { createNoopHostfsBroker } from "../hostfs/hostfs-broker.js";
@@ -24,6 +27,7 @@ import type {
   TaskInputPayload,
   WorkerStartConfig,
 } from "../types.js";
+import { SkillService } from "../skills.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
@@ -234,11 +238,13 @@ export function createTestOrchestrator(options: {
   persistentApprovalStore?: PersistentApprovalStore;
   hostfsBroker?: HostfsBroker;
   taskBundleAssignmentRegistry?: TaskBundleAssignmentLookup;
+  skillService?: SkillService;
 }) {
   const channel = options.channel ?? new RecordingChannel();
   const runner = options.sandboxRunner ?? new FakeSandboxRunner();
   const store = options.sessionStore ?? new InMemorySessionStore();
   const privilegeBroker = options.privilegeBroker ?? new FakePrivilegeBroker();
+  const skillService = options.skillService ?? new SkillService(mkdtempSync(join(tmpdir(), "sandy-test-config-")));
   const orchestrator = new SandyOrchestrator({
     channel,
     mainAgent: options.mainAgent,
@@ -249,6 +255,7 @@ export function createTestOrchestrator(options: {
     persistentApprovalStore: options.persistentApprovalStore ?? createNoopPersistentApprovalStore(),
     hostfsBroker: options.hostfsBroker ?? createNoopHostfsBroker(),
     taskBundleAssignmentRegistry: options.taskBundleAssignmentRegistry ?? createNoopTaskBundleAssignmentRegistry(),
+    skillService,
   });
 
   return {
@@ -257,5 +264,6 @@ export function createTestOrchestrator(options: {
     runner,
     store,
     privilegeBroker,
+    skillService,
   };
 }

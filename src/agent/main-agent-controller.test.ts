@@ -244,7 +244,7 @@ test("CodexMainAgentController passes a configured model override into new threa
   assert.equal(expectDefined(codex.startedThreads[0], "Expected started thread options.").model, "gpt-5.4-mini");
 });
 
-test("buildMainAgentPrompt includes configured skill metadata only on the initial turn", () => {
+test("buildMainAgentPrompt includes configured skill metadata on every turn", () => {
   const initialPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["add milk to my shopping list"]).newVisibleEntries,
     activeTask: null,
@@ -267,7 +267,8 @@ test("buildMainAgentPrompt includes configured skill metadata only on the initia
   assert.match(initialPrompt, /Configured skills available to sub-agents:/);
   assert.match(initialPrompt, /Adding task to Todoist/);
   assert.match(initialPrompt, /must launch a sub-agent instead of replying directly/);
-  assert.doesNotMatch(deltaPrompt, /Configured skills available to sub-agents:/);
+  assert.match(deltaPrompt, /Configured skills available to sub-agents:/);
+  assert.match(deltaPrompt, /Adding task to Todoist/);
 });
 
 test("buildMainAgentPrompt does not include skill body text below the frontmatter", () => {

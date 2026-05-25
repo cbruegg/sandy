@@ -142,7 +142,7 @@ async function launchRunnerWithChild(
     handshakeTimeoutMs?: number;
     shareRoot?: string;
     builtWorkerCodexConfigToml?: string | null;
-    skillsDirectory?: string | null;
+    getSkillsDirectory?: () => string | null;
     workerCodexBinaryPath?: string;
     workerNetworkName?: string | null;
     resolveWorkerImage?: () => string;
@@ -158,7 +158,7 @@ async function launchRunnerWithChild(
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: options?.shareRoot ?? "/tmp/sandy-test-shares",
     codexAuthFile: null,
-    skillsDirectory: options?.skillsDirectory ?? null,
+    getSkillsDirectory: options?.getSkillsDirectory ?? (() => null),
     workerCodexBinaryPath: options?.workerCodexBinaryPath ?? defaultWorkerCodexBinaryPath,
     workerNetworkName: options?.workerNetworkName,
     workerNetwork: {
@@ -279,7 +279,7 @@ test("DockerSandboxRunner passes the configured Codex model in the start_task pa
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
     codexAuthFile: null,
-    skillsDirectory: null,
+    getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetwork: {
       mode: "unrestricted",
@@ -550,7 +550,7 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
     codexAuthFile: null,
-    skillsDirectory: null,
+    getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetwork: {
       mode: "unrestricted",
@@ -612,7 +612,7 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
     codexAuthFile: null,
-    skillsDirectory: null,
+    getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetwork: {
       mode: "unrestricted",
@@ -675,7 +675,7 @@ test("DockerSandboxRunner falls back to a root Docker container when host rm fai
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
     codexAuthFile: null,
-    skillsDirectory: null,
+    getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetwork: {
       mode: "unrestricted",
@@ -754,7 +754,7 @@ test("DockerSandboxRunner mounts configured skills read-only into the worker", a
   const skillsDirectory = "/tmp/sandy-config/skills";
 
   const { invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
-    skillsDirectory,
+    getSkillsDirectory: () => skillsDirectory,
   });
 
   const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
@@ -766,7 +766,7 @@ test("DockerSandboxRunner does not mount skills when no skills directory is conf
   const taskChild = new FakeChildProcess();
 
   const { invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
-    skillsDirectory: null,
+    getSkillsDirectory: () => null,
   });
 
   const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
@@ -832,7 +832,7 @@ test("DockerSandboxRunner launches a network guard and shares its network namesp
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
     codexAuthFile: null,
-    skillsDirectory: null,
+    getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetworkName: "sandy-mcp-net",
     workerNetwork: {
@@ -930,7 +930,7 @@ test("DockerSandboxRunner reports a disconnect when the network guard exits mid-
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
     codexAuthFile: null,
-    skillsDirectory: null,
+    getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetwork: {
       mode: "public_internet_only",
@@ -992,7 +992,7 @@ test("DockerSandboxRunner rejects share inspection for unknown tasks", async () 
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
     codexAuthFile: null,
-    skillsDirectory: null,
+    getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetwork: {
       mode: "unrestricted",
@@ -1029,7 +1029,7 @@ test("DockerSandboxRunner rejects share deletion for unknown tasks", async () =>
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
     codexAuthFile: null,
-    skillsDirectory: null,
+    getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetwork: {
       mode: "unrestricted",
@@ -1097,7 +1097,7 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
     codexAuthFile: null,
-    skillsDirectory: null,
+    getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetworkName: "sandy-mcp-net",
     workerNetwork: {
@@ -1223,7 +1223,7 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
     codexAuthFile: null,
-    skillsDirectory: null,
+    getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetwork: {
       mode: "unrestricted",
@@ -1325,7 +1325,7 @@ test("DockerSandboxRunner adds managed label to worker, guard and proxy containe
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
     codexAuthFile: null,
-    skillsDirectory: null,
+    getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetwork: {
       mode: "unrestricted",

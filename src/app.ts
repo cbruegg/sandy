@@ -32,6 +32,7 @@ import { validateMatrixAuthStateForStartup, resolveMatrixAccessToken } from "./m
 import {createNoopHostfsBroker} from "./hostfs/hostfs-broker.js";
 import {initializeHostfs, type HostfsServices} from "./hostfs/index.js";
 import { ChatGPTTokenBroker } from "./auth/chatgpt-token-broker.js";
+import { SkillService } from "./skills.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -57,7 +58,6 @@ export async function startApp(): Promise<void> {
     workerPreinstallRefresh: config.workerPreinstall.refresh,
     workerNetworkMode: config.workerNetwork.mode,
     workerNetworkAllowLocalCidrs: config.workerNetwork.allowLocalCidrs,
-    configuredSkillCount: config.skills.length,
   });
 
   const transcriptionProvider = config.sttApiKey
@@ -127,10 +127,12 @@ export async function startApp(): Promise<void> {
   const hostMcpRegistry = new HostMcpServerRegistry(config.mcpServers);
   await hostMcpRegistry.start();
 
+  const skillService = new SkillService(config.configDirectory);
+
   const mainAgent = new CodexMainAgentController(
     codex,
     config.agentModel,
-    config.skills,
+    () => skillService.getSkills(),
     Object.keys(config.mcpServers),
     config.httpTokens,
   );
@@ -229,7 +231,7 @@ export async function startApp(): Promise<void> {
       && config.authMode.codexAuthStrategy === "copy_file"
       ? config.authMode.codexAuthFile
       : null,
-    skillsDirectory: config.skillsDirectory,
+    getSkillsDirectory: () => skillService.getSkillsDirectory(),
     workerCodexBinaryPath,
     networkGuardImage: config.networkGuardImage,
     workerNetwork: config.workerNetwork,
@@ -327,6 +329,7 @@ export async function startApp(): Promise<void> {
     persistentApprovalStore,
     hostfsBroker: hostfsServices?.broker ?? createNoopHostfsBroker(),
     taskBundleAssignmentRegistry,
+    skillService,
   });
 
   const sidecarManager = new McpSidecarManager({
