@@ -170,9 +170,7 @@ export class ChatGPTTokenBroker {
         id_token?: string;
       };
     } catch (error) {
-      logger.error("token_broker.refresh_error", {
-        message: error instanceof Error ? error.message : "Unknown refresh error.",
-      });
+      logger.error("token_broker.refresh_error", error, "Unknown refresh error.");
       return null;
     }
   }

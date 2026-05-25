@@ -149,11 +149,10 @@ export class WebDAVServer {
           res.end("Method not allowed");
       }
     } catch (error) {
-        logger.error("hostfs.webdav_request_failed", {
+        logger.error("hostfs.webdav_request_failed", error, String(error), {
           method: req.method,
           url: requestPath,
           bundleId,
-          error: error instanceof Error ? error.message : String(error),
         });
       res.statusCode = 500;
       res.end("Internal server error");
@@ -317,9 +316,8 @@ export class WebDAVServer {
       res.statusCode = existed ? 204 : 201;
       res.end();
     } catch (error) {
-      logger.error("hostfs.webdav_put_failed", {
+      logger.error("hostfs.webdav_put_failed", error, String(error), {
         hostPath,
-        error: error instanceof Error ? error.message : String(error),
       });
       res.statusCode = 500;
       res.end("Write failed");
@@ -363,9 +361,8 @@ export class WebDAVServer {
       res.statusCode = 204;
       res.end();
     } catch (error) {
-      logger.error("hostfs.webdav_delete_failed", {
+      logger.error("hostfs.webdav_delete_failed", error, String(error), {
         hostPath,
-        error: error instanceof Error ? error.message : String(error),
       });
       res.statusCode = 500;
       res.end("Delete failed");
@@ -401,9 +398,8 @@ export class WebDAVServer {
         res.end("Already exists");
         return;
       }
-      logger.error("hostfs.webdav_mkcol_failed", {
+      logger.error("hostfs.webdav_mkcol_failed", error, String(error), {
         hostPath,
-        error: error instanceof Error ? error.message : String(error),
       });
       res.statusCode = 500;
       res.end("Create directory failed");

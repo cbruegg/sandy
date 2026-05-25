@@ -101,9 +101,8 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
       try {
         hostfsVolumeName = await this.options.createHostfsVolume(bundleId);
       } catch (error) {
-        logger.error("bundle.hostfs_volume_creation_failed", {
+        logger.error("bundle.hostfs_volume_creation_failed", error, String(error), {
           bundleId,
-          error: error instanceof Error ? error.message : String(error),
         });
         // Continue without hostfs volume
       }
@@ -360,10 +359,9 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
             reject(new Error(message.message ?? "HTTP proxy container failed during startup."));
           }
         } catch (error) {
-          logger.error("bundle.http_proxy_protocol_error", {
+          logger.error("bundle.http_proxy_protocol_error", error, "Invalid proxy control message.", {
             containerName,
             line: line.trim(),
-            message: error instanceof Error ? error.message : "Invalid proxy control message.",
           });
         }
       });
@@ -448,7 +446,7 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
         logger.warn(event, payload);
         return;
       case "error":
-        logger.error(event, payload);
+        logger.error(event, null, undefined, payload);
         return;
     }
   }

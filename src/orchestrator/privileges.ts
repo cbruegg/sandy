@@ -72,11 +72,10 @@ export class OrchestratorPrivileges {
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown native tool execution failure.";
-      logger.error("task.native_tool_handler_failed", {
+      logger.error("task.native_tool_handler_failed", error, "Unknown native tool execution failure.", {
         chatId,
         taskId: input.taskId,
         toolName: input.toolName,
-        message,
       });
       await this.failActiveTaskFromEventHandling(session, input.taskId, message);
       return {

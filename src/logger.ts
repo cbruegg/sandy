@@ -47,8 +47,18 @@ class SandyLogger {
     this.write("warn", event, data);
   }
 
-  error(event: string, data?: Record<string, unknown>): void {
-    this.write("error", event, data);
+  error(
+    event: string,
+    error: unknown,
+    defaultMessage?: string,
+    data?: Record<string, unknown>,
+  ): void {
+    if (error !== null && defaultMessage !== undefined) {
+      const message = error instanceof Error ? error.message : defaultMessage;
+      this.write("error", event, { message, ...(data ?? {}) });
+    } else {
+      this.write("error", event, data);
+    }
   }
 
   debugContent(event: string, data?: Record<string, unknown>): void {

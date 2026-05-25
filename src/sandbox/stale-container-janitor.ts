@@ -59,9 +59,8 @@ async function removeContainer(spawner: typeof spawn, id: string): Promise<void>
     });
 
     child.once("error", (error) => {
-      logger.error("janitor.removal_failed", {
+      logger.error("janitor.removal_failed", error, String(error), {
         containerId: id,
-        error: error instanceof Error ? error.message : String(error),
       });
       resolve();
     });

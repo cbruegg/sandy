@@ -86,9 +86,8 @@ export async function startApp(): Promise<void> {
     }
     shutdownRequested = true;
     const wrappedError = error instanceof Error ? error : new Error(`Fatal channel error from ${source}.`);
-    logger.error("app.fatal_channel_error", {
+    logger.error("app.fatal_channel_error", wrappedError, `Fatal channel error from ${source}.`, {
       source,
-      message: wrappedError.message,
     });
     void shutdown?.().finally(() => rejectFatalError?.(wrappedError));
   };
@@ -296,9 +295,7 @@ export async function startApp(): Promise<void> {
             tokens: await tokenBroker.getInitialTokens(),
           };
         } catch (error) {
-          logger.error("token_broker.worker_launch_tokens_failed", {
-            message: error instanceof Error ? error.message : "Unknown error",
-          });
+          logger.error("token_broker.worker_launch_tokens_failed", error, "Unknown error");
           auth = { mode: "ambient_auth_file" };
         }
       } else {
@@ -321,9 +318,7 @@ export async function startApp(): Promise<void> {
       try {
         return await tokenBroker.refreshTokens(previousAccountId);
       } catch (error) {
-        logger.error("token_broker.refresh_failed", {
-          message: error instanceof Error ? error.message : "Unknown error",
-        });
+        logger.error("token_broker.refresh_failed", error, "Unknown error");
         return null;
       }
     },

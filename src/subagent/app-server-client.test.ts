@@ -616,7 +616,7 @@ test("CodexAppServerClient sends JSON-RPC error when auth refresh handler reject
     const errorLog = logs.find((entry) => entry.event === "appserver.auth_refresh_failed");
     assert.ok(errorLog);
     assert.equal(errorLog?.level, "error");
-    assert.equal(errorLog?.data?.["error"], "Host refused to refresh tokens");
+    assert.equal(errorLog?.data?.["message"], "Host refused to refresh tokens");
 
     // Complete the turn so the stream iterator can finish cleanly.
     child.stdout.write(`${JSON.stringify({
