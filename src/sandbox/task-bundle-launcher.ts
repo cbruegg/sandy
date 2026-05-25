@@ -22,6 +22,7 @@ import {randomUUID} from "node:crypto";
 import {SANDY_CODEX_PATH_ENV} from "../codex-client.ts";
 
 const workerCodexSeedMountPath = "/run/sandy-codex-seed";
+const workerCodexContainerPath = "/usr/local/bin/codex";
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 300_000;
 
 export type TaskBundleLauncherOptions = {
@@ -31,7 +32,7 @@ export type TaskBundleLauncherOptions = {
   shareRoot: string;
   codexAuthFile: string | null;
   skillsDirectory: string | null;
-  workerCodexBinaryPath?: string | null;
+  workerCodexBinaryPath: string;
   workerNetworkName?: string | null;
   workerNetwork: WorkerNetworkConfig;
   httpProxyCaCertPath?: string | null;
@@ -193,9 +194,7 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
     const hostTz = process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
     dockerArgs.push("-e", `TZ=${hostTz}`);
 
-    if (this.options.workerCodexBinaryPath) {
-      dockerArgs.push("-e", `${SANDY_CODEX_PATH_ENV}=/usr/local/bin/codex`);
-    }
+    dockerArgs.push("-e", `${SANDY_CODEX_PATH_ENV}=${workerCodexContainerPath}`);
 
     if (this.options.httpProxyCaCertPath && this.options.httpProxyImage) {
       dockerArgs.push(
@@ -208,9 +207,7 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
       dockerArgs.push("-v", `${workerCodexHomeTempDir}:${workerCodexSeedMountPath}:ro`);
     }
 
-    if (this.options.workerCodexBinaryPath) {
-      dockerArgs.push("-v", `${this.options.workerCodexBinaryPath}:/usr/local/bin/codex:ro`);
-    }
+    dockerArgs.push("-v", `${this.options.workerCodexBinaryPath}:${workerCodexContainerPath}:ro`);
 
     if (this.options.skillsDirectory) {
       dockerArgs.push("-v", `${this.options.skillsDirectory}:${workerSkillsPath}:ro`);
