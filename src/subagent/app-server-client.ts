@@ -1,7 +1,8 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
+import type { Input } from "@openai/codex-sdk";
 import { z } from "zod";
-import type { AppServerTurnInput, ChatGPTExternalTokens } from "../types.js";
+import type { ChatGPTExternalTokens } from "../types.js";
 import { logger } from "../logger.js";
 import { buildAppServerThreadStartParams } from "./codex-task-runtime.js";
 
@@ -259,8 +260,14 @@ export class CodexAppServerClient {
     });
   }
 
-  private async initialize(enableExperimentalApi: boolean): Promise<void> {
-    this.start();
+  // ---- typed RPC layer (covers only the subset Sandy uses) ----
+  //
+  // The low-level request() method is generic and dynamically typed.
+  // These wrappers give compile-time safety for the app-server methods
+  // Sandy actually calls. When adding new RPC methods, extend this layer
+  // rather than calling request() directly.
+
+  private async rpcInitialize(enableExperimentalApi: boolean): Promise<void> {
     await this.request<void>("initialize", {
       clientInfo: {
         name: "sandy_worker",
@@ -273,6 +280,37 @@ export class CodexAppServerClient {
           }
         : {},
     });
+  }
+
+  private async rpcLoginWithTokens(tokens: ChatGPTExternalTokens): Promise<void> {
+    await this.request<void>("account/login/start", {
+      type: "chatgptAuthTokens",
+      accessToken: tokens.accessToken,
+      chatgptAccountId: tokens.chatgptAccountId,
+      chatgptPlanType: tokens.chatgptPlanType,
+    });
+  }
+
+  private async rpcThreadStart(model?: string): Promise<{ thread: { id: string } }> {
+    return await this.request<{ thread: { id: string } }>("thread/start", buildAppServerThreadStartParams(model));
+  }
+
+  private async rpcTurnStart(threadId: string, input: Input): Promise<void> {
+    const wireInput = typeof input === "string"
+      ? [{ type: "text" as const, text: input }]
+      : input;
+    await this.request<void>("turn/start", { threadId, input: wireInput });
+  }
+
+  private async rpcTurnInterrupt(threadId: string): Promise<void> {
+    await this.request<void>("turn/interrupt", { threadId });
+  }
+
+  // ---- end typed RPC layer ----
+
+  private async initialize(enableExperimentalApi: boolean): Promise<void> {
+    this.start();
+    await this.rpcInitialize(enableExperimentalApi);
     if (this.child) {
       this.child.stdin.write(JSON.stringify({ jsonrpc: "2.0", method: "initialized", params: {} }) + "\n");
     }
@@ -281,24 +319,19 @@ export class CodexAppServerClient {
 
   async loginWithTokens(tokens: ChatGPTExternalTokens): Promise<void> {
     this.ensureStarted("loginWithTokens");
-    await this.request("account/login/start", {
-      type: "chatgptAuthTokens",
-      accessToken: tokens.accessToken,
-      chatgptAccountId: tokens.chatgptAccountId,
-      chatgptPlanType: tokens.chatgptPlanType,
-    });
+    await this.rpcLoginWithTokens(tokens);
     this.loggedIn = true;
   }
 
   async startThread(model?: string): Promise<string> {
     this.ensureReady("startThread");
-    const result = await this.request<{ thread: { id: string } }>("thread/start", buildAppServerThreadStartParams(model));
+    const result = await this.rpcThreadStart(model);
     return result.thread.id;
   }
 
   async *streamTurn(
     threadId: string,
-    input: AppServerTurnInput,
+    input: Input,
     onAuthRefresh: AuthRefreshCallback,
     abortSignal?: AbortSignal,
   ): AsyncGenerator<AppServerEvent> {
@@ -330,10 +363,7 @@ export class CodexAppServerClient {
       });
     };
 
-    await this.request("turn/start", {
-      threadId,
-      input,
-    });
+    await this.rpcTurnStart(threadId, input);
 
     try {
       let done = false;
@@ -366,7 +396,7 @@ export class CodexAppServerClient {
 
         if (!event) {
           try {
-            await this.request("turn/interrupt", { threadId });
+            await this.rpcTurnInterrupt(threadId);
           } catch {
             // best effort
           }

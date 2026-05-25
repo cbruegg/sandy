@@ -1,5 +1,6 @@
 import { logger } from "../logger.js";
-import type { AppServerTurnInput, ChatGPTExternalTokens, SubAgentEvent } from "../types.js";
+import type { Input } from "@openai/codex-sdk";
+import type { ChatGPTExternalTokens, SubAgentEvent } from "../types.js";
 import { CodexAppServerClient } from "./app-server-client.js";
 import { writeSubAgentEvent } from "./subagent-event-writer.js";
 import { buildTaskSummaryInput } from "./worker-prompt.js";
@@ -22,7 +23,7 @@ type AppServerSessionAuthMode =
 type StreamAppServerTaskTurnOptions = {
   appServer: AppServerTurnStreamer;
   threadId: string;
-  input: AppServerTurnInput;
+  input: Input;
   onAuthRefresh: AuthRefreshCallback;
   abortSignal?: AbortSignal;
   sendEvent?: (event: SubAgentEvent) => void;
@@ -31,7 +32,7 @@ type StreamAppServerTaskTurnOptions = {
 type StreamAppServerSummaryOptions = {
   appServer: AppServerTurnStreamer;
   threadId: string;
-  input: AppServerTurnInput;
+  input: Input;
   onAuthRefresh: AuthRefreshCallback;
   abortSignal?: AbortSignal;
 };
@@ -186,7 +187,7 @@ export class AppServerWorkerSession {
     this.handleAuthRefreshResult(null);
   }
 
-  async streamTurn(input: AppServerTurnInput, abortSignal?: AbortSignal): Promise<boolean> {
+  async streamTurn(input: Input, abortSignal?: AbortSignal): Promise<boolean> {
     return streamAppServerTurn({
       appServer: this.appServer,
       threadId: this.threadId,

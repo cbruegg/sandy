@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { type Thread } from "@openai/codex-sdk";
+import { type Input, type Thread } from "@openai/codex-sdk";
 import { messages } from "../messages.js";
 import { AppServerWorkerSession } from "./worker-app-server.js";
 import {
@@ -12,7 +12,7 @@ import {
   streamAppServerTurn,
   streamTurn,
 } from "./worker.js";
-import type { AppServerTurnInput, ChannelFormatting, HostCommand, PrivilegeResolutionResult, SubAgentEvent } from "../types.js";
+import type { ChannelFormatting, HostCommand, PrivilegeResolutionResult, SubAgentEvent } from "../types.js";
 import { parseSubAgentEvent } from "../types.js";
 import { parseWorkerToolPayload } from "./worker-tools.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
@@ -25,7 +25,7 @@ const testFormatting: ChannelFormatting = {
 };
 
 function createAppServerSessionStarter(session: {
-  streamTurn: (input: AppServerTurnInput, abortSignal?: AbortSignal) => Promise<boolean>;
+  streamTurn: (input: Input, abortSignal?: AbortSignal) => Promise<boolean>;
   emitTaskSummary: () => Promise<void>;
   close: () => void;
   cancelPendingAuthRefresh: () => void;
@@ -108,24 +108,18 @@ test("buildPrivilegeResolutionInput explains the host privilege result to the su
 
   const input = buildPrivilegeResolutionInput(result);
 
-  assert.equal(input.length, 1);
-  assert.equal(input[0]?.type, "text");
-  const text = input[0]?.type === "text" ? input[0].text : "";
-  assert.match(text, /req-1/);
-  assert.match(text, /approved/);
-  assert.match(text, /Copied \/tmp\/input.txt into the shared workspace\./);
-  assert.match(text, /Continue the task from here\./);
+  assert.match(input, /req-1/);
+  assert.match(input, /approved/);
+  assert.match(input, /Copied \/tmp\/input.txt into the shared workspace\./);
+  assert.match(input, /Continue the task from here\./);
 });
 
 test("buildTaskSummaryInput requests a host-facing handoff summary", () => {
   const input = buildTaskSummaryInput();
 
-  assert.equal(input.length, 1);
-  assert.equal(input[0]?.type, "text");
-  const text = input[0]?.type === "text" ? input[0].text : "";
-  assert.match(text, /host-facing handoff summary/);
-  assert.match(text, /Do not emit any Sandy tool calls/);
-  assert.match(text, /Artifacts:/);
+  assert.match(input, /host-facing handoff summary/);
+  assert.match(input, /Do not emit any Sandy tool calls/);
+  assert.match(input, /Artifacts:/);
 });
 
 test("buildInitialTaskInput includes current date and time", () => {
@@ -148,7 +142,7 @@ test("buildInitialTaskInput includes current date and time", () => {
 test("worker processes follow-up commands after start_task initialization finishes", async () => {
   const { promise: sessionReady, resolve: resolveSession } = Promise.withResolvers<void>();
   const sentEvents: SubAgentEvent[] = [];
-  const turnInputs: AppServerTurnInput[] = [];
+  const turnInputs: Input[] = [];
   const startTaskCommand: Extract<HostCommand, { type: "start_task" }> = {
     type: "start_task",
     taskId: "task-1",
@@ -177,7 +171,7 @@ test("worker processes follow-up commands after start_task initialization finish
     startAppServerWorkerSession: async () => {
       await sessionReady;
       return {
-        async streamTurn(input: AppServerTurnInput) {
+        async streamTurn(input: Input) {
           turnInputs.push(input);
           return false;
         },
@@ -204,10 +198,8 @@ test("worker processes follow-up commands after start_task initialization finish
 
   assert.equal(sentEvents.some((event) => event.type === "task_error"), false);
   assert.equal(turnInputs.length, 2);
-  const initialInputJson = JSON.stringify(turnInputs[0]);
-  assert.match(initialInputJson, /Add the track to the DJ collection/);
-  const followUpInputJson = JSON.stringify(turnInputs[1]);
-  assert.match(followUpInputJson, /Use https:\/\/example\.com\/set/);
+  assert.match(JSON.stringify(turnInputs[0]), /Add the track to the DJ collection/);
+  assert.match(JSON.stringify(turnInputs[1]), /Use https:\/\/example\.com\/set/);
 });
 
 test("worker requires SANDY_CODEX_PATH for app-server tasks", async () => {
@@ -303,7 +295,7 @@ test("worker starts ambient app-server auth for api key mode and exports CODEX_A
 });
 
 test("worker passes image attachments through app-server user_message turns", async () => {
-  const turnInputs: AppServerTurnInput[] = [];
+  const turnInputs: Input[] = [];
   const processor = createWorkerCommandProcessor({
     sendEvent: () => {},
     env: { SANDY_CODEX_PATH: "/usr/local/bin/codex" },
@@ -618,7 +610,7 @@ test("AppServerWorkerSession accepts a synchronous auth refresh response", async
     close(): void {},
     async *streamTurn(
       _threadId: string,
-      _input: AppServerTurnInput,
+      _input: Input,
       onAuthRefresh: (previousAccountId: string | null) => Promise<typeof refreshedTokens>,
     ) {
       const tokens = await onAuthRefresh("acct-123");
@@ -634,7 +626,7 @@ test("AppServerWorkerSession accepts a synchronous auth refresh response", async
     }
   }, true);
 
-  const sawTerminalError = await session.streamTurn([{ type: "text", text: "hello" }]);
+  const sawTerminalError = await session.streamTurn("hello");
 
   assert.equal(sawTerminalError, false);
   assert.deepEqual(sentEvents, [{

@@ -69,12 +69,6 @@ export type WorkerAuthConfig =
   | { mode: "ambient_auth_file" }
   | { mode: "external_tokens"; tokens: ChatGPTExternalTokens };
 
-type AppServerTurnInputItem =
-  | { type: "text"; text: string }
-  | { type: "local_image"; path: string };
-
-export type AppServerTurnInput = AppServerTurnInputItem[];
-
 export type WorkerStartConfig = {
   auth: WorkerAuthConfig;
   codexModel: string | null;

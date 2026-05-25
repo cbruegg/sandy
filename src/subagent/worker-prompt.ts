@@ -1,8 +1,8 @@
 import { spawnSync } from "node:child_process";
+import type { Input, UserInput } from "@openai/codex-sdk";
 import type { ChannelFormatting, PrivilegeResolutionResult } from "../types.js";
 import { hostMountPath } from "../paths.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
-import type { AppServerTurnInput } from "../types.js";
 import { formatDateTimePrefix } from "../datetime-prefix.js";
 import { sandyMcpServerId } from "./worker-tools.js";
 
@@ -23,7 +23,7 @@ export function buildInitialTaskInput(
   httpTokens: HttpTokenPromptInput[] = [],
   httpProxyWrapper: string | null = null,
   images: ImageAttachment[] = [],
-): AppServerTurnInput {
+): Input {
   const textInput = buildInitialTaskInputWithCapabilities(
     taskBrief,
     taskLanguage,
@@ -33,7 +33,11 @@ export function buildInitialTaskInput(
     httpProxyWrapper,
   );
 
-  const inputs: AppServerTurnInput = [];
+  if (images.length === 0) {
+    return textInput;
+  }
+
+  const inputs: UserInput[] = [];
 
   if (textInput.trim()) {
     inputs.push({ type: "text", text: textInput.trim() });
@@ -105,31 +109,25 @@ export function buildInitialTaskInputWithCapabilities(
   return lines.join("\n");
 }
 
-export function buildPrivilegeResolutionInput(result: PrivilegeResolutionResult): AppServerTurnInput {
-  return [{
-    type: "text",
-    text: [
-      `Host privilege request ${result.requestId} finished with outcome "${result.outcome}".`,
-      result.message,
-      "Continue the task from here.",
-    ].join("\n"),
-  }];
+export function buildPrivilegeResolutionInput(result: PrivilegeResolutionResult): string {
+  return [
+    `Host privilege request ${result.requestId} finished with outcome "${result.outcome}".`,
+    result.message,
+    "Continue the task from here.",
+  ].join("\n");
 }
 
-export function buildTaskSummaryInput(): AppServerTurnInput {
-  return [{
-    type: "text",
-    text: [
-      "Your task work is complete.",
-      "Write a short host-facing handoff summary of this task.",
-      "Do not address the user directly.",
-      "Do not emit any Sandy tool calls.",
-      "Use this exact structure:",
-      "Summary: <what you accomplished and the current state>",
-      "Artifacts: <files created or updated in /workspace/share, or \"none\">",
-      "Open questions: <remaining blockers, follow-ups, or \"none\">",
-    ].join("\n"),
-  }];
+export function buildTaskSummaryInput(): string {
+  return [
+    "Your task work is complete.",
+    "Write a short host-facing handoff summary of this task.",
+    "Do not address the user directly.",
+    "Do not emit any Sandy tool calls.",
+    "Use this exact structure:",
+    "Summary: <what you accomplished and the current state>",
+    "Artifacts: <files created or updated in /workspace/share, or \"none\">",
+    "Open questions: <remaining blockers, follow-ups, or \"none\">",
+  ].join("\n");
 }
 
 function detectRuntimeCapabilities(): string[] {

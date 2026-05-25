@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { CODEX_API_KEY_ENV, SANDY_CODEX_PATH_ENV } from "../codex-client.js";
 import { configureLogger, logger } from "../logger.js";
 import { messages } from "../messages.js";
-import { type AppServerTurnInput, type HostCommand, type SubAgentEvent } from "../types.js";
+import { type HostCommand, type SubAgentEvent } from "../types.js";
 import {
   buildInitialTaskInput,
   buildPrivilegeResolutionInput,
@@ -81,9 +81,9 @@ function joinTaskSections(taskBrief: string, text: string): string {
   return sections.join("\n\n");
 }
 
-function buildAppServerInputWithImages(text: string, images: ImageAttachment[]): AppServerTurnInput {
+function buildAppServerInputWithImages(text: string, images: ImageAttachment[]): Input {
   if (images.length === 0) {
-    return text.trim() ? [{ type: "text" as const, text: text.trim() }] : [];
+    return text;
   }
 
   return [
@@ -184,7 +184,7 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
     return appServerSession;
   };
 
-  const enqueueAppServerTurn = (input: AppServerTurnInput): void => {
+  const enqueueAppServerTurn = (input: Input): void => {
     turnQueue = turnQueue.then(async () => {
       currentAbort = new AbortController();
       try {
