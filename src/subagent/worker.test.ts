@@ -285,9 +285,9 @@ test("streamTurn ignores empty assistant messages", async () => {
       },
     } as unknown as Thread;
 
-    const result = await streamTurn(thread, "Inspect the reel.");
+    const sawTerminalError = await streamTurn(thread, "Inspect the reel.");
 
-    assert.equal(result.sawTerminalError, false);
+    assert.equal(sawTerminalError, false);
     assert.deepEqual(writes, []);
   } finally {
     process.stdout.write = originalWrite;
@@ -397,11 +397,17 @@ test("streamAppServerTurn emits assistant output only after the message complete
       },
     };
 
-    for await (const _result of streamAppServerTurn(appServer as Parameters<typeof streamAppServerTurn>[0], "thread-1", "hello")) {
-      // drain generator
-    }
+    const sawTerminalError = await streamAppServerTurn({
+      appServer: appServer as Parameters<typeof streamAppServerTurn>[0]["appServer"],
+      threadId: "thread-1",
+      input: "hello",
+      onAuthRefresh: async () => {
+        throw new Error("unexpected auth refresh");
+      },
+    });
 
     const events = writes.map((entry) => JSON.parse(entry.trim()) as SubAgentEvent);
+    assert.equal(sawTerminalError, false);
     assert.deepEqual(events, [{ type: "assistant_output", text: "Using the Todoist skill." }]);
   } finally {
     process.stdout.write = originalWrite;
@@ -436,11 +442,17 @@ test("streamAppServerTurn does not duplicate completed messages after deltas", a
       },
     };
 
-    for await (const _result of streamAppServerTurn(appServer as Parameters<typeof streamAppServerTurn>[0], "thread-1", "hello")) {
-      // drain generator
-    }
+    const sawTerminalError = await streamAppServerTurn({
+      appServer: appServer as Parameters<typeof streamAppServerTurn>[0]["appServer"],
+      threadId: "thread-1",
+      input: "hello",
+      onAuthRefresh: async () => {
+        throw new Error("unexpected auth refresh");
+      },
+    });
 
     const events = writes.map((entry) => JSON.parse(entry.trim()) as SubAgentEvent);
+    assert.equal(sawTerminalError, false);
     assert.deepEqual(events, [{ type: "assistant_output", text: "Hello world" }]);
   } finally {
     process.stdout.write = originalWrite;
@@ -456,7 +468,7 @@ test("AppServerWorkerSession accepts a synchronous auth refresh response", async
   };
 
   const appServer = {
-    async close(): Promise<void> {},
+    close(): void {},
     async *streamTurn(
       _threadId: string,
       _inputText: string,
@@ -475,9 +487,9 @@ test("AppServerWorkerSession accepts a synchronous auth refresh response", async
     }
   });
 
-  const result = await session.streamTurn("hello");
+  const sawTerminalError = await session.streamTurn("hello");
 
-  assert.equal(result.sawTerminalError, false);
+  assert.equal(sawTerminalError, false);
   assert.deepEqual(sentEvents, [{
     type: "chatgpt_auth_refresh_request",
     previousAccountId: "acct-123",

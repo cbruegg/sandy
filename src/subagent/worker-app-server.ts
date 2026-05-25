@@ -4,8 +4,6 @@ import { CodexAppServerClient } from "./app-server-client.js";
 import { writeSubAgentEvent } from "./subagent-event-writer.js";
 import { buildTaskSummaryInput } from "./worker-prompt.js";
 
-type TurnMode = "task" | "summary";
-
 type StreamTurnResult = {
   sawTerminalError: boolean;
   summaryText: string | null;
@@ -17,19 +15,57 @@ type AuthRefreshCallback = (
   previousAccountId: string | null,
 ) => Promise<{ accessToken: string; chatgptAccountId: string; chatgptPlanType: string | null }>;
 
+type StreamAppServerTaskTurnOptions = {
+  appServer: AppServerTurnStreamer;
+  threadId: string;
+  input: string;
+  onAuthRefresh: AuthRefreshCallback;
+  abortSignal?: AbortSignal;
+  sendEvent?: (event: SubAgentEvent) => void;
+};
+
+type StreamAppServerSummaryOptions = {
+  appServer: AppServerTurnStreamer;
+  threadId: string;
+  input: string;
+  onAuthRefresh: AuthRefreshCallback;
+  abortSignal?: AbortSignal;
+};
+
 class AppServerMessageBuffer {
+  // `emittedText` tracks text that has already been forwarded to the host for
+  // the current assistant message.
   private emittedText = "";
+  // `pendingText` tracks newly streamed text that we have buffered locally but
+  // have not forwarded yet because the message has not been completed.
   private pendingText = "";
 
-  appendDelta(text: string): string[] {
+  appendDelta(text: string): void {
     if (!text) {
-      return [];
+      return;
     }
     this.pendingText += text;
-    return [];
   }
 
   appendCompleted(text: string): string[] {
+    // The app-server streams deltas and then later emits the full completed
+    // message text for the same item. We only want to forward text that has not
+    // already been emitted.
+    //
+    // Example 1:
+    //   deltas:    "Hello" + " world"
+    //   completed: "Hello world"
+    //   output:    ["Hello world"]
+    //
+    // Example 2:
+    //   deltas:    "Hello world"
+    //   completed: "Hello"
+    //   output:    []
+    //
+    // Example 3:
+    //   deltas:    "Hello"
+    //   completed: "Rewritten answer"
+    //   output:    ["Rewritten answer"]
     if (!text) {
       return this.flushAll();
     }
@@ -78,25 +114,18 @@ function normalizeSummaryText(chunks: string[]): string | null {
   return summary.length > 0 ? summary : null;
 }
 
-export async function* streamAppServerTurn(
-  appServer: AppServerTurnStreamer,
-  threadId: string,
-  input: string,
-  mode: TurnMode = "task",
-  abortSignal?: AbortSignal,
-  onAuthRefresh: AuthRefreshCallback = () => Promise.reject(
-    new Error("App-server requested auth refresh without a configured handler."),
-  ),
-  sendEvent: (event: SubAgentEvent) => void = writeSubAgentEvent,
-): AsyncGenerator<{
-  result: StreamTurnResult;
-  events: SubAgentEvent[];
-}> {
-  let sawTerminalError = false;
-  const summaryChunks: string[] = [];
+/**
+ * Streams one ongoing app-server task turn.
+ *
+ * Use this for normal live conversation turns while the sub-agent is actively
+ * working through the task in the current thread.
+ */
+export async function streamAppServerTurn(options: StreamAppServerTaskTurnOptions): Promise<boolean> {
+  const sendEvent = options.sendEvent ?? writeSubAgentEvent;
   const messageBuffer = new AppServerMessageBuffer();
+  let sawTerminalError = false;
 
-  const flushBufferedTaskOutput = () => {
+  const flushBufferedTaskOutput = (): void => {
     for (const chunk of messageBuffer.flushAll()) {
       if (chunk.trim()) {
         sendEvent({ type: "assistant_output", text: chunk });
@@ -104,91 +133,113 @@ export async function* streamAppServerTurn(
     }
   };
 
-  const appendSummaryChunk = (text: string | null) => {
-    if (text) {
-      summaryChunks.push(text);
-    }
-  };
-
   try {
-    for await (const event of appServer.streamTurn(threadId, input, onAuthRefresh, abortSignal)) {
+    for await (const event of options.appServer.streamTurn(
+      options.threadId,
+      options.input,
+      options.onAuthRefresh,
+      options.abortSignal,
+    )) {
       logger.debug("appserver.event_received", { eventType: event.type, event });
 
       switch (event.type) {
-        case "agent_message_delta": {
+        case "agent_message_delta":
           messageBuffer.appendDelta(event.text);
           break;
-        }
 
-        case "agent_message_completed": {
-          if (mode === "summary") {
-            messageBuffer.appendCompleted(event.text);
-            appendSummaryChunk(messageBuffer.takeCompletedText());
-            break;
-          }
-
+        case "agent_message_completed":
           for (const chunk of messageBuffer.appendCompleted(event.text)) {
             if (chunk.trim()) {
               sendEvent({ type: "assistant_output", text: chunk });
             }
           }
           break;
-        }
 
         case "turn_completed":
-          if (mode === "summary") {
-            appendSummaryChunk(messageBuffer.takeCompletedText());
-          } else {
-            flushBufferedTaskOutput();
-          }
+          flushBufferedTaskOutput();
           break;
 
         case "turn_failed":
-          if (mode !== "summary") {
-            flushBufferedTaskOutput();
-          }
+          flushBufferedTaskOutput();
           sendEvent({ type: "task_error", message: event.error });
           sawTerminalError = true;
-          yield {
-            result: { sawTerminalError: true, summaryText: null },
-            events: [],
-          };
-          return;
+          return sawTerminalError;
 
         case "error":
-          if (mode !== "summary") {
-            flushBufferedTaskOutput();
-          }
+          flushBufferedTaskOutput();
           sendEvent({ type: "task_error", message: event.message });
           sawTerminalError = true;
-          yield {
-            result: { sawTerminalError: true, summaryText: null },
-            events: [],
-          };
-          return;
+          return sawTerminalError;
       }
     }
   } catch (error) {
-    if (mode !== "summary") {
-      flushBufferedTaskOutput();
-    }
+    flushBufferedTaskOutput();
     const message = error instanceof Error ? error.message : "App-server turn failed.";
     sendEvent({ type: "task_error", message });
     sawTerminalError = true;
   }
 
-  if (mode === "summary") {
-    appendSummaryChunk(messageBuffer.takeCompletedText());
-  } else {
-    flushBufferedTaskOutput();
+  flushBufferedTaskOutput();
+  return sawTerminalError;
+}
+
+/**
+ * Streams the final host-facing summary request for a completed thread.
+ *
+ * Use this only after task completion when asking the sub-agent to summarize
+ * the whole conversation/thread for the final handoff.
+ */
+async function streamAppServerSummary(options: StreamAppServerSummaryOptions): Promise<StreamTurnResult> {
+  const summaryChunks: string[] = [];
+  const messageBuffer = new AppServerMessageBuffer();
+  let sawTerminalError = false;
+
+  const appendSummaryChunk = (text: string | null): void => {
+    if (text) {
+      summaryChunks.push(text);
+    }
+  };
+
+  try {
+    for await (const event of options.appServer.streamTurn(
+      options.threadId,
+      options.input,
+      options.onAuthRefresh,
+      options.abortSignal,
+    )) {
+      logger.debug("appserver.event_received", { eventType: event.type, event });
+
+      switch (event.type) {
+        case "agent_message_delta":
+          messageBuffer.appendDelta(event.text);
+          break;
+
+        case "agent_message_completed":
+          messageBuffer.appendCompleted(event.text);
+          appendSummaryChunk(messageBuffer.takeCompletedText());
+          break;
+
+        case "turn_completed":
+          appendSummaryChunk(messageBuffer.takeCompletedText());
+          break;
+
+        case "turn_failed":
+          sawTerminalError = true;
+          return { sawTerminalError, summaryText: null };
+
+        case "error":
+          sawTerminalError = true;
+          return { sawTerminalError, summaryText: null };
+      }
+    }
+  } catch {
+    sawTerminalError = true;
   }
 
-  yield {
-    result: {
-      sawTerminalError,
-      summaryText: mode === "summary" ? normalizeSummaryText(summaryChunks) : null,
-    },
-    events: [],
+  appendSummaryChunk(messageBuffer.takeCompletedText());
+  return {
+    sawTerminalError,
+    summaryText: normalizeSummaryText(summaryChunks),
   };
 }
 
@@ -228,33 +279,24 @@ export class AppServerWorkerSession {
     this.handleAuthRefreshResult(null);
   }
 
-  async streamTurn(
-    inputText: string,
-    mode: TurnMode = "task",
-    abortSignal?: AbortSignal,
-  ): Promise<StreamTurnResult> {
-    let finalResult: StreamTurnResult = {
-      sawTerminalError: false,
-      summaryText: null,
-    };
-
-    for await (const { result } of streamAppServerTurn(
-      this.appServer,
-      this.threadId,
-      inputText,
-      mode,
+  async streamTurn(inputText: string, abortSignal?: AbortSignal): Promise<boolean> {
+    return streamAppServerTurn({
+      appServer: this.appServer,
+      threadId: this.threadId,
+      input: inputText,
+      onAuthRefresh: async (previousAccountId) => await this.requestAuthRefresh(previousAccountId),
       abortSignal,
-      async (previousAccountId) => await this.requestAuthRefresh(previousAccountId),
-      this.sendEvent,
-    )) {
-      finalResult = result;
-    }
-
-    return finalResult;
+      sendEvent: this.sendEvent,
+    });
   }
 
   async emitTaskSummary(): Promise<void> {
-    const result = await this.streamTurn(buildTaskSummaryInput(), "summary");
+    const result = await streamAppServerSummary({
+      appServer: this.appServer,
+      threadId: this.threadId,
+      input: buildTaskSummaryInput(),
+      onAuthRefresh: async (previousAccountId) => await this.requestAuthRefresh(previousAccountId),
+    });
     if (result.sawTerminalError || !result.summaryText) {
       return;
     }
@@ -265,10 +307,9 @@ export class AppServerWorkerSession {
     });
   }
 
-  close(): Promise<void> {
+  close(): void {
     this.cancelPendingAuthRefresh();
     this.appServer.close();
-    return Promise.resolve();
   }
 
   private async requestAuthRefresh(previousAccountId: string | null): Promise<{

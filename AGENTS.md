@@ -68,6 +68,7 @@ Keep the runtime dependency graph acyclic. Do not introduce circular constructio
 Avoid module-scope mutable runtime state. Keep mutable coordination state inside explicit objects or function scopes so concurrent work does not share hidden globals.
 When code depends on process environment values, inject an env object at the function boundary so tests do not need to mutate the global `process.env`.
 Do not make dependencies optional merely so production code can fall back to globals while tests override them. If a function or class needs injectable collaborators, require them explicitly and provide production values at the composition boundary.
+Do not make functions return a Promise when they can complete synchronously. Prefer plain synchronous return types unless the implementation actually needs asynchronous behavior.
 
 ## Testing Guidelines
 

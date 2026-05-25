@@ -43,6 +43,24 @@ function respond(child: FakeChildProcess, id: number, result: unknown): void {
   child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`);
 }
 
+async function createAuthenticatedClient(
+  spawnImpl: typeof import("node:child_process").spawn,
+  child: FakeChildProcess,
+  tokens: ChatGPTExternalTokens,
+): Promise<CodexAppServerClient> {
+  const clientPromise = CodexAppServerClient.createAuthenticated({
+    codexPath: "codex",
+    spawnImpl,
+    tokens,
+  });
+
+  await Promise.resolve();
+  respond(child, 1, {});
+  await new Promise((resolve) => setImmediate(resolve));
+  respond(child, 2, {});
+  return clientPromise;
+}
+
 test("CodexAppServerClient starts threads with kebab-case sandbox mode", async () => {
   const child = new FakeChildProcess();
   const spawns: Array<{ command: string; args: string[] }> = [];
@@ -51,22 +69,12 @@ test("CodexAppServerClient starts threads with kebab-case sandbox mode", async (
     return child as unknown as ChildProcessWithoutNullStreams;
   }) as typeof import("node:child_process").spawn;
 
-  const client = new CodexAppServerClient("codex", spawnImpl);
   const tokens: ChatGPTExternalTokens = {
     accessToken: "access-token",
     chatgptAccountId: "acct-123",
     chatgptPlanType: "plus",
   };
-
-  const initializePromise = client.initialize();
-  await Promise.resolve();
-  respond(child, 1, {});
-  await initializePromise;
-
-  const loginPromise = client.loginWithTokens(tokens);
-  await Promise.resolve();
-  respond(child, 2, {});
-  await loginPromise;
+  const client = await createAuthenticatedClient(spawnImpl, child, tokens);
 
   const startThreadPromise = client.startThread("gpt-5.4-mini");
   await Promise.resolve();
@@ -95,22 +103,12 @@ test("CodexAppServerClient starts threads with kebab-case sandbox mode", async (
 test("CodexAppServerClient answers auth refresh requests during turns", async () => {
   const child = new FakeChildProcess();
   const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
-  const client = new CodexAppServerClient("codex", spawnImpl);
   const tokens: ChatGPTExternalTokens = {
     accessToken: "access-token",
     chatgptAccountId: "acct-123",
     chatgptPlanType: "plus",
   };
-
-  const initializePromise = client.initialize();
-  await Promise.resolve();
-  respond(child, 1, {});
-  await initializePromise;
-
-  const loginPromise = client.loginWithTokens(tokens);
-  await Promise.resolve();
-  respond(child, 2, {});
-  await loginPromise;
+  const client = await createAuthenticatedClient(spawnImpl, child, tokens);
 
   const startThreadPromise = client.startThread();
   await Promise.resolve();
@@ -192,22 +190,12 @@ test("CodexAppServerClient answers auth refresh requests during turns", async ()
 test("CodexAppServerClient handles auth refresh before turn-start RPC response", async () => {
   const child = new FakeChildProcess();
   const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
-  const client = new CodexAppServerClient("codex", spawnImpl);
   const tokens: ChatGPTExternalTokens = {
     accessToken: "access-token",
     chatgptAccountId: "acct-123",
     chatgptPlanType: "plus",
   };
-
-  const initializePromise = client.initialize();
-  await Promise.resolve();
-  respond(child, 1, {});
-  await initializePromise;
-
-  const loginPromise = client.loginWithTokens(tokens);
-  await Promise.resolve();
-  respond(child, 2, {});
-  await loginPromise;
+  const client = await createAuthenticatedClient(spawnImpl, child, tokens);
 
   const startThreadPromise = client.startThread();
   await Promise.resolve();
@@ -284,22 +272,12 @@ test("CodexAppServerClient handles auth refresh before turn-start RPC response",
 test("CodexAppServerClient ignores non-message item completions until turn completion", async () => {
   const child = new FakeChildProcess();
   const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
-  const client = new CodexAppServerClient("codex", spawnImpl);
   const tokens: ChatGPTExternalTokens = {
     accessToken: "access-token",
     chatgptAccountId: "acct-123",
     chatgptPlanType: "plus",
   };
-
-  const initializePromise = client.initialize();
-  await Promise.resolve();
-  respond(child, 1, {});
-  await initializePromise;
-
-  const loginPromise = client.loginWithTokens(tokens);
-  await Promise.resolve();
-  respond(child, 2, {});
-  await loginPromise;
+  const client = await createAuthenticatedClient(spawnImpl, child, tokens);
 
   const startThreadPromise = client.startThread();
   await Promise.resolve();
@@ -348,22 +326,12 @@ test("CodexAppServerClient ignores non-message item completions until turn compl
 test("CodexAppServerClient emits agent message deltas", async () => {
   const child = new FakeChildProcess();
   const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
-  const client = new CodexAppServerClient("codex", spawnImpl);
   const tokens: ChatGPTExternalTokens = {
     accessToken: "access-token",
     chatgptAccountId: "acct-123",
     chatgptPlanType: "plus",
   };
-
-  const initializePromise = client.initialize();
-  await Promise.resolve();
-  respond(child, 1, {});
-  await initializePromise;
-
-  const loginPromise = client.loginWithTokens(tokens);
-  await Promise.resolve();
-  respond(child, 2, {});
-  await loginPromise;
+  const client = await createAuthenticatedClient(spawnImpl, child, tokens);
 
   const startThreadPromise = client.startThread();
   await Promise.resolve();
@@ -410,7 +378,6 @@ test("CodexAppServerClient emits agent message deltas", async () => {
 test("CodexAppServerClient ignores known benign notifications and item completions", async () => {
   const child = new FakeChildProcess();
   const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
-  const client = new CodexAppServerClient("codex", spawnImpl);
   const tokens: ChatGPTExternalTokens = {
     accessToken: "access-token",
     chatgptAccountId: "acct-123",
@@ -426,15 +393,7 @@ test("CodexAppServerClient ignores known benign notifications and item completio
   });
 
   try {
-    const initializePromise = client.initialize();
-    await Promise.resolve();
-    respond(child, 1, {});
-    await initializePromise;
-
-    const loginPromise = client.loginWithTokens(tokens);
-    await Promise.resolve();
-    respond(child, 2, {});
-    await loginPromise;
+    const client = await createAuthenticatedClient(spawnImpl, child, tokens);
 
     const startThreadPromise = client.startThread();
     await Promise.resolve();
@@ -513,22 +472,12 @@ test("CodexAppServerClient ignores known benign notifications and item completio
 test("CodexAppServerClient maps failed turn/completed notifications to turn_failed", async () => {
   const child = new FakeChildProcess();
   const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
-  const client = new CodexAppServerClient("codex", spawnImpl);
   const tokens: ChatGPTExternalTokens = {
     accessToken: "access-token",
     chatgptAccountId: "acct-123",
     chatgptPlanType: "plus",
   };
-
-  const initializePromise = client.initialize();
-  await Promise.resolve();
-  respond(child, 1, {});
-  await initializePromise;
-
-  const loginPromise = client.loginWithTokens(tokens);
-  await Promise.resolve();
-  respond(child, 2, {});
-  await loginPromise;
+  const client = await createAuthenticatedClient(spawnImpl, child, tokens);
 
   const startThreadPromise = client.startThread();
   await Promise.resolve();

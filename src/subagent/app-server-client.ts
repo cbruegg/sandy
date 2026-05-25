@@ -109,6 +109,12 @@ type ParsedAppServerNotification =
   | z.infer<typeof errorNotificationSchema>
   | z.infer<typeof itemCompletedNotificationSchema>
   | z.infer<typeof agentMessageDeltaNotificationSchema>
+  | {
+    kind: "parse_failed";
+    method: string;
+    params: Record<string, unknown> | undefined;
+    issues: z.core.$ZodIssue[];
+  }
   | { kind: "ignored"; method: string; params: Record<string, unknown> | undefined };
 
 type ParsedCompletedItem = z.infer<typeof itemCompletedNotificationSchema>["item"];
@@ -135,7 +141,7 @@ export class CodexAppServerClient {
   private readonly warnedUnhandledCompletedItemTypes = new Set<string>();
   private readonly warnedUnhandledServerRequestMethods = new Set<string>();
 
-  constructor(
+  private constructor(
     private readonly codexPath: string,
     private readonly spawnImpl: typeof spawn = spawn,
   ) {}
@@ -408,6 +414,13 @@ export class CodexAppServerClient {
           text: notification.text,
           itemId: notification.itemId ?? null,
         };
+      case "parse_failed":
+        logger.warn("appserver.notification_parse_failed", {
+          method: notification.method,
+          params: notification.params,
+          issues: notification.issues,
+        });
+        return { type: "noop" };
       case "ignored":
         if (!ignoredNotificationMethods.has(notification.method)) {
           this.warnUnhandledNotification(notification.method, notification.params);
@@ -445,9 +458,19 @@ export class CodexAppServerClient {
     schema: TSchema,
     method: string,
     params: Record<string, unknown> | undefined,
-  ): z.infer<TSchema> | { kind: "ignored"; method: string; params: Record<string, unknown> | undefined } {
+  ):
+    | z.infer<TSchema>
+    | { kind: "parse_failed"; method: string; params: Record<string, unknown> | undefined; issues: z.core.$ZodIssue[] } {
     const parsed = schema.safeParse(params ?? {});
-    return parsed.success ? parsed.data : { kind: "ignored", method, params };
+    if (parsed.success) {
+      return parsed.data;
+    }
+    return {
+      kind: "parse_failed",
+      method,
+      params,
+      issues: parsed.error.issues,
+    };
   }
 
   private warnUnhandledNotification(method: string, params: Record<string, unknown> | undefined): void {
