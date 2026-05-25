@@ -90,10 +90,9 @@ export class DockerSandboxRunner implements SandboxRunner {
           return retirePromise;
         }
         retirePromise = this.pool.retireBundle(reservedBundle).catch((error) => {
-          logger.error("sandbox.retire_bundle_failed", {
+          logger.error("sandbox.retire_bundle_failed", error, String(error), {
             taskId: reservedBundle.taskId,
             bundleId: reservedBundle.bundleId,
-            error: error instanceof Error ? error.message : String(error),
           });
         });
         return retirePromise;
@@ -114,7 +113,7 @@ export class DockerSandboxRunner implements SandboxRunner {
         if (workerConnected || terminalEventSeen || shutdownRequested) {
           return;
         }
-        logger.error("sandbox.handshake_timeout", {
+        logger.error("sandbox.handshake_timeout", null, undefined, {
           taskId: request.taskId,
           timeoutMs: this.handshakeTimeoutMs,
         });
@@ -158,10 +157,9 @@ export class DockerSandboxRunner implements SandboxRunner {
       };
 
       const handleEventDeliveryFailure = async (event: SubAgentEvent, error: unknown): Promise<void> => {
-        logger.error("sandbox.event_handler_failed", {
+        logger.error("sandbox.event_handler_failed", error, "Unknown event delivery failure.", {
           taskId: request.taskId,
           eventType: event.type,
-          message: error instanceof Error ? error.message : "Unknown event delivery failure.",
         });
         if (finished || shutdownRequested) {
           return;
@@ -185,7 +183,7 @@ export class DockerSandboxRunner implements SandboxRunner {
         disconnectReported = true;
         rejectTaskInitialized?.(new Error(message));
         clearHandshakeTimer();
-        logger.error("sandbox.worker_disconnected", {
+        logger.error("sandbox.worker_disconnected", null, undefined, {
           taskId: request.taskId,
           message,
         });
@@ -264,9 +262,8 @@ export class DockerSandboxRunner implements SandboxRunner {
       });
 
       reservedBundle.guardChild?.on("error", (error) => {
-        logger.error("sandbox.network_guard_failed", {
+        logger.error("sandbox.network_guard_failed", error, error.message, {
           taskId: request.taskId,
-          message: error.message,
         });
       });
 
@@ -274,7 +271,7 @@ export class DockerSandboxRunner implements SandboxRunner {
         if (finished || shutdownRequested || terminalEventSeen) {
           return;
         }
-        logger.error("sandbox.network_guard_exited", {
+        logger.error("sandbox.network_guard_exited", null, undefined, {
           taskId: request.taskId,
           code,
           signal,
@@ -286,9 +283,8 @@ export class DockerSandboxRunner implements SandboxRunner {
       });
 
       reservedBundle.proxyChild?.on("error", (error) => {
-        logger.error("sandbox.http_proxy_failed", {
+        logger.error("sandbox.http_proxy_failed", error, error.message, {
           taskId: request.taskId,
-          message: error.message,
         });
       });
 
@@ -296,7 +292,7 @@ export class DockerSandboxRunner implements SandboxRunner {
         if (finished || shutdownRequested || terminalEventSeen) {
           return;
         }
-        logger.error("sandbox.http_proxy_exited", {
+        logger.error("sandbox.http_proxy_exited", null, undefined, {
           taskId: request.taskId,
           code,
           signal,
@@ -392,9 +388,8 @@ export class DockerSandboxRunner implements SandboxRunner {
               error: tokens ? null : "Token refresh failed.",
             });
           } catch (error) {
-            logger.error("sandbox.auth_refresh_write_failed", {
+            logger.error("sandbox.auth_refresh_write_failed", error, this.describeWriteFailure(error), {
               taskId: request.taskId,
-              message: this.describeWriteFailure(error),
             });
           }
         },
@@ -404,20 +399,18 @@ export class DockerSandboxRunner implements SandboxRunner {
         try {
           await this.pool.retireBundle(bundle);
         } catch (retireError) {
-          logger.error("sandbox.retire_bundle_failed", {
+          logger.error("sandbox.retire_bundle_failed", retireError, String(retireError), {
             taskId: bundle.taskId,
             bundleId: bundle.bundleId,
-            error: retireError instanceof Error ? retireError.message : String(retireError),
           });
         }
         if (this.taskSharePaths.has(request.taskId)) {
           try {
             await this.deleteTaskShare(request.taskId);
           } catch (cleanupError) {
-            logger.error("sandbox.share_cleanup_failed", {
+            logger.error("sandbox.share_cleanup_failed", cleanupError, String(cleanupError), {
               taskId: request.taskId,
               sharePath: this.taskSharePaths.get(request.taskId) ?? null,
-              error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
             });
           }
         }
@@ -529,7 +522,7 @@ export class DockerSandboxRunner implements SandboxRunner {
           });
           resolve();
         } else {
-          logger.error("sandbox.share_cleanup_docker_failed", {
+          logger.error("sandbox.share_cleanup_docker_failed", null, undefined, {
             taskId,
             sharePath,
             exitCode: code,
@@ -538,10 +531,9 @@ export class DockerSandboxRunner implements SandboxRunner {
         }
       });
       child.on("error", (error) => {
-        logger.error("sandbox.share_cleanup_docker_failed", {
+        logger.error("sandbox.share_cleanup_docker_failed", error, String(error), {
           taskId,
           sharePath,
-          error: error instanceof Error ? error.message : String(error),
         });
         reject(error);
       });
@@ -643,7 +635,7 @@ export class DockerSandboxRunner implements SandboxRunner {
         logger.warn(event, payload);
         return;
       case "error":
-        logger.error(event, payload);
+        logger.error(event, null, undefined, payload);
         return;
     }
   }

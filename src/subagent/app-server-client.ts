@@ -373,7 +373,7 @@ export class CodexAppServerClient {
       if (this.activeAuthRefreshHandler) {
         this.activeAuthRefreshHandler(id, parsed.success ? parsed.data.previousAccountId ?? null : null)
           .catch((error: Error) => {
-            logger.error("appserver.auth_refresh_failed", { error: error.message });
+            logger.error("appserver.auth_refresh_failed", error, "Auth refresh failed.");
             this.writeJsonRpcMessage({
               jsonrpc: "2.0",
               id,

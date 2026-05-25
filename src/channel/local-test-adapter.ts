@@ -161,9 +161,7 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
       try {
         await this.processPending(handler);
       } catch (error) {
-        logger.error("local_test.poll_failed", {
-          message: error instanceof Error ? error.message : "Unknown local-test poll failure.",
-        });
+        logger.error("local_test.poll_failed", error, "Unknown local-test poll failure.");
       }
       if (!this.stopRequested) {
         await sleep(100);
@@ -196,10 +194,9 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
           `${Date.now()}-${createIdentifier("failed")}-${entry.name}`,
         );
         await rename(sourcePath, failedPath);
-        logger.error("local_test.inbox_entry_failed", {
+        logger.error("local_test.inbox_entry_failed", error, "Unknown local-test inbox failure.", {
           sourcePath,
           failedPath,
-          message: error instanceof Error ? error.message : "Unknown local-test inbox failure.",
         });
       }
     }

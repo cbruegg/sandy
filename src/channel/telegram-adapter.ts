@@ -138,10 +138,9 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
       try {
         await handler(event);
       } catch (error) {
-        logger.error("telegram.handler_error", {
+        logger.error("telegram.handler_error", error, "Unknown handler error.", {
           kind: event.kind,
           chatId: event.chatId,
-          message: error instanceof Error ? error.message : "Unknown handler error.",
         });
       }
 
@@ -159,9 +158,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     this.bot.on("message", middleware);
     this.bot.on("callback_query:data", middleware);
     this.bot.catch((error) => {
-      logger.error("telegram.polling_error", {
-        message: error instanceof Error ? error.message : "Unknown Telegram polling error.",
-      });
+      logger.error("telegram.polling_error", error, "Unknown Telegram polling error.");
     });
 
     logger.info("telegram.polling_started", {

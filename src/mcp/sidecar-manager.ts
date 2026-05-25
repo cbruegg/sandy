@@ -442,7 +442,7 @@ export class McpSidecarManager {
         logger.warn(message.event, message.data);
         return;
       case "error":
-        logger.error(message.event, message.data);
+        logger.error(message.event, null, undefined, message.data);
         return;
     }
   }

@@ -84,7 +84,7 @@ export class OrchestratorTaskLifecycle {
           await this.finishActiveTask(session, "completed");
           break;
         case "task_error":
-          logger.error("task.failed", {
+          logger.error("task.failed", null, undefined, {
             chatId,
             taskId,
             message: event.message,
@@ -100,11 +100,10 @@ export class OrchestratorTaskLifecycle {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown sub-agent event handling failure.";
-      logger.error("task.event_handler_failed", {
+      logger.error("task.event_handler_failed", error, "Unknown sub-agent event handling failure.", {
         chatId,
         taskId,
         eventType: event.type,
-        message,
       });
       await this.failActiveTaskFromEventHandling(session, taskId, message);
     }
@@ -273,10 +272,9 @@ export class OrchestratorTaskLifecycle {
     try {
       await this.deps.channel.sendText(session.chatId, messages.taskFailed(message));
     } catch (notifyError) {
-      logger.error("task.event_failure_notification_failed", {
+      logger.error("task.event_failure_notification_failed", notifyError, "Unknown notification failure.", {
         chatId: session.chatId,
         taskId,
-        message: notifyError instanceof Error ? notifyError.message : "Unknown notification failure.",
       });
     }
     await this.closeActiveTask(session);

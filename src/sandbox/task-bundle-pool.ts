@@ -130,9 +130,7 @@ export class TaskBundlePoolImpl implements TaskBundlePool {
       })
       .catch((error) => {
         if (!this.shuttingDown) {
-          logger.error("pool.standby_warm_failed", {
-            error: error instanceof Error ? error.message : String(error),
-          });
+          logger.error("pool.standby_warm_failed", error, String(error));
           setTimeout(() => {
             this.scheduleReplenish();
           }, 5_000);

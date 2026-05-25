@@ -394,10 +394,9 @@ export async function ensureManagedCodexPath(options: EnsureManagedCodexOptions 
       });
       return binaryPath;
     } catch (error) {
-      logger.error("codex.download_failed", {
+      logger.error("codex.download_failed", error, "Unknown Codex download failure.", {
         version,
         cacheRoot,
-        message: error instanceof Error ? error.message : "Unknown Codex download failure.",
       });
       await rm(versionDirectory, { recursive: true, force: true }).catch(() => {});
       throw error;

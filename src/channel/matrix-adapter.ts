@@ -431,10 +431,9 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     try {
       await handler(normalized);
     } catch (error) {
-      logger.error("matrix.handler_error", {
+      logger.error("matrix.handler_error", error, "Unknown handler error.", {
         kind: normalized.kind,
         chatId: normalized.chatId,
-        message: error instanceof Error ? error.message : "Unknown handler error.",
       });
     }
   }
@@ -463,10 +462,9 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     try {
       await handler(normalized);
     } catch (error) {
-      logger.error("matrix.handler_error", {
+      logger.error("matrix.handler_error", error, "Unknown handler error.", {
         kind: normalized.kind,
         chatId: normalized.chatId,
-        message: error instanceof Error ? error.message : "Unknown handler error.",
       });
     }
   }
