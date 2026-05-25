@@ -4,7 +4,7 @@ import type { Input } from "@openai/codex-sdk";
 import { z } from "zod";
 import type { ChatGPTExternalTokens } from "../types.js";
 import { logger } from "../logger.js";
-import { buildAppServerThreadStartParams } from "./codex-task-runtime.js";
+import {sharedWorkspaceMountPath} from "../shared-workspace.ts";
 
 type PendingRequest<T = unknown> = {
   resolve: (result: T) => void;
@@ -226,6 +226,19 @@ class AppServerTypedRpc {
   respondMethodNotFound(message: JsonRpcErrorResponse): void {
     this.host.writeJsonRpcMessage(message);
   }
+}
+
+
+function buildAppServerThreadStartParams(model?: string) {
+  return {
+    ...(model ? { model } : {}),
+    cwd: sharedWorkspaceMountPath,
+    approvalPolicy: "never",
+    // Docker is the actual isolation boundary for sub-agents; avoid nested
+    // bwrap sandboxing in-container.
+    sandbox: "danger-full-access",
+    personality: "none",
+  };
 }
 
 export class CodexAppServerClient {
