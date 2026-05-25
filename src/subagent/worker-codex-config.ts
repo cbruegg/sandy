@@ -53,9 +53,6 @@ export async function applyWorkerCodexConfigPatch(
   codexHomePath: string = workerCodexHomePath,
 ): Promise<void> {
   const patch = buildWorkerCodexConfigPatch(env);
-  if (!patch) {
-    return;
-  }
 
   const configPath = join(codexHomePath, "config.toml");
   const existingConfig = await readWorkerCodexConfig(configPath);
@@ -63,7 +60,7 @@ export async function applyWorkerCodexConfigPatch(
   const shellEnvironmentSet = asTomlTable(shellEnvironmentPolicy["set"]);
   const mergedShellEnvironmentSet = {
     ...shellEnvironmentSet,
-    ...(patch.shell_environment_policy
+    ...(patch?.shell_environment_policy
       ? { PATH: patch.shell_environment_policy.set.PATH }
       : {}),
   };
@@ -72,7 +69,7 @@ export async function applyWorkerCodexConfigPatch(
 
   const mergedConfig = {
     ...existingConfig,
-    ...(patch.model ? { model: patch.model } : {}),
+    ...(patch?.model ? { model: patch.model } : {}),
     ...(hasShellEnvironmentPolicy
       ? {
           shell_environment_policy: {
@@ -81,6 +78,15 @@ export async function applyWorkerCodexConfigPatch(
           },
         }
       : {}),
+    features: {
+      ...asTomlTable(existingConfig["features"]),
+      memories: false,
+    },
+    memories: {
+      ...asTomlTable(existingConfig["memories"]),
+      generate_memories: false,
+      use_memories: false,
+    },
   };
 
   await mkdir(codexHomePath, { recursive: true });

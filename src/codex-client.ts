@@ -423,6 +423,18 @@ export async function createCodexClient(options: Omit<CodexOptions, "codexPathOv
     ...options,
     env,
     codexPathOverride,
+    config: {
+      ...options.config,
+      features: {
+        ...((options.config?.["features"] as Record<string, unknown> | undefined) ?? {}),
+        memories: false,
+      },
+      memories: {
+        ...((options.config?.["memories"] as Record<string, unknown> | undefined) ?? {}),
+        generate_memories: false,
+        use_memories: false,
+      },
+    },
   });
 }
 

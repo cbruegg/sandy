@@ -59,6 +59,8 @@ test("applyWorkerCodexConfigPatch preserves seeded MCP config while adding shell
     model: string;
     mcp_servers: Record<string, { url: string; bearer_token_env_var: string }>;
     shell_environment_policy: { set: { PATH: string } };
+    features: { memories: boolean };
+    memories: { generate_memories: boolean; use_memories: boolean };
   };
 
   assert.equal(parsed.model, "gpt-5.4-mini");
@@ -73,6 +75,9 @@ test("applyWorkerCodexConfigPatch preserves seeded MCP config while adding shell
       PATH: "/root/.bun/bin:/usr/bin:/bin",
     },
   });
+  assert.equal(parsed.features.memories, false);
+  assert.equal(parsed.memories.generate_memories, false);
+  assert.equal(parsed.memories.use_memories, false);
 });
 
 test("applyWorkerCodexConfigPatch creates the worker Codex home when no seed was mounted", async () => {
@@ -88,6 +93,8 @@ test("applyWorkerCodexConfigPatch creates the worker Codex home when no seed was
   const parsed = toml.parse(await readFile(configPath, "utf8")) as {
     model: string;
     shell_environment_policy: { set: { PATH: string } };
+    features: { memories: boolean };
+    memories: { generate_memories: boolean; use_memories: boolean };
   };
 
   assert.equal(parsed.model, "gpt-5.4-mini");
@@ -96,4 +103,24 @@ test("applyWorkerCodexConfigPatch creates the worker Codex home when no seed was
       PATH: "/root/.bun/bin:/usr/bin:/bin",
     },
   });
+  assert.equal(parsed.features.memories, false);
+  assert.equal(parsed.memories.generate_memories, false);
+  assert.equal(parsed.memories.use_memories, false);
+});
+
+test("applyWorkerCodexConfigPatch writes memory settings even when PATH and model are absent", async () => {
+  const rootHome = await mkdtemp(join(tmpdir(), "sandy-worker-home-"));
+  const codexHome = join(rootHome, ".codex");
+  const configPath = join(codexHome, "config.toml");
+
+  await applyWorkerCodexConfigPatch({}, codexHome);
+
+  const parsed = toml.parse(await readFile(configPath, "utf8")) as {
+    features: { memories: boolean };
+    memories: { generate_memories: boolean; use_memories: boolean };
+  };
+
+  assert.equal(parsed.features.memories, false);
+  assert.equal(parsed.memories.generate_memories, false);
+  assert.equal(parsed.memories.use_memories, false);
 });
