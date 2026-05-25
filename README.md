@@ -256,12 +256,12 @@ Worker network behavior:
 - `worker.network.allow_local_cidrs` accepts only literal IP addresses and CIDR blocks.
 - Set `worker.network.mode = "unrestricted"` only if you intentionally want workers to be able to reach local/private network addresses directly.
 
-Skills behavior:
+[Skills](https://github.com/anthropics/skills) behavior:
 
 - Sandy looks for skills only in a `skills/` directory next to the active `config.toml`.
 - Sandy parses only the skill `name` and `description` from the leading frontmatter block in `SKILL.md`.
 - The main agent receives only that metadata and is instructed to delegate requests that require one of those skills to a sub-agent.
-- Skills are loaded only during Sandy startup. If you add, remove, or edit a skill, restart Sandy before the change will take effect.
+- Skills can be updated while Sandy is running.
 
 ### Build and run
 
