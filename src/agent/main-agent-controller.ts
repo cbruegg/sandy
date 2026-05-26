@@ -19,16 +19,39 @@ export interface MainAgentController {
   decide(context: DecideContext): Promise<MainAgentDecision>;
 }
 
-type MainAgentTurn = {
-  finalResponse: string;
+// ---- streamed event types (narrow local contract, decoupled from @openai/codex-sdk) ----
+
+type StreamedThreadEventItem = {
+  type: string;
+  text?: string;
+  id?: string;
+};
+
+export type StreamedThreadEvent = {
+  type: string;
+  item?: StreamedThreadEventItem;
+};
+
+type MainAgentStreamedTurn = {
+  events: AsyncGenerator<StreamedThreadEvent>;
 };
 
 type MainAgentThread = {
-  run(input: string): Promise<MainAgentTurn>;
+  runStreamed(input: string): Promise<MainAgentStreamedTurn>;
 };
+
 type CodexClient = {
   startThread(options?: ThreadOptions): MainAgentThread;
 };
+
+// ---- end streamed types ----
+
+const COMPACTION_ITEM_TYPE = "context_compaction";
+const AGENT_MESSAGE_ITEM_TYPE = "agent_message";
+
+function isContextCompactionItem(item: StreamedThreadEventItem): boolean {
+  return item.type === COMPACTION_ITEM_TYPE;
+}
 
 const MAX_DECISION_VALIDATION_ATTEMPTS = 3;
 
@@ -40,6 +63,7 @@ export class CodexMainAgentController implements MainAgentController {
   private readonly httpTokens: Record<string, HttpTokenConfig>;
   private readonly threads = new Map<string, MainAgentThread>();
   private readonly threadDirectories = new Map<string, string>();
+  private readonly needsInstructionRefresh = new Map<string, boolean>();
 
   constructor(
     codex: CodexClient,
@@ -57,22 +81,30 @@ export class CodexMainAgentController implements MainAgentController {
 
   async decide(context: DecideContext): Promise<MainAgentDecision> {
     const isInitialTurn = !this.threads.has(context.chatId);
+    const includeFullInstructions = isInitialTurn || this.needsInstructionRefresh.get(context.chatId) === true;
+    if (!isInitialTurn) {
+      this.needsInstructionRefresh.delete(context.chatId);
+    }
+
     const thread = this.getOrCreateThread(context.chatId);
     logger.info("main_agent.decision_requested", {
       chatId: context.chatId,
       newVisibleEntryCount: context.newVisibleEntries.length,
       hasActiveTask: context.activeTask !== null,
+      includeFullInstructions,
+      isInitialTurn,
     });
     const prompt = buildMainAgentPrompt({
       activeTask: context.activeTask,
       channelFormatting: context.channelFormatting,
       newVisibleEntries: context.newVisibleEntries,
       isInitialTurn,
+      includeFullInstructions,
       skills: this.getSkills(),
       workerMcpServerIds: this.workerMcpServerIds,
       httpTokens: this.httpTokens,
     });
-    const decision = await this.runValidatedDecision(thread, prompt, context.chatId);
+    const decision = await this.runValidatedDecision(thread, prompt, context);
     logger.info("main_agent.decision_received", {
       chatId: context.chatId,
       action: decision.action,
@@ -81,25 +113,55 @@ export class CodexMainAgentController implements MainAgentController {
     return decision;
   }
 
-  private async runValidatedDecision(thread: MainAgentThread, prompt: string, chatId: string): Promise<MainAgentDecision> {
+  private async runValidatedDecision(
+    thread: MainAgentThread,
+    prompt: string,
+    context: { chatId: string },
+  ): Promise<MainAgentDecision> {
     let nextInput = prompt;
 
     for (let attempt = 1; attempt <= MAX_DECISION_VALIDATION_ATTEMPTS; attempt += 1) {
-      const turn = await thread.run(nextInput);
+      const turn = await thread.runStreamed(nextInput);
+      let finalResponse = "";
+      let sawCompaction = false;
+
+      for await (const event of turn.events) {
+        if (event.type === "item.started" || event.type === "item.completed") {
+          if (event.item && isContextCompactionItem(event.item)) {
+            sawCompaction = true;
+          }
+          if (
+            event.type === "item.completed" &&
+            event.item?.type === AGENT_MESSAGE_ITEM_TYPE &&
+            event.item.text !== undefined
+          ) {
+            finalResponse = event.item.text;
+          }
+        }
+      }
+
+      if (sawCompaction) {
+        this.needsInstructionRefresh.set(context.chatId, true);
+        logger.info("main_agent.compaction_detected", {
+          chatId: context.chatId,
+          attempt,
+        });
+      }
+
       logger.debugContent("main_agent.model_response", {
-        chatId,
+        chatId: context.chatId,
         attempt,
-        response: turn.finalResponse,
+        response: finalResponse,
       });
       try {
-        return parseMainAgentDecision(turn.finalResponse);
+        return parseMainAgentDecision(finalResponse);
       } catch (error) {
         if (!(error instanceof SyntaxError) && !(error instanceof ZodError)) {
           throw error;
         }
 
         logger.warn("main_agent.decision_validation_failed", {
-          chatId,
+          chatId: context.chatId,
           attempt,
           maxAttempts: MAX_DECISION_VALIDATION_ATTEMPTS,
           message: error.message,
@@ -112,7 +174,7 @@ export class CodexMainAgentController implements MainAgentController {
           );
         }
 
-        nextInput = formatMainAgentDecisionValidationError(turn.finalResponse, error);
+        nextInput = formatMainAgentDecisionValidationError(finalResponse, error);
       }
     }
 
@@ -180,15 +242,16 @@ export function buildMainAgentPrompt(input: {
   activeTask: DecideContext["activeTask"];
   channelFormatting: DecideContext["channelFormatting"];
   isInitialTurn: boolean;
+  includeFullInstructions: boolean;
   skills: SkillMetadata[];
   workerMcpServerIds: string[];
   httpTokens: Record<string, HttpTokenConfig>;
 }): string {
-  const intro = input.isInitialTurn
+  const intro = input.includeFullInstructions
     ? [
         "You are Sandy's main orchestration controller.",
         "Decide whether Sandy should launch a new sub-agent task or reply directly.",
-        "This thread persists across decisions for one chat, so retain prior visible context from earlier turns in this thread.",
+        "This thread persists across decisions for one chat. Some prior context may have been compacted; use only the visible entries below plus any prior context still present in this thread.",
         "If some earlier sub-agent output or privilege request details are not present in this thread, treat them as unavailable and do not invent them.",
         "Return exactly one JSON object that matches the provided schema.",
       ]
@@ -207,7 +270,7 @@ export function buildMainAgentPrompt(input: {
       ]
     : [];
 
-  const workerMcpSection = input.isInitialTurn && input.workerMcpServerIds.length > 0
+  const workerMcpSection = input.includeFullInstructions && input.workerMcpServerIds.length > 0
     ? [
         "",
         "Configured MCP servers available to sub-agents:",
@@ -216,7 +279,7 @@ export function buildMainAgentPrompt(input: {
     : [];
 
   const httpTokenEntries = Object.entries(input.httpTokens);
-  const httpTokenSection = input.isInitialTurn && httpTokenEntries.length > 0
+  const httpTokenSection = input.includeFullInstructions && httpTokenEntries.length > 0
     ? [
         "",
         "Configured HTTP tokens available to sub-agents:",
@@ -224,14 +287,14 @@ export function buildMainAgentPrompt(input: {
       ]
     : [];
 
-  const sandyToolsSection = input.isInitialTurn
+  const sandyToolsSection = input.includeFullInstructions
     ? [
         "",
         buildSandyToolsPromptSection(),
       ]
     : [];
 
-  const skillDecisionRules = input.isInitialTurn && input.skills.length > 0
+  const skillDecisionRules = input.includeFullInstructions && input.skills.length > 0
     ? [
         "- You know configured skills only by the name and description listed above. Do not assume any other skill content.",
         "- If the user's request requires one of the configured skills, you must launch a sub-agent instead of replying directly.",
@@ -239,7 +302,7 @@ export function buildMainAgentPrompt(input: {
       ]
     : [];
 
-  const skillManagementRules = input.isInitialTurn
+  const skillManagementRules = input.includeFullInstructions
     ? [
         "- If the user asks to list, add, edit, or remove Sandy skills, you must launch a sub-agent task instead of replying directly.",
         "- The sub-agent can use the create_skill, update_skill, and delete_skill host tools to perform skill changes.",
@@ -258,7 +321,7 @@ export function buildMainAgentPrompt(input: {
     "Required JSON schema:",
     JSON.stringify(mainAgentDecisionPromptSchema, null, 2),
     "",
-    input.isInitialTurn ? "Visible chat entries for this first decision:" : "New visible chat entries since your last decision:",
+    input.includeFullInstructions ? "Visible chat entries for this decision:" : "New visible chat entries since your last decision:",
     JSON.stringify(input.newVisibleEntries, null, 2),
     "",
     "Current active task metadata:",
