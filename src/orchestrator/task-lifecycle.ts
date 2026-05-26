@@ -5,6 +5,7 @@ import {
   buildTaskBriefWithAttachments,
   buildTaskInputPayload,
   describeUserMessageForMainAgent,
+  injectMemoryIntoTaskInput,
 } from "./worker-input.js";
 import { stageSharedAttachments } from "./task-share.js";
 import { OrchestratorRuntimeState } from "./runtime-state.js";
@@ -19,6 +20,8 @@ import type {
   SubAgentEvent,
   TranscriptEntry,
 } from "../types.js";
+import type { RelevantMemory } from "../memory/types.js";
+import { storeTaskSummaryMemory } from "../memory/mempalace-memory.js";
 
 export class OrchestratorTaskLifecycle {
   constructor(
@@ -114,6 +117,7 @@ export class OrchestratorTaskLifecycle {
     session: SessionState,
     event: UserMessageEvent,
     decision: MainAgentDecision,
+    relevantMemories: RelevantMemory[] = [],
   ): Promise<void> {
     switch (decision.action) {
       case "reply":
@@ -128,10 +132,16 @@ export class OrchestratorTaskLifecycle {
         const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskId);
         const taskBrief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
         const initialInput = buildTaskInputPayload(stagedAttachments);
+
+        // Inject relevant trusted memories so the sub-agent has context from
+        // past work in this chat.
+        const enrichedInitialInput = injectMemoryIntoTaskInput(initialInput, relevantMemories);
+
         logger.info("task.launching", {
           chatId: event.chatId,
           taskId,
           taskName: decision.taskName,
+          injectedMemoryCount: relevantMemories.length,
         });
         const taskPolicy = normalizeTaskPolicy(decision.taskPolicy);
         session.activeTask = {
@@ -160,7 +170,7 @@ export class OrchestratorTaskLifecycle {
             taskBrief,
             taskLanguage: decision.taskLanguage,
             channelFormatting: this.channelFormatting,
-            initialInput,
+            initialInput: enrichedInitialInput,
             workerStartConfig: await this.deps.buildWorkerStartConfig(),
           },
           async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
@@ -202,6 +212,22 @@ export class OrchestratorTaskLifecycle {
       timestamp,
       text: session.pendingTaskSummary.summary,
     }];
+
+    // Persist the released summary as trusted memory so future tasks in this
+    // chat benefit from the sub-agent's findings.
+    storeTaskSummaryMemory(
+      this.deps.mainAgentMemory,
+      session.chatId,
+      session.pendingTaskSummary.summary,
+      session.pendingTaskSummary.taskName,
+    ).catch((error) => {
+      logger.warn("memory.task_summary_persist_failed", {
+        chatId: session.chatId,
+        taskName: session.pendingTaskSummary?.taskName,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    });
+
     session.pendingTaskSummary = null;
     return releasedEntries;
   }

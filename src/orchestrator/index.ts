@@ -5,7 +5,14 @@ import { OrchestratorRuntimeState } from "./runtime-state.js";
 import type { SandyOrchestratorDependencies, SupportedChatEvent } from "./shared.js";
 import { OrchestratorTaskLifecycle, describeUserMessageForMainAgent } from "./task-lifecycle.js";
 import { buildWorkerFollowUpInput } from "./worker-input.js";
-import type { ChannelFormatting, MainAgentDecision, NormalizedChatEvent, SessionState } from "../types.js";
+import type {
+  ChannelFormatting,
+  MainAgentDecision,
+  NormalizedChatEvent,
+  SessionState,
+} from "../types.js";
+import type { RelevantMemory } from "../memory/types.js";
+import { storeConversationMemory } from "../memory/mempalace-memory.js";
 
 export class SandyOrchestrator {
   private readonly channelFormatting: ChannelFormatting;
@@ -137,8 +144,18 @@ export class SandyOrchestrator {
           return;
         }
 
+        const releasedEntries = this.taskLifecycle.releasePendingTaskSummaries(session);
+
+        // Search trusted memories for this chat to help the main agent route
+        // and to provide context to any launched sub-agents.
+        const relevantMemories: RelevantMemory[] = await this.deps.mainAgentMemory.searchRelevantMemories({
+          chatId: event.chatId,
+          query: event.text,
+          activeTaskName: session.activeTask?.taskName,
+        });
+
         const newVisibleEntries = [
-          ...this.taskLifecycle.releasePendingTaskSummaries(session),
+          ...releasedEntries,
           {
             role: "user" as const,
             kind: "user_message",
@@ -152,9 +169,33 @@ export class SandyOrchestrator {
           newVisibleEntries,
           activeTask: session.activeTask,
           channelFormatting: this.channelFormatting,
+          relevantMemories,
         });
 
-        await this.taskLifecycle.executeMainAgentDecision(session, event, decision);
+        // Store the user message as trusted memory. If the main agent replied
+        // directly we also store the reply; task summaries are stored when
+        // released.
+        await storeConversationMemory(
+          this.deps.mainAgentMemory,
+          event.chatId,
+          event.text,
+          "user_message",
+        );
+
+        if (decision.action === "reply") {
+          await this.taskLifecycle.executeMainAgentDecision(session, event, decision);
+          // Store the direct reply as trusted conversation memory.
+          await storeConversationMemory(
+            this.deps.mainAgentMemory,
+            event.chatId,
+            decision.replyText,
+            "main_agent_reply",
+          );
+          return;
+        }
+
+        // For task launches, pass the memories along so the sub-agent gets context.
+        await this.taskLifecycle.executeMainAgentDecision(session, event, decision, relevantMemories);
         return;
       }
     }

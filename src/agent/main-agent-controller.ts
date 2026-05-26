@@ -8,6 +8,7 @@ import { formatDateTimePrefix } from "../datetime-prefix.js";
 import { logger } from "../logger.js";
 import type { DecideContext, MainAgentDecision } from "../types.js";
 import type { SkillMetadata } from "../skills.js";
+import type { RelevantMemory } from "../memory/types.js";
 import {
   formatMainAgentDecisionValidationError,
   mainAgentDecisionPromptSchema,
@@ -62,6 +63,7 @@ export class CodexMainAgentController implements MainAgentController {
       chatId: context.chatId,
       newVisibleEntryCount: context.newVisibleEntries.length,
       hasActiveTask: context.activeTask !== null,
+      relevantMemoryCount: context.relevantMemories.length,
     });
     const prompt = buildMainAgentPrompt({
       activeTask: context.activeTask,
@@ -71,6 +73,7 @@ export class CodexMainAgentController implements MainAgentController {
       skills: this.getSkills(),
       workerMcpServerIds: this.workerMcpServerIds,
       httpTokens: this.httpTokens,
+      relevantMemories: context.relevantMemories,
     });
     const decision = await this.runValidatedDecision(thread, prompt, context.chatId);
     logger.info("main_agent.decision_received", {
@@ -183,6 +186,7 @@ export function buildMainAgentPrompt(input: {
   skills: SkillMetadata[];
   workerMcpServerIds: string[];
   httpTokens: Record<string, HttpTokenConfig>;
+  relevantMemories: RelevantMemory[];
 }): string {
   const intro = input.isInitialTurn
     ? [
@@ -247,6 +251,25 @@ export function buildMainAgentPrompt(input: {
       ]
     : [];
 
+  const relevantMemoriesSection = input.relevantMemories.length > 0
+    ? [
+        "",
+        "Relevant trusted memories from past interactions in this chat (use only when helpful):",
+        ...input.relevantMemories.map((m, i) => {
+          const date = m.createdAt ? `[${m.createdAt.substring(0, 10)}] ` : "";
+          return `- Memory ${i + 1}: ${date}${m.text}`;
+        }),
+      ]
+    : [];
+
+  const memoryRules = input.relevantMemories.length > 0
+    ? [
+        "- Use these memories only when they are relevant to the current user request.",
+        "- Prefer the current visible chat context over older memories.",
+        "- Do not assume a memory is authoritative if it conflicts with current user input.",
+      ]
+    : [];
+
   return [
     formatDateTimePrefix(),
     ...intro,
@@ -254,6 +277,7 @@ export function buildMainAgentPrompt(input: {
     ...workerMcpSection,
     ...httpTokenSection,
     ...sandyToolsSection,
+    ...relevantMemoriesSection,
     "",
     "Required JSON schema:",
     JSON.stringify(mainAgentDecisionPromptSchema, null, 2),
@@ -284,5 +308,6 @@ export function buildMainAgentPrompt(input: {
     "- Any replyText you produce is user-visible. Follow the provided channel formatting instructions exactly.",
     ...skillDecisionRules,
     ...skillManagementRules,
+    ...memoryRules,
   ].join("\n");
 }
