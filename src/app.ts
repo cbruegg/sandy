@@ -21,7 +21,6 @@ import {DockerSandboxRunner, type DockerSandboxRunnerOptions} from "./sandbox/do
 import {TaskBundleLauncherImpl, type TaskBundleLauncherOptions} from "./sandbox/task-bundle-launcher.js";
 import { TaskBundlePoolImpl } from "./sandbox/task-bundle-pool.js";
 import { TaskBundleAssignmentRegistry } from "./sandbox/task-bundle-assignment-registry.js";
-import { cleanupStaleContainers } from "./sandbox/stale-container-janitor.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
 import { OpenAiTranscriptionProvider } from "./transcription/openai-transcription-provider.js";
 import { resolvePublishedUpdateSource } from "./build-metadata.js";
@@ -227,6 +226,7 @@ export async function startApp(): Promise<void> {
     workerImage: config.workerImage,
     resolveWorkerImage: () => workerImageManager.getLaunchImage(),
     shareRoot: config.shareRoot,
+    controlRoot: config.shareRoot,
     codexAuthFile: config.authMode.mode === "codex_auth_file"
       && config.authMode.codexAuthStrategy === "copy_file"
       ? config.authMode.codexAuthFile
@@ -261,8 +261,6 @@ export async function startApp(): Promise<void> {
         }
         : undefined,
   };
-
-  await cleanupStaleContainers();
 
   const taskBundleLauncher = new TaskBundleLauncherImpl(taskBundleLauncherOptions);
   const taskBundleAssignmentRegistry = new TaskBundleAssignmentRegistry();

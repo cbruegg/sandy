@@ -1,4 +1,5 @@
 import { type Input, type Thread, type ThreadEvent, type TodoListItem } from "@openai/codex-sdk";
+import { statSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -39,6 +40,7 @@ type WorkerCommandProcessorOptions = {
 
 type WorkerCommandProcessor = {
   handleLine: (line: string) => Promise<void>;
+  shutdown: () => void;
 };
 
 function assertTaskStarted(taskStarted: boolean, commandType: HostCommand["type"]): void {
@@ -300,6 +302,13 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
     }
   };
 
+  const shutdown = (): void => {
+    currentAbort?.abort();
+    appServerSession?.cancelPendingAuthRefresh();
+    appServerSession?.close();
+    options.onShutdown();
+  };
+
   return {
     handleLine: (line: string) => {
       commandQueue = commandQueue.then(() => handleCommandLine(line)).catch((error) => {
@@ -307,6 +316,7 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
       });
       return commandQueue;
     },
+    shutdown,
   };
 }
 
@@ -337,6 +347,16 @@ export async function main(): Promise<void> {
 
   writeSubAgentEvent({ type: "worker_connected" });
 
+  let shutDown = false;
+  const doShutdown = (reason: string): void => {
+    if (shutDown) return;
+    shutDown = true;
+    logger.info("worker.shutting_down", { reason });
+    processor.shutdown();
+    shutdownResolver?.();
+    process.exit(0);
+  };
+
   const processor = createWorkerCommandProcessor({
     sendEvent: writeSubAgentEvent,
     env: process.env,
@@ -353,8 +373,30 @@ export async function main(): Promise<void> {
   });
 
   input.on("close", () => {
-    shutdownResolver?.();
+    doShutdown("stdin_closed");
   });
+
+  // Watch the controller heartbeat file. If the host process dies without
+  // closing stdin (e.g. SIGKILL), the heartbeat will stop being refreshed
+  // and the container will self-terminate.
+  const heartbeatPath = process.env["SANDY_CONTROLLER_HEARTBEAT_PATH"];
+  const heartbeatTimeoutMs = Number(process.env["SANDY_CONTROLLER_HEARTBEAT_TIMEOUT_MS"] ?? 30_000);
+
+  if (heartbeatPath) {
+    const interval = setInterval(() => {
+      try {
+        const stat = statSync(heartbeatPath);
+        const age = Date.now() - stat.mtimeMs;
+        if (age > heartbeatTimeoutMs) {
+          doShutdown("heartbeat_stale");
+        }
+      } catch {
+        // File missing — controller directory may be gone.
+        doShutdown("heartbeat_missing");
+      }
+    }, Math.min(heartbeatTimeoutMs / 2, 5_000));
+    interval.unref();
+  }
 
   await waitForShutdown;
 }

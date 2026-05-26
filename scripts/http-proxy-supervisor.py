@@ -5,6 +5,7 @@ import socketserver
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -65,6 +66,7 @@ class Supervisor:
 
         threading.Thread(target=self._read_mitmdump_stdout, daemon=True).start()
         threading.Thread(target=self._read_mitmdump_stderr, daemon=True).start()
+        threading.Thread(target=self._watch_heartbeat, daemon=True).start()
 
         self._emit({"type": "ready"})
 
@@ -73,6 +75,8 @@ class Supervisor:
                 raw = line.strip()
                 if not raw:
                     continue
+                if self._stop_event.is_set():
+                    break
                 message = json.loads(raw)
                 if message.get("type") != "auth_response":
                     continue
@@ -148,6 +152,26 @@ class Supervisor:
     def _emit(self, message: dict):
         sys.stdout.write(json.dumps(message) + "\n")
         sys.stdout.flush()
+
+    def _watch_heartbeat(self):
+        heartbeat_path = os.environ.get("SANDY_CONTROLLER_HEARTBEAT_PATH")
+        if not heartbeat_path:
+            return
+        timeout_ms = int(os.environ.get("SANDY_CONTROLLER_HEARTBEAT_TIMEOUT_MS", 30000))
+        interval = max(timeout_ms / 2000.0, 2.0)
+        while not self._stop_event.wait(interval):
+            try:
+                mtime = os.path.getmtime(heartbeat_path)
+                age_s = time.time() - mtime
+                if age_s * 1000 > timeout_ms:
+                    self._emit_log("warn", "http.proxy.heartbeat_stale", {"age_ms": age_s * 1000})
+                    self.shutdown()
+                    return
+            except OSError:
+                # File missing — controller directory may be gone.
+                self._emit_log("warn", "http.proxy.heartbeat_missing", {})
+                self.shutdown()
+                return
 
 
 if __name__ == "__main__":

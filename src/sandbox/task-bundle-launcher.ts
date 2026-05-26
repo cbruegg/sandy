@@ -20,6 +20,15 @@ import {createBundleSharePath} from "./task-bundle-share.js";
 import {SANDY_MANAGED_CONTAINER_LABEL} from "./container-label.js";
 import {randomUUID} from "node:crypto";
 import {SANDY_CODEX_PATH_ENV} from "../codex-client.ts";
+import {
+  createBundleControlDir,
+  removeBundleControlDir,
+  startHeartbeat,
+  HEARTBEAT_INTERVAL_MS,
+  HEARTBEAT_TIMEOUT_MS,
+  HEARTBEAT_FILE,
+  CONTROLLER_CONTROL_MOUNT_PATH,
+} from "./heartbeat.js";
 
 const workerCodexSeedMountPath = "/run/sandy-codex-seed";
 const workerCodexContainerPath = "/usr/local/bin/codex";
@@ -54,6 +63,8 @@ export type TaskBundleLauncherOptions = {
   resolveWorkerImage?: () => string;
   networkGuardImage?: string;
   shareRoot: string;
+  /** Host-side directory under which per-bundle control directories are created. */
+  controlRoot: string;
   codexAuthFile: string | null;
   getSkillsDirectory: () => string | null;
   workerCodexBinaryPath: string;
@@ -88,6 +99,8 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
   async createBundle(): Promise<TaskBundle> {
     const bundleId = randomUUID();
     const shareHostPath = await createBundleSharePath(this.options.shareRoot, bundleId);
+    const controlDir = await createBundleControlDir(bundleId, this.options.controlRoot);
+    const heartbeat = startHeartbeat(controlDir, HEARTBEAT_INTERVAL_MS, this.setTimeoutImpl, this.clearTimeoutImpl);
 
     let workerTempDir: string | null = null;
     let workerCodexHomeTempDir: string | null = null;
@@ -142,8 +155,10 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
 
     const networkGuard = await (async (): Promise<StartedNetworkGuard | null> => {
       try {
-        return await this.launchNetworkGuard(bundleId);
+        return await this.launchNetworkGuard(bundleId, controlDir);
       } catch (error) {
+        heartbeat.stop();
+        await removeBundleControlDir(controlDir);
         await cleanupWorkerCodexConfig();
         throw error;
       }
@@ -171,6 +186,12 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
         ...proxyCapabilityArgs,
         "-v",
         `${this.options.httpProxyConfDirPath}:/run/sandy-mitmproxy-conf:ro`,
+        "-v",
+        `${controlDir}:${CONTROLLER_CONTROL_MOUNT_PATH}:ro`,
+        "-e",
+        `SANDY_CONTROLLER_HEARTBEAT_PATH=${CONTROLLER_CONTROL_MOUNT_PATH}/${HEARTBEAT_FILE}`,
+        "-e",
+        `SANDY_CONTROLLER_HEARTBEAT_TIMEOUT_MS=${HEARTBEAT_TIMEOUT_MS}`,
         "-e",
         "MITMPROXY_CONFDIR=/run/sandy-mitmproxy-conf",
         this.options.httpProxyImage,
@@ -188,6 +209,8 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
         );
       } catch (error) {
         proxyChild.kill("SIGTERM");
+        heartbeat.stop();
+        await removeBundleControlDir(controlDir);
         await cleanupWorkerCodexConfig();
         throw error;
       }
@@ -241,6 +264,15 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
       dockerArgs.push("-v", `${hostfsVolumeName}:${hostMountPath}`);
     }
 
+    dockerArgs.push(
+      "-v",
+      `${controlDir}:${CONTROLLER_CONTROL_MOUNT_PATH}:ro`,
+      "-e",
+      `SANDY_CONTROLLER_HEARTBEAT_PATH=${CONTROLLER_CONTROL_MOUNT_PATH}/${HEARTBEAT_FILE}`,
+      "-e",
+      `SANDY_CONTROLLER_HEARTBEAT_TIMEOUT_MS=${HEARTBEAT_TIMEOUT_MS}`,
+    );
+
     dockerArgs.push("-v", `${shareHostPath}:${sharedWorkspaceMountPath}`, workerImage);
 
     const child = this.spawnImpl("docker", dockerArgs, {
@@ -252,7 +284,13 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
       containerName,
       guardContainerName: networkGuard?.containerName ?? null,
       proxyContainerName,
+      controlDir,
     });
+
+    const stopHeartbeat = async () => {
+      heartbeat.stop();
+      await removeBundleControlDir(controlDir);
+    };
 
     return {
       bundleId,
@@ -264,6 +302,8 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
       proxyContainerName,
       shareHostPath,
       hostfsVolumeName,
+      controlDir,
+      stopHeartbeat,
       cleanupWorkerCodexConfig,
     };
   }
@@ -273,6 +313,8 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
       bundleId: bundle.bundleId,
       containerName: bundle.containerName,
     });
+    // Stop the heartbeat first so containers can self-terminate if we fail.
+    await bundle.stopHeartbeat();
     bundle.child.kill("SIGTERM");
     bundle.guardChild?.kill("SIGTERM");
     bundle.proxyChild?.kill("SIGTERM");
@@ -313,7 +355,7 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
     return this.options.resolveWorkerImage?.() ?? this.options.workerImage;
   }
 
-  private async launchNetworkGuard(bundleId: string): Promise<StartedNetworkGuard | null> {
+  private async launchNetworkGuard(bundleId: string, controlDir: string): Promise<StartedNetworkGuard | null> {
     return await launchNetworkGuardContainer({
       taskId: bundleId,
       workerNetwork: this.options.workerNetwork,
@@ -325,6 +367,7 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
       setTimeoutImpl: this.setTimeoutImpl,
       clearTimeoutImpl: this.clearTimeoutImpl,
       cleanupContainer: async (containerName) => this.cleanupContainer(containerName),
+      controlDir,
     });
   }
 

@@ -13,6 +13,10 @@ export type TaskBundle = {
   proxyContainerName: string | null;
   shareHostPath: string;
   hostfsVolumeName: string | null;
+  /** Host-side path to the bundle control directory (contains the heartbeat file). */
+  controlDir: string;
+  /** Stop the heartbeat writer and clean up the control directory. */
+  stopHeartbeat: () => Promise<void>;
   cleanupWorkerCodexConfig: () => Promise<void>;
 };
 
