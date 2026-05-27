@@ -9,11 +9,7 @@ import { ProxyAccess } from "../proxy-access.js";
 import {
   CONTROLLER_CONTROL_MOUNT_PATH,
   HEARTBEAT_FILE,
-  HEARTBEAT_INTERVAL_MS,
   HEARTBEAT_TIMEOUT_MS,
-  createControlDir,
-  removeBundleControlDir,
-  startHeartbeat,
 } from "../sandbox/heartbeat.js";
 import type { McpUpstreamMethod } from "./sidecar-protocol.js";
 import type {
@@ -23,7 +19,6 @@ import type {
 } from "./proxy-contract.js";
 import { buildHostOauthStateDirectory, sidecarOauthMountPath } from "./oauth-paths.js";
 import { mcpProxyContainerAlias } from "./proxy-route.js";
-import { mcpWorkerNetworkNamePrefix } from "./worker-network-name.js";
 import {
   parseMcpSidecarToHostMessage,
   type McpSidecarAuthorizationRequestMessage,
@@ -35,6 +30,7 @@ import {
 
 type McpSidecarManagerOptions = {
   configDirectory: string;
+  controllerControlDir: string;
   mcpServers: Record<string, McpServerConfig>;
   workerNetworkName: string;
   sidecarImage: string;
@@ -61,7 +57,6 @@ export class McpSidecarManager {
   private readonly setTimeoutImpl: typeof setTimeout;
   private readonly clearTimeoutImpl: typeof clearTimeout;
   private child: ChildProcessWithoutNullStreams | null = null;
-  private stopHeartbeat: (() => Promise<void>) | null = null;
   private started = false;
   private stopped = false;
 
@@ -83,20 +78,7 @@ export class McpSidecarManager {
     this.started = true;
     const oauthStateDirectory = buildHostOauthStateDirectory(this.options.configDirectory);
     await mkdir(oauthStateDirectory, { recursive: true });
-    const controlDir = await createControlDir(`mcp-sidecar-${this.containerName}`, this.options.configDirectory);
-    const heartbeat = startHeartbeat(controlDir, HEARTBEAT_INTERVAL_MS, this.setTimeoutImpl, this.clearTimeoutImpl);
-    this.stopHeartbeat = async () => {
-      heartbeat.stop();
-      await removeBundleControlDir(controlDir);
-    };
-    try {
-      await this.pruneStaleNetworks();
-      await this.runDockerCommand(["network", "create", this.options.workerNetworkName]);
-    } catch (error) {
-      await this.stopHeartbeat?.();
-      this.stopHeartbeat = null;
-      throw error;
-    }
+    await this.runDockerCommand(["network", "create", this.options.workerNetworkName]);
 
     let child: ChildProcessWithoutNullStreams | null = null;
     try {
@@ -115,7 +97,7 @@ export class McpSidecarManager {
         "-v",
         `${oauthStateDirectory}:${sidecarOauthMountPath}`,
         "-v",
-        `${controlDir}:${CONTROLLER_CONTROL_MOUNT_PATH}:ro`,
+        `${this.options.controllerControlDir}:${CONTROLLER_CONTROL_MOUNT_PATH}:ro`,
         "-e",
         `SANDY_CONTROLLER_HEARTBEAT_PATH=${CONTROLLER_CONTROL_MOUNT_PATH}/${HEARTBEAT_FILE}`,
         "-e",
@@ -126,8 +108,7 @@ export class McpSidecarManager {
       });
       this.child = child;
     } catch (error) {
-      await this.stopHeartbeat?.();
-      this.stopHeartbeat = null;
+      await this.runDockerCommand(["network", "rm", this.options.workerNetworkName], true);
       throw error;
     }
 
@@ -239,7 +220,7 @@ export class McpSidecarManager {
       logger.info("mcp.sidecar.started", {
         containerName: this.containerName,
         networkName: this.options.workerNetworkName,
-        controlDir,
+        controllerControlDir: this.options.controllerControlDir,
       });
     } catch (error) {
       await this.stop();
@@ -252,9 +233,6 @@ export class McpSidecarManager {
       return;
     }
     this.stopped = true;
-
-    await this.stopHeartbeat?.();
-    this.stopHeartbeat = null;
 
     if (this.child) {
       try {
@@ -491,18 +469,6 @@ export class McpSidecarManager {
       throw new Error("MCP sidecar is not running.");
     }
     this.child.stdin.write(`${JSON.stringify(message)}\n`);
-  }
-
-  private async pruneStaleNetworks(): Promise<void> {
-    const existingNetworkNames = await this.runDockerCommandCapture(["network", "ls", "--format", "{{.Name}}"]);
-    const staleNetworkNames = existingNetworkNames
-      .split("\n")
-      .map((name) => name.trim())
-      .filter((name) => name.startsWith(mcpWorkerNetworkNamePrefix) && name !== this.options.workerNetworkName);
-
-    for (const networkName of staleNetworkNames) {
-      await this.runDockerCommand(["network", "rm", networkName], true);
-    }
   }
 
   private async runDockerCommand(args: string[], ignoreFailure = false): Promise<void> {

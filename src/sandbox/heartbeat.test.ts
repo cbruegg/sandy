@@ -6,8 +6,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import {
   startHeartbeat,
-  createBundleControlDir,
-  removeBundleControlDir,
+  createControlDir,
+  removeControlDir,
   HEARTBEAT_FILE,
   HEARTBEAT_INTERVAL_MS,
 } from "./heartbeat.js";
@@ -37,10 +37,10 @@ function createTimerController() {
   };
 }
 
-test("createBundleControlDir creates the directory and heartbeat file", async () => {
+test("createControlDir creates the directory and heartbeat file", async () => {
   const root = mkdtempSync(join(tmpdir(), "sandy-hb-test-"));
   try {
-    const controlDir = await createBundleControlDir("test-bundle", root);
+    const controlDir = await createControlDir(root, "test-control");
     const heartbeatPath = join(controlDir, HEARTBEAT_FILE);
 
     const fileStat = await stat(heartbeatPath);
@@ -114,15 +114,15 @@ test("startHeartbeat stop prevents further ticks", async () => {
   }
 });
 
-test("removeBundleControlDir removes the directory", async () => {
+test("removeControlDir removes the directory", async () => {
   const root = mkdtempSync(join(tmpdir(), "sandy-hb-test-"));
   try {
-    const controlDir = await createBundleControlDir("test-bundle", root);
+    const controlDir = await createControlDir(root, "test-control");
 
     // Verify it exists.
     await stat(controlDir);
 
-    await removeBundleControlDir(controlDir);
+    await removeControlDir(controlDir);
 
     // Verify it was removed.
     await assert.rejects(
@@ -134,13 +134,13 @@ test("removeBundleControlDir removes the directory", async () => {
   }
 });
 
-test("removeBundleControlDir does not throw when directory is already gone", async () => {
+test("removeControlDir does not throw when directory is already gone", async () => {
   const root = mkdtempSync(join(tmpdir(), "sandy-hb-test-"));
   try {
-    const controlDir = `${root}/.sandy-control/bundle-nonexistent`;
+    const controlDir = `${root}/.sandy-control/nonexistent-control`;
 
     // Should not throw even though the directory doesn't exist.
-    await removeBundleControlDir(controlDir);
+    await removeControlDir(controlDir);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

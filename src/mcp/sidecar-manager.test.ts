@@ -6,7 +6,7 @@ import { setImmediate as setImmediateCallback } from "node:timers";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { McpSidecarManager } from "./sidecar-manager.js";
 import { ProxyAccess } from "../proxy-access.js";
-import { createMcpWorkerNetworkName, mcpWorkerNetworkNamePrefix } from "./worker-network-name.js";
+import { createMcpWorkerNetworkName } from "./worker-network-name.js";
 
 class FakeChildProcess extends EventEmitter {
   public readonly stdin = new PassThrough();
@@ -30,13 +30,6 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
   const spawnImpl = ((_command: string, args: readonly string[]) => {
     invocations.push([...args]);
     const child = new FakeChildProcess();
-    if (args[0] === "network" && args[1] === "ls") {
-      queueMicrotask(() => {
-        child.stdout.write(`${mcpWorkerNetworkNamePrefix}stale-one\nbridge\n`);
-        child.emit("exit", 0, null);
-      });
-      return child as unknown as ChildProcessWithoutNullStreams;
-    }
     if (args[0] === "run") {
       sidecarChild.stdout.write('{"type":"ready"}\n');
       return sidecarChild as unknown as ChildProcessWithoutNullStreams;
@@ -51,6 +44,7 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
   const workerNetworkName = createMcpWorkerNetworkName();
   const manager = new McpSidecarManager({
     configDirectory: "/tmp/sandy-config",
+    controllerControlDir: "/tmp/sandy-controller",
     mcpServers: {
       todoist: {
         transport: "streamable_http",
@@ -82,10 +76,8 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
   await manager.stop();
 
   const firstInvocation = invocations[0];
-  assert.deepEqual(firstInvocation, ["network", "ls", "--format", "{{.Name}}"]);
-  const pruneInvocation = invocations[1];
-  assert.deepEqual(pruneInvocation, ["network", "rm", `${mcpWorkerNetworkNamePrefix}stale-one`]);
-  const createInvocation = invocations[2];
+  assert.deepEqual(firstInvocation, ["network", "create", workerNetworkName]);
+  const createInvocation = invocations[0];
   assert.ok(createInvocation);
   assert.equal(createInvocation[0], "network");
   assert.equal(createInvocation[1], "create");
@@ -112,12 +104,6 @@ test("McpSidecarManager returns a failed authorization result when authorization
 
   const spawnImpl = ((_command: string, args: readonly string[]) => {
     const child = new FakeChildProcess();
-    if (args[0] === "network" && args[1] === "ls") {
-      queueMicrotask(() => {
-        child.emit("exit", 0, null);
-      });
-      return child as unknown as ChildProcessWithoutNullStreams;
-    }
     if (args[0] === "run") {
       sidecarChild.stdout.write('{"type":"ready"}\n');
       return sidecarChild as unknown as ChildProcessWithoutNullStreams;
@@ -130,6 +116,7 @@ test("McpSidecarManager returns a failed authorization result when authorization
 
   const manager = new McpSidecarManager({
     configDirectory: "/tmp/sandy-config",
+    controllerControlDir: "/tmp/sandy-controller",
     mcpServers: {
       todoist: {
         transport: "streamable_http",
@@ -177,12 +164,6 @@ test("McpSidecarManager forwards structured sidecar logs through the host logger
   const sidecarChild = new FakeChildProcess();
   const spawnImpl = ((_command: string, args: readonly string[]) => {
     const child = new FakeChildProcess();
-    if (args[0] === "network" && args[1] === "ls") {
-      queueMicrotask(() => {
-        child.emit("exit", 0, null);
-      });
-      return child as unknown as ChildProcessWithoutNullStreams;
-    }
     if (args[0] === "run") {
       sidecarChild.stdout.write('{"type":"ready"}\n');
       return sidecarChild as unknown as ChildProcessWithoutNullStreams;
@@ -213,6 +194,7 @@ test("McpSidecarManager forwards structured sidecar logs through the host logger
 
   const manager = new McpSidecarManager({
     configDirectory: "/tmp/sandy-config",
+    controllerControlDir: "/tmp/sandy-controller",
     mcpServers: {
       todoist: {
         transport: "streamable_http",
@@ -275,12 +257,6 @@ test("McpSidecarManager answers native Sandy tool calls over the control channel
 
   const spawnImpl = ((_command: string, args: readonly string[]) => {
     const child = new FakeChildProcess();
-    if (args[0] === "network" && args[1] === "ls") {
-      queueMicrotask(() => {
-        child.emit("exit", 0, null);
-      });
-      return child as unknown as ChildProcessWithoutNullStreams;
-    }
     if (args[0] === "run") {
       sidecarChild.stdout.write('{"type":"ready"}\n');
       return sidecarChild as unknown as ChildProcessWithoutNullStreams;
@@ -293,6 +269,7 @@ test("McpSidecarManager answers native Sandy tool calls over the control channel
 
   const manager = new McpSidecarManager({
     configDirectory: "/tmp/sandy-config",
+    controllerControlDir: "/tmp/sandy-controller",
     mcpServers: {},
     workerNetworkName: createMcpWorkerNetworkName(),
     sidecarImage: "sandy-mcp-proxy:latest",
@@ -342,12 +319,6 @@ test("McpSidecarManager returns a failed native tool call result when native too
 
   const spawnImpl = ((_command: string, args: readonly string[]) => {
     const child = new FakeChildProcess();
-    if (args[0] === "network" && args[1] === "ls") {
-      queueMicrotask(() => {
-        child.emit("exit", 0, null);
-      });
-      return child as unknown as ChildProcessWithoutNullStreams;
-    }
     if (args[0] === "run") {
       sidecarChild.stdout.write('{"type":"ready"}\n');
       return sidecarChild as unknown as ChildProcessWithoutNullStreams;
@@ -360,6 +331,7 @@ test("McpSidecarManager returns a failed native tool call result when native too
 
   const manager = new McpSidecarManager({
     configDirectory: "/tmp/sandy-config",
+    controllerControlDir: "/tmp/sandy-controller",
     mcpServers: {},
     workerNetworkName: createMcpWorkerNetworkName(),
     sidecarImage: "sandy-mcp-proxy:latest",
@@ -408,12 +380,6 @@ test("McpSidecarManager forwards stdio MCP requests to the host registry", async
 
   const spawnImpl = ((_command: string, args: readonly string[]) => {
     const child = new FakeChildProcess();
-    if (args[0] === "network" && args[1] === "ls") {
-      queueMicrotask(() => {
-        child.emit("exit", 0, null);
-      });
-      return child as unknown as ChildProcessWithoutNullStreams;
-    }
     if (args[0] === "run") {
       sidecarChild.stdout.write('{"type":"ready"}\n');
       return sidecarChild as unknown as ChildProcessWithoutNullStreams;
@@ -426,6 +392,7 @@ test("McpSidecarManager forwards stdio MCP requests to the host registry", async
 
   const manager = new McpSidecarManager({
     configDirectory: "/tmp/sandy-config",
+    controllerControlDir: "/tmp/sandy-controller",
     mcpServers: {
       spotify: {
         transport: "stdio",

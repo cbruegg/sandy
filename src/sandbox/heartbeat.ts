@@ -1,4 +1,4 @@
-import { writeFile, mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 
 export const HEARTBEAT_FILE = "heartbeat";
 export const HEARTBEAT_INTERVAL_MS = 5_000;
@@ -52,13 +52,7 @@ export function startHeartbeat(
   };
 }
 
-/**
- * Create a named control directory and initialize the heartbeat file.
- */
-export async function createControlDir(
-  controlName: string,
-  controlRoot: string,
-): Promise<string> {
+export async function createControlDir(controlRoot: string, controlName: string): Promise<string> {
   const controlDir = `${controlRoot}/.sandy-control/${controlName}`;
   await mkdir(controlDir, { recursive: true });
   // Create the initial heartbeat file so containers see a fresh lease immediately.
@@ -67,19 +61,9 @@ export async function createControlDir(
 }
 
 /**
- * Create a bundle control directory and initialize the heartbeat file.
+ * Remove a control directory.
  */
-export async function createBundleControlDir(
-  bundleId: string,
-  controlRoot: string,
-): Promise<string> {
-  return await createControlDir(`bundle-${bundleId}`, controlRoot);
-}
-
-/**
- * Remove a bundle control directory.
- */
-export async function removeBundleControlDir(controlDir: string): Promise<void> {
+export async function removeControlDir(controlDir: string): Promise<void> {
   await rm(controlDir, { recursive: true, force: true }).catch(() => {
     // Best-effort cleanup; the directory will be cleaned up by the OS eventually.
   });
