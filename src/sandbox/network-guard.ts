@@ -4,6 +4,7 @@ import {logger} from "../logger.js";
 import {mcpProxyContainerAlias} from "../mcp/proxy-route.js";
 import {createInterface} from "node:readline";
 import {SANDY_MANAGED_CONTAINER_LABEL} from "./container-label.js";
+import {HEARTBEAT_FILE, HEARTBEAT_TIMEOUT_MS, CONTROLLER_CONTROL_MOUNT_PATH} from "./heartbeat.js";
 
 const DEFAULT_NETWORK_GUARD_IMAGE = "sandy-network-guard:latest";
 
@@ -23,6 +24,8 @@ type LaunchNetworkGuardOptions = {
   setTimeoutImpl?: typeof setTimeout;
   clearTimeoutImpl?: typeof clearTimeout;
   cleanupContainer: (containerName: string) => Promise<void>;
+  /** Host-side bundle control directory to mount into the guard container. */
+  controlDir?: string;
 };
 
 /**
@@ -70,6 +73,17 @@ export async function launchNetworkGuardContainer(
       options.workerNetworkName,
       "-e",
       `SANDY_NETWORK_GUARD_ALLOWED_HOSTS=${allowedHosts.join(",")}`,
+    );
+  }
+
+  if (options.controlDir) {
+    dockerArgs.push(
+      "-v",
+      `${options.controlDir}:${CONTROLLER_CONTROL_MOUNT_PATH}:ro`,
+      "-e",
+      `SANDY_CONTROLLER_HEARTBEAT_PATH=${CONTROLLER_CONTROL_MOUNT_PATH}/${HEARTBEAT_FILE}`,
+      "-e",
+      `SANDY_CONTROLLER_HEARTBEAT_TIMEOUT_MS=${HEARTBEAT_TIMEOUT_MS}`,
     );
   }
 

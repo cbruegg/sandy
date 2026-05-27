@@ -21,7 +21,6 @@ import {DockerSandboxRunner, type DockerSandboxRunnerOptions} from "./sandbox/do
 import {TaskBundleLauncherImpl, type TaskBundleLauncherOptions} from "./sandbox/task-bundle-launcher.js";
 import { TaskBundlePoolImpl } from "./sandbox/task-bundle-pool.js";
 import { TaskBundleAssignmentRegistry } from "./sandbox/task-bundle-assignment-registry.js";
-import { cleanupStaleContainers } from "./sandbox/stale-container-janitor.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
 import { OpenAiTranscriptionProvider } from "./transcription/openai-transcription-provider.js";
 import { resolvePublishedUpdateSource } from "./build-metadata.js";
@@ -33,6 +32,8 @@ import {createNoopHostfsBroker} from "./hostfs/hostfs-broker.js";
 import {initializeHostfs, type HostfsServices} from "./hostfs/index.js";
 import { ChatGPTTokenBroker } from "./auth/chatgpt-token-broker.js";
 import { SkillService } from "./skills.js";
+import { randomUUID } from "node:crypto";
+import { createControlDir, removeControlDir, startHeartbeat } from "./sandbox/heartbeat.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -93,11 +94,12 @@ export async function startApp(): Promise<void> {
   };
 
   const channel = createRetryingChannelAdapter(rawChannel, triggerFatalChannelError);
+  const sandyCacheRoot = resolveSandyCacheRoot();
 
   const workerImageManager = new WorkerImageManager({
     baseImage: config.workerImage,
     preinstall: config.workerPreinstall,
-    cacheRoot: resolveSandyCacheRoot(),
+    cacheRoot: sandyCacheRoot,
   });
 
   // Pre-resolve the worker Codex binary so each container can reuse the cache instead of re-downloading it.
@@ -126,6 +128,13 @@ export async function startApp(): Promise<void> {
 
   const hostMcpRegistry = new HostMcpServerRegistry(config.mcpServers);
   await hostMcpRegistry.start();
+
+  const controllerControlDir = await createControlDir(sandyCacheRoot, `controller-${randomUUID()}`);
+  const controllerHeartbeat = startHeartbeat(controllerControlDir);
+  const stopControllerHeartbeat = async (): Promise<void> => {
+    controllerHeartbeat.stop();
+    await removeControlDir(controllerControlDir);
+  };
 
   const skillService = new SkillService(config.configDirectory);
 
@@ -227,6 +236,7 @@ export async function startApp(): Promise<void> {
     workerImage: config.workerImage,
     resolveWorkerImage: () => workerImageManager.getLaunchImage(),
     shareRoot: config.shareRoot,
+    controllerControlDir,
     codexAuthFile: config.authMode.mode === "codex_auth_file"
       && config.authMode.codexAuthStrategy === "copy_file"
       ? config.authMode.codexAuthFile
@@ -261,8 +271,6 @@ export async function startApp(): Promise<void> {
         }
         : undefined,
   };
-
-  await cleanupStaleContainers();
 
   const taskBundleLauncher = new TaskBundleLauncherImpl(taskBundleLauncherOptions);
   const taskBundleAssignmentRegistry = new TaskBundleAssignmentRegistry();
@@ -337,6 +345,7 @@ export async function startApp(): Promise<void> {
     mcpServers: config.mcpServers,
     workerNetworkName,
     sidecarImage: config.mcpSidecarImage,
+    controllerControlDir,
     authorizeToolCall: orchestrator.authorizeMcpToolCall.bind(orchestrator),
     authorizeResourceRead: orchestrator.authorizeMcpResourceRead.bind(orchestrator),
     executeNativeToolCall: orchestrator.executeNativeWorkerToolCall.bind(orchestrator),
@@ -363,6 +372,7 @@ export async function startApp(): Promise<void> {
     await stopWithLogging("sidecarManager.stop", sidecarManager?.stop.bind(sidecarManager));
     await stopWithLogging("hostMcpRegistry.close", () => hostMcpRegistry.close());
     await stopWithLogging("sandboxRunner.shutdown", sandboxRunner.shutdown?.bind(sandboxRunner));
+    await stopWithLogging("controllerHeartbeat.stop", stopControllerHeartbeat);
     await stopWithLogging("workerImageManager.stop", () => workerImageManager.stop());
     if (hostfsServices) {
       await stopWithLogging("hostfs.webdav.stop", () => hostfsServices.webdavServer.stop());
