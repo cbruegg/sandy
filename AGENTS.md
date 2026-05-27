@@ -78,6 +78,7 @@ Do not make functions return a Promise when they can complete synchronously. Pre
 
 Tests use Bun's test runner via `bun test`. Place tests next to the related code as `*.test.ts`. High test coverage is expected for orchestration behavior, normalization, privilege routing, and failure handling. Prefer small fakes over networked or Docker-backed integration in unit tests.
 Do not make properties or parameters nullable merely to avoid constructing fakes or dummies in tests. Prefer explicit test doubles at the boundary so production dependencies stay accurately typed.
+Prefer `$projectDir/tmp` over `/tmp` when creating temporary files or directories during the dev/test cycle. Accessing `/tmp/` may require user approval on each invocation, while project-local `tmp/` avoids that friction.
 Do not commit without asking, unless the user specifically requested it.
 
 ## Maintenance

@@ -1,4 +1,5 @@
-/tmp
+# Project-local temp directory (prefer over /tmp to avoid approval prompts)
+/tmp/
 /out-tsc
 
 /node_modules
