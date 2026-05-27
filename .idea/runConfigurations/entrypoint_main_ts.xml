@@ -3,7 +3,7 @@
     <option name="program" value="src/entrypoint-main.ts" />
     <option name="workingDirectory" value="$PROJECT_DIR$" />
     <envs>
-      <env name="SANDY_CONFIG_FILE" value="config/config.toml" />
+      <env name="SANDY_CONFIG_FILE" value="/Users/cbruegg/WebstormProjects/sandy/config/config.toml" />
     </envs>
     <method v="2">
       <option name="RunConfigurationTask" enabled="true" run_configuration_name="Local Docker Refresh" run_configuration_type="ShConfigurationType" />
