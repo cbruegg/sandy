@@ -53,17 +53,27 @@ export function startHeartbeat(
 }
 
 /**
+ * Create a named control directory and initialize the heartbeat file.
+ */
+export async function createControlDir(
+  controlName: string,
+  controlRoot: string,
+): Promise<string> {
+  const controlDir = `${controlRoot}/.sandy-control/${controlName}`;
+  await mkdir(controlDir, { recursive: true });
+  // Create the initial heartbeat file so containers see a fresh lease immediately.
+  await writeFile(`${controlDir}/${HEARTBEAT_FILE}`, String(Date.now()));
+  return controlDir;
+}
+
+/**
  * Create a bundle control directory and initialize the heartbeat file.
  */
 export async function createBundleControlDir(
   bundleId: string,
   controlRoot: string,
 ): Promise<string> {
-  const controlDir = `${controlRoot}/.sandy-control/bundle-${bundleId}`;
-  await mkdir(controlDir, { recursive: true });
-  // Create the initial heartbeat file so containers see a fresh lease immediately.
-  await writeFile(`${controlDir}/${HEARTBEAT_FILE}`, String(Date.now()));
-  return controlDir;
+  return await createControlDir(`bundle-${bundleId}`, controlRoot);
 }
 
 /**

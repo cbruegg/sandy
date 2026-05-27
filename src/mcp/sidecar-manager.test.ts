@@ -90,11 +90,14 @@ test("McpSidecarManager creates the Docker network, bootstraps the sidecar, and 
   assert.equal(createInvocation[0], "network");
   assert.equal(createInvocation[1], "create");
   assert.equal(createInvocation[2], workerNetworkName);
-  assert.ok(invocations.some((invocation) => invocation[0] === "run" && invocation.includes("--network-alias")));
-  assert.ok(invocations.some((invocation) =>
-    invocation[0] === "run"
-    && invocation.includes("--add-host")
-    && invocation.includes("host.docker.internal:host-gateway")));
+  const runInvocation = invocations.find((invocation) => invocation[0] === "run");
+  assert.ok(runInvocation);
+  assert.ok(runInvocation.includes("--network-alias"));
+  assert.ok(runInvocation.includes("--add-host"));
+  assert.ok(runInvocation.includes("host.docker.internal:host-gateway"));
+  assert.ok(runInvocation.some((arg) => arg.includes("/run/sandy-controller:ro")));
+  assert.ok(runInvocation.some((arg) => arg.startsWith("SANDY_CONTROLLER_HEARTBEAT_PATH=")));
+  assert.ok(runInvocation.some((arg) => arg.startsWith("SANDY_CONTROLLER_HEARTBEAT_TIMEOUT_MS=")));
   assert.ok(invocations.some((invocation) => invocation[0] === "network" && invocation[1] === "rm"));
   assert.match(stdinContent, /"type":"bootstrap"/);
   assert.match(stdinContent, /"workerProxyTokenSecret":"shared-secret"/);

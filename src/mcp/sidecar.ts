@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { configureLogger } from "../logger.js";
@@ -46,6 +47,23 @@ export async function main(): Promise<void> {
   const pendingAuthorization = new Map<string, (result: PrivilegeResolutionResult) => void>();
   const pendingNativeToolCalls = new Map<string, (result: NativeToolCallResult) => void>();
   let shuttingDown = false;
+
+  const shutdown = (reason: string): void => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+    void proxy.stop().finally(() => {
+      process.exit(0);
+    });
+    send({
+      type: "log",
+      timestamp: new Date().toISOString(),
+      level: "info",
+      event: "mcp.sidecar.shutting_down",
+      data: { reason },
+    });
+  };
 
   const proxy = new SandyMcpProxy({
     access,
@@ -115,10 +133,7 @@ export async function main(): Promise<void> {
         return;
       }
       if (message.type === "shutdown") {
-        shuttingDown = true;
-        void proxy.stop().finally(() => {
-          process.exit(0);
-        });
+        shutdown("host_shutdown");
       }
     } catch (error) {
       send({
@@ -130,6 +145,27 @@ export async function main(): Promise<void> {
 
   try {
     await proxy.start();
+    input.once("close", () => {
+      shutdown("stdin_closed");
+    });
+
+    const heartbeatPath = process.env["SANDY_CONTROLLER_HEARTBEAT_PATH"];
+    const heartbeatTimeoutMs = Number(process.env["SANDY_CONTROLLER_HEARTBEAT_TIMEOUT_MS"] ?? 30_000);
+    if (heartbeatPath) {
+      const interval = setInterval(() => {
+        try {
+          const heartbeatStat = statSync(heartbeatPath);
+          const ageMs = Date.now() - heartbeatStat.mtimeMs;
+          if (ageMs > heartbeatTimeoutMs) {
+            shutdown("heartbeat_stale");
+          }
+        } catch {
+          shutdown("heartbeat_missing");
+        }
+      }, Math.min(heartbeatTimeoutMs / 2, 5_000));
+      interval.unref();
+    }
+
     send({ type: "ready" });
   } catch (error) {
     send({
