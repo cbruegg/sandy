@@ -53,15 +53,15 @@ export async function main(): Promise<void> {
       return;
     }
     shuttingDown = true;
-    void proxy.stop().finally(() => {
-      process.exit(0);
-    });
     send({
       type: "log",
       timestamp: new Date().toISOString(),
       level: "info",
       event: "mcp.sidecar.shutting_down",
       data: { reason },
+    });
+    void proxy.stop().finally(() => {
+      process.exit(0);
     });
   };
 
