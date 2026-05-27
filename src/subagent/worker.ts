@@ -347,12 +347,12 @@ export async function main(): Promise<void> {
 
   writeSubAgentEvent({ type: "worker_connected" });
 
-  let shutDown = false;
-  const doShutdown = (reason: string): void => {
-    if (shutDown) return;
-    shutDown = true;
-    logger.info("worker.shutting_down", { reason });
-    processor.shutdown();
+  let shutdownStarted = false;
+  const finishShutdown = (): void => {
+    if (shutdownStarted) {
+      return;
+    }
+    shutdownStarted = true;
     shutdownResolver?.();
     process.exit(0);
   };
@@ -362,11 +362,16 @@ export async function main(): Promise<void> {
     env: process.env,
     applyWorkerCodexConfigPatch,
     startAppServerWorkerSession: async (options) => await AppServerWorkerSession.start(options),
-    onShutdown: () => {
-      shutdownResolver?.();
-      process.exit(0);
-    },
+    onShutdown: finishShutdown,
   });
+
+  const doShutdown = (reason: string): void => {
+    if (shutdownStarted) {
+      return;
+    }
+    logger.info("worker.shutting_down", { reason });
+    processor.shutdown();
+  };
 
   input.on("line", (line) => {
     void processor.handleLine(line);
@@ -383,6 +388,9 @@ export async function main(): Promise<void> {
   const heartbeatTimeoutMs = Number(process.env["SANDY_CONTROLLER_HEARTBEAT_TIMEOUT_MS"] ?? 30_000);
 
   if (heartbeatPath) {
+    // Poll at half the timeout so we notice a stale heartbeat promptly
+    // without checking more frequently than necessary.
+    const pollIntervalMs = Math.min(heartbeatTimeoutMs / 2, 5_000);
     const interval = setInterval(() => {
       try {
         const stat = statSync(heartbeatPath);
@@ -394,7 +402,7 @@ export async function main(): Promise<void> {
         // File missing — controller directory may be gone.
         doShutdown("heartbeat_missing");
       }
-    }, Math.min(heartbeatTimeoutMs / 2, 5_000));
+    }, pollIntervalMs);
     interval.unref();
   }
 

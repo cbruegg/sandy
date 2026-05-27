@@ -158,8 +158,10 @@ class Supervisor:
         if not heartbeat_path:
             return
         timeout_ms = int(os.environ.get("SANDY_CONTROLLER_HEARTBEAT_TIMEOUT_MS", 30000))
-        interval_seconds = max((timeout_ms / 1000.0) / 2.0, 2.0)
-        while not self._stop_event.wait(interval_seconds):
+        # Poll at half the timeout so we notice a stale heartbeat promptly
+        # without spinning too aggressively for long timeout windows.
+        poll_interval_seconds = max((timeout_ms / 1000.0) / 2.0, 2.0)
+        while not self._stop_event.wait(poll_interval_seconds):
             try:
                 mtime = os.path.getmtime(heartbeat_path)
                 age_s = time.time() - mtime

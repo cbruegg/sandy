@@ -80,9 +80,8 @@ export class McpSidecarManager {
     await mkdir(oauthStateDirectory, { recursive: true });
     await this.runDockerCommand(["network", "create", this.options.workerNetworkName]);
 
-    let child: ChildProcessWithoutNullStreams | null = null;
     try {
-      child = this.spawnImpl("docker", [
+      const child = this.spawnImpl("docker", [
         "run",
         "--rm",
         "-i",
@@ -107,115 +106,110 @@ export class McpSidecarManager {
         stdio: ["pipe", "pipe", "pipe"],
       });
       this.child = child;
-    } catch (error) {
-      await this.runDockerCommand(["network", "rm", this.options.workerNetworkName], true);
-      throw error;
-    }
 
-    const stdout = createInterface({
-      input: child.stdout,
-      crlfDelay: Infinity,
-    });
+      const stdout = createInterface({
+        input: child.stdout,
+        crlfDelay: Infinity,
+      });
 
-    let ready = false;
-    let startupResolved = false;
-    let startupReject: ((reason?: unknown) => void) | null = null;
-    const startupPromise = new Promise<void>((resolve, reject) => {
-      startupReject = reject;
-      const timer = this.setTimeoutImpl(() => {
-        if (!ready) {
-          reject(new Error("MCP sidecar did not become ready in time."));
-        }
-      }, this.startupTimeoutMs);
+      let ready = false;
+      let startupResolved = false;
+      let startupReject: ((reason?: unknown) => void) | null = null;
+      const startupPromise = new Promise<void>((resolve, reject) => {
+        startupReject = reject;
+        const timer = this.setTimeoutImpl(() => {
+          if (!ready) {
+            reject(new Error("MCP sidecar did not become ready in time."));
+          }
+        }, this.startupTimeoutMs);
 
-      const finish = (fn: () => void) => {
-        if (startupResolved) {
-          return;
-        }
-        startupResolved = true;
-        this.clearTimeoutImpl(timer);
-        fn();
-      };
+        const finish = (fn: () => void) => {
+          if (startupResolved) {
+            return;
+          }
+          startupResolved = true;
+          this.clearTimeoutImpl(timer);
+          fn();
+        };
 
-      stdout.on("line", (line) => {
-        const trimmed = line.trim();
-        if (!trimmed) {
-          return;
-        }
+        stdout.on("line", (line) => {
+          const trimmed = line.trim();
+          if (!trimmed) {
+            return;
+          }
 
-        try {
-          const message = parseMcpSidecarToHostMessage(trimmed);
-          if (message.type === "ready") {
-            ready = true;
-            finish(resolve);
+          try {
+            const message = parseMcpSidecarToHostMessage(trimmed);
+            if (message.type === "ready") {
+              ready = true;
+              finish(resolve);
+              return;
+            }
+            if (message.type === "fatal_error") {
+              finish(() => reject(new Error(`MCP sidecar failed: ${message.message}`)));
+              return;
+            }
+            if (message.type === "authorization_request") {
+              this.dispatchAuthorizationRequest(message);
+              return;
+            }
+            if (message.type === "resource_authorization_request") {
+              this.dispatchResourceAuthorizationRequest(message);
+              return;
+            }
+            if (message.type === "native_tool_call_request") {
+              this.dispatchNativeToolCallRequest(message);
+              return;
+            }
+            if (message.type === "upstream_request") {
+              this.dispatchUpstreamRequest(message);
+              return;
+            }
+            if (message.type === "log") {
+              this.forwardSidecarLog(message);
+              return;
+            }
+          } catch (error) {
+            logger.warn("mcp.sidecar.stdout_invalid", {
+              message: error instanceof Error ? error.message : "Invalid sidecar output.",
+              line: trimmed,
+            });
+          }
+        });
+
+        child.once("exit", (code, signal) => {
+          this.child = null;
+          if (!ready) {
+            finish(() => reject(new Error(`MCP sidecar exited before ready (code=${code}, signal=${signal}).`)));
             return;
           }
-          if (message.type === "fatal_error") {
-            finish(() => reject(new Error(`MCP sidecar failed: ${message.message}`)));
-            return;
-          }
-          if (message.type === "authorization_request") {
-            this.dispatchAuthorizationRequest(message);
-            return;
-          }
-          if (message.type === "resource_authorization_request") {
-            this.dispatchResourceAuthorizationRequest(message);
-            return;
-          }
-          if (message.type === "native_tool_call_request") {
-            this.dispatchNativeToolCallRequest(message);
-            return;
-          }
-          if (message.type === "upstream_request") {
-            this.dispatchUpstreamRequest(message);
-            return;
-          }
-          if (message.type === "log") {
-            this.forwardSidecarLog(message);
-            return;
-          }
-        } catch (error) {
-          logger.warn("mcp.sidecar.stdout_invalid", {
-            message: error instanceof Error ? error.message : "Invalid sidecar output.",
-            line: trimmed,
+          logger.warn("mcp.sidecar.exited", {
+            code,
+            signal,
+          });
+        });
+      });
+
+      child.stderr.on("data", (chunk) => {
+        const message = String(chunk).trim();
+        if (message) {
+          logger.warn("mcp.sidecar.stderr", {
+            message,
           });
         }
       });
 
-      child.once("exit", (code, signal) => {
-        this.child = null;
-        if (!ready) {
-          finish(() => reject(new Error(`MCP sidecar exited before ready (code=${code}, signal=${signal}).`)));
-          return;
-        }
-        logger.warn("mcp.sidecar.exited", {
-          code,
-          signal,
-        });
+      child.once("error", (error) => {
+        startupReject?.(error);
       });
-    });
 
-    child.stderr.on("data", (chunk) => {
-      const message = String(chunk).trim();
-      if (message) {
-        logger.warn("mcp.sidecar.stderr", {
-          message,
-        });
-      }
-    });
+      this.sendToSidecar({
+        type: "bootstrap",
+        oauthStateDirectory: sidecarOauthMountPath,
+        workerProxyTokenSecret: this.access.sharedSecret,
+        mcpServers: this.options.mcpServers,
+      });
 
-    child.once("error", (error) => {
-      startupReject?.(error);
-    });
-
-    this.sendToSidecar({
-      type: "bootstrap",
-      oauthStateDirectory: sidecarOauthMountPath,
-      workerProxyTokenSecret: this.access.sharedSecret,
-      mcpServers: this.options.mcpServers,
-    });
-
-    try {
       await startupPromise;
       logger.info("mcp.sidecar.started", {
         containerName: this.containerName,

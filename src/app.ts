@@ -371,9 +371,9 @@ export async function startApp(): Promise<void> {
     await stopWithLogging("channel.stop", () => channel.stop());
     await stopWithLogging("sidecarManager.stop", sidecarManager?.stop.bind(sidecarManager));
     await stopWithLogging("hostMcpRegistry.close", () => hostMcpRegistry.close());
-     await stopWithLogging("sandboxRunner.shutdown", sandboxRunner.shutdown?.bind(sandboxRunner));
-      await stopWithLogging("controllerHeartbeat.stop", stopControllerHeartbeat);
-      await stopWithLogging("workerImageManager.stop", () => workerImageManager.stop());
+    await stopWithLogging("sandboxRunner.shutdown", sandboxRunner.shutdown?.bind(sandboxRunner));
+    await stopWithLogging("controllerHeartbeat.stop", stopControllerHeartbeat);
+    await stopWithLogging("workerImageManager.stop", () => workerImageManager.stop());
     if (hostfsServices) {
       await stopWithLogging("hostfs.webdav.stop", () => hostfsServices.webdavServer.stop());
     }

@@ -152,6 +152,9 @@ export async function main(): Promise<void> {
     const heartbeatPath = process.env["SANDY_CONTROLLER_HEARTBEAT_PATH"];
     const heartbeatTimeoutMs = Number(process.env["SANDY_CONTROLLER_HEARTBEAT_TIMEOUT_MS"] ?? 30_000);
     if (heartbeatPath) {
+      // Poll at half the timeout so we notice a stale heartbeat promptly
+      // without checking more frequently than necessary.
+      const pollIntervalMs = Math.min(heartbeatTimeoutMs / 2, 5_000);
       const interval = setInterval(() => {
         try {
           const heartbeatStat = statSync(heartbeatPath);
@@ -162,7 +165,7 @@ export async function main(): Promise<void> {
         } catch {
           shutdown("heartbeat_missing");
         }
-      }, Math.min(heartbeatTimeoutMs / 2, 5_000));
+      }, pollIntervalMs);
       interval.unref();
     }
 
