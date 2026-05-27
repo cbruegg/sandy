@@ -2,7 +2,6 @@ import type { HttpTokenConfig } from "../config.js";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ThreadOptions } from "@openai/codex-sdk";
 import { ZodError } from "zod";
 import { formatDateTimePrefix } from "../datetime-prefix.js";
 import { logger } from "../logger.js";
@@ -14,65 +13,52 @@ import {
   parseMainAgentDecision,
 } from "./main-agent-decision.js";
 import {sandyMcpServerId, workerToolEntries} from "../subagent/worker-tools.js";
+import {
+  type AppServerEvent,
+  type AppServerThreadProfile,
+  type AuthRefreshCallback,
+  createMainAgentProfile,
+} from "../subagent/app-server-client.js";
+import type { Input } from "@openai/codex-sdk";
 
 export interface MainAgentController {
   decide(context: DecideContext): Promise<MainAgentDecision>;
 }
 
-// ---- streamed event types (narrow local contract, decoupled from @openai/codex-sdk) ----
-
-type StreamedThreadEventItem = {
-  type: string;
-  text?: string;
-  id?: string;
-};
-
-export type StreamedThreadEvent = {
-  type: string;
-  item?: StreamedThreadEventItem;
-};
-
-type MainAgentStreamedTurn = {
-  events: AsyncGenerator<StreamedThreadEvent>;
-};
-
-type MainAgentThread = {
-  runStreamed(input: string): Promise<MainAgentStreamedTurn>;
-};
-
-type CodexClient = {
-  startThread(options?: ThreadOptions): MainAgentThread;
-};
-
-// ---- end streamed types ----
-
-const COMPACTION_ITEM_TYPE = "context_compaction";
-const AGENT_MESSAGE_ITEM_TYPE = "agent_message";
-
-function isContextCompactionItem(item: StreamedThreadEventItem): boolean {
-  return item.type === COMPACTION_ITEM_TYPE;
+export interface MainAgentAppServer {
+  startThread(profile: AppServerThreadProfile, model?: string): Promise<string>;
+  streamTurn(
+    threadId: string,
+    input: Input,
+    onAuthRefresh: AuthRefreshCallback,
+    abortSignal?: AbortSignal,
+  ): AsyncGenerator<AppServerEvent>;
 }
 
 const MAX_DECISION_VALIDATION_ATTEMPTS = 3;
 
+const noopAuthRefresh: AuthRefreshCallback = () => {
+  throw new Error("Auth refresh not supported for main agent.");
+};
+
 export class CodexMainAgentController implements MainAgentController {
-  private readonly codex: CodexClient;
+  private readonly appServer: MainAgentAppServer;
   private readonly model: string | null;
   private readonly getSkills: () => SkillMetadata[];
   private readonly workerMcpServerIds: string[];
   private readonly httpTokens: Record<string, HttpTokenConfig>;
-  private readonly threads = new Map<string, MainAgentThread>();
+  private readonly threadIds = new Map<string, string>();
   private readonly threadDirectories = new Map<string, string>();
   private readonly needsInstructionRefresh = new Map<string, boolean>();
 
   constructor(
-    codex: CodexClient,
+    appServer: MainAgentAppServer,
     model: string | null = null,
     getSkills: () => SkillMetadata[] = () => [],
     workerMcpServerIds: string[] = [],
     httpTokens: Record<string, HttpTokenConfig> = {},
   ) {
-    this.codex = codex;
+    this.appServer = appServer;
     this.model = model;
     this.getSkills = getSkills;
     this.workerMcpServerIds = [...workerMcpServerIds].sort();
@@ -80,13 +66,13 @@ export class CodexMainAgentController implements MainAgentController {
   }
 
   async decide(context: DecideContext): Promise<MainAgentDecision> {
-    const isInitialTurn = !this.threads.has(context.chatId);
+    const isInitialTurn = !this.threadIds.has(context.chatId);
     const includeFullInstructions = isInitialTurn || this.needsInstructionRefresh.get(context.chatId) === true;
     if (!isInitialTurn) {
       this.needsInstructionRefresh.delete(context.chatId);
     }
 
-    const thread = this.getOrCreateThread(context.chatId);
+    const threadId = await this.getOrCreateThreadId(context.chatId);
     logger.info("main_agent.decision_requested", {
       chatId: context.chatId,
       newVisibleEntryCount: context.newVisibleEntries.length,
@@ -104,7 +90,8 @@ export class CodexMainAgentController implements MainAgentController {
       workerMcpServerIds: this.workerMcpServerIds,
       httpTokens: this.httpTokens,
     });
-    const decision = await this.runValidatedDecision(thread, prompt, context);
+    const input: Input = [{ type: "text", text: prompt }];
+    const decision = await this.runValidatedDecision(threadId, input, context);
     logger.info("main_agent.decision_received", {
       chatId: context.chatId,
       action: decision.action,
@@ -114,38 +101,48 @@ export class CodexMainAgentController implements MainAgentController {
   }
 
   private async runValidatedDecision(
-    thread: MainAgentThread,
-    prompt: string,
+    threadId: string,
+    initialInput: Input,
     context: { chatId: string },
   ): Promise<MainAgentDecision> {
-    let nextInput = prompt;
+    let nextInput = initialInput;
 
     for (let attempt = 1; attempt <= MAX_DECISION_VALIDATION_ATTEMPTS; attempt += 1) {
-      const turn = await thread.runStreamed(nextInput);
       let finalResponse = "";
       let sawCompaction = false;
 
-      for await (const event of turn.events) {
-        if (event.type === "item.started" || event.type === "item.completed") {
-          if (event.item && isContextCompactionItem(event.item)) {
+      for await (const event of this.appServer.streamTurn(
+        threadId,
+        nextInput,
+        noopAuthRefresh,
+      )) {
+        switch (event.type) {
+          case "agent_message_completed":
+            finalResponse = event.text;
+            break;
+
+          case "context_compaction":
             sawCompaction = true;
-          }
-          if (
-            event.type === "item.completed" &&
-            event.item?.type === AGENT_MESSAGE_ITEM_TYPE &&
-            event.item.text !== undefined
-          ) {
-            finalResponse = event.item.text;
-          }
+            logger.info("main_agent.compaction_detected", {
+              chatId: context.chatId,
+              attempt,
+              detectionMethod: "app_server_item",
+            });
+            break;
+
+          case "turn_completed":
+            break;
+
+          case "turn_failed":
+            throw new Error(`Turn failed: ${event.error}`);
+
+          case "error":
+            throw new Error(`App server error: ${event.message}`);
         }
       }
 
       if (sawCompaction) {
         this.needsInstructionRefresh.set(context.chatId, true);
-        logger.info("main_agent.compaction_detected", {
-          chatId: context.chatId,
-          attempt,
-        });
       }
 
       logger.debugContent("main_agent.model_response", {
@@ -174,31 +171,28 @@ export class CodexMainAgentController implements MainAgentController {
           );
         }
 
-        nextInput = formatMainAgentDecisionValidationError(finalResponse, error);
+        nextInput = [{ type: "text", text: formatMainAgentDecisionValidationError(finalResponse, error) }];
       }
     }
 
     throw new Error("Unreachable.");
   }
 
-  private getOrCreateThread(chatId: string): MainAgentThread {
-    const existing = this.threads.get(chatId);
+  private async getOrCreateThreadId(chatId: string): Promise<string> {
+    const existing = this.threadIds.get(chatId);
     if (existing) {
       return existing;
     }
-    const created = this.createThread(chatId);
-    this.threads.set(chatId, created);
-    return created;
-  }
-
-  private createThread(chatId: string): MainAgentThread {
     const workingDirectory = this.getOrCreateThreadDirectory(chatId);
-    const thread = this.codex.startThread(buildMainAgentThreadOptions(workingDirectory, this.model));
+    const profile = createMainAgentProfile(workingDirectory);
+    const threadId = await this.appServer.startThread(profile, this.model ?? undefined);
+    this.threadIds.set(chatId, threadId);
     logger.debug("main_agent.thread_started", {
       chatId,
       workingDirectory,
+      threadId,
     });
-    return thread;
+    return threadId;
   }
 
   private getOrCreateThreadDirectory(chatId: string): string {
@@ -215,16 +209,6 @@ export class CodexMainAgentController implements MainAgentController {
     });
     return directory;
   }
-}
-
-export function buildMainAgentThreadOptions(workingDirectory: string, model: string | null = null): ThreadOptions {
-  return {
-    approvalPolicy: "never",
-    ...(model ? { model } : {}),
-    sandboxMode: "read-only",
-    workingDirectory,
-    skipGitRepoCheck: true,
-  };
 }
 
 function buildSandyToolsPromptSection(): string {

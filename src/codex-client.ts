@@ -415,6 +415,7 @@ export async function ensureManagedCodexPath(options: EnsureManagedCodexOptions 
   }
 }
 
+/** @public Not currently used in-app but kept as a public API. */
 export async function createCodexClient(options: Omit<CodexOptions, "codexPathOverride"> = {}): Promise<Codex> {
   const codexPathOverride = await ensureManagedCodexPath();
   const env = options.env ? normalizeChildProcessEnv(options.env) : undefined;

@@ -2,7 +2,7 @@ import { CodexMainAgentController } from "./agent/main-agent-controller.js";
 import { createChannelAdapter } from "./channel/create-channel.js";
 import type { WorkerAuthConfig } from "./types.js";
 import { loadConfig } from "./config.js";
-import { createCodexClient, ensureManagedCodexPath } from "./codex-client.js";
+import { ensureManagedCodexPath } from "./codex-client.js";
 import { resolveSandyCacheRoot } from "./cache-paths.js";
 import { configureLogger, logger } from "./logger.js";
 import { ProxyAccess } from "./proxy-access.js";
@@ -34,6 +34,7 @@ import { ChatGPTTokenBroker } from "./auth/chatgpt-token-broker.js";
 import { SkillService } from "./skills.js";
 import { randomUUID } from "node:crypto";
 import { createControlDir, removeControlDir, startHeartbeat } from "./sandbox/heartbeat.js";
+import { CodexAppServerClient } from "./subagent/app-server-client.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -102,19 +103,21 @@ export async function startApp(): Promise<void> {
     cacheRoot: sandyCacheRoot,
   });
 
-  // Pre-resolve the worker Codex binary so each container can reuse the cache instead of re-downloading it.
-  const [codex, workerCodexBinaryPath, initialWorkerImage] = await Promise.all([
-    config.authMode.mode === "api_key"
-      ? createCodexClient({
-          apiKey: config.authMode.openAiApiKey,
-        })
-      : createCodexClient(),
+  // Pre-resolve the worker Codex binary so each container can reuse the cache
+  // instead of re-downloading it.  Also resolve the host-platform Codex binary
+  // for the main agent's app-server process.
+  const [mainAgentCodexPath, workerCodexBinaryPath, initialWorkerImage] = await Promise.all([
+    ensureManagedCodexPath(),
     ensureManagedCodexPath({
       platform: "linux",
       arch: process.arch,
     }),
     workerImageManager.start(),
   ]);
+
+  const mainAgentAppServer = await CodexAppServerClient.createWithAmbientAuth({
+    codexPath: mainAgentCodexPath,
+  });
 
   const tokenBroker: ChatGPTTokenBroker | null = config.authMode.mode === "codex_auth_file"
     && config.authMode.codexAuthStrategy === "external_tokens"
@@ -139,7 +142,7 @@ export async function startApp(): Promise<void> {
   const skillService = new SkillService(config.configDirectory);
 
   const mainAgent = new CodexMainAgentController(
-    codex,
+    mainAgentAppServer,
     config.agentModel,
     () => skillService.getSkills(),
     Object.keys(config.mcpServers),
@@ -372,6 +375,7 @@ export async function startApp(): Promise<void> {
     await stopWithLogging("sidecarManager.stop", sidecarManager?.stop.bind(sidecarManager));
     await stopWithLogging("hostMcpRegistry.close", () => hostMcpRegistry.close());
     await stopWithLogging("sandboxRunner.shutdown", sandboxRunner.shutdown?.bind(sandboxRunner));
+    await stopWithLogging("mainAgentAppServer.close", () => Promise.resolve(mainAgentAppServer.close()));
     await stopWithLogging("controllerHeartbeat.stop", stopControllerHeartbeat);
     await stopWithLogging("workerImageManager.stop", () => workerImageManager.stop());
     if (hostfsServices) {

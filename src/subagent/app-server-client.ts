@@ -13,10 +13,13 @@ type PendingRequest<T = unknown> = {
 
 type AppServerEvent =
   | { type: "agent_message_completed"; text: string; itemId: string | null }
+  | { type: "context_compaction" }
   | { type: "noop" }
   | { type: "turn_completed" }
   | { type: "turn_failed"; error: string }
   | { type: "error"; message: string };
+
+export type { AppServerEvent };
 
 const REFRESH_AUTH_METHOD = "account/chatgptAuthTokens/refresh";
 const JSON_RPC_METHOD_NOT_FOUND = -32601;
@@ -27,7 +30,6 @@ const ignoredNotificationMethods = new Set([
   // Sandy treats item completion as the only host-visible source of
   // assistant message text and ignores intermediate delta notifications.
   "item/agentMessage/delta",
-  "item/started",
   "mcpServer/startupStatus/updated",
   "skills/changed",
   "thread/started",
@@ -97,11 +99,17 @@ const itemCompletedNotificationSchema = itemCompletedParamsSchema.transform((dat
   item: data.item,
 }));
 
+const itemStartedNotificationSchema = itemCompletedParamsSchema.transform((data) => ({
+  kind: "item_started" as const,
+  item: data.item,
+}));
+
 type ParsedAppServerNotification =
   | z.infer<typeof turnCompletedNotificationSchema>
   | z.infer<typeof turnFailedNotificationSchema>
   | z.infer<typeof errorNotificationSchema>
   | z.infer<typeof itemCompletedNotificationSchema>
+  | z.infer<typeof itemStartedNotificationSchema>
   | {
     kind: "parse_failed";
     method: string;
@@ -112,7 +120,7 @@ type ParsedAppServerNotification =
 
 type ParsedCompletedItem = z.infer<typeof itemCompletedNotificationSchema>["item"];
 
-type AuthRefreshCallback = (
+export type AuthRefreshCallback = (
   previousAccountId: string | null,
 ) => Promise<{ accessToken: string; chatgptAccountId: string; chatgptPlanType: string | null }>;
 
@@ -120,11 +128,13 @@ type CreateExternalTokensClientOptions = {
   codexPath: string;
   tokens: ChatGPTExternalTokens;
   spawnImpl?: typeof spawn;
+  extraSpawnArgs?: string[];
 };
 
 type CreateAmbientAuthClientOptions = {
   codexPath: string;
   spawnImpl?: typeof spawn;
+  extraSpawnArgs?: string[];
 };
 
 type AppServerTypedRpcHost = {
@@ -262,14 +272,37 @@ class AppServerTypedRpc {
 }
 
 
-function buildAppServerThreadStartParams(model?: string) {
+export type AppServerThreadProfile = {
+  sandbox: "read-only" | "workspace-write" | "danger-full-access";
+  cwd: string;
+  personality?: string;
+};
+
+function buildAppServerThreadStartParams(
+  profile: AppServerThreadProfile,
+  model?: string,
+) {
   return {
     ...(model ? { model } : {}),
-    cwd: sharedWorkspaceMountPath,
+    cwd: profile.cwd,
     approvalPolicy: "never",
-    // Docker is the actual isolation boundary for sub-agents; avoid nested
-    // bwrap sandboxing in-container.
-    sandbox: "danger-full-access",
+    // Docker (or the host OS for the main agent) is the actual isolation
+    // boundary; avoid nested bwrap sandboxing in-container.
+    sandbox: profile.sandbox,
+    personality: profile.personality ?? "none",
+  };
+}
+
+export const DEFAULT_WORKER_PROFILE: AppServerThreadProfile = {
+  sandbox: "danger-full-access",
+  cwd: sharedWorkspaceMountPath,
+  personality: "none",
+};
+
+export function createMainAgentProfile(workingDirectory: string): AppServerThreadProfile {
+  return {
+    sandbox: "read-only",
+    cwd: workingDirectory,
     personality: "none",
   };
 }
@@ -290,12 +323,13 @@ export class CodexAppServerClient {
   private constructor(
     private readonly codexPath: string,
     private readonly spawnImpl: typeof spawn = spawn,
+    private readonly extraSpawnArgs: string[] = [],
   ) {
     this.rpc = new AppServerTypedRpc(this);
   }
 
   static async createWithExternalTokens(options: CreateExternalTokensClientOptions): Promise<CodexAppServerClient> {
-    const client = new CodexAppServerClient(options.codexPath, options.spawnImpl);
+    const client = new CodexAppServerClient(options.codexPath, options.spawnImpl, options.extraSpawnArgs);
     await client.initialize(true);
     await client.loginWithTokens(options.tokens);
     return client;
@@ -307,7 +341,7 @@ export class CodexAppServerClient {
   // opt into the experimental app-server auth APIs or send an explicit login
   // request over JSON-RPC.
   static async createWithAmbientAuth(options: CreateAmbientAuthClientOptions): Promise<CodexAppServerClient> {
-    const client = new CodexAppServerClient(options.codexPath, options.spawnImpl);
+    const client = new CodexAppServerClient(options.codexPath, options.spawnImpl, options.extraSpawnArgs);
     await client.initialize(false);
     client.loggedIn = true;
     return client;
@@ -316,7 +350,7 @@ export class CodexAppServerClient {
   start(): void {
     if (this.child) return;
 
-    this.child = this.spawnImpl(this.codexPath, ["app-server", "--listen", "stdio://"], {
+    this.child = this.spawnImpl(this.codexPath, ["app-server", "--listen", "stdio://", ...this.extraSpawnArgs], {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env },
     });
@@ -455,9 +489,9 @@ export class CodexAppServerClient {
     this.loggedIn = true;
   }
 
-  async startThread(model?: string): Promise<string> {
+  async startThread(profile: AppServerThreadProfile, model?: string): Promise<string> {
     this.ensureReady("startThread");
-    const result = await this.rpc.startThread(buildAppServerThreadStartParams(model));
+    const result = await this.rpc.startThread(buildAppServerThreadStartParams(profile, model));
     return result.thread.id;
   }
 
@@ -572,8 +606,15 @@ export class CodexAppServerClient {
           type: "error",
           message: notification.message ?? "Unknown app-server error.",
         };
+      case "item_started":
       case "item_completed": {
         const itemType = notification.item?.type ?? null;
+        if (itemType === "contextCompaction") {
+          return { type: "context_compaction" };
+        }
+        if (notification.kind === "item_started") {
+          return { type: "noop" };
+        }
         if ((itemType === "agent_message" || itemType === "agentMessage") && typeof notification.item?.text === "string") {
           return { type: "agent_message_completed", text: notification.item.text, itemId: notification.item.id ?? null };
         }
@@ -611,6 +652,9 @@ export class CodexAppServerClient {
 
       case "error":
         return this.parseNotificationWithSchema(errorNotificationSchema, method, params);
+
+      case "item/started":
+        return this.parseNotificationWithSchema(itemStartedNotificationSchema, method, params);
 
       case "item/completed":
         return this.parseNotificationWithSchema(itemCompletedNotificationSchema, method, params);

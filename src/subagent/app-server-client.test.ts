@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { PassThrough, Writable } from "node:stream";
-import { CodexAppServerClient } from "./app-server-client.js";
+import { CodexAppServerClient, DEFAULT_WORKER_PROFILE, createMainAgentProfile } from "./app-server-client.js";
 import type { ChatGPTExternalTokens } from "../types.js";
 import { configureLogger, type LogLevel } from "../logger.js";
 
@@ -90,7 +90,7 @@ test("CodexAppServerClient starts threads with kebab-case sandbox mode", async (
   };
   const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-  const startThreadPromise = client.startThread("gpt-5.4-mini");
+  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE, "gpt-5.4-mini");
   await Promise.resolve();
 
   assert.deepEqual(spawns, [{
@@ -124,7 +124,7 @@ test("CodexAppServerClient answers auth refresh requests during turns", async ()
   };
   const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-  const startThreadPromise = client.startThread();
+  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
   await Promise.resolve();
   respond(child, 3, { thread: { id: "thread-1" } });
   const threadId = await startThreadPromise;
@@ -211,7 +211,7 @@ test("CodexAppServerClient handles auth refresh before turn-start RPC response",
   };
   const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-  const startThreadPromise = client.startThread();
+  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
   await Promise.resolve();
   respond(child, 3, { thread: { id: "thread-1" } });
   const threadId = await startThreadPromise;
@@ -293,7 +293,7 @@ test("CodexAppServerClient ignores non-message item completions until turn compl
   };
   const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-  const startThreadPromise = client.startThread();
+  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
   await Promise.resolve();
   respond(child, 3, { thread: { id: "thread-1" } });
   const threadId = await startThreadPromise;
@@ -347,7 +347,7 @@ test("CodexAppServerClient ignores agent message deltas until completion", async
   };
   const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-  const startThreadPromise = client.startThread();
+  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
   await Promise.resolve();
   respond(child, 3, { thread: { id: "thread-1" } });
   const threadId = await startThreadPromise;
@@ -408,7 +408,7 @@ test("CodexAppServerClient ignores known benign notifications and item completio
   try {
     const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-    const startThreadPromise = client.startThread();
+    const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
     await Promise.resolve();
     respond(child, 3, { thread: { id: "thread-1" } });
     const threadId = await startThreadPromise;
@@ -492,7 +492,7 @@ test("CodexAppServerClient maps failed turn/completed notifications to turn_fail
   };
   const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-  const startThreadPromise = client.startThread();
+  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
   await Promise.resolve();
   respond(child, 3, { thread: { id: "thread-1" } });
   const threadId = await startThreadPromise;
@@ -544,7 +544,7 @@ test("CodexAppServerClient initializes ambient auth without experimental API or 
   });
   assert.equal(messages.some((message) => message["method"] === "account/login/start"), false);
 
-  const startThreadPromise = client.startThread();
+  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
   await Promise.resolve();
   respond(child, 2, { thread: { id: "thread-1" } });
   assert.equal(await startThreadPromise, "thread-1");
@@ -570,7 +570,7 @@ test("CodexAppServerClient sends JSON-RPC error when auth refresh handler reject
   try {
     const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-    const startThreadPromise = client.startThread();
+    const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
     await Promise.resolve();
     respond(child, 3, { thread: { id: "thread-1" } });
     const threadId = await startThreadPromise;
@@ -635,4 +635,166 @@ test("CodexAppServerClient sends JSON-RPC error when auth refresh handler reject
       forwardLog: undefined,
     });
   }
+});
+
+test("CodexAppServerClient yields context_compaction on item/started with contextCompaction type", async () => {
+  const child = new FakeChildProcess();
+  const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
+  const tokens: ChatGPTExternalTokens = {
+    accessToken: "access-token",
+    chatgptAccountId: "acct-123",
+    chatgptPlanType: "plus",
+  };
+  const client = await createExternalTokensClient(spawnImpl, child, tokens);
+
+  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
+  await Promise.resolve();
+  respond(child, 3, { thread: { id: "thread-1" } });
+  const threadId = await startThreadPromise;
+
+  const streamPromise = (async () => {
+    const events: Array<{ type: string }> = [];
+    for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async () => tokens)) {
+      events.push(event);
+    }
+    return events;
+  })();
+
+  await Promise.resolve();
+  respond(child, 4, {});
+  await new Promise((resolve) => setImmediate(resolve));
+
+  child.stdout.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    method: "item/started",
+    params: {
+      item: {
+        id: "compaction-1",
+        type: "contextCompaction",
+      },
+    },
+  })}\n`);
+  await new Promise((resolve) => setImmediate(resolve));
+  child.stdout.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    method: "turn/completed",
+    params: {},
+  })}\n`);
+
+  assert.deepEqual(await streamPromise, [
+    { type: "context_compaction" },
+    { type: "turn_completed" },
+  ]);
+});
+
+test("CodexAppServerClient yields context_compaction on item/completed with contextCompaction type", async () => {
+  const child = new FakeChildProcess();
+  const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
+  const tokens: ChatGPTExternalTokens = {
+    accessToken: "access-token",
+    chatgptAccountId: "acct-123",
+    chatgptPlanType: "plus",
+  };
+  const client = await createExternalTokensClient(spawnImpl, child, tokens);
+
+  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
+  await Promise.resolve();
+  respond(child, 3, { thread: { id: "thread-1" } });
+  const threadId = await startThreadPromise;
+
+  const streamPromise = (async () => {
+    const events: Array<{ type: string }> = [];
+    for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async () => tokens)) {
+      events.push(event);
+    }
+    return events;
+  })();
+
+  await Promise.resolve();
+  respond(child, 4, {});
+  await new Promise((resolve) => setImmediate(resolve));
+
+  child.stdout.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    method: "item/completed",
+    params: {
+      item: {
+        id: "compaction-1",
+        type: "contextCompaction",
+      },
+    },
+  })}\n`);
+  await new Promise((resolve) => setImmediate(resolve));
+  child.stdout.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    method: "turn/completed",
+    params: {},
+  })}\n`);
+
+  assert.deepEqual(await streamPromise, [
+    { type: "context_compaction" },
+    { type: "turn_completed" },
+  ]);
+});
+
+test("CodexAppServerClient ignores item/started with non-compaction types", async () => {
+  const child = new FakeChildProcess();
+  const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
+  const tokens: ChatGPTExternalTokens = {
+    accessToken: "access-token",
+    chatgptAccountId: "acct-123",
+    chatgptPlanType: "plus",
+  };
+  const client = await createExternalTokensClient(spawnImpl, child, tokens);
+
+  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
+  await Promise.resolve();
+  respond(child, 3, { thread: { id: "thread-1" } });
+  const threadId = await startThreadPromise;
+
+  const streamPromise = (async () => {
+    const events: Array<{ type: string }> = [];
+    for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async () => tokens)) {
+      events.push(event);
+    }
+    return events;
+  })();
+
+  await Promise.resolve();
+  respond(child, 4, {});
+  await new Promise((resolve) => setImmediate(resolve));
+
+  child.stdout.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    method: "item/started",
+    params: {
+      item: {
+        id: "msg-1",
+        type: "agentMessage",
+      },
+    },
+  })}\n`);
+  await new Promise((resolve) => setImmediate(resolve));
+  child.stdout.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    method: "turn/completed",
+    params: {},
+  })}\n`);
+
+  assert.deepEqual(await streamPromise, [
+    { type: "turn_completed" },
+  ]);
+});
+
+test("createMainAgentProfile uses read-only sandbox and given cwd", () => {
+  const profile = createMainAgentProfile("/tmp/sandy-main-agent-test");
+  assert.equal(profile.sandbox, "read-only");
+  assert.equal(profile.cwd, "/tmp/sandy-main-agent-test");
+  assert.equal(profile.personality, "none");
+});
+
+test("DEFAULT_WORKER_PROFILE uses danger-full-access sandbox and workspace share", () => {
+  assert.equal(DEFAULT_WORKER_PROFILE.sandbox, "danger-full-access");
+  assert.equal(DEFAULT_WORKER_PROFILE.cwd, "/workspace/share");
+  assert.equal(DEFAULT_WORKER_PROFILE.personality, "none");
 });

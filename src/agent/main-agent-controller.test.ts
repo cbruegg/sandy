@@ -1,15 +1,19 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { ThreadOptions } from "@openai/codex-sdk";
+import type { Input } from "@openai/codex-sdk";
 import {
   buildMainAgentPrompt,
-  buildMainAgentThreadOptions,
   CodexMainAgentController,
-  type StreamedThreadEvent,
+  type MainAgentAppServer,
 } from "./main-agent-controller.js";
 import type { SkillMetadata } from "../skills.js";
 import type { ChannelFormatting, DecideContext } from "../types.js";
 import type { HttpTokenConfig } from "../config.js";
+import type {
+  AppServerEvent,
+  AppServerThreadProfile,
+  AuthRefreshCallback,
+} from "../subagent/app-server-client.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
@@ -30,64 +34,62 @@ const testHttpTokens: Record<string, HttpTokenConfig> = {
   },
 };
 
-function expectDefined<T>(value: T | null | undefined, message: string): NonNullable<T> {
-  assert.notEqual(value, undefined, message);
-  assert.notEqual(value, null, message);
-  return value as NonNullable<T>;
-}
+// ---- helpers for building AppServerEvent sequences ----
 
-// ---- helpers for building streamed event sequences ----
-
-function buildTurnEvents(finalResponse: string): StreamedThreadEvent[] {
+function buildTurnEvents(finalResponse: string): AppServerEvent[] {
   return [
-    { type: "item.completed", item: { type: "agent_message", text: finalResponse } },
-    { type: "turn.completed" },
+    { type: "agent_message_completed", text: finalResponse, itemId: null },
+    { type: "turn_completed" },
   ];
 }
 
-function buildTurnEventsWithCompaction(finalResponse: string): StreamedThreadEvent[] {
+function buildTurnEventsWithCompaction(finalResponse: string): AppServerEvent[] {
   return [
-    { type: "item.started", item: { type: "context_compaction", id: "compaction-1" } },
-    { type: "item.completed", item: { type: "context_compaction", id: "compaction-1" } },
-    { type: "item.completed", item: { type: "agent_message", text: finalResponse } },
-    { type: "turn.completed" },
+    { type: "context_compaction" },
+    { type: "agent_message_completed", text: finalResponse, itemId: null },
+    { type: "turn_completed" },
   ];
 }
 
-function streamFromEvents(events: StreamedThreadEvent[]): AsyncGenerator<StreamedThreadEvent> {
-  return (async function* () {
+// ---- test double ----
+
+class FakeAppServerClient implements MainAgentAppServer {
+  public readonly startedProfiles: AppServerThreadProfile[] = [];
+  public readonly startedModels: Array<string | undefined> = [];
+  public readonly threadInputs: string[][] = [];
+  public readonly threadIds = new Map<string, string>();
+  private nextThreadId = 1;
+  private nextChatId = 0;
+
+  constructor(private eventSequences: AppServerEvent[][] = []) {}
+
+  async startThread(profile: AppServerThreadProfile, model?: string): Promise<string> {
+    this.startedProfiles.push(profile);
+    this.startedModels.push(model);
+    const threadId = `thread-${this.nextThreadId++}`;
+    this.threadIds.set(`chat-${this.nextChatId++}`, threadId);
+    return threadId;
+  }
+
+  async *streamTurn(
+    _threadId: string,
+    input: Input,
+    _onAuthRefresh: AuthRefreshCallback,
+    _abortSignal?: AbortSignal,
+  ): AsyncGenerator<AppServerEvent> {
+    const promptText = (Array.isArray(input) && input[0]?.type === "text")
+      ? input[0].text
+      : "";
+    this.threadInputs.push([promptText]);
+
+    const events = this.eventSequences.shift() ?? [];
     for (const event of events) {
       yield event;
     }
-  })();
-}
-
-// ---- test doubles ----
-
-class RecordingThread {
-  public readonly inputs: string[] = [];
-
-  constructor(private readonly eventSequences: StreamedThreadEvent[][]) {}
-
-  async runStreamed(input: string): Promise<{ events: AsyncGenerator<StreamedThreadEvent> }> {
-    this.inputs.push(input);
-    const events = this.eventSequences.shift() ?? [];
-    return { events: streamFromEvents(events) };
   }
-}
 
-class RecordingCodexClient {
-  public readonly startedThreads: ThreadOptions[] = [];
-  public readonly threads: RecordingThread[] = [];
-
-  constructor(private readonly eventSequencesPerThread: StreamedThreadEvent[][][]) {}
-
-  startThread(options?: ThreadOptions): RecordingThread {
-    this.startedThreads.push(options ?? {});
-    const eventSequences = this.eventSequencesPerThread.shift() ?? [];
-    const thread = new RecordingThread(eventSequences);
-    this.threads.push(thread);
-    return thread;
+  close(): void {
+    // noop
   }
 }
 
@@ -114,20 +116,25 @@ function replyDecision(replyText: string): string {
 
 // ---- tests ----
 
-test("buildMainAgentThreadOptions locks the main agent down", () => {
-  const options = buildMainAgentThreadOptions("/tmp/sandy-main-agent-test");
+test("CodexMainAgentController starts threads with read-only sandbox and working directory", async () => {
+  const appServer = new FakeAppServerClient([buildTurnEvents(replyDecision("hello"))]);
+  const controller = new CodexMainAgentController(appServer);
 
-  assert.equal(options.approvalPolicy, "never");
-  assert.equal(options.model, undefined);
-  assert.equal(options.sandboxMode, "read-only");
-  assert.equal(options.workingDirectory, "/tmp/sandy-main-agent-test");
-  assert.equal(options.skipGitRepoCheck, true);
+  await controller.decide(makeContext(["hello"]));
+
+  assert.equal(appServer.startedProfiles.length, 1);
+  assert.equal(appServer.startedProfiles[0]?.sandbox, "read-only");
+  assert.equal(appServer.startedProfiles[0]?.personality, "none");
+  assert.match(appServer.startedProfiles[0]?.cwd ?? "", /^.+sandy-main-agent-/);
 });
 
-test("buildMainAgentThreadOptions includes a model override when configured", () => {
-  const options = buildMainAgentThreadOptions("/tmp/sandy-main-agent-test", "gpt-5.4-mini");
+test("CodexMainAgentController includes a model override when configured", async () => {
+  const appServer = new FakeAppServerClient([buildTurnEvents(replyDecision("hello"))]);
+  const controller = new CodexMainAgentController(appServer, "gpt-5.4-mini");
 
-  assert.equal(options.model, "gpt-5.4-mini");
+  await controller.decide(makeContext(["hello"]));
+
+  assert.equal(appServer.startedModels[0], "gpt-5.4-mini");
 });
 
 test("buildMainAgentPrompt includes only the new visible entries for incremental turns without full instructions", () => {
@@ -202,24 +209,6 @@ test("buildMainAgentPrompt includes current date and time on every turn", () => 
   assert.match(deltaPrompt, /Current date and time: [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}/);
 });
 
-test("CodexMainAgentController starts threads in a unique temp directory with no approvals", async () => {
-  const codex = new RecordingCodexClient([[buildTurnEvents(replyDecision("hello"))]]);
-  const controller = new CodexMainAgentController(codex);
-
-  const decision = await controller.decide(makeContext(["hello"]));
-
-  assert.equal(decision.action, "reply");
-  assert.equal(codex.startedThreads.length, 1);
-
-  const options = expectDefined(codex.startedThreads[0], "Expected started thread options.");
-  assert.equal(options.approvalPolicy, "never");
-  assert.equal(options.model, undefined);
-  assert.equal(options.sandboxMode, "read-only");
-  assert.equal(options.skipGitRepoCheck, true);
-  assert.match(options.workingDirectory ?? "", /^.+sandy-main-agent-/);
-  assert.match(expectDefined(codex.threads[0], "Expected thread.").inputs[0] ?? "", /Required JSON schema:/);
-});
-
 test("buildMainAgentPrompt includes the precise decision schema", () => {
   const prompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
@@ -243,65 +232,61 @@ test("buildMainAgentPrompt includes the precise decision schema", () => {
 });
 
 test("CodexMainAgentController sends only the entries provided for each decision", async () => {
-  const codex = new RecordingCodexClient([[
+  const appServer = new FakeAppServerClient([
     buildTurnEvents(replyDecision("hello")),
     buildTurnEvents(replyDecision("world")),
-  ]]);
-  const controller = new CodexMainAgentController(codex);
+  ]);
+  const controller = new CodexMainAgentController(appServer);
 
   await controller.decide(makeContext(["hello"]));
   await controller.decide(makeContext(["world"]));
 
-  assert.equal(codex.threads.length, 1);
-  const thread = expectDefined(codex.threads[0], "Expected thread.");
-  assert.equal(thread.inputs.length, 2);
-
-  const [firstInput, secondInput] = thread.inputs;
+  assert.equal(appServer.threadInputs.length, 2);
+  const [firstInput, secondInput] = appServer.threadInputs;
   assert.ok(firstInput);
   assert.ok(secondInput);
-  assert.match(firstInput, /"text": "hello"/);
-  assert.doesNotMatch(firstInput, /"text": "world"/);
-  assert.match(secondInput, /"text": "world"/);
-  assert.doesNotMatch(secondInput, /"text": "hello"/);
+  assert.match(firstInput[0] ?? "", /"text": "hello"/);
+  assert.doesNotMatch(firstInput[0] ?? "", /"text": "world"/);
+  assert.match(secondInput[0] ?? "", /"text": "world"/);
+  assert.doesNotMatch(secondInput[0] ?? "", /"text": "hello"/);
 });
 
 test("CodexMainAgentController retries when the model returns invalid JSON", async () => {
-  const codex = new RecordingCodexClient([[
+  const appServer = new FakeAppServerClient([
     buildTurnEvents("not json"),
     buildTurnEvents(replyDecision("hello")),
-  ]]);
-  const controller = new CodexMainAgentController(codex);
+  ]);
+  const controller = new CodexMainAgentController(appServer);
 
   const decision = await controller.decide(makeContext(["hello"]));
 
   assert.equal(decision.action, "reply");
-  const thread = expectDefined(codex.threads[0], "Expected thread.");
-  assert.equal(thread.inputs.length, 2);
-  assert.match(thread.inputs[1] ?? "", /Your last response was not valid JSON/);
+  assert.equal(appServer.threadInputs.length, 2);
+  assert.match(appServer.threadInputs[1]?.[0] ?? "", /Your last response was not valid JSON/);
 });
 
 test("CodexMainAgentController gives up after repeated validation failures", async () => {
-  const codex = new RecordingCodexClient([[
+  const appServer = new FakeAppServerClient([
     buildTurnEvents("{}"),
     buildTurnEvents("[]"),
     buildTurnEvents('{"action":"reply"}'), // valid Zod schema but missing replyText
-  ]]);
-  const controller = new CodexMainAgentController(codex);
+  ]);
+  const controller = new CodexMainAgentController(appServer);
 
   await assert.rejects(
     controller.decide(makeContext(["hello"])),
     /Main agent failed to return a valid decision after 3 attempts/,
   );
-  assert.equal(expectDefined(codex.threads[0], "Expected thread.").inputs.length, 3);
+  assert.equal(appServer.threadInputs.length, 3);
 });
 
 test("CodexMainAgentController passes a configured model override into new threads", async () => {
-  const codex = new RecordingCodexClient([[buildTurnEvents(replyDecision("hello"))]]);
-  const controller = new CodexMainAgentController(codex, "gpt-5.4-mini");
+  const appServer = new FakeAppServerClient([buildTurnEvents(replyDecision("hello"))]);
+  const controller = new CodexMainAgentController(appServer, "gpt-5.4-mini");
 
   await controller.decide(makeContext(["hello"]));
 
-  assert.equal(expectDefined(codex.startedThreads[0], "Expected started thread options.").model, "gpt-5.4-mini");
+  assert.equal(appServer.startedModels[0], "gpt-5.4-mini");
 });
 
 test("buildMainAgentPrompt includes configured skill metadata on every turn", () => {
@@ -466,13 +451,13 @@ test("buildMainAgentPrompt includes Sandy host-integration tools when includeFul
 // ---- compaction detection tests ----
 
 test("CodexMainAgentController detects compaction events and triggers instruction refresh on next turn", async () => {
-  const codex = new RecordingCodexClient([[
+  const appServer = new FakeAppServerClient([
     buildTurnEvents(replyDecision("hello")),
     buildTurnEvents(replyDecision("world")),
     buildTurnEventsWithCompaction(replyDecision("compacted turn")),
     buildTurnEvents(replyDecision("after compaction")),
-  ]]);
-  const controller = new CodexMainAgentController(codex);
+  ]);
+  const controller = new CodexMainAgentController(appServer);
 
   // Turn 1: initial, should have full instructions
   await controller.decide(makeContext(["msg1"]));
@@ -483,59 +468,57 @@ test("CodexMainAgentController detects compaction events and triggers instructio
   // Turn 4: should have full instructions because compaction was detected on turn 3
   await controller.decide(makeContext(["msg4"]));
 
-  const thread = expectDefined(codex.threads[0], "Expected thread.");
-  assert.equal(thread.inputs.length, 4);
+  assert.equal(appServer.threadInputs.length, 4);
 
   // Turn 1: initial → full instructions (visible chat entries for this decision)
-  assert.match(thread.inputs[0] ?? "", /Visible chat entries for this decision:/);
-  assert.match(thread.inputs[0] ?? "", /You are Sandy's main orchestration controller/);
+  assert.match(appServer.threadInputs[0]?.[0] ?? "", /Visible chat entries for this decision:/);
+  assert.match(appServer.threadInputs[0]?.[0] ?? "", /You are Sandy's main orchestration controller/);
 
   // Turn 2: normal incremental → no full instructions
-  assert.match(thread.inputs[1] ?? "", /New visible chat entries since your last decision:/);
-  assert.match(thread.inputs[1] ?? "", /Continue acting as Sandy's main orchestration controller/);
+  assert.match(appServer.threadInputs[1]?.[0] ?? "", /New visible chat entries since your last decision:/);
+  assert.match(appServer.threadInputs[1]?.[0] ?? "", /Continue acting as Sandy's main orchestration controller/);
 
   // Turn 3: compaction happens during this turn → still normal incremental (flag set for next turn)
-  assert.match(thread.inputs[2] ?? "", /New visible chat entries since your last decision:/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /New visible chat entries since your last decision:/);
 
   // Turn 4: flag was set → full instructions reappear
-  assert.match(thread.inputs[3] ?? "", /Visible chat entries for this decision:/);
-  assert.match(thread.inputs[3] ?? "", /Some prior context may have been compacted/);
+  assert.match(appServer.threadInputs[3]?.[0] ?? "", /Visible chat entries for this decision:/);
+  assert.match(appServer.threadInputs[3]?.[0] ?? "", /Some prior context may have been compacted/);
 });
 
 test("CodexMainAgentController does not re-include full instructions on subsequent normal turns after refresh", async () => {
-  const codex = new RecordingCodexClient([[
+  const appServer = new FakeAppServerClient([
     buildTurnEvents(replyDecision("hello")),
     buildTurnEventsWithCompaction(replyDecision("compacted")),
     buildTurnEvents(replyDecision("after refresh")),
     buildTurnEvents(replyDecision("normal again")),
-  ]]);
-  const controller = new CodexMainAgentController(codex);
+  ]);
+  const controller = new CodexMainAgentController(appServer);
 
   await controller.decide(makeContext(["msg1"]));
   await controller.decide(makeContext(["msg2"])); // compaction detected here
   await controller.decide(makeContext(["msg3"])); // full instructions due to flag
   await controller.decide(makeContext(["msg4"])); // back to normal
 
-  const thread = expectDefined(codex.threads[0], "Expected thread.");
-  assert.equal(thread.inputs.length, 4);
+  assert.equal(appServer.threadInputs.length, 4);
 
   // Turn 3: refresh → full instructions
-  assert.match(thread.inputs[2] ?? "", /Visible chat entries for this decision:/);
-  assert.match(thread.inputs[2] ?? "", /You are Sandy's main orchestration controller/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /Visible chat entries for this decision:/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /You are Sandy's main orchestration controller/);
 
   // Turn 4: back to normal incremental
-  assert.match(thread.inputs[3] ?? "", /New visible chat entries since your last decision:/);
-  assert.match(thread.inputs[3] ?? "", /Continue acting as Sandy's main orchestration controller/);
+  assert.match(appServer.threadInputs[3]?.[0] ?? "", /New visible chat entries since your last decision:/);
+  assert.match(appServer.threadInputs[3]?.[0] ?? "", /Continue acting as Sandy's main orchestration controller/);
 });
 
 test("CodexMainAgentController includes Sandy tools and MCP configs again after compaction refresh", async () => {
-  const codex = new RecordingCodexClient([[
+  const appServer = new FakeAppServerClient([
     buildTurnEvents(replyDecision("hello")),
     buildTurnEventsWithCompaction(replyDecision("compacted")),
     buildTurnEvents(replyDecision("refreshed")),
-  ]]);
+  ]);
   const controller = new CodexMainAgentController(
-    codex,
+    appServer,
     null,
     () => testSkills,
     ["github", "todoist"],
@@ -546,71 +529,64 @@ test("CodexMainAgentController includes Sandy tools and MCP configs again after 
   await controller.decide(makeContext(["msg2"])); // compaction detected
   await controller.decide(makeContext(["msg3"])); // full instructions
 
-  const thread = expectDefined(codex.threads[0], "Expected thread.");
-  assert.equal(thread.inputs.length, 3);
+  assert.equal(appServer.threadInputs.length, 3);
 
   // Turn 2 (compaction happens): should NOT include full instructions
-  assert.match(thread.inputs[1] ?? "", /New visible chat entries since your last decision:/);
-  assert.doesNotMatch(thread.inputs[1] ?? "", /Configured MCP servers available to sub-agents:/);
+  assert.match(appServer.threadInputs[1]?.[0] ?? "", /New visible chat entries since your last decision:/);
+  assert.doesNotMatch(appServer.threadInputs[1]?.[0] ?? "", /Configured MCP servers available to sub-agents:/);
 
   // Turn 3 (refresh): should include full instructions with MCP/token/tool config
-  assert.match(thread.inputs[2] ?? "", /Visible chat entries for this decision:/);
-  assert.match(thread.inputs[2] ?? "", /Configured MCP servers available to sub-agents:/);
-  assert.match(thread.inputs[2] ?? "", /- github/);
-  assert.match(thread.inputs[2] ?? "", /- todoist/);
-  assert.match(thread.inputs[2] ?? "", /Configured HTTP tokens available to sub-agents:/);
-  assert.match(thread.inputs[2] ?? "", /vid2text: Token for the video transcription API\./);
-  assert.match(thread.inputs[2] ?? "", /send_file_to_channel/);
-  assert.match(thread.inputs[2] ?? "", /Configured skills available to sub-agents:/);
-  assert.match(thread.inputs[2] ?? "", /Adding task to Todoist/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /Visible chat entries for this decision:/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /Configured MCP servers available to sub-agents:/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /- github/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /- todoist/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /Configured HTTP tokens available to sub-agents:/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /vid2text: Token for the video transcription API\./);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /send_file_to_channel/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /Configured skills available to sub-agents:/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /Adding task to Todoist/);
 });
 
-test("CodexMainAgentController detects context_compaction in both item.started and item.completed events", async () => {
-  // Only item.started (no item.completed) should still trigger the flag
-  const codex = new RecordingCodexClient([[
+test("CodexMainAgentController detects context_compaction in item events", async () => {
+  // A single context_compaction event should trigger the flag
+  const appServer = new FakeAppServerClient([
     buildTurnEvents(replyDecision("hello")),
-    [
-      { type: "item.started" as const, item: { type: "context_compaction", id: "compaction-1" } },
-      { type: "item.completed", item: { type: "agent_message", text: replyDecision("turn after compaction start") } },
-      { type: "turn.completed" },
-    ],
+    buildTurnEventsWithCompaction(replyDecision("turn after compaction")),
     buildTurnEvents(replyDecision("refreshed")),
-  ]]);
-  const controller = new CodexMainAgentController(codex);
+  ]);
+  const controller = new CodexMainAgentController(appServer);
 
   await controller.decide(makeContext(["msg1"]));
-  await controller.decide(makeContext(["msg2"])); // item.started with context_compaction → flag set
+  await controller.decide(makeContext(["msg2"])); // context_compaction event → flag set
   await controller.decide(makeContext(["msg3"])); // should have full instructions
 
-  const thread = expectDefined(codex.threads[0], "Expected thread.");
-  assert.match(thread.inputs[2] ?? "", /Visible chat entries for this decision:/);
-  assert.match(thread.inputs[2] ?? "", /You are Sandy's main orchestration controller/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /Visible chat entries for this decision:/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /You are Sandy's main orchestration controller/);
 });
 
 test("CodexMainAgentController clears the instruction refresh flag after exactly one turn", async () => {
   // Compaction happens on the first turn. Flag is set.
   // Next turn includes full instructions and clears the flag.
   // The turn after that returns to normal incremental mode.
-  const codex = new RecordingCodexClient([[
+  const appServer = new FakeAppServerClient([
     buildTurnEventsWithCompaction(replyDecision("compacted turn")),
     buildTurnEvents(replyDecision("turn after compaction")),
     buildTurnEvents(replyDecision("turn after refresh")),
-  ]]);
-  const controller = new CodexMainAgentController(codex);
+  ]);
+  const controller = new CodexMainAgentController(appServer);
 
   await controller.decide(makeContext(["msg1"])); // compaction detected → flag set
   await controller.decide(makeContext(["msg2"])); // flag consumed → full instructions
   await controller.decide(makeContext(["msg3"])); // flag cleared → normal incremental
 
-  const thread = expectDefined(codex.threads[0], "Expected thread.");
-  assert.equal(thread.inputs.length, 3);
+  assert.equal(appServer.threadInputs.length, 3);
 
   // Turn 1: initial (first call, isInitialTurn = true)
-  assert.match(thread.inputs[0] ?? "", /Visible chat entries for this decision:/);
+  assert.match(appServer.threadInputs[0]?.[0] ?? "", /Visible chat entries for this decision:/);
   // Turn 2: flag was set by compaction on turn 1 → full instructions
-  assert.match(thread.inputs[1] ?? "", /Visible chat entries for this decision:/);
-  assert.match(thread.inputs[1] ?? "", /Some prior context may have been compacted/);
+  assert.match(appServer.threadInputs[1]?.[0] ?? "", /Visible chat entries for this decision:/);
+  assert.match(appServer.threadInputs[1]?.[0] ?? "", /Some prior context may have been compacted/);
   // Turn 3: flag cleared → normal incremental
-  assert.match(thread.inputs[2] ?? "", /New visible chat entries since your last decision:/);
-  assert.match(thread.inputs[2] ?? "", /Continue acting as Sandy's main orchestration controller/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /New visible chat entries since your last decision:/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /Continue acting as Sandy's main orchestration controller/);
 });
