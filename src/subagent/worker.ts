@@ -1,5 +1,5 @@
 import { type Input, type Thread, type ThreadEvent, type TodoListItem } from "@openai/codex-sdk";
-import { statSync } from "node:fs";
+import { isHeartbeatFreshSync } from "../sandbox/heartbeat.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -393,9 +393,7 @@ export async function main(): Promise<void> {
     const pollIntervalMs = Math.min(heartbeatTimeoutMs / 2, 5_000);
     const interval = setInterval(() => {
       try {
-        const stat = statSync(heartbeatPath);
-        const age = Date.now() - stat.mtimeMs;
-        if (age > heartbeatTimeoutMs) {
+        if (!isHeartbeatFreshSync(heartbeatPath, heartbeatTimeoutMs)) {
           doShutdown("heartbeat_stale");
         }
       } catch {

@@ -20,6 +20,10 @@ import type {
 import { buildHostOauthStateDirectory, sidecarOauthMountPath } from "./oauth-paths.js";
 import { mcpProxyContainerAlias } from "./proxy-route.js";
 import {
+  buildManagedNetworkCreateArgs,
+  pruneStaleManagedNetworks,
+} from "./network-pruning.js";
+import {
   parseMcpSidecarToHostMessage,
   type McpSidecarAuthorizationRequestMessage,
   type McpSidecarNativeToolCallRequestMessage,
@@ -78,7 +82,16 @@ export class McpSidecarManager {
     this.started = true;
     const oauthStateDirectory = buildHostOauthStateDirectory(this.options.configDirectory);
     await mkdir(oauthStateDirectory, { recursive: true });
-    await this.runDockerCommand(["network", "create", this.options.workerNetworkName]);
+    // Label the network with the controller heartbeat path so the next startup
+    // can reclaim only networks whose owning Sandy instance is gone.
+    await pruneStaleManagedNetworks({
+      runDockerCommand: this.runDockerCommand.bind(this),
+      runDockerCommandCapture: this.runDockerCommandCapture.bind(this),
+    });
+    await this.runDockerCommand(buildManagedNetworkCreateArgs(
+      this.options.workerNetworkName,
+      this.options.controllerControlDir,
+    ));
 
     try {
       const child = this.spawnImpl("docker", [

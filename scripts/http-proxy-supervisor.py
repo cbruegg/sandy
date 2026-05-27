@@ -166,14 +166,19 @@ class Supervisor:
                 mtime = os.path.getmtime(heartbeat_path)
                 age_s = time.time() - mtime
                 if age_s * 1000 > timeout_ms:
-                    self._emit_log("warn", "http.proxy.heartbeat_stale", {"age_ms": age_s * 1000})
-                    self.shutdown()
-                    return
+                    self._shutdown_and_exit("http.proxy.heartbeat_stale", {"age_ms": age_s * 1000})
             except OSError:
                 # File missing — controller directory may be gone.
-                self._emit_log("warn", "http.proxy.heartbeat_missing", {})
-                self.shutdown()
-                return
+                self._shutdown_and_exit("http.proxy.heartbeat_missing", {})
+
+    # Heartbeat loss is a crash-fallback path: stop mitmdump and force the
+    # supervisor process to exit even if stdin stays open.
+    def _shutdown_and_exit(self, event: str, data: dict):
+        self._emit_log("warn", event, data)
+        self.shutdown()
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(1)
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-import { statSync } from "node:fs";
+import { isHeartbeatFreshSync } from "../sandbox/heartbeat.js";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { configureLogger } from "../logger.js";
@@ -157,9 +157,7 @@ export async function main(): Promise<void> {
       const pollIntervalMs = Math.min(heartbeatTimeoutMs / 2, 5_000);
       const interval = setInterval(() => {
         try {
-          const heartbeatStat = statSync(heartbeatPath);
-          const ageMs = Date.now() - heartbeatStat.mtimeMs;
-          if (ageMs > heartbeatTimeoutMs) {
+          if (!isHeartbeatFreshSync(heartbeatPath, heartbeatTimeoutMs)) {
             shutdown("heartbeat_stale");
           }
         } catch {

@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 
 export const HEARTBEAT_FILE = "heartbeat";
@@ -68,3 +69,15 @@ export async function removeControlDir(controlDir: string): Promise<void> {
     // Best-effort cleanup; the directory will be cleaned up by the OS eventually.
   });
 }
+
+/**
+ * Check whether a heartbeat file's mtime is within `timeoutMs`.
+ * Throws if the file does not exist, so callers can distinguish stale (file
+ * exists but too old) from missing (file not found).
+ */
+export function isHeartbeatFreshSync(heartbeatPath: string, timeoutMs: number = HEARTBEAT_TIMEOUT_MS): boolean {
+  const stats = statSync(heartbeatPath);
+  return Date.now() - stats.mtimeMs <= timeoutMs;
+}
+
+
