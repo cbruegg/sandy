@@ -13,7 +13,7 @@ import type {
   AppServerEvent,
   AppServerThreadProfile,
   AuthRefreshCallback,
-} from "../subagent/app-server-client.js";
+} from "../codex-app-server-client/app-server-client.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",

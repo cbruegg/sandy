@@ -1,9 +1,16 @@
 import { logger } from "../logger.js";
 import type { Input } from "@openai/codex-sdk";
 import type { ChatGPTExternalTokens, SubAgentEvent } from "../types.js";
-import { CodexAppServerClient, DEFAULT_WORKER_PROFILE } from "./app-server-client.js";
+import { CodexAppServerClient } from "../codex-app-server-client/app-server-client.js";
 import { writeSubAgentEvent } from "./subagent-event-writer.js";
 import { buildTaskSummaryInput } from "./worker-prompt.js";
+import { sharedWorkspaceMountPath } from "../shared-workspace.ts";
+
+const WORKER_PROFILE = {
+  sandbox: "danger-full-access" as const,
+  cwd: sharedWorkspaceMountPath,
+  personality: "none" as const,
+};
 
 function buildTextInput(text: string): Input {
   return text.trim() ? [{ type: "text", text: text.trim() }] : [];
@@ -171,7 +178,7 @@ export class AppServerWorkerSession {
       : await CodexAppServerClient.createWithAmbientAuth({
         codexPath: options.codexPath,
       });
-    const threadId = await appServer.startThread(DEFAULT_WORKER_PROFILE, options.model);
+    const threadId = await appServer.startThread(WORKER_PROFILE, options.model);
     const session = new AppServerWorkerSession(
       appServer,
       threadId,

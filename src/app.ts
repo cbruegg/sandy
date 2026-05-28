@@ -34,7 +34,7 @@ import { ChatGPTTokenBroker } from "./auth/chatgpt-token-broker.js";
 import { SkillService } from "./skills.js";
 import { randomUUID } from "node:crypto";
 import { createControlDir, removeControlDir, startHeartbeat } from "./sandbox/heartbeat.js";
-import { CodexAppServerClient } from "./subagent/app-server-client.js";
+import { CodexAppServerClient } from "./codex-app-server-client/app-server-client.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -117,6 +117,10 @@ export async function startApp(): Promise<void> {
 
   const mainAgentAppServer = await CodexAppServerClient.createWithAmbientAuth({
     codexPath: mainAgentCodexPath,
+    extraSpawnArgs: [
+      "-c",
+      "model_auto_compact_token_limit=200",
+    ],
   });
 
   const tokenBroker: ChatGPTTokenBroker | null = config.authMode.mode === "codex_auth_file"

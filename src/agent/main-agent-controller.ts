@@ -18,7 +18,7 @@ import {
   type AppServerThreadProfile,
   type AuthRefreshCallback,
   createMainAgentProfile,
-} from "../subagent/app-server-client.js";
+} from "../codex-app-server-client/app-server-client.js";
 import type { Input } from "@openai/codex-sdk";
 
 export interface MainAgentController {
@@ -46,9 +46,27 @@ export class CodexMainAgentController implements MainAgentController {
   private readonly model: string | null;
   private readonly getSkills: () => SkillMetadata[];
   private readonly workerMcpServerIds: string[];
+  /**
+   * Configured HTTP tokens keyed by token ID (from config.toml).
+   * Each value carries a description used in the main-agent prompt so
+   * the model knows which tokens are available for sub-agent tasks.
+   */
   private readonly httpTokens: Record<string, HttpTokenConfig>;
+  /**
+   * Active app-server thread IDs keyed by Sandy chat ID.
+   * One chat may have at most one active thread at any time.
+   */
   private readonly threadIds = new Map<string, string>();
+  /**
+   * Temporary working directories keyed by Sandy chat ID.
+   * Each directory is created on first use and kept for the chat lifetime.
+   */
   private readonly threadDirectories = new Map<string, string>();
+  /**
+   * Whether the next decide() call for a chat should re-inject the
+   * full orchestration instructions. Set after auto-compaction is
+   * detected and cleared immediately after the restored prompt is built.
+   */
   private readonly needsInstructionRefresh = new Map<string, boolean>();
 
   constructor(

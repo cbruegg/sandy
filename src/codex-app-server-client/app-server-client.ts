@@ -4,7 +4,14 @@ import type { Input } from "@openai/codex-sdk";
 import { z } from "zod";
 import type { ChatGPTExternalTokens } from "../types.js";
 import { logger } from "../logger.js";
-import {sharedWorkspaceMountPath} from "../shared-workspace.ts";
+import type { InitializeParams } from "./generated/InitializeParams.js";
+import type { LoginAccountParams } from "./generated/v2/LoginAccountParams.js";
+import type { ThreadStartParams } from "./generated/v2/ThreadStartParams.js";
+import type { Personality } from "./generated/Personality.js";
+import type { TurnCompletedNotification } from "./generated/v2/TurnCompletedNotification.js";
+import type { ItemCompletedNotification } from "./generated/v2/ItemCompletedNotification.js";
+import type { ItemStartedNotification } from "./generated/v2/ItemStartedNotification.js";
+import type { ErrorNotification } from "./generated/v2/ErrorNotification.js";
 
 type PendingRequest<T = unknown> = {
   resolve: (result: T) => void;
@@ -52,73 +59,20 @@ const refreshAuthParamsSchema = z.object({
   previousAccountId: z.string().nullable().optional(),
 }).passthrough();
 
-const turnCompletedParamsSchema = z.object({
-  turn: z.object({
-    status: z.string().optional(),
-    error: z.object({
-      message: z.string().optional(),
-    }).nullable().optional(),
-  }).optional(),
-}).passthrough();
-
-const turnFailedParamsSchema = z.object({
-  error: z.object({
-    message: z.string().optional(),
-  }).nullable().optional(),
-}).passthrough();
-
-const errorParamsSchema = z.object({
-  message: z.string().optional(),
-}).passthrough();
-
-const itemCompletedParamsSchema = z.object({
-  item: z.object({
-    id: z.string().nullable().optional(),
-    text: z.string().nullable().optional(),
-    type: z.string().nullable().optional(),
-  }).passthrough().optional(),
-}).passthrough();
-
-const turnCompletedNotificationSchema = turnCompletedParamsSchema.transform((data) => ({
-  kind: "turn_completed" as const,
-  turn: data.turn,
-}));
-
-const turnFailedNotificationSchema = turnFailedParamsSchema.transform((data) => ({
-  kind: "turn_failed" as const,
-  error: data.error,
-}));
-
-const errorNotificationSchema = errorParamsSchema.transform((data) => ({
-  kind: "error" as const,
-  message: data.message,
-}));
-
-const itemCompletedNotificationSchema = itemCompletedParamsSchema.transform((data) => ({
-  kind: "item_completed" as const,
-  item: data.item,
-}));
-
-const itemStartedNotificationSchema = itemCompletedParamsSchema.transform((data) => ({
-  kind: "item_started" as const,
-  item: data.item,
-}));
-
-type ParsedAppServerNotification =
-  | z.infer<typeof turnCompletedNotificationSchema>
-  | z.infer<typeof turnFailedNotificationSchema>
-  | z.infer<typeof errorNotificationSchema>
-  | z.infer<typeof itemCompletedNotificationSchema>
-  | z.infer<typeof itemStartedNotificationSchema>
-  | {
-    kind: "parse_failed";
-    method: string;
-    params: Record<string, unknown> | undefined;
-    issues: z.core.$ZodIssue[];
-  }
+/**
+ * Result of parsing an app-server notification.
+ *
+ * Success variants carry the canonical generated type; the fallback
+ * variants cover parse failures and unknown method names.
+ */
+type ParsedNotification =
+  | { kind: "turn_completed"; data: TurnCompletedNotification }
+  | { kind: "turn_failed"; error: { message?: string } | undefined }
+  | { kind: "item_completed"; data: ItemCompletedNotification }
+  | { kind: "item_started"; data: ItemStartedNotification }
+  | { kind: "error"; data: ErrorNotification }
+  | { kind: "parse_failed"; method: string; params: Record<string, unknown> | undefined }
   | { kind: "ignored"; method: string; params: Record<string, unknown> | undefined };
-
-type ParsedCompletedItem = z.infer<typeof itemCompletedNotificationSchema>["item"];
 
 export type AuthRefreshCallback = (
   previousAccountId: string | null,
@@ -143,66 +97,29 @@ type AppServerTypedRpcHost = {
 };
 
 /**
- * @see {@link https://developers.openai.com/codex/app-server#initialization App Server — Initialization}
+ * Auth refresh result sent back to the app-server as the `result` field
+ * of the JSON-RPC response for `account/chatgptAuthTokens/refresh`.
+ *
+ * Derived from the Codex app-server protocol v2.
+ *
+ * @see {@link https://developers.openai.com/codex/app-server App Server Protocol Overview}
  * @see {@link https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/v2.rs Open-source protocol definitions (v2.rs)}
  */
-type AppServerInitializeParams = {
-  clientInfo: {
-    name: string;
-    title: string;
-    version: string;
-  };
-  capabilities: {
-    experimentalApi?: boolean;
-  };
-};
-
-/**
- * @see {@link https://developers.openai.com/codex/app-server#authentication App Server — Authentication}
- * @see {@link https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/v2.rs Open-source protocol definitions (v2.rs)}
- */
-type AppServerLoginWithTokensParams = {
-  type: "chatgptAuthTokens";
-  accessToken: string;
-  chatgptAccountId: string;
-  chatgptPlanType: string | null;
-};
-
-/**
- * @see {@link https://developers.openai.com/codex/app-server#start-or-resume-a-thread App Server — Start or Resume a Thread}
- * @see {@link https://developers.openai.com/codex/agent-approvals-security App Server — Agent Approvals & Security}
- * @see {@link https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/v2.rs Open-source protocol definitions (v2.rs)}
- */
-type AppServerThreadStartParams = ReturnType<typeof buildAppServerThreadStartParams>;
-
-type AppServerThreadStartResult = {
-  thread: {
-    id: string;
-  };
-};
-
-/**
- * @see {@link https://developers.openai.com/codex/app-server#turnstart App Server — Turn Start}
- * @see {@link https://developers.openai.com/codex/agent-approvals-security App Server — Agent Approvals & Security}
- * @see {@link https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/v2.rs Open-source protocol definitions (v2.rs)}
- */
-type AppServerTurnStartParams = {
-  threadId: string;
-  input: Input;
-};
-
-/**
- * @see {@link https://developers.openai.com/codex/app-server#turninterrupt App Server — Turn Interrupt}
- * @see {@link https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/v2.rs Open-source protocol definitions (v2.rs)}
- */
-type AppServerTurnInterruptParams = {
-  threadId: string;
-};
-
 type AppServerAuthRefreshResult = {
   accessToken: string;
   chatgptAccountId: string;
   chatgptPlanType: string | null;
+};
+
+/**
+ * Thread-start result.  Not yet included in the generated app-server types;
+ * kept as a locally declared type until `codex app-server generate-ts`
+ * emits it.
+ */
+type AppServerThreadStartResult = {
+  thread: {
+    id: string;
+  };
 };
 
 type JsonRpcSuccessResponse = {
@@ -238,7 +155,7 @@ type JsonRpcInitializedNotification = {
 class AppServerTypedRpc {
   constructor(private readonly host: AppServerTypedRpcHost) {}
 
-  async initialize(params: AppServerInitializeParams): Promise<void> {
+  async initialize(params: InitializeParams): Promise<void> {
     await this.host.requestRaw<void>("initialize", params);
   }
 
@@ -246,19 +163,37 @@ class AppServerTypedRpc {
     this.host.writeJsonRpcMessage(message);
   }
 
-  async loginWithTokens(params: AppServerLoginWithTokensParams): Promise<void> {
+  /**
+   * Sends the `chatgptAuthTokens` variant of the `account/login/start`
+   * app-server request.  The full generated type is
+   * {@link LoginAccountParams} (a discriminated union); this method
+   * only ever sends the token-based variant.
+   */
+  async loginWithTokens(params: Extract<LoginAccountParams, { type: "chatgptAuthTokens" }>): Promise<void> {
     await this.host.requestRaw<void>("account/login/start", params);
   }
 
-  async startThread(params: AppServerThreadStartParams): Promise<AppServerThreadStartResult> {
+  async startThread(params: ThreadStartParams): Promise<AppServerThreadStartResult> {
     return await this.host.requestRaw<AppServerThreadStartResult>("thread/start", params);
   }
 
-  async turnStart(params: AppServerTurnStartParams): Promise<void> {
+  /**
+   * Starts a turn.  Accepts the core fields of the app-server
+   * {@link TurnStartParams} but uses `Input` from `@openai/codex-sdk`
+   * instead of the generated `UserInput` array because Sandy
+   * callers already produce `Input` objects (which are compatible
+   * at runtime).
+   */
+  async turnStart(params: { threadId: string; input: Input }): Promise<void> {
     await this.host.requestRaw<void>("turn/start", params);
   }
 
-  async turnInterrupt(params: AppServerTurnInterruptParams): Promise<void> {
+  /**
+   * Interrupts a turn.  `turnId` is omitted from the generated
+   * {@link TurnInterruptParams} because the controller currently
+   * does not track per-turn identifiers.
+   */
+  async turnInterrupt(params: Omit<import("./generated/v2/TurnInterruptParams.js").TurnInterruptParams, "turnId">): Promise<void> {
     await this.host.requestRaw<void>("turn/interrupt", params);
   }
 
@@ -271,17 +206,54 @@ class AppServerTypedRpc {
   }
 }
 
+/**
+ * Parses a raw JSON-RPC notification from the app-server into our
+ * typed {@link ParsedNotification} discriminated union.  Each
+ * success variant carries the canonical generated type for that
+ * notification.
+ *
+ * The generated types ({@link TurnCompletedNotification},
+ * {@link ItemCompletedNotification}, etc.) are the protocol source
+ * of truth produced by `codex app-server generate-ts`.  This function
+ * does coarse identity-matching on the method name and delegates
+ * field access to the caller; no Zod-based runtime validation is
+ * access a handful of well-known fields.
+ */
+function parseAppServerNotification(
+  method: string,
+  params: Record<string, unknown> | undefined,
+): ParsedNotification {
+  switch (method) {
+    case "turn/completed":
+      return { kind: "turn_completed", data: (params ?? {}) as TurnCompletedNotification };
+    case "turn/failed":
+      // Legacy notification: the app-server may still emit this
+      // instead of turn/completed with status=failed.
+      return {
+        kind: "turn_failed",
+        error: (params as Record<string, unknown>)?.["error"] as { message?: string } | undefined,
+      };
+    case "error":
+      return { kind: "error", data: (params ?? {}) as ErrorNotification };
+    case "item/started":
+      return { kind: "item_started", data: (params ?? {}) as ItemStartedNotification };
+    case "item/completed":
+      return { kind: "item_completed", data: (params ?? {}) as ItemCompletedNotification };
+    default:
+      return { kind: "ignored", method, params };
+  }
+}
 
 export type AppServerThreadProfile = {
   sandbox: "read-only" | "workspace-write" | "danger-full-access";
   cwd: string;
-  personality?: string;
+  personality?: Personality;
 };
 
 function buildAppServerThreadStartParams(
   profile: AppServerThreadProfile,
   model?: string,
-) {
+): ThreadStartParams {
   return {
     ...(model ? { model } : {}),
     cwd: profile.cwd,
@@ -292,12 +264,6 @@ function buildAppServerThreadStartParams(
     personality: profile.personality ?? "none",
   };
 }
-
-export const DEFAULT_WORKER_PROFILE: AppServerThreadProfile = {
-  sandbox: "danger-full-access",
-  cwd: sharedWorkspaceMountPath,
-  personality: "none",
-};
 
 export function createMainAgentProfile(workingDirectory: string): AppServerThreadProfile {
   return {
@@ -467,9 +433,10 @@ export class CodexAppServerClient {
       capabilities: enableExperimentalApi
         ? {
             experimentalApi: true,
+            requestAttestation: false,
           }
-        : {},
-    });
+        : null,
+    } satisfies InitializeParams);
     this.rpc.sendInitializedNotification({
       jsonrpc: "2.0",
       method: "initialized",
@@ -591,44 +558,53 @@ export class CodexAppServerClient {
   }
 
   private parseNotification(method: string, p: Record<string, unknown> | undefined): AppServerEvent {
-    const notification = this.parseAppServerNotification(method, p);
+    const notification = parseAppServerNotification(method, p);
 
     switch (notification.kind) {
-      case "turn_completed":
-        if (notification.turn?.status === "failed") {
-          return { type: "turn_failed", error: notification.turn.error?.message ?? "Unknown turn failure." };
+      case "turn_completed": {
+        const turn = notification.data.turn;
+        if (turn?.status === "failed") {
+          return { type: "turn_failed", error: turn.error?.message ?? "Unknown turn failure." };
         }
         return { type: "turn_completed" };
+      }
       case "turn_failed":
         return { type: "turn_failed", error: notification.error?.message ?? "Unknown turn failure." };
-      case "error":
-        return {
-          type: "error",
-          message: notification.message ?? "Unknown app-server error.",
-        };
+      case "error": {
+        // The app-server may send a flat { message } or the nested
+        // { error: { message } } shape described by the generated types.
+        const message =
+          (notification.data as { message?: string }).message ??
+          notification.data.error?.message ??
+          "Unknown app-server error.";
+        return { type: "error", message };
+      }
       case "item_started":
       case "item_completed": {
-        const itemType = notification.item?.type ?? null;
-        if (itemType === "contextCompaction") {
+        const raw = notification.data as Record<string, unknown>;
+        const item = raw["item"] as Record<string, unknown> | undefined;
+        if (!item) {
+          return { type: "noop" };
+        }
+        if (item["type"] === "contextCompaction") {
           return { type: "context_compaction" };
         }
         if (notification.kind === "item_started") {
           return { type: "noop" };
         }
-        if ((itemType === "agent_message" || itemType === "agentMessage") && typeof notification.item?.text === "string") {
-          return { type: "agent_message_completed", text: notification.item.text, itemId: notification.item.id ?? null };
+        if (item["type"] === "agentMessage" && typeof item["text"] === "string") {
+          return { type: "agent_message_completed", text: item["text"], itemId: typeof item["id"] === "string" ? item["id"] : null };
         }
-        if (itemType && ignoredCompletedItemTypes.has(itemType)) {
+        if (typeof item["type"] === "string" && ignoredCompletedItemTypes.has(item["type"])) {
           return { type: "noop" };
         }
-        this.warnUnhandledCompletedItemType(itemType, notification.item);
+        this.warnUnhandledCompletedItemType(typeof item["type"] === "string" ? item["type"] : "unknown");
         return { type: "noop" };
       }
       case "parse_failed":
         logger.warn("appserver.notification_parse_failed", {
           method: notification.method,
           params: notification.params,
-          issues: notification.issues,
         });
         return { type: "noop" };
       case "ignored":
@@ -639,48 +615,14 @@ export class CodexAppServerClient {
     }
   }
 
-  private parseAppServerNotification(
-    method: string,
-    params: Record<string, unknown> | undefined,
-  ): ParsedAppServerNotification {
-    switch (method) {
-      case "turn/completed":
-        return this.parseNotificationWithSchema(turnCompletedNotificationSchema, method, params);
-
-      case "turn/failed":
-        return this.parseNotificationWithSchema(turnFailedNotificationSchema, method, params);
-
-      case "error":
-        return this.parseNotificationWithSchema(errorNotificationSchema, method, params);
-
-      case "item/started":
-        return this.parseNotificationWithSchema(itemStartedNotificationSchema, method, params);
-
-      case "item/completed":
-        return this.parseNotificationWithSchema(itemCompletedNotificationSchema, method, params);
-
-      default:
-        return { kind: "ignored", method, params };
+  private warnUnhandledCompletedItemType(itemType: string): void {
+    if (this.warnedUnhandledCompletedItemTypes.has(itemType)) {
+      return;
     }
-  }
-
-  private parseNotificationWithSchema<TSchema extends z.ZodTypeAny>(
-    schema: TSchema,
-    method: string,
-    params: Record<string, unknown> | undefined,
-  ):
-    | z.infer<TSchema>
-    | { kind: "parse_failed"; method: string; params: Record<string, unknown> | undefined; issues: z.core.$ZodIssue[] } {
-    const parsed = schema.safeParse(params ?? {});
-    if (parsed.success) {
-      return parsed.data;
-    }
-    return {
-      kind: "parse_failed",
-      method,
-      params,
-      issues: parsed.error.issues,
-    };
+    this.warnedUnhandledCompletedItemTypes.add(itemType);
+    logger.warn("appserver.item_completed_unhandled", {
+      itemType,
+    });
   }
 
   private warnUnhandledNotification(method: string, params: Record<string, unknown> | undefined): void {
@@ -691,21 +633,6 @@ export class CodexAppServerClient {
     logger.warn("appserver.notification_unhandled", {
       method,
       params,
-    });
-  }
-
-  private warnUnhandledCompletedItemType(
-    itemType: string | null,
-    item: ParsedCompletedItem,
-  ): void {
-    const key = itemType ?? "<missing>";
-    if (this.warnedUnhandledCompletedItemTypes.has(key)) {
-      return;
-    }
-    this.warnedUnhandledCompletedItemTypes.add(key);
-    logger.warn("appserver.item_completed_unhandled", {
-      itemType,
-      item,
     });
   }
 

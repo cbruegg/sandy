@@ -8,5 +8,6 @@
   "project": [
     "src/**/*.ts"
   ],
-  "tags": ["-public"]
+  "ignoreBinaries": ["codex"],
+  "ignore": ["src/codex-app-server-client/generated/**"]
 }

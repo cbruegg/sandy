@@ -3,9 +3,15 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { PassThrough, Writable } from "node:stream";
-import { CodexAppServerClient, DEFAULT_WORKER_PROFILE, createMainAgentProfile } from "./app-server-client.js";
+import { CodexAppServerClient, createMainAgentProfile } from "./app-server-client.js";
 import type { ChatGPTExternalTokens } from "../types.js";
 import { configureLogger, type LogLevel } from "../logger.js";
+
+const TEST_WORKER_PROFILE = {
+  sandbox: "danger-full-access" as const,
+  cwd: "/workspace/share",
+  personality: "none" as const,
+};
 
 class CaptureWritable extends Writable {
   public readonly writes: string[] = [];
@@ -90,7 +96,7 @@ test("CodexAppServerClient starts threads with kebab-case sandbox mode", async (
   };
   const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE, "gpt-5.4-mini");
+  const startThreadPromise = client.startThread(TEST_WORKER_PROFILE, "gpt-5.4-mini");
   await Promise.resolve();
 
   assert.deepEqual(spawns, [{
@@ -124,7 +130,7 @@ test("CodexAppServerClient answers auth refresh requests during turns", async ()
   };
   const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
+  const startThreadPromise = client.startThread(TEST_WORKER_PROFILE);
   await Promise.resolve();
   respond(child, 3, { thread: { id: "thread-1" } });
   const threadId = await startThreadPromise;
@@ -211,7 +217,7 @@ test("CodexAppServerClient handles auth refresh before turn-start RPC response",
   };
   const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
+  const startThreadPromise = client.startThread(TEST_WORKER_PROFILE);
   await Promise.resolve();
   respond(child, 3, { thread: { id: "thread-1" } });
   const threadId = await startThreadPromise;
@@ -293,7 +299,7 @@ test("CodexAppServerClient ignores non-message item completions until turn compl
   };
   const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
+  const startThreadPromise = client.startThread(TEST_WORKER_PROFILE);
   await Promise.resolve();
   respond(child, 3, { thread: { id: "thread-1" } });
   const threadId = await startThreadPromise;
@@ -347,7 +353,7 @@ test("CodexAppServerClient ignores agent message deltas until completion", async
   };
   const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
+  const startThreadPromise = client.startThread(TEST_WORKER_PROFILE);
   await Promise.resolve();
   respond(child, 3, { thread: { id: "thread-1" } });
   const threadId = await startThreadPromise;
@@ -408,7 +414,7 @@ test("CodexAppServerClient ignores known benign notifications and item completio
   try {
     const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-    const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
+    const startThreadPromise = client.startThread(TEST_WORKER_PROFILE);
     await Promise.resolve();
     respond(child, 3, { thread: { id: "thread-1" } });
     const threadId = await startThreadPromise;
@@ -492,7 +498,7 @@ test("CodexAppServerClient maps failed turn/completed notifications to turn_fail
   };
   const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
+  const startThreadPromise = client.startThread(TEST_WORKER_PROFILE);
   await Promise.resolve();
   respond(child, 3, { thread: { id: "thread-1" } });
   const threadId = await startThreadPromise;
@@ -540,11 +546,11 @@ test("CodexAppServerClient initializes ambient auth without experimental API or 
       title: "Sandy Worker",
       version: "1.0.0",
     },
-    capabilities: {},
+    capabilities: null,
   });
   assert.equal(messages.some((message) => message["method"] === "account/login/start"), false);
 
-  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
+  const startThreadPromise = client.startThread(TEST_WORKER_PROFILE);
   await Promise.resolve();
   respond(child, 2, { thread: { id: "thread-1" } });
   assert.equal(await startThreadPromise, "thread-1");
@@ -570,7 +576,7 @@ test("CodexAppServerClient sends JSON-RPC error when auth refresh handler reject
   try {
     const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-    const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
+    const startThreadPromise = client.startThread(TEST_WORKER_PROFILE);
     await Promise.resolve();
     respond(child, 3, { thread: { id: "thread-1" } });
     const threadId = await startThreadPromise;
@@ -647,7 +653,7 @@ test("CodexAppServerClient yields context_compaction on item/started with contex
   };
   const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
+  const startThreadPromise = client.startThread(TEST_WORKER_PROFILE);
   await Promise.resolve();
   respond(child, 3, { thread: { id: "thread-1" } });
   const threadId = await startThreadPromise;
@@ -697,7 +703,7 @@ test("CodexAppServerClient yields context_compaction on item/completed with cont
   };
   const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
+  const startThreadPromise = client.startThread(TEST_WORKER_PROFILE);
   await Promise.resolve();
   respond(child, 3, { thread: { id: "thread-1" } });
   const threadId = await startThreadPromise;
@@ -747,7 +753,7 @@ test("CodexAppServerClient ignores item/started with non-compaction types", asyn
   };
   const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-  const startThreadPromise = client.startThread(DEFAULT_WORKER_PROFILE);
+  const startThreadPromise = client.startThread(TEST_WORKER_PROFILE);
   await Promise.resolve();
   respond(child, 3, { thread: { id: "thread-1" } });
   const threadId = await startThreadPromise;
@@ -793,8 +799,8 @@ test("createMainAgentProfile uses read-only sandbox and given cwd", () => {
   assert.equal(profile.personality, "none");
 });
 
-test("DEFAULT_WORKER_PROFILE uses danger-full-access sandbox and workspace share", () => {
-  assert.equal(DEFAULT_WORKER_PROFILE.sandbox, "danger-full-access");
-  assert.equal(DEFAULT_WORKER_PROFILE.cwd, "/workspace/share");
-  assert.equal(DEFAULT_WORKER_PROFILE.personality, "none");
+test("TEST_WORKER_PROFILE uses danger-full-access sandbox and workspace share", () => {
+  assert.equal(TEST_WORKER_PROFILE.sandbox, "danger-full-access");
+  assert.equal(TEST_WORKER_PROFILE.cwd, "/workspace/share");
+  assert.equal(TEST_WORKER_PROFILE.personality, "none");
 });

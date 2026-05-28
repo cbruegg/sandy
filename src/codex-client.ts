@@ -4,7 +4,6 @@ import { chmod, mkdir, mkdtemp, readdir, rename, rm, stat, writeFile } from "nod
 import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
-import { Codex, type CodexOptions } from "@openai/codex-sdk";
 import { embeddedCodexVersion } from "./build-constants.js";
 import { resolveCodexCacheRoot } from "./cache-paths.js";
 import { buildGitHubHeaders, isGitHubUrl } from "./github-http.js";
@@ -73,12 +72,6 @@ function resolveConfiguredCodexPath(env: NodeJS.ProcessEnv): string | null {
     throw new Error(`Configured ${SANDY_CODEX_PATH_ENV} path is not executable: ${resolvedPath}`);
   }
   return resolvedPath;
-}
-
-function normalizeChildProcessEnv(env: NodeJS.ProcessEnv | Record<string, string>): Record<string, string> {
-  return Object.fromEntries(
-    Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
-  );
 }
 
 function isSupportedPlatform(value: NodeJS.Platform): value is SupportedPlatform {
@@ -413,29 +406,6 @@ export async function ensureManagedCodexPath(options: EnsureManagedCodexOptions 
       managedCodexPathResolutions.delete(resolutionKey);
     }
   }
-}
-
-/** @public Not currently used in-app but kept as a public API. */
-export async function createCodexClient(options: Omit<CodexOptions, "codexPathOverride"> = {}): Promise<Codex> {
-  const codexPathOverride = await ensureManagedCodexPath();
-  const env = options.env ? normalizeChildProcessEnv(options.env) : undefined;
-  return new Codex({
-    ...options,
-    env,
-    codexPathOverride,
-    config: {
-      ...options.config,
-      features: {
-        ...((options.config?.["features"] as Record<string, unknown> | undefined) ?? {}),
-        memories: false,
-      },
-      memories: {
-        ...((options.config?.["memories"] as Record<string, unknown> | undefined) ?? {}),
-        generate_memories: false,
-        use_memories: false,
-      },
-    },
-  });
 }
 
 export function resolveCodexPathOverride(env: NodeJS.ProcessEnv = process.env): string | undefined {
