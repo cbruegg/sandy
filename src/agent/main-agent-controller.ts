@@ -134,28 +134,40 @@ export class CodexMainAgentController implements MainAgentController {
         nextInput,
         noopAuthRefresh,
       )) {
-        switch (event.type) {
-          case "agent_message_completed":
-            finalResponse = event.text;
+        switch (event.method) {
+          case "item/completed":
+            if (event.params.item.type === "agentMessage") {
+              finalResponse = event.params.item.text;
+            }
+            if (event.params.item.type === "contextCompaction") {
+              sawCompaction = true;
+              logger.info("main_agent.compaction_detected", {
+                chatId: context.chatId,
+                attempt,
+                detectionMethod: "app_server_item",
+              });
+            }
             break;
 
-          case "context_compaction":
-            sawCompaction = true;
-            logger.info("main_agent.compaction_detected", {
-              chatId: context.chatId,
-              attempt,
-              detectionMethod: "app_server_item",
-            });
+          case "item/started":
+            if (event.params.item.type === "contextCompaction") {
+              sawCompaction = true;
+              logger.info("main_agent.compaction_detected", {
+                chatId: context.chatId,
+                attempt,
+                detectionMethod: "app_server_item",
+              });
+            }
             break;
 
-          case "turn_completed":
+          case "turn/completed":
+            if (event.params.turn?.status === "failed") {
+              throw new Error(`Turn failed: ${event.params.turn.error?.message ?? "Unknown turn failure."}`);
+            }
             break;
-
-          case "turn_failed":
-            throw new Error(`Turn failed: ${event.error}`);
 
           case "error":
-            throw new Error(`App server error: ${event.message}`);
+            throw new Error(`App server error: ${event.params.error?.message ?? "Unknown app-server error."}`);
         }
       }
 

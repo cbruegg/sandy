@@ -38,16 +38,16 @@ const testHttpTokens: Record<string, HttpTokenConfig> = {
 
 function buildTurnEvents(finalResponse: string): AppServerEvent[] {
   return [
-    { type: "agent_message_completed", text: finalResponse, itemId: null },
-    { type: "turn_completed" },
+    { method: "item/completed", params: { item: { type: "agentMessage", text: finalResponse, id: "item-1", phase: null, memoryCitation: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 } },
+    { method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "full", status: "completed", error: null, startedAt: null, completedAt: null, durationMs: null } } },
   ];
 }
 
 function buildTurnEventsWithCompaction(finalResponse: string): AppServerEvent[] {
   return [
-    { type: "context_compaction" },
-    { type: "agent_message_completed", text: finalResponse, itemId: null },
-    { type: "turn_completed" },
+    { method: "item/started", params: { item: { type: "contextCompaction", id: "compaction-1" }, threadId: "thread-1", turnId: "turn-1", startedAtMs: 0 } },
+    { method: "item/completed", params: { item: { type: "agentMessage", text: finalResponse, id: "item-1", phase: null, memoryCitation: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 } },
+    { method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "full", status: "completed", error: null, startedAt: null, completedAt: null, durationMs: null } } },
   ];
 }
 

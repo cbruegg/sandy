@@ -74,27 +74,31 @@ export async function streamAppServerTurn(options: StreamAppServerTaskTurnOption
       options.onAuthRefresh,
       options.abortSignal,
     )) {
-      logger.debug("appserver.event_received", { eventType: event.type, event });
+      logger.debug("appserver.event_received", { eventType: event.method, event });
 
-      switch (event.type) {
-        case "agent_message_completed":
-          if (event.text.trim()) {
-            sendEvent({ type: "assistant_output", text: event.text });
+      switch (event.method) {
+        case "item/completed":
+          if (event.params.item.type === "agentMessage" && event.params.item.text.trim()) {
+            sendEvent({ type: "assistant_output", text: event.params.item.text });
           }
           break;
 
-        case "turn_completed":
+        case "item/started":
           break;
 
-        case "turn_failed":
-          sendEvent({ type: "task_error", message: event.error });
-          sawTerminalError = true;
-          return { sawTerminalError };
+        case "turn/completed":
+          if (event.params.turn?.status === "failed") {
+            sendEvent({ type: "task_error", message: event.params.turn.error?.message ?? "Unknown turn failure." });
+            sawTerminalError = true;
+            return { sawTerminalError };
+          }
+          break;
 
-        case "error":
-          sendEvent({ type: "task_error", message: event.message });
+        case "error": {
+          sendEvent({ type: "task_error", message: event.params.error?.message ?? "Unknown app-server error." });
           sawTerminalError = true;
           return { sawTerminalError };
+        }
       }
     }
   } catch (error) {
@@ -123,21 +127,24 @@ async function streamAppServerSummary(options: StreamAppServerSummaryOptions): P
       options.onAuthRefresh,
       options.abortSignal,
     )) {
-      logger.debug("appserver.event_received", { eventType: event.type, event });
+      logger.debug("appserver.event_received", { eventType: event.method, event });
 
-      switch (event.type) {
-        case "agent_message_completed":
-          if (event.text.trim()) {
-            summaryChunks.push(event.text);
+      switch (event.method) {
+        case "item/completed":
+          if (event.params.item.type === "agentMessage" && event.params.item.text.trim()) {
+            summaryChunks.push(event.params.item.text);
           }
           break;
 
-        case "turn_completed":
+        case "item/started":
           break;
 
-        case "turn_failed":
-          sawTerminalError = true;
-          return { sawTerminalError, summaryText: null };
+        case "turn/completed":
+          if (event.params.turn?.status === "failed") {
+            sawTerminalError = true;
+            return { sawTerminalError, summaryText: null };
+          }
+          break;
 
         case "error":
           sawTerminalError = true;

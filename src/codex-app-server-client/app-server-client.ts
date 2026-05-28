@@ -7,28 +7,28 @@ import { logger } from "../logger.js";
 import type { InitializeParams } from "./generated/InitializeParams.js";
 import type { RequestId } from "./generated/RequestId.js";
 import type { ServerNotification } from "./generated/ServerNotification.js";
-import type { ServerRequest } from "./generated/ServerRequest.js";
 import type { LoginAccountParams } from "./generated/v2/LoginAccountParams.js";
 import type { ThreadStartParams } from "./generated/v2/ThreadStartParams.js";
 import type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse.js";
 import type { TurnStartParams } from "./generated/v2/TurnStartParams.js";
 import type { TurnStartResponse } from "./generated/v2/TurnStartResponse.js";
 import type { TurnInterruptParams } from "./generated/v2/TurnInterruptParams.js";
+import type { ChatgptAuthTokensRefreshParams } from "./generated/v2/ChatgptAuthTokensRefreshParams.js";
 import type { ChatgptAuthTokensRefreshResponse } from "./generated/v2/ChatgptAuthTokensRefreshResponse.js";
 import type { Personality } from "./generated/Personality.js";
+import type { TurnCompletedNotification } from "./generated/v2/TurnCompletedNotification.js";
+import type { ItemCompletedNotification } from "./generated/v2/ItemCompletedNotification.js";
+import type { ItemStartedNotification } from "./generated/v2/ItemStartedNotification.js";
+import type { ErrorNotification } from "./generated/v2/ErrorNotification.js";
 
 type PendingRequest<T = unknown> = {
   resolve: (result: T) => void;
   reject: (error: Error) => void;
 };
 
-type AppServerEvent =
-  | { type: "agent_message_completed"; text: string; itemId: string | null }
-  | { type: "context_compaction" }
-  | { type: "noop" }
-  | { type: "turn_completed" }
-  | { type: "turn_failed"; error: string }
-  | { type: "error"; message: string };
+type AppServerEvent = Extract<ServerNotification, {
+  method: "error" | "item/started" | "item/completed" | "turn/completed";
+}>;
 
 export type { AppServerEvent };
 
@@ -66,33 +66,6 @@ const refreshAuthParamsSchema = z.object({
 function isJsonRpcRequestId(value: unknown): value is RequestId {
   return typeof value === "number" || typeof value === "string";
 }
-
-function serverNotification<Method extends ServerNotification["method"]>(
-  method: Method,
-  params: Record<string, unknown> | undefined,
-): ServerNotificationOf<Method> {
-  return { method, params: (params ?? {}) as ServerNotificationOf<Method>["params"] } as unknown as ServerNotificationOf<Method>;
-}
-
-type ServerNotificationOf<Method extends ServerNotification["method"]> = Extract<ServerNotification, { method: Method }>;
-type AuthRefreshServerRequest = Extract<ServerRequest, { method: typeof REFRESH_AUTH_METHOD }>;
-
-type UnknownServerNotification = {
-  kind: "unknown";
-  method: string;
-  params: Record<string, unknown> | undefined;
-};
-
-type ParsedNotification = ServerNotification | UnknownServerNotification;
-
-type UnknownServerRequest = {
-  kind: "unknown";
-  id: RequestId;
-  method: string;
-  params: unknown;
-};
-
-type ParsedServerRequest = AuthRefreshServerRequest | UnknownServerRequest;
 
 export type AuthRefreshCallback = (
   previousAccountId: string | null,
@@ -192,47 +165,6 @@ class AppServerTypedRpc {
 
   respondMethodNotFound(message: JsonRpcErrorResponse): void {
     this.host.writeJsonRpcMessage(message);
-  }
-}
-
-/**
- * Parses a raw JSON-RPC notification from the app-server into the
- * generated {@link ServerNotification} union where possible, plus an
- * unknown-method fallback.
- *
- * The generated notification union is the protocol source of truth
- * produced by `codex app-server generate-ts`. This function does
- * coarse identity-matching on the method name and delegates field
- * access to the caller; no Zod-based runtime validation is performed.
- */
-function parseAppServerNotification(
-  method: string,
-  params: Record<string, unknown> | undefined,
-): ParsedNotification {
-  switch (method) {
-    case "turn/completed":
-      return serverNotification(method, params);
-    case "error":
-      return serverNotification(method, params);
-    case "item/started":
-      return serverNotification(method, params);
-    case "item/completed":
-      return serverNotification(method, params);
-    default:
-      return { kind: "unknown", method, params };
-  }
-}
-
-function parseAppServerRequest(id: RequestId, method: string, params: unknown): ParsedServerRequest {
-  switch (method) {
-    case REFRESH_AUTH_METHOD:
-      return {
-        id,
-        method,
-        params: (params ?? {}) as AuthRefreshServerRequest["params"],
-      };
-    default:
-      return { kind: "unknown", id, method, params };
   }
 }
 
@@ -349,7 +281,7 @@ export class CodexAppServerClient {
 
     // JSON-RPC request from server to client
     if (isJsonRpcRequestId(msg["id"]) && typeof msg["method"] === "string") {
-      this.processServerRequest(parseAppServerRequest(msg["id"], msg["method"], msg["params"]));
+      this.processServerRequest(msg["id"], msg["method"], msg["params"]);
       return;
     }
 
@@ -360,36 +292,35 @@ export class CodexAppServerClient {
     }
   }
 
-  private processServerRequest(request: ParsedServerRequest): void {
-    if ("kind" in request) {
-      this.warnUnhandledServerRequest(request.method, request.params);
+  private processServerRequest(id: RequestId, method: string, params: unknown): void {
+    if (method !== REFRESH_AUTH_METHOD) {
+      this.warnUnhandledServerRequest(method, params);
       this.rpc.respondMethodNotFound({
         jsonrpc: "2.0",
-        id: request.id,
+        id,
         error: {
           code: JSON_RPC_METHOD_NOT_FOUND,
-          message: `Method not found: ${request.method}`,
+          message: `Method not found: ${method}`,
         },
       });
       return;
     }
 
-    if (request.method === REFRESH_AUTH_METHOD) {
-      const parsed = refreshAuthParamsSchema.safeParse(request.params);
-      if (this.activeAuthRefreshHandler) {
-        this.activeAuthRefreshHandler(request.id, parsed.success ? parsed.data.previousAccountId ?? null : null)
-          .catch((error: Error) => {
-            logger.error("appserver.auth_refresh_failed", error, "Auth refresh failed.");
-            this.writeJsonRpcMessage({
-              jsonrpc: "2.0",
-              id: request.id,
-              error: {
-                code: JSON_RPC_INTERNAL_ERROR,
-                message: `Auth refresh failed: ${error.message}`,
-              },
-            });
+    const typedParams = (params ?? {}) as ChatgptAuthTokensRefreshParams;
+    const parsed = refreshAuthParamsSchema.safeParse(typedParams);
+    if (this.activeAuthRefreshHandler) {
+      this.activeAuthRefreshHandler(id, parsed.success ? parsed.data.previousAccountId ?? null : null)
+        .catch((error: Error) => {
+          logger.error("appserver.auth_refresh_failed", error, "Auth refresh failed.");
+          this.writeJsonRpcMessage({
+            jsonrpc: "2.0",
+            id,
+            error: {
+              code: JSON_RPC_INTERNAL_ERROR,
+              message: `Auth refresh failed: ${error.message}`,
+            },
           });
-      }
+        });
     }
   }
 
@@ -479,7 +410,10 @@ export class CodexAppServerClient {
     };
 
     this.activeNotificationHandler = (method: string, params: unknown) => {
-      pushEvent(this.parseNotification(method, params as Record<string, unknown> | undefined));
+      const event = this.parseNotification(method, params as Record<string, unknown> | undefined);
+      if (event) {
+        pushEvent(event);
+      }
     };
 
     this.activeAuthRefreshHandler = async (id: RequestId, previousAccountId: string | null) => {
@@ -535,11 +469,7 @@ export class CodexAppServerClient {
           return;
         }
 
-        if (event.type === "noop") {
-          continue;
-        }
-
-        if (event.type === "turn_completed" || event.type === "turn_failed" || event.type === "error") {
+        if (event.method === "turn/completed" || event.method === "error") {
           done = true;
           yield event;
         } else {
@@ -552,59 +482,37 @@ export class CodexAppServerClient {
     }
   }
 
-  private parseNotification(method: string, p: Record<string, unknown> | undefined): AppServerEvent {
-    const notification = parseAppServerNotification(method, p);
-
-    if ("kind" in notification) {
-      if (!ignoredNotificationMethods.has(notification.method)) {
-        this.warnUnhandledNotification(notification.method, notification.params);
-      }
-      return { type: "noop" };
-    }
-
-    switch (notification.method) {
+  private parseNotification(method: string, params: Record<string, unknown> | undefined): AppServerEvent | null {
+    switch (method) {
       case "turn/completed": {
-        const turn = notification.params.turn;
-        if (turn?.status === "failed") {
-          return { type: "turn_failed", error: turn.error?.message ?? "Unknown turn failure." };
-        }
-        return { type: "turn_completed" };
+        return { method, params: (params ?? {}) as TurnCompletedNotification };
       }
       case "error": {
-        // The app-server may send a flat { message } or the nested
-        // { error: { message } } shape described by the generated types.
-        const message =
-          (notification.params as { message?: string }).message ??
-          notification.params.error?.message ??
-          "Unknown app-server error.";
-        return { type: "error", message };
+        return { method, params: (params ?? {}) as ErrorNotification };
       }
-      case "item/started":
+      case "item/started": {
+        return { method, params: (params ?? {}) as ItemStartedNotification };
+      }
       case "item/completed": {
-        const item = notification.params.item;
+        const notification = (params ?? {}) as ItemCompletedNotification;
+        const item = notification.item;
         if (!item) {
-          return { type: "noop" };
+          return null;
         }
-        if (item.type === "contextCompaction") {
-          return { type: "context_compaction" };
-        }
-        if (notification.method === "item/started") {
-          return { type: "noop" };
-        }
-        if (item.type === "agentMessage") {
-          return { type: "agent_message_completed", text: item.text, itemId: item.id ?? null };
+        if (item.type === "agentMessage" || item.type === "contextCompaction") {
+          return { method, params: notification };
         }
         if (ignoredCompletedItemTypes.has(item.type)) {
-          return { type: "noop" };
+          return null;
         }
         this.warnUnhandledCompletedItemType(item.type);
-        return { type: "noop" };
+        return { method, params: notification };
       }
       default:
-        if (!ignoredNotificationMethods.has(notification.method)) {
-          this.warnUnhandledNotification(notification.method, notification.params);
+        if (!ignoredNotificationMethods.has(method)) {
+          this.warnUnhandledNotification(method, params);
         }
-        return { type: "noop" };
+        return null;
     }
   }
 

@@ -136,7 +136,7 @@ test("CodexAppServerClient answers auth refresh requests during turns", async ()
   const threadId = await startThreadPromise;
 
   const streamPromise = (async () => {
-    const events = [] as Array<{ type: string; text?: string }>;
+    const events = [] as Array<{ method: string; params?: unknown }>;
     for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async (previousAccountId) => {
       assert.equal(previousAccountId, "acct-123");
       return {
@@ -202,8 +202,8 @@ test("CodexAppServerClient answers auth refresh requests during turns", async ()
 
   const events = await streamPromise;
   assert.deepEqual(events, [
-    { type: "agent_message_completed", itemId: null, text: "done" },
-    { type: "turn_completed" },
+    { method: "item/completed", params: { item: { type: "agentMessage", text: "done" } } },
+    { method: "turn/completed", params: {} },
   ]);
 });
 
@@ -223,7 +223,7 @@ test("CodexAppServerClient handles auth refresh before turn-start RPC response",
   const threadId = await startThreadPromise;
 
   const streamPromise = (async () => {
-    const events: Array<{ type: string; text?: string }> = [];
+    const events: Array<{ method: string; params?: unknown }> = [];
     for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async (previousAccountId) => {
       assert.equal(previousAccountId, "acct-123");
       return {
@@ -281,8 +281,8 @@ test("CodexAppServerClient handles auth refresh before turn-start RPC response",
   })}\n`);
 
   assert.deepEqual(await streamPromise, [
-    { type: "agent_message_completed", itemId: null, text: "done after early refresh" },
-    { type: "turn_completed" },
+    { method: "item/completed", params: { item: { type: "agentMessage", text: "done after early refresh" } } },
+    { method: "turn/completed", params: {} },
   ]);
 
   messages = parseWrittenJsonLines(child);
@@ -305,7 +305,7 @@ test("CodexAppServerClient ignores non-message item completions until turn compl
   const threadId = await startThreadPromise;
 
   const streamPromise = (async () => {
-    const events: Array<{ type: string; text?: string }> = [];
+    const events: Array<{ method: string; params?: unknown }> = [];
     for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async () => ({
       accessToken: "refreshed-access-token",
       chatgptAccountId: "acct-123",
@@ -339,7 +339,7 @@ test("CodexAppServerClient ignores non-message item completions until turn compl
   })}\n`);
 
   assert.deepEqual(await streamPromise, [
-    { type: "turn_completed" },
+    { method: "turn/completed", params: {} },
   ]);
 });
 
@@ -359,7 +359,7 @@ test("CodexAppServerClient ignores agent message deltas until completion", async
   const threadId = await startThreadPromise;
 
   const streamPromise = (async () => {
-    const events: Array<{ type: string; text?: string }> = [];
+    const events: Array<{ method: string; params?: unknown }> = [];
     for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async () => tokens)) {
       events.push(event);
     }
@@ -390,7 +390,7 @@ test("CodexAppServerClient ignores agent message deltas until completion", async
   })}\n`);
 
   assert.deepEqual(await streamPromise, [
-    { type: "turn_completed" },
+    { method: "turn/completed", params: { turn: { status: "completed" } } },
   ]);
 });
 
@@ -420,7 +420,7 @@ test("CodexAppServerClient ignores known benign notifications and item completio
     const threadId = await startThreadPromise;
 
     const streamPromise = (async () => {
-      const events: Array<{ type: string }> = [];
+      const events: Array<{ method: string; params?: unknown }> = [];
       for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async () => tokens)) {
         events.push(event);
       }
@@ -476,7 +476,7 @@ test("CodexAppServerClient ignores known benign notifications and item completio
       },
     })}\n`);
 
-    assert.deepEqual(await streamPromise, [{ type: "turn_completed" }]);
+    assert.deepEqual(await streamPromise, [{ method: "turn/completed", params: { turn: { status: "completed", error: null } } }]);
     assert.equal(logs.some((entry) => entry.event === "appserver.notification_unhandled"), false);
     assert.equal(logs.some((entry) => entry.event === "appserver.item_completed_unhandled"), false);
   } finally {
@@ -488,7 +488,7 @@ test("CodexAppServerClient ignores known benign notifications and item completio
   }
 });
 
-test("CodexAppServerClient maps failed turn/completed notifications to turn_failed", async () => {
+test("CodexAppServerClient yields failed turn/completed notifications", async () => {
   const child = new FakeChildProcess();
   const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
   const tokens: ChatGPTExternalTokens = {
@@ -504,7 +504,7 @@ test("CodexAppServerClient maps failed turn/completed notifications to turn_fail
   const threadId = await startThreadPromise;
 
   const streamPromise = (async () => {
-    const events: Array<{ type: string; error?: string }> = [];
+    const events: Array<{ method: string; params?: unknown }> = [];
     for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async () => tokens)) {
       events.push(event);
     }
@@ -529,7 +529,17 @@ test("CodexAppServerClient maps failed turn/completed notifications to turn_fail
   })}\n`);
 
   assert.deepEqual(await streamPromise, [
-    { type: "turn_failed", error: "turn exploded" },
+    {
+      method: "turn/completed",
+      params: {
+        turn: {
+          status: "failed",
+          error: {
+            message: "turn exploded",
+          },
+        },
+      },
+    },
   ]);
 });
 
@@ -582,7 +592,7 @@ test("CodexAppServerClient sends JSON-RPC error when auth refresh handler reject
     const threadId = await startThreadPromise;
 
     const streamPromise = (async () => {
-      const events: Array<{ type: string; text?: string }> = [];
+      const events: Array<{ method: string; params?: unknown }> = [];
       for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async (previousAccountId) => {
         assert.equal(previousAccountId, "acct-123");
         throw new Error("Host refused to refresh tokens");
@@ -633,7 +643,7 @@ test("CodexAppServerClient sends JSON-RPC error when auth refresh handler reject
 `);
     await new Promise((resolve) => setImmediate(resolve));
 
-    assert.deepEqual(await streamPromise, [{ type: "turn_completed" }]);
+    assert.deepEqual(await streamPromise, [{ method: "turn/completed", params: {} }]);
   } finally {
     configureLogger({
       minLevel: "info",
@@ -659,7 +669,7 @@ test("CodexAppServerClient yields context_compaction on item/started with contex
   const threadId = await startThreadPromise;
 
   const streamPromise = (async () => {
-    const events: Array<{ type: string }> = [];
+    const events: Array<{ method: string; params?: unknown }> = [];
     for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async () => tokens)) {
       events.push(event);
     }
@@ -688,8 +698,8 @@ test("CodexAppServerClient yields context_compaction on item/started with contex
   })}\n`);
 
   assert.deepEqual(await streamPromise, [
-    { type: "context_compaction" },
-    { type: "turn_completed" },
+    { method: "item/started", params: { item: { id: "compaction-1", type: "contextCompaction" } } },
+    { method: "turn/completed", params: {} },
   ]);
 });
 
@@ -709,7 +719,7 @@ test("CodexAppServerClient yields context_compaction on item/completed with cont
   const threadId = await startThreadPromise;
 
   const streamPromise = (async () => {
-    const events: Array<{ type: string }> = [];
+    const events: Array<{ method: string; params?: unknown }> = [];
     for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async () => tokens)) {
       events.push(event);
     }
@@ -738,12 +748,12 @@ test("CodexAppServerClient yields context_compaction on item/completed with cont
   })}\n`);
 
   assert.deepEqual(await streamPromise, [
-    { type: "context_compaction" },
-    { type: "turn_completed" },
+    { method: "item/completed", params: { item: { id: "compaction-1", type: "contextCompaction" } } },
+    { method: "turn/completed", params: {} },
   ]);
 });
 
-test("CodexAppServerClient ignores item/started with non-compaction types", async () => {
+test("CodexAppServerClient yields item/started with non-compaction types", async () => {
   const child = new FakeChildProcess();
   const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
   const tokens: ChatGPTExternalTokens = {
@@ -759,7 +769,7 @@ test("CodexAppServerClient ignores item/started with non-compaction types", asyn
   const threadId = await startThreadPromise;
 
   const streamPromise = (async () => {
-    const events: Array<{ type: string }> = [];
+    const events: Array<{ method: string; params?: unknown }> = [];
     for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async () => tokens)) {
       events.push(event);
     }
@@ -788,7 +798,8 @@ test("CodexAppServerClient ignores item/started with non-compaction types", asyn
   })}\n`);
 
   assert.deepEqual(await streamPromise, [
-    { type: "turn_completed" },
+    { method: "item/started", params: { item: { id: "msg-1", type: "agentMessage" } } },
+    { method: "turn/completed", params: {} },
   ]);
 });
 
