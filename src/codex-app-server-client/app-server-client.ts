@@ -1,30 +1,36 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { Input } from "@openai/codex-sdk";
-import { z } from "zod";
 import type { ChatGPTExternalTokens } from "../types.js";
 import { logger } from "../logger.js";
 import type { InitializeParams } from "./generated/InitializeParams.js";
 import type { RequestId } from "./generated/RequestId.js";
 import type { ServerNotification } from "./generated/ServerNotification.js";
+import type { ServerRequest } from "./generated/ServerRequest.js";
 import type { LoginAccountParams } from "./generated/v2/LoginAccountParams.js";
 import type { ThreadStartParams } from "./generated/v2/ThreadStartParams.js";
 import type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse.js";
 import type { TurnStartParams } from "./generated/v2/TurnStartParams.js";
 import type { TurnStartResponse } from "./generated/v2/TurnStartResponse.js";
 import type { TurnInterruptParams } from "./generated/v2/TurnInterruptParams.js";
-import type { ChatgptAuthTokensRefreshParams } from "./generated/v2/ChatgptAuthTokensRefreshParams.js";
 import type { ChatgptAuthTokensRefreshResponse } from "./generated/v2/ChatgptAuthTokensRefreshResponse.js";
 import type { Personality } from "./generated/Personality.js";
-import type { TurnCompletedNotification } from "./generated/v2/TurnCompletedNotification.js";
-import type { ItemCompletedNotification } from "./generated/v2/ItemCompletedNotification.js";
-import type { ItemStartedNotification } from "./generated/v2/ItemStartedNotification.js";
-import type { ErrorNotification } from "./generated/v2/ErrorNotification.js";
 
 type PendingRequest<T = unknown> = {
   resolve: (result: T) => void;
   reject: (error: Error) => void;
 };
+
+type JsonRpcResponse = {
+  id: RequestId;
+  result?: unknown;
+  error?: {
+    code: number;
+    message: string;
+  };
+};
+
+type AppServerMessage = JsonRpcResponse | ServerRequest | ServerNotification;
 
 type AppServerEvent = Extract<ServerNotification, {
   method: "error" | "item/started" | "item/completed" | "turn/completed";
@@ -32,7 +38,6 @@ type AppServerEvent = Extract<ServerNotification, {
 
 export type { AppServerEvent };
 
-const REFRESH_AUTH_METHOD = "account/chatgptAuthTokens/refresh";
 const JSON_RPC_METHOD_NOT_FOUND = -32601;
 const JSON_RPC_INTERNAL_ERROR = -32603;
 
@@ -48,24 +53,6 @@ const ignoredNotificationMethods = new Set([
   "thread/tokenUsage/updated",
   "turn/started",
 ]);
-
-const ignoredCompletedItemTypes = new Set([
-  "commandExecution",
-  "command_execution",
-  "mcpToolCall",
-  "mcp_tool_call",
-  "reasoning",
-  "userMessage",
-  "user_message",
-]);
-
-const refreshAuthParamsSchema = z.object({
-  previousAccountId: z.string().nullable().optional(),
-}).passthrough();
-
-function isJsonRpcRequestId(value: unknown): value is RequestId {
-  return typeof value === "number" || typeof value === "string";
-}
 
 export type AuthRefreshCallback = (
   previousAccountId: string | null,
@@ -199,14 +186,13 @@ export function createMainAgentProfile(workingDirectory: string): AppServerThrea
 
 export class CodexAppServerClient {
   private child: ChildProcessWithoutNullStreams | null = null;
-  private activeNotificationHandler: ((method: string, params: unknown) => void) | null = null;
+  private activeNotificationHandler: ((notification: ServerNotification) => void) | null = null;
   private activeAuthRefreshHandler: ((id: RequestId, previousAccountId: string | null) => Promise<void>) | null = null;
   private nextId = 1;
   private pendingRequests = new Map<number, PendingRequest>();
   private initialized = false;
   private loggedIn = false;
   private readonly warnedUnhandledNotificationMethods = new Set<string>();
-  private readonly warnedUnhandledCompletedItemTypes = new Set<string>();
   private readonly warnedUnhandledServerRequestMethods = new Set<string>();
   private readonly rpc: AppServerTypedRpc;
 
@@ -254,7 +240,7 @@ export class CodexAppServerClient {
       const trimmed = line.trim();
       if (!trimmed) return;
       try {
-        const msg: Record<string, unknown> = JSON.parse(trimmed) as Record<string, unknown>;
+        const msg = JSON.parse(trimmed) as AppServerMessage;
         this.processMessage(msg);
       } catch {
         // non-JSON line, ignore
@@ -262,71 +248,75 @@ export class CodexAppServerClient {
     });
   }
 
-  private processMessage(msg: Record<string, unknown>): void {
+  private processMessage(msg: AppServerMessage): void {
     // JSON-RPC response to one of our requests
-    if (typeof msg["id"] === "number" && msg["method"] === undefined) {
-      const id = msg["id"];
+    if ("id" in msg && !("method" in msg)) {
+      if (typeof msg.id !== "number") {
+        return;
+      }
+      const id = msg.id;
       const pending = this.pendingRequests.get(id);
       if (pending) {
         this.pendingRequests.delete(id);
-        if (msg["error"] !== undefined) {
-          const err = msg["error"] as { code: number; message: string };
+        if (msg.error !== undefined) {
+          const err = msg.error;
           pending.reject(new Error(`RPC error ${err.code}: ${err.message}`));
         } else {
-          pending.resolve(msg["result"]);
+          pending.resolve(msg.result);
         }
       }
       return;
     }
 
     // JSON-RPC request from server to client
-    if (isJsonRpcRequestId(msg["id"]) && typeof msg["method"] === "string") {
-      this.processServerRequest(msg["id"], msg["method"], msg["params"]);
+    if ("id" in msg && "method" in msg) {
+      this.processServerRequest(msg);
       return;
     }
 
     // JSON-RPC notification from server to client
-    if (typeof msg["method"] === "string" && msg["id"] === undefined) {
-      this.processNotification(msg["method"], msg["params"]);
+    if ("method" in msg) {
+      this.processNotification(msg);
       return;
     }
   }
 
-  private processServerRequest(id: RequestId, method: string, params: unknown): void {
-    if (method !== REFRESH_AUTH_METHOD) {
-      this.warnUnhandledServerRequest(method, params);
-      this.rpc.respondMethodNotFound({
-        jsonrpc: "2.0",
-        id,
-        error: {
-          code: JSON_RPC_METHOD_NOT_FOUND,
-          message: `Method not found: ${method}`,
-        },
-      });
-      return;
-    }
+  private processServerRequest(request: ServerRequest): void {
+    switch (request.method) {
+      case "account/chatgptAuthTokens/refresh":
+        if (this.activeAuthRefreshHandler) {
+          this.activeAuthRefreshHandler(request.id, request.params.previousAccountId ?? null)
+            .catch((error: Error) => {
+              logger.error("appserver.auth_refresh_failed", error, "Auth refresh failed.");
+              this.writeJsonRpcMessage({
+                jsonrpc: "2.0",
+                id: request.id,
+                error: {
+                  code: JSON_RPC_INTERNAL_ERROR,
+                  message: `Auth refresh failed: ${error.message}`,
+                },
+              });
+            });
+        }
+        return;
 
-    const typedParams = (params ?? {}) as ChatgptAuthTokensRefreshParams;
-    const parsed = refreshAuthParamsSchema.safeParse(typedParams);
-    if (this.activeAuthRefreshHandler) {
-      this.activeAuthRefreshHandler(id, parsed.success ? parsed.data.previousAccountId ?? null : null)
-        .catch((error: Error) => {
-          logger.error("appserver.auth_refresh_failed", error, "Auth refresh failed.");
-          this.writeJsonRpcMessage({
-            jsonrpc: "2.0",
-            id,
-            error: {
-              code: JSON_RPC_INTERNAL_ERROR,
-              message: `Auth refresh failed: ${error.message}`,
-            },
-          });
+      default:
+        this.warnUnhandledServerRequest(request.method, request.params);
+        this.rpc.respondMethodNotFound({
+          jsonrpc: "2.0",
+          id: request.id,
+          error: {
+            code: JSON_RPC_METHOD_NOT_FOUND,
+            message: `Method not found: ${request.method}`,
+          },
         });
+        return;
     }
   }
 
-  private processNotification(method: string, params: unknown): void {
+  private processNotification(notification: ServerNotification): void {
     if (this.activeNotificationHandler) {
-      this.activeNotificationHandler(method, params);
+      this.activeNotificationHandler(notification);
     }
   }
 
@@ -409,8 +399,8 @@ export class CodexAppServerClient {
       pendingEvents.push(event);
     };
 
-    this.activeNotificationHandler = (method: string, params: unknown) => {
-      const event = this.parseNotification(method, params as Record<string, unknown> | undefined);
+    this.activeNotificationHandler = (notification: ServerNotification) => {
+      const event = this.handleNotification(notification);
       if (event) {
         pushEvent(event);
       }
@@ -482,48 +472,42 @@ export class CodexAppServerClient {
     }
   }
 
-  private parseNotification(method: string, params: Record<string, unknown> | undefined): AppServerEvent | null {
-    switch (method) {
+  private parseNotification(notification: ServerNotification): AppServerEvent | null {
+    switch (notification.method) {
       case "turn/completed": {
-        return { method, params: (params ?? {}) as TurnCompletedNotification };
+        return notification;
       }
       case "error": {
-        return { method, params: (params ?? {}) as ErrorNotification };
+        return notification;
       }
       case "item/started": {
-        return { method, params: (params ?? {}) as ItemStartedNotification };
+        return notification;
       }
       case "item/completed": {
-        const notification = (params ?? {}) as ItemCompletedNotification;
-        const item = notification.item;
-        if (!item) {
-          return null;
-        }
-        if (item.type === "agentMessage" || item.type === "contextCompaction") {
-          return { method, params: notification };
-        }
-        if (ignoredCompletedItemTypes.has(item.type)) {
-          return null;
-        }
-        this.warnUnhandledCompletedItemType(item.type);
-        return { method, params: notification };
+        return notification;
       }
       default:
-        if (!ignoredNotificationMethods.has(method)) {
-          this.warnUnhandledNotification(method, params);
-        }
         return null;
     }
   }
 
-  private warnUnhandledCompletedItemType(itemType: string): void {
-    if (this.warnedUnhandledCompletedItemTypes.has(itemType)) {
-      return;
+  private handleNotification(notification: ServerNotification): AppServerEvent | null {
+    const event = this.parseNotification(notification);
+    if (!event) {
+      if (!ignoredNotificationMethods.has(notification.method)) {
+        this.warnUnhandledNotification(notification.method, notification.params);
+      }
+      return null;
     }
-    this.warnedUnhandledCompletedItemTypes.add(itemType);
-    logger.warn("appserver.item_completed_unhandled", {
-      itemType,
-    });
+
+    if (event.method === "item/completed") {
+      const itemType = event.params.item?.type;
+      if (itemType !== "agentMessage" && itemType !== "contextCompaction") {
+        return null;
+      }
+    }
+
+    return event;
   }
 
   private warnUnhandledNotification(method: string, params: Record<string, unknown> | undefined): void {
