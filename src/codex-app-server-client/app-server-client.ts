@@ -5,8 +5,15 @@ import { z } from "zod";
 import type { ChatGPTExternalTokens } from "../types.js";
 import { logger } from "../logger.js";
 import type { InitializeParams } from "./generated/InitializeParams.js";
+import type { RequestId } from "./generated/RequestId.js";
 import type { LoginAccountParams } from "./generated/v2/LoginAccountParams.js";
 import type { ThreadStartParams } from "./generated/v2/ThreadStartParams.js";
+import type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse.js";
+import type { TurnError } from "./generated/v2/TurnError.js";
+import type { TurnStartParams } from "./generated/v2/TurnStartParams.js";
+import type { TurnStartResponse } from "./generated/v2/TurnStartResponse.js";
+import type { TurnInterruptParams } from "./generated/v2/TurnInterruptParams.js";
+import type { ChatgptAuthTokensRefreshResponse } from "./generated/v2/ChatgptAuthTokensRefreshResponse.js";
 import type { Personality } from "./generated/Personality.js";
 import type { TurnCompletedNotification } from "./generated/v2/TurnCompletedNotification.js";
 import type { ItemCompletedNotification } from "./generated/v2/ItemCompletedNotification.js";
@@ -59,6 +66,10 @@ const refreshAuthParamsSchema = z.object({
   previousAccountId: z.string().nullable().optional(),
 }).passthrough();
 
+function isJsonRpcRequestId(value: unknown): value is RequestId {
+  return typeof value === "number" || typeof value === "string";
+}
+
 /**
  * Result of parsing an app-server notification.
  *
@@ -67,7 +78,7 @@ const refreshAuthParamsSchema = z.object({
  */
 type ParsedNotification =
   | { kind: "turn_completed"; data: TurnCompletedNotification }
-  | { kind: "turn_failed"; error: { message?: string } | undefined }
+  | { kind: "turn_failed"; error: TurnError | undefined }
   | { kind: "item_completed"; data: ItemCompletedNotification }
   | { kind: "item_started"; data: ItemStartedNotification }
   | { kind: "error"; data: ErrorNotification }
@@ -76,7 +87,7 @@ type ParsedNotification =
 
 export type AuthRefreshCallback = (
   previousAccountId: string | null,
-) => Promise<{ accessToken: string; chatgptAccountId: string; chatgptPlanType: string | null }>;
+) => Promise<ChatgptAuthTokensRefreshResponse>;
 
 type CreateExternalTokensClientOptions = {
   codexPath: string;
@@ -96,41 +107,15 @@ type AppServerTypedRpcHost = {
   writeJsonRpcMessage: (message: Record<string, unknown>) => void;
 };
 
-/**
- * Auth refresh result sent back to the app-server as the `result` field
- * of the JSON-RPC response for `account/chatgptAuthTokens/refresh`.
- *
- * Derived from the Codex app-server protocol v2.
- *
- * @see {@link https://developers.openai.com/codex/app-server App Server Protocol Overview}
- * @see {@link https://github.com/openai/codex/blob/main/codex-rs/app-server-protocol/src/protocol/v2.rs Open-source protocol definitions (v2.rs)}
- */
-type AppServerAuthRefreshResult = {
-  accessToken: string;
-  chatgptAccountId: string;
-  chatgptPlanType: string | null;
-};
-
-/**
- * Thread-start result.  Not yet included in the generated app-server types;
- * kept as a locally declared type until `codex app-server generate-ts`
- * emits it.
- */
-type AppServerThreadStartResult = {
-  thread: {
-    id: string;
-  };
-};
-
 type JsonRpcSuccessResponse = {
   jsonrpc: "2.0";
-  id: number;
+  id: RequestId;
   result: unknown;
 };
 
 type JsonRpcErrorResponse = {
   jsonrpc: "2.0";
-  id: number;
+  id: RequestId;
   error: {
     code: number;
     message: string;
@@ -173,8 +158,8 @@ class AppServerTypedRpc {
     await this.host.requestRaw<void>("account/login/start", params);
   }
 
-  async startThread(params: ThreadStartParams): Promise<AppServerThreadStartResult> {
-    return await this.host.requestRaw<AppServerThreadStartResult>("thread/start", params);
+  async startThread(params: ThreadStartParams): Promise<ThreadStartResponse> {
+    return await this.host.requestRaw<ThreadStartResponse>("thread/start", params);
   }
 
   /**
@@ -184,16 +169,11 @@ class AppServerTypedRpc {
    * callers already produce `Input` objects (which are compatible
    * at runtime).
    */
-  async turnStart(params: { threadId: string; input: Input }): Promise<void> {
-    await this.host.requestRaw<void>("turn/start", params);
+  async turnStart(params: Omit<TurnStartParams, "input"> & { input: Input }): Promise<TurnStartResponse> {
+    return await this.host.requestRaw<TurnStartResponse>("turn/start", params);
   }
 
-  /**
-   * Interrupts a turn.  `turnId` is omitted from the generated
-   * {@link TurnInterruptParams} because the controller currently
-   * does not track per-turn identifiers.
-   */
-  async turnInterrupt(params: Omit<import("./generated/v2/TurnInterruptParams.js").TurnInterruptParams, "turnId">): Promise<void> {
+  async turnInterrupt(params: TurnInterruptParams): Promise<void> {
     await this.host.requestRaw<void>("turn/interrupt", params);
   }
 
@@ -231,7 +211,7 @@ function parseAppServerNotification(
       // instead of turn/completed with status=failed.
       return {
         kind: "turn_failed",
-        error: (params as Record<string, unknown>)?.["error"] as { message?: string } | undefined,
+        error: (params as Record<string, unknown>)?.["error"] as TurnError | undefined,
       };
     case "error":
       return { kind: "error", data: (params ?? {}) as ErrorNotification };
@@ -276,7 +256,7 @@ export function createMainAgentProfile(workingDirectory: string): AppServerThrea
 export class CodexAppServerClient {
   private child: ChildProcessWithoutNullStreams | null = null;
   private activeNotificationHandler: ((method: string, params: unknown) => void) | null = null;
-  private activeAuthRefreshHandler: ((id: number, previousAccountId: string | null) => Promise<void>) | null = null;
+  private activeAuthRefreshHandler: ((id: RequestId, previousAccountId: string | null) => Promise<void>) | null = null;
   private nextId = 1;
   private pendingRequests = new Map<number, PendingRequest>();
   private initialized = false;
@@ -356,7 +336,7 @@ export class CodexAppServerClient {
     }
 
     // JSON-RPC request from server to client
-    if (typeof msg["id"] === "number" && typeof msg["method"] === "string") {
+    if (isJsonRpcRequestId(msg["id"]) && typeof msg["method"] === "string") {
       this.processServerRequest(msg["id"], msg["method"], msg["params"]);
       return;
     }
@@ -368,7 +348,7 @@ export class CodexAppServerClient {
     }
   }
 
-  private processServerRequest(id: number, method: string, params: unknown): void {
+  private processServerRequest(id: RequestId, method: string, params: unknown): void {
     if (method === REFRESH_AUTH_METHOD) {
       const parsed = refreshAuthParamsSchema.safeParse(params ?? {});
       if (this.activeAuthRefreshHandler) {
@@ -487,7 +467,7 @@ export class CodexAppServerClient {
       pushEvent(this.parseNotification(method, params as Record<string, unknown> | undefined));
     };
 
-    this.activeAuthRefreshHandler = async (id: number, previousAccountId: string | null) => {
+    this.activeAuthRefreshHandler = async (id: RequestId, previousAccountId: string | null) => {
       const tokens = await onAuthRefresh(previousAccountId);
       this.rpc.respondAuthRefresh({
         jsonrpc: "2.0",
@@ -496,11 +476,11 @@ export class CodexAppServerClient {
           accessToken: tokens.accessToken,
           chatgptAccountId: tokens.chatgptAccountId,
           chatgptPlanType: tokens.chatgptPlanType,
-        } satisfies AppServerAuthRefreshResult,
+        } satisfies ChatgptAuthTokensRefreshResponse,
       });
     };
 
-    await this.rpc.turnStart({ threadId, input });
+    const turnStartResponse = await this.rpc.turnStart({ threadId, input });
 
     try {
       let done = false;
@@ -533,7 +513,7 @@ export class CodexAppServerClient {
 
         if (!event) {
           try {
-            await this.rpc.turnInterrupt({ threadId });
+            await this.rpc.turnInterrupt({ threadId, turnId: turnStartResponse.turn.id });
           } catch {
             // best effort
           }
