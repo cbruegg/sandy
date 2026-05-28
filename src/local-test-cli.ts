@@ -1,9 +1,11 @@
+import { spawn } from "node:child_process";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import {
   createIdentifier,
   parseLocalTestOutboundEvent,
 } from "./channel/local-test-protocol.js";
+import { SANDY_MANAGED_CONTAINER_LABEL } from "./sandbox/container-label.js";
 
 type CliIo = {
   stdout: NodeJS.WriteStream;
@@ -16,11 +18,13 @@ type LocalTestCliCommand =
   | "approve"
   | "deny"
   | "cancel"
+  | "cancel-all"
   | "mark-finished"
   | "report-danger"
   | "tail"
   | "wait-for"
-  | "list-events";
+  | "list-events"
+  | "status";
 
 export async function runLocalTestCli(args: string[], io: CliIo = {
   stdout: process.stdout,
@@ -106,6 +110,12 @@ export async function runLocalTestCli(args: string[], io: CliIo = {
     case "wait-for":
       await waitForEvent(spoolRoot, options, io.stdout);
       return;
+    case "status":
+      await printStatus(spoolRoot, options, io.stdout);
+      return;
+    case "cancel-all":
+      await cancelAll(spoolRoot, options, io);
+      return;
   }
 }
 
@@ -118,8 +128,10 @@ function parseCommand(raw: string | undefined): LocalTestCliCommand | undefined 
     case "approve":
     case "deny":
     case "cancel":
+    case "cancel-all":
     case "mark-finished":
     case "report-danger":
+    case "status":
     case "tail":
     case "wait-for":
     case "list-events":
@@ -301,3 +313,83 @@ async function sleep(delayMs: number): Promise<void> {
 function parseUnknownJson(raw: string): unknown {
   return JSON.parse(raw) as unknown;
 }
+
+// ---- status command ----
+
+async function printStatus(
+  spoolRoot: string,
+  _options: Record<string, string | string[]>,
+  stdout: NodeJS.WriteStream,
+): Promise<void> {
+  const containers = await listManagedContainers();
+
+  const lines: string[] = [];
+  lines.push(`=== Sandy Container Status ===`);
+  lines.push(`Spool root: ${spoolRoot}`);
+  lines.push(`Managed containers: ${containers.length}`);
+  lines.push("");
+
+  if (containers.length === 0) {
+    lines.push("  (none)");
+  } else {
+    for (const c of containers) {
+      lines.push(`  ${c.id.slice(0, 12)}  ${c.image.padEnd(32)} ${c.name}`);
+    }
+  }
+
+  stdout.write(lines.join("\n") + "\n");
+}
+
+// ---- cancel-all command ----
+
+async function cancelAll(
+  spoolRoot: string,
+  options: Record<string, string | string[]>,
+  io: CliIo,
+): Promise<void> {
+  io.stdout.write("Sending cancel_request for active task...\n");
+  await writeSimpleEvent(spoolRoot, "cancel_request", options);
+
+  // Give Sandy a moment to process the cancel and emit task_update.
+  await sleep(500);
+
+  io.stdout.write("\nDocker containers remaining:\n");
+  const remaining = await listManagedContainers();
+  if (remaining.length === 0) {
+    io.stdout.write("  (none)\n");
+  } else {
+    for (const c of remaining) {
+      io.stdout.write(`  ${c.id.slice(0, 12)}  ${c.image.padEnd(30)} ${c.name}\n`);
+    }
+    io.stdout.write(`\n  ${remaining.length} container(s) still running.\n`);
+    io.stdout.write("  Run 'status' to check task state, or stop Sandy to clean up standbys.\n");
+  }
+}
+
+// ---- Docker helpers ----
+
+type ContainerInfo = { id: string; image: string; name: string };
+
+async function listManagedContainers(): Promise<ContainerInfo[]> {
+  return new Promise((resolve) => {
+    const child = spawn("docker", [
+      "ps",
+      "--filter", `label=${SANDY_MANAGED_CONTAINER_LABEL}`,
+      "--format", "{{.ID}}|{{.Image}}|{{.Names}}",
+    ], { stdio: ["ignore", "pipe", "ignore"] });
+
+    let stdout = "";
+    child.stdout.on("data", (chunk) => { stdout += String(chunk); });
+
+    child.on("error", () => resolve([]));
+    child.on("exit", () => {
+      const lines = stdout.trim().split("\n").filter((l) => l.length > 0);
+      const containers = lines.map((line) => {
+        const [id, image, name] = line.split("|");
+        return { id: id!, image: image!, name: name! };
+      });
+      resolve(containers);
+    });
+  });
+}
+
