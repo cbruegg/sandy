@@ -7,7 +7,6 @@ import { formatDateTimePrefix } from "../datetime-prefix.js";
 import { logger } from "../logger.js";
 import type { DecideContext, MainAgentDecision } from "../types.js";
 import type { SkillMetadata } from "../skills.js";
-import type { RelevantMemory } from "../memory/types.js";
 import {
   formatMainAgentDecisionValidationError,
   mainAgentDecisionPromptSchema,
@@ -43,6 +42,10 @@ export class CodexMainAgentController implements MainAgentController {
    */
   private readonly httpTokens: Record<string, HttpTokenConfig>;
   /**
+   * Pre-built MemPalace MCP config for thread start, or null if unavailable.
+   */
+  private readonly mempalaceMcpConfig: { [key: string]: unknown } | null;
+  /**
    * Active app-server thread IDs keyed by Sandy chat ID.
    * One chat may have at most one active thread at any time.
    */
@@ -65,12 +68,14 @@ export class CodexMainAgentController implements MainAgentController {
     getSkills: () => SkillMetadata[] = () => [],
     workerMcpServerIds: string[] = [],
     httpTokens: Record<string, HttpTokenConfig> = {},
+    mempalaceMcpConfig: { [key: string]: unknown } | null = null,
   ) {
     this.appServer = appServer;
     this.model = model;
     this.getSkills = getSkills;
     this.workerMcpServerIds = [...workerMcpServerIds].sort();
     this.httpTokens = {...httpTokens};
+    this.mempalaceMcpConfig = mempalaceMcpConfig;
   }
 
   async decide(context: DecideContext): Promise<MainAgentDecision> {
@@ -85,7 +90,6 @@ export class CodexMainAgentController implements MainAgentController {
       chatId: context.chatId,
       newVisibleEntryCount: context.newVisibleEntries.length,
       hasActiveTask: context.activeTask !== null,
-      relevantMemoryCount: context.relevantMemories.length,
       includeFullInstructions,
       isInitialTurn,
     });
@@ -97,7 +101,7 @@ export class CodexMainAgentController implements MainAgentController {
       skills: this.getSkills(),
       workerMcpServerIds: this.workerMcpServerIds,
       httpTokens: this.httpTokens,
-      relevantMemories: context.relevantMemories,
+      mempalaceAvailable: this.mempalaceMcpConfig !== null,
     });
     const input: Input = [{ type: "text", text: prompt }];
     const decision = await this.runValidatedDecision(threadId, input, context);
@@ -206,7 +210,7 @@ export class CodexMainAgentController implements MainAgentController {
     }
     const workingDirectory = this.getOrCreateThreadDirectory(chatId);
     const profile = {
-      ...createMainAgentProfile(workingDirectory),
+      ...createMainAgentProfile(workingDirectory, this.mempalaceMcpConfig),
       ...(this.model ? { model: this.model } : {}),
     };
     const threadId = await this.appServer.startThread(profile);
@@ -253,7 +257,7 @@ export function buildMainAgentPrompt(input: {
   skills: SkillMetadata[];
   workerMcpServerIds: string[];
   httpTokens: Record<string, HttpTokenConfig>;
-  relevantMemories: RelevantMemory[];
+  mempalaceAvailable: boolean;
 }): string {
   const intro = input.includeFullInstructions
     ? [
@@ -318,22 +322,16 @@ export function buildMainAgentPrompt(input: {
       ]
     : [];
 
-  const relevantMemoriesSection = input.relevantMemories.length > 0
+  const mempalaceSection = input.includeFullInstructions && input.mempalaceAvailable
     ? [
         "",
-        "Relevant trusted memories from past Sandy interactions (use only when helpful):",
-        ...input.relevantMemories.map((m) => {
-          const date = m.createdAt ? `[${m.createdAt.substring(0, 10)}] ` : "";
-          return `- ${date}${m.text}`;
-        }),
-      ]
-    : [];
-
-  const memoryRules = input.relevantMemories.length > 0
-    ? [
-        "- Use these memories only when they are relevant to the current user request.",
-        "- Prefer the current visible chat context over older memories.",
+        "A MemPalace memory server is available to you via MCP. Use MCP tool discovery to list its tools. Use it to:",
+        "- Search past Sandy memories before answering questions about past events, decisions, or user preferences.",
+        "- File stable facts, preferences, and longer-lived context worth remembering.",
+        "- Never delegate memory management to sub-agents.",
+        "- Prefer current visible chat context over older memories.",
         "- Do not assume a memory is authoritative if it conflicts with current user input.",
+        "- Return your decision JSON after optional tool use.",
       ]
     : [];
 
@@ -344,7 +342,7 @@ export function buildMainAgentPrompt(input: {
     ...workerMcpSection,
     ...httpTokenSection,
     ...sandyToolsSection,
-    ...relevantMemoriesSection,
+    ...mempalaceSection,
     "",
     "Required JSON schema:",
     JSON.stringify(mainAgentDecisionPromptSchema, null, 2),
@@ -375,6 +373,5 @@ export function buildMainAgentPrompt(input: {
     "- Any replyText you produce is user-visible. Follow the provided channel formatting instructions exactly.",
     ...skillDecisionRules,
     ...skillManagementRules,
-    ...memoryRules,
   ].join("\n");
 }

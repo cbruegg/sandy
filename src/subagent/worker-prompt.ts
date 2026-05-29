@@ -117,14 +117,12 @@ export function buildTaskSummaryInput(): string {
   return [
     "Your task work is complete.",
     "Write a short host-facing handoff summary of this task.",
-    "Include any stable facts, preferences, or longer-lived context that Sandy should remember for future work.",
     "Do not address the user directly.",
     "Do not emit any Sandy tool calls.",
     "Use this exact structure:",
     "Summary: <what you accomplished and the current state>",
     "Artifacts: <files created or updated in /workspace/share, or \"none\">",
     "Open questions: <remaining blockers, follow-ups, or \"none\">",
-    "Potential memories: <stable facts or preferences to remember, or \"none\">",
   ].join("\n");
 }
 

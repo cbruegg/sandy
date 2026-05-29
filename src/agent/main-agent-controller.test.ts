@@ -101,7 +101,6 @@ function makeContext(texts: string[], chatId = "chat-1"): DecideContext {
     })),
     activeTask: null,
     channelFormatting: testFormatting,
-    relevantMemories: [],
   };
 }
 
@@ -124,6 +123,27 @@ test("CodexMainAgentController starts threads with read-only sandbox and working
   assert.equal(appServer.startedProfiles[0]?.sandbox, "read-only");
   assert.equal(appServer.startedProfiles[0]?.personality, "none");
   assert.match(appServer.startedProfiles[0]?.cwd ?? "", /^.+sandy-main-agent-/);
+  assert.equal(appServer.startedProfiles[0]?.config, null);
+});
+
+test("CodexMainAgentController passes MemPalace MCP config when mempalaceAvailable is true", async () => {
+  const appServer = new FakeAppServerClient([buildTurnEvents(replyDecision("hello"))]);
+  const fakeConfig = {
+    mcp_servers: {
+      mempalace: {
+        command: "python3",
+        args: ["-m", "mempalace.mcp_server", "--palace", "/tmp/test-palace"],
+      },
+    },
+  };
+  const controller = new CodexMainAgentController(appServer, null, () => [], [], {}, fakeConfig);
+
+  await controller.decide(makeContext(["hello"]));
+
+  assert.equal(appServer.startedProfiles.length, 1);
+  const config = appServer.startedProfiles[0]?.config;
+  assert.ok(config);
+  assert.ok(config && typeof config === "object" && "mcp_servers" in config);
 });
 
 test("CodexMainAgentController includes a model override when configured", async () => {
@@ -143,7 +163,7 @@ test("buildMainAgentPrompt includes only the new visible entries for incremental
     includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
-    httpTokens: {}, relevantMemories: [],
+    httpTokens: {}, mempalaceAvailable: false,
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["follow-up"]).newVisibleEntries,
@@ -152,7 +172,7 @@ test("buildMainAgentPrompt includes only the new visible entries for incremental
     includeFullInstructions: false,
     skills: [],
     workerMcpServerIds: [],
-    httpTokens: {}, relevantMemories: [],
+    httpTokens: {}, mempalaceAvailable: false,
   });
 
   assert.match(initialPrompt, /Visible chat entries for this decision:/);
@@ -171,7 +191,7 @@ test("buildMainAgentPrompt includes full instructions on incremental turn when i
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {},
-    relevantMemories: [],
+    mempalaceAvailable: false,
   });
 
   assert.match(deltaPrompt, /Visible chat entries for this decision:/);
@@ -187,7 +207,7 @@ test("buildMainAgentPrompt includes current date and time on every turn", () => 
     includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
-    httpTokens: {}, relevantMemories: [],
+    httpTokens: {}, mempalaceAvailable: false,
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["follow-up"]).newVisibleEntries,
@@ -196,35 +216,11 @@ test("buildMainAgentPrompt includes current date and time on every turn", () => 
     includeFullInstructions: false,
     skills: [],
     workerMcpServerIds: [],
-    httpTokens: {}, relevantMemories: [],
+    httpTokens: {}, mempalaceAvailable: false,
   });
 
   assert.match(initialPrompt, /Current date and time: [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}/);
   assert.match(deltaPrompt, /Current date and time: [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}/);
-});
-
-test("buildMainAgentPrompt renders relevant memories as plain bullets", () => {
-  const prompt = buildMainAgentPrompt({
-    newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
-    activeTask: null,
-    channelFormatting: testFormatting,
-    includeFullInstructions: true,
-    skills: [],
-    workerMcpServerIds: [],
-    httpTokens: {},
-    relevantMemories: [{
-      text: "The user prefers Bun over npm.",
-      wing: "sandy",
-      room: "conversation",
-      similarity: 0.9,
-      sourceFile: "user_message",
-      createdAt: "2026-04-01T00:00:00.000Z",
-    }],
-  });
-
-  assert.match(prompt, /Relevant trusted memories from past Sandy interactions/);
-  assert.match(prompt, /- \[2026-04-01\] The user prefers Bun over npm\./);
-  assert.doesNotMatch(prompt, /Memory 1:/);
 });
 
 test("buildMainAgentPrompt includes the precise decision schema", () => {
@@ -235,7 +231,7 @@ test("buildMainAgentPrompt includes the precise decision schema", () => {
     includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
-    httpTokens: {}, relevantMemories: [],
+    httpTokens: {}, mempalaceAvailable: false,
   });
 
   assert.match(prompt, /Required JSON schema:/);
@@ -246,6 +242,37 @@ test("buildMainAgentPrompt includes the precise decision schema", () => {
   assert.match(prompt, /"taskPolicy"/);
   assert.match(prompt, /autoApproveMcpServers/);
   assert.match(prompt, /autoApproveHttpTokens/);
+});
+
+test("buildMainAgentPrompt includes MemPalace MCP instructions when mempalaceAvailable is true", () => {
+  const prompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    includeFullInstructions: true,
+    skills: [],
+    workerMcpServerIds: [],
+    httpTokens: {},
+    mempalaceAvailable: true,
+  });
+
+  assert.match(prompt, /MemPalace memory server is available to you via MCP/);
+  assert.match(prompt, /Never delegate memory management to sub-agents/);
+});
+
+test("buildMainAgentPrompt omits MemPalace MCP instructions when mempalaceAvailable is false", () => {
+  const prompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    includeFullInstructions: true,
+    skills: [],
+    workerMcpServerIds: [],
+    httpTokens: {},
+    mempalaceAvailable: false,
+  });
+
+  assert.doesNotMatch(prompt, /MemPalace memory server is available to you via MCP/);
 });
 
 test("CodexMainAgentController sends only the entries provided for each decision", async () => {
@@ -314,7 +341,7 @@ test("buildMainAgentPrompt includes configured skill metadata on every turn", ()
     includeFullInstructions: true,
     skills: testSkills,
     workerMcpServerIds: [],
-    httpTokens: {}, relevantMemories: [],
+    httpTokens: {}, mempalaceAvailable: false,
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["another request"]).newVisibleEntries,
@@ -323,7 +350,7 @@ test("buildMainAgentPrompt includes configured skill metadata on every turn", ()
     includeFullInstructions: false,
     skills: testSkills,
     workerMcpServerIds: [],
-    httpTokens: {}, relevantMemories: [],
+    httpTokens: {}, mempalaceAvailable: false,
   });
 
   assert.match(initialPrompt, /Configured skills available to sub-agents:/);
@@ -341,7 +368,7 @@ test("buildMainAgentPrompt does not include skill body text below the frontmatte
     includeFullInstructions: true,
     skills: testSkills,
     workerMcpServerIds: [],
-    httpTokens: {}, relevantMemories: [],
+    httpTokens: {}, mempalaceAvailable: false,
   });
 
   assert.doesNotMatch(prompt, /Use the Todoist MCP/);
@@ -356,7 +383,7 @@ test("buildMainAgentPrompt includes configured MCP server ids only when includeF
     includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: ["github", "todoist"],
-    httpTokens: {}, relevantMemories: [],
+    httpTokens: {}, mempalaceAvailable: false,
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["follow up"]).newVisibleEntries,
@@ -365,7 +392,7 @@ test("buildMainAgentPrompt includes configured MCP server ids only when includeF
     includeFullInstructions: false,
     skills: [],
     workerMcpServerIds: ["github", "todoist"],
-    httpTokens: {}, relevantMemories: [],
+    httpTokens: {}, mempalaceAvailable: false,
   });
 
   assert.match(initialPrompt, /Configured MCP servers available to sub-agents:/);
@@ -383,7 +410,7 @@ test("buildMainAgentPrompt includes MCP server ids on incremental turn when incl
     skills: [],
     workerMcpServerIds: ["github", "todoist"],
     httpTokens: {},
-    relevantMemories: [],
+    mempalaceAvailable: false,
   });
 
   assert.match(prompt, /Configured MCP servers available to sub-agents:/);
@@ -399,7 +426,7 @@ test("buildMainAgentPrompt omits the MCP section when no servers are configured"
     includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
-    httpTokens: {}, relevantMemories: [],
+    httpTokens: {}, mempalaceAvailable: false,
   });
 
   assert.doesNotMatch(prompt, /Configured MCP servers available to sub-agents:/);
@@ -413,7 +440,7 @@ test("buildMainAgentPrompt includes configured HTTP token ids and descriptions w
     includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
-    httpTokens: testHttpTokens, relevantMemories: [],
+    httpTokens: testHttpTokens, mempalaceAvailable: false,
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["follow up"]).newVisibleEntries,
@@ -422,7 +449,7 @@ test("buildMainAgentPrompt includes configured HTTP token ids and descriptions w
     includeFullInstructions: false,
     skills: [],
     workerMcpServerIds: [],
-    httpTokens: testHttpTokens, relevantMemories: [],
+    httpTokens: testHttpTokens, mempalaceAvailable: false,
   });
 
   assert.match(initialPrompt, /Configured HTTP tokens available to sub-agents:/);
@@ -438,7 +465,7 @@ test("buildMainAgentPrompt includes Sandy host-integration tools when includeFul
     includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
-    httpTokens: {}, relevantMemories: [],
+    httpTokens: {}, mempalaceAvailable: false,
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["follow up"]).newVisibleEntries,
@@ -447,7 +474,7 @@ test("buildMainAgentPrompt includes Sandy host-integration tools when includeFul
     includeFullInstructions: false,
     skills: [],
     workerMcpServerIds: [],
-    httpTokens: {}, relevantMemories: [],
+    httpTokens: {}, mempalaceAvailable: false,
   });
 
   assert.match(initialPrompt, /MCP server "sandy" available to the worker\/sub-agent exposes these host-integration tools:/);

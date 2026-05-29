@@ -134,25 +134,13 @@ small model such as `gpt-5.4-mini`.
 
 Memory behavior:
 
-- Sandy uses MemPalace as a local-first memory store when the Python `mempalace` package is installed and importable by `python3`.
+- Sandy auto-configures a MemPalace MCP server for its main agent when the Python `mempalace` package is installed and importable by `python3`.
 - By default, Sandy uses the palace at `~/.mempalace/palace`.
-- Sandy currently files trusted memories into one shared Sandy wing so they can be recalled across chats for the same controlling user.
-- Conversation entries and released sub-agent summaries are stored in separate MemPalace rooms.
-- Before each main-agent decision, Sandy searches for relevant memories and includes the top hits as additional context.
-- When Sandy launches a sub-agent task, those retrieved memories are also injected into the worker's initial input.
-- If MemPalace is missing or fails at runtime, Sandy logs a warning and continues without memory rather than refusing to boot.
+- MemPalace memories are managed directly by the main agent via MCP tool calls. The main agent can search past memories and file new stable facts and preferences.
+- Sub-agents never see MemPalace or any memory tools; memory management stays main-agent-only.
+- If MemPalace is missing, Sandy simply starts without memory capabilities and continues normally.
 
-One way to install MemPalace is:
-
-```bash
-uv tool install mempalace
-```
-
-After installing the CLI, initialize the default palace once:
-
-```bash
-mempalace init ~/.mempalace/palace
-```
+To make MemPalace available, install the Python package (for example with `uv tool install mempalace` or `pip install mempalace`) and ensure `python3 -c "import mempalace"` succeeds.
 
 Telegram auth behavior:
 
@@ -530,8 +518,7 @@ non-deterministic components such as the LLM and TTS providers should be mocked 
 - Add support for more channels, such as Discord, Slack, etc.
 - Add support for more LLM providers, such as Anthropic, etc.
 - Add support for more TTS providers, such as Google Cloud Speech-to-Text, AWS
-- Add support for scheduled tasks, allowing sub-agents to schedule tasks for later execution, 
+- Add support for scheduled tasks, allowing sub-agents to schedule tasks for later execution,
   and notify the user when they are executed.
-- Add support for memory.
 - Add tools for audio and video transcription
 - Add support for sandboxed headless browser use

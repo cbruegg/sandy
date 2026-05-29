@@ -11,8 +11,6 @@ import type {
   NormalizedChatEvent,
   SessionState,
 } from "../types.js";
-import type { RelevantMemory } from "../memory/types.js";
-import { storeConversationMemory } from "../memory/mempalace-memory.js";
 
 export class SandyOrchestrator {
   private readonly channelFormatting: ChannelFormatting;
@@ -146,14 +144,6 @@ export class SandyOrchestrator {
 
         const releasedEntries = this.taskLifecycle.releasePendingTaskSummaries(session);
 
-        // Search trusted memories for this chat to help the main agent route
-        // and to provide context to any launched sub-agents.
-        const relevantMemories: RelevantMemory[] = await this.deps.mainAgentMemory.searchRelevantMemories({
-          chatId: event.chatId,
-          query: event.text,
-          activeTaskName: session.activeTask?.taskName,
-        });
-
         const newVisibleEntries = [
           ...releasedEntries,
           {
@@ -169,33 +159,14 @@ export class SandyOrchestrator {
           newVisibleEntries,
           activeTask: session.activeTask,
           channelFormatting: this.channelFormatting,
-          relevantMemories,
         });
-
-        // Store the user message as trusted memory. If the main agent replied
-        // directly we also store the reply; task summaries are stored when
-        // released.
-        await storeConversationMemory(
-          this.deps.mainAgentMemory,
-          event.chatId,
-          event.text,
-          "user_message",
-        );
 
         if (decision.action === "reply") {
           await this.taskLifecycle.executeMainAgentDecision(session, event, decision);
-          // Store the direct reply as trusted conversation memory.
-          await storeConversationMemory(
-            this.deps.mainAgentMemory,
-            event.chatId,
-            decision.replyText,
-            "main_agent_reply",
-          );
           return;
         }
 
-        // For task launches, pass the memories along so the sub-agent gets context.
-        await this.taskLifecycle.executeMainAgentDecision(session, event, decision, relevantMemories);
+        await this.taskLifecycle.executeMainAgentDecision(session, event, decision);
         return;
       }
     }

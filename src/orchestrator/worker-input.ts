@@ -1,5 +1,4 @@
 import type { MessageAttachment, SharedAttachment, TaskInputPayload } from "../types.js";
-import type { RelevantMemory } from "../memory/types.js";
 
 export function describeUserMessageForMainAgent(text: string, attachments: MessageAttachment[]): string {
   if (attachments.length === 0) {
@@ -83,52 +82,4 @@ export function buildWorkerFollowUpInput(text: string, attachments: SharedAttach
   };
 }
 
-/**
- * Build a plain-text context block from host-retrieved relevant memories.
- * This block is injected into the sub-agent's initial task input so it has
- * background from past trusted Sandy interactions.
- */
-function buildMemoryContextText(memories: RelevantMemory[]): string {
-  if (memories.length === 0) {
-    return "";
-  }
 
-  const lines = [
-    "Trusted memories from past Sandy interactions (provided by Sandy host, use when relevant):",
-  ];
-
-  for (const memory of memories) {
-    const date = memory.createdAt ? ` [${memory.createdAt.substring(0, 10)}]` : "";
-    const source = memory.room ? ` (${memory.room})` : "";
-    // Truncate very long memory texts to keep the prompt compact. The
-    // sub-agent can ask the host for more detail if needed.
-    const truncated = memory.text.length > 500
-      ? memory.text.substring(0, 500) + "..."
-      : memory.text;
-    lines.push(`-${date}${source}: ${truncated}`);
-  }
-
-  return lines.join("\n");
-}
-
-/**
- * Returns a new TaskInputPayload with memory context prepended to the text
- * section. The original payload is not mutated.
- */
-export function injectMemoryIntoTaskInput(
-  input: TaskInputPayload,
-  memories: RelevantMemory[],
-): TaskInputPayload {
-  const memoryText = buildMemoryContextText(memories);
-  if (!memoryText) {
-    return input;
-  }
-
-  const sections = [input.text.trim()].filter((s) => s.length > 0);
-  sections.unshift(memoryText);
-
-  return {
-    text: sections.join("\n\n"),
-    images: input.images,
-  };
-}

@@ -28,8 +28,6 @@ import type {
   WorkerStartConfig,
 } from "../types.js";
 import { SkillService } from "../skills.js";
-import type { MainAgentMemory } from "../memory/types.js";
-import { NoopMainAgentMemory } from "../memory/noop-memory.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
@@ -241,7 +239,6 @@ export function createTestOrchestrator(options: {
   hostfsBroker?: HostfsBroker;
   taskBundleAssignmentRegistry?: TaskBundleAssignmentLookup;
   skillService?: SkillService;
-  mainAgentMemory?: MainAgentMemory;
 }) {
   const channel = options.channel ?? new RecordingChannel();
   const runner = options.sandboxRunner ?? new FakeSandboxRunner();
@@ -259,7 +256,6 @@ export function createTestOrchestrator(options: {
     hostfsBroker: options.hostfsBroker ?? createNoopHostfsBroker(),
     taskBundleAssignmentRegistry: options.taskBundleAssignmentRegistry ?? createNoopTaskBundleAssignmentRegistry(),
     skillService,
-    mainAgentMemory: options.mainAgentMemory ?? new NoopMainAgentMemory(),
   });
 
   return {

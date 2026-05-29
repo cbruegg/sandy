@@ -107,7 +107,6 @@ test("orchestrator keeps completed-task summary pending until the user sends ano
       "Summary: Inspected the environment and found 8 CPUs.",
       "Artifacts: none",
       "Open questions: none",
-      "Potential memories: none",
     ].join("\n"),
   });
   await runner.emit({ type: "task_done" });
@@ -120,7 +119,6 @@ test("orchestrator keeps completed-task summary pending until the user sends ano
       "Summary: Inspected the environment and found 8 CPUs.",
       "Artifacts: none",
       "Open questions: none",
-      "Potential memories: none",
     ].join("\n"),
   });
 });
@@ -185,7 +183,6 @@ test("orchestrator asks the worker to finalize when the user marks the task as f
       "Summary: Finished based on the visible progress.",
       "Artifacts: none",
       "Open questions: none",
-      "Potential memories: none",
     ].join("\n"),
   });
   await runner.emit({ type: "task_done" });
@@ -198,7 +195,6 @@ test("orchestrator asks the worker to finalize when the user marks the task as f
       "Summary: Finished based on the visible progress.",
       "Artifacts: none",
       "Open questions: none",
-      "Potential memories: none",
     ].join("\n"),
   });
 });

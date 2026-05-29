@@ -35,8 +35,7 @@ import { SkillService } from "./skills.js";
 import { randomUUID } from "node:crypto";
 import { createControlDir, removeControlDir, startHeartbeat } from "./sandbox/heartbeat.js";
 import { CodexAppServerClient } from "./codex-app-server-client/app-server-client.js";
-import { MemPalaceMainAgentMemory } from "./memory/mempalace-memory.js";
-import { NoopMainAgentMemory } from "./memory/noop-memory.js";
+import { buildMainAgentMcpConfig } from "./mempalace-availability.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -145,12 +144,22 @@ export async function startApp(): Promise<void> {
 
   const skillService = new SkillService(config.configDirectory);
 
+  const mempalaceMcpConfig = buildMainAgentMcpConfig();
+  if (mempalaceMcpConfig) {
+    logger.info("mempalace.available", {
+      backend: "mempalace",
+    });
+  } else {
+    logger.info("mempalace.unavailable");
+  }
+
   const mainAgent = new CodexMainAgentController(
     mainAgentAppServer,
     config.agentModel,
     () => skillService.getSkills(),
     Object.keys(config.mcpServers),
     config.httpTokens,
+    mempalaceMcpConfig,
   );
 
   const workerAccess = new ProxyAccess();
@@ -296,21 +305,6 @@ export async function startApp(): Promise<void> {
   );
   const sandboxRunner = new DockerSandboxRunner(sandboxRunnerOptions, taskBundlePool);
 
-  // Construct a MemPalace-backed memory service. Falls back to no-op if the
-  // Python helper is not available so Sandy still boots without memory.
-  let mainAgentMemory;
-  try {
-    mainAgentMemory = new MemPalaceMainAgentMemory();
-    logger.info("memory.engine_ready", {
-      backend: "mempalace",
-    });
-  } catch (error) {
-    mainAgentMemory = new NoopMainAgentMemory();
-    logger.warn("memory.engine_unavailable", {
-      message: error instanceof Error ? error.message : String(error),
-    });
-  }
-
   const orchestrator = new SandyOrchestrator({
     channel,
     mainAgent,
@@ -360,7 +354,6 @@ export async function startApp(): Promise<void> {
     hostfsBroker: hostfsServices?.broker ?? createNoopHostfsBroker(),
     taskBundleAssignmentRegistry,
     skillService,
-    mainAgentMemory,
   });
 
   const sidecarManager = new McpSidecarManager({

@@ -2,7 +2,6 @@ import { z } from "zod";
 import type { ChannelFormatting } from "./channel.js";
 import type { ActiveTaskState } from "./task-state.js";
 import type { TranscriptEntry } from "./transcript.js";
-import type { RelevantMemory } from "../memory/types.js";
 
 const mainAgentTaskPolicySchema = z.object({
   autoApproveMcpServers: z.array(z.string().min(1)).default([]),
@@ -32,5 +31,4 @@ export type DecideContext = {
   newVisibleEntries: TranscriptEntry[];
   activeTask: ActiveTaskState | null;
   channelFormatting: ChannelFormatting;
-  relevantMemories: RelevantMemory[];
 };

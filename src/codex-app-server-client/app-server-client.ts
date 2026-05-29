@@ -161,11 +161,15 @@ function buildAppServerThreadStartParams(
   };
 }
 
-export function createMainAgentProfile(workingDirectory: string): ThreadStartParams {
+export function createMainAgentProfile(
+  workingDirectory: string,
+  config?: { [key: string]: unknown } | null,
+): ThreadStartParams {
   return {
     sandbox: "read-only",
     cwd: workingDirectory,
     personality: "none",
+    config: (config as ThreadStartParams["config"]) ?? null,
   };
 }
 

@@ -8,7 +8,6 @@ import type { SessionStore } from "../session/in-memory-session-store.js";
 import type { ChatGPTExternalTokens, NormalizedChatEvent, SessionState, WorkerStartConfig } from "../types.js";
 import type { PrivilegeBroker } from "../privilege/privilege-broker.js";
 import type { SkillService } from "../skills.js";
-import type { MainAgentMemory } from "../memory/types.js";
 
 export type SupportedChatEvent = Exclude<NormalizedChatEvent, { kind: "unsupported_input" }>;
 export type UserMessageEvent = Extract<NormalizedChatEvent, { kind: "user_message" }>;
@@ -26,5 +25,4 @@ export type SandyOrchestratorDependencies = {
   hostfsBroker: HostfsBroker;
   taskBundleAssignmentRegistry: TaskBundleAssignmentLookup;
   skillService: SkillService;
-  mainAgentMemory: MainAgentMemory;
 };
