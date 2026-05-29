@@ -71,9 +71,11 @@ async function createExternalTokensClient(
 async function createAmbientAuthClient(
   spawnImpl: typeof import("node:child_process").spawn,
   child: FakeChildProcess,
+  env?: NodeJS.ProcessEnv,
 ): Promise<CodexAppServerClient> {
   const clientPromise = CodexAppServerClient.createWithAmbientAuth({
     codexPath: "codex",
+    env,
     spawnImpl,
   });
 
@@ -568,6 +570,24 @@ test("CodexAppServerClient initializes ambient auth without experimental API or 
   await Promise.resolve();
   respond(child, 2, { thread: { id: "thread-1" } });
   assert.equal(await startThreadPromise, "thread-1");
+});
+
+test("CodexAppServerClient passes ambient auth environment overrides to app-server", async () => {
+  const child = new FakeChildProcess();
+  const spawns: Array<NodeJS.ProcessEnv | undefined> = [];
+  const spawnImpl = ((
+    _command: string,
+    _args: readonly string[],
+    options?: { env?: NodeJS.ProcessEnv },
+  ) => {
+    spawns.push(options?.env);
+    return child as unknown as ChildProcessWithoutNullStreams;
+  }) as typeof import("node:child_process").spawn;
+
+  await createAmbientAuthClient(spawnImpl, child, { CODEX_API_KEY: "sk-config-only" });
+
+  assert.equal(spawns.length, 1);
+  assert.equal(spawns[0]?.["CODEX_API_KEY"], "sk-config-only");
 });
 
 test("CodexAppServerClient sends JSON-RPC error when auth refresh handler rejects", async () => {

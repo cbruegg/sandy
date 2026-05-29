@@ -63,6 +63,7 @@ type CreateExternalTokensClientOptions = {
 
 type CreateAmbientAuthClientOptions = {
   codexPath: string;
+  env?: NodeJS.ProcessEnv;
   spawnImpl?: typeof spawn;
 };
 
@@ -192,13 +193,14 @@ export class CodexAppServerClient implements AgentClient {
 
   private constructor(
     private readonly codexPath: string,
+    private readonly env: NodeJS.ProcessEnv | undefined,
     private readonly spawnImpl: typeof spawn = spawn,
   ) {
     this.rpc = new AppServerTypedRpc(this);
   }
 
   static async createWithExternalTokens(options: CreateExternalTokensClientOptions): Promise<CodexAppServerClient> {
-    const client = new CodexAppServerClient(options.codexPath, options.spawnImpl);
+    const client = new CodexAppServerClient(options.codexPath, undefined, options.spawnImpl);
     await client.initialize(true);
     await client.loginWithTokens(options.tokens);
     return client;
@@ -210,7 +212,7 @@ export class CodexAppServerClient implements AgentClient {
   // opt into the experimental app-server auth APIs or send an explicit login
   // request over JSON-RPC.
   static async createWithAmbientAuth(options: CreateAmbientAuthClientOptions): Promise<CodexAppServerClient> {
-    const client = new CodexAppServerClient(options.codexPath, options.spawnImpl);
+    const client = new CodexAppServerClient(options.codexPath, options.env, options.spawnImpl);
     await client.initialize(false);
     client.loggedIn = true;
     return client;
@@ -221,7 +223,7 @@ export class CodexAppServerClient implements AgentClient {
 
     this.child = this.spawnImpl(this.codexPath, ["app-server", "--listen", "stdio://"], {
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env },
+      env: { ...process.env, ...this.env },
     });
 
     const stdout = createInterface({

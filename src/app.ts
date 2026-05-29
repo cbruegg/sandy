@@ -1,8 +1,8 @@
 import { CodexMainAgentController } from "./agent/main-agent-controller.js";
 import { createChannelAdapter } from "./channel/create-channel.js";
 import type { WorkerAuthConfig } from "./types.js";
-import { loadConfig } from "./config.js";
-import { ensureManagedCodexPath } from "./codex-client.js";
+import { defaultCodexAuthFilePath, loadConfig } from "./config.js";
+import { CODEX_API_KEY_ENV, ensureManagedCodexPath } from "./codex-client.js";
 import { resolveSandyCacheRoot } from "./cache-paths.js";
 import { configureLogger, logger } from "./logger.js";
 import { ProxyAccess } from "./proxy-access.js";
@@ -114,14 +114,16 @@ export async function startApp(): Promise<void> {
     }),
     workerImageManager.start(),
   ]);
-
   const mainAgentAppServer = await CodexAppServerClient.createWithAmbientAuth({
     codexPath: mainAgentCodexPath,
+    env: config.authMode.mode === "api_key"
+      ? { [CODEX_API_KEY_ENV]: config.authMode.openAiApiKey }
+      : undefined,
   });
 
   const tokenBroker: ChatGPTTokenBroker | null = config.authMode.mode === "codex_auth_file"
     && config.authMode.codexAuthStrategy === "external_tokens"
-    ? new ChatGPTTokenBroker(config.authMode.codexAuthFile)
+    ? new ChatGPTTokenBroker(defaultCodexAuthFilePath())
     : null;
 
   logger.info("worker_image.ready", {
@@ -242,7 +244,7 @@ export async function startApp(): Promise<void> {
     controllerControlDir,
     codexAuthFile: config.authMode.mode === "codex_auth_file"
       && config.authMode.codexAuthStrategy === "copy_file"
-      ? config.authMode.codexAuthFile
+      ? defaultCodexAuthFilePath()
       : null,
     getSkillsDirectory: () => skillService.getSkillsDirectory(),
     workerCodexBinaryPath,
