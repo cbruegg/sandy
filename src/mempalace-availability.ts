@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import type {ThreadStartParams} from "./codex-app-server-client/generated/v2";
 
 /** Default MemPalace palace directory. */
 const MEMPALACE_PALACE_PATH = join(homedir(), ".mempalace", "palace");
@@ -21,7 +22,7 @@ function isMemPalaceAvailable(): boolean {
   return cachedAvailability;
 }
 
-export function buildMainAgentMcpConfig(): { [key: string]: unknown } | null {
+export function buildMainAgentMcpConfig(): ThreadStartParams["config"] | null {
   if (!isMemPalaceAvailable()) {
     return null;
   }

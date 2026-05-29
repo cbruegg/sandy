@@ -19,6 +19,7 @@ import {
   createMainAgentProfile,
 } from "../codex-app-server-client/app-server-client.js";
 import type { Input } from "@openai/codex-sdk";
+import type {ThreadStartParams} from "../codex-app-server-client/generated/v2";
 
 export interface MainAgentController {
   decide(context: DecideContext): Promise<MainAgentDecision>;
@@ -44,7 +45,7 @@ export class CodexMainAgentController implements MainAgentController {
   /**
    * Pre-built MemPalace MCP config for thread start, or null if unavailable.
    */
-  private readonly mempalaceMcpConfig: { [key: string]: unknown } | null;
+  private readonly mempalaceMcpConfig: ThreadStartParams["config"] | null;
   /**
    * Active app-server thread IDs keyed by Sandy chat ID.
    * One chat may have at most one active thread at any time.
@@ -68,7 +69,7 @@ export class CodexMainAgentController implements MainAgentController {
     getSkills: () => SkillMetadata[] = () => [],
     workerMcpServerIds: string[] = [],
     httpTokens: Record<string, HttpTokenConfig> = {},
-    mempalaceMcpConfig: { [key: string]: unknown } | null = null,
+    mempalaceMcpConfig: ThreadStartParams["config"] | null = null,
   ) {
     this.appServer = appServer;
     this.model = model;
