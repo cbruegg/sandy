@@ -171,6 +171,7 @@ test("buildMainAgentPrompt includes full instructions on incremental turn when i
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {},
+    relevantMemories: [],
   });
 
   assert.match(deltaPrompt, /Visible chat entries for this decision:/);
@@ -358,6 +359,7 @@ test("buildMainAgentPrompt includes MCP server ids on incremental turn when incl
     skills: [],
     workerMcpServerIds: ["github", "todoist"],
     httpTokens: {},
+    relevantMemories: [],
   });
 
   assert.match(prompt, /Configured MCP servers available to sub-agents:/);
