@@ -14,7 +14,6 @@ import type { TurnStartParams } from "./generated/v2/TurnStartParams.js";
 import type { TurnStartResponse } from "./generated/v2/TurnStartResponse.js";
 import type { TurnInterruptParams } from "./generated/v2/TurnInterruptParams.js";
 import type { ChatgptAuthTokensRefreshResponse } from "./generated/v2/ChatgptAuthTokensRefreshResponse.js";
-import type { Personality } from "./generated/Personality.js";
 
 type PendingRequest<T = unknown> = {
   resolve: (result: T) => void;
@@ -37,6 +36,7 @@ type AppServerEvent = Extract<ServerNotification, {
 }>;
 
 export type { AppServerEvent };
+export type { ThreadStartParams };
 
 const JSON_RPC_METHOD_NOT_FOUND = -32601;
 const JSON_RPC_INTERNAL_ERROR = -32603;
@@ -62,13 +62,11 @@ type CreateExternalTokensClientOptions = {
   codexPath: string;
   tokens: ChatGPTExternalTokens;
   spawnImpl?: typeof spawn;
-  extraSpawnArgs?: string[];
 };
 
 type CreateAmbientAuthClientOptions = {
   codexPath: string;
   spawnImpl?: typeof spawn;
-  extraSpawnArgs?: string[];
 };
 
 type AppServerTypedRpcHost = {
@@ -155,28 +153,19 @@ class AppServerTypedRpc {
   }
 }
 
-export type AppServerThreadProfile = {
-  sandbox: "read-only" | "workspace-write" | "danger-full-access";
-  cwd: string;
-  personality?: Personality;
-};
-
 function buildAppServerThreadStartParams(
-  profile: AppServerThreadProfile,
+  profile: ThreadStartParams,
   model?: string,
 ): ThreadStartParams {
   return {
+    ...profile,
     ...(model ? { model } : {}),
-    cwd: profile.cwd,
     approvalPolicy: "never",
-    // Docker (or the host OS for the main agent) is the actual isolation
-    // boundary; avoid nested bwrap sandboxing in-container.
-    sandbox: profile.sandbox,
     personality: profile.personality ?? "none",
   };
 }
 
-export function createMainAgentProfile(workingDirectory: string): AppServerThreadProfile {
+export function createMainAgentProfile(workingDirectory: string): ThreadStartParams {
   return {
     sandbox: "read-only",
     cwd: workingDirectory,
@@ -184,7 +173,17 @@ export function createMainAgentProfile(workingDirectory: string): AppServerThrea
   };
 }
 
-export class CodexAppServerClient {
+export interface AgentClient {
+  startThread(profile: ThreadStartParams, model?: string): Promise<string>;
+  streamTurn(
+    threadId: string,
+    input: Input,
+    onAuthRefresh: AuthRefreshCallback,
+    abortSignal?: AbortSignal,
+  ): AsyncGenerator<AppServerEvent>;
+}
+
+export class CodexAppServerClient implements AgentClient {
   private child: ChildProcessWithoutNullStreams | null = null;
   private activeNotificationHandler: ((notification: ServerNotification) => void) | null = null;
   private activeAuthRefreshHandler: ((id: RequestId, previousAccountId: string | null) => Promise<void>) | null = null;
@@ -199,13 +198,12 @@ export class CodexAppServerClient {
   private constructor(
     private readonly codexPath: string,
     private readonly spawnImpl: typeof spawn = spawn,
-    private readonly extraSpawnArgs: string[] = [],
   ) {
     this.rpc = new AppServerTypedRpc(this);
   }
 
   static async createWithExternalTokens(options: CreateExternalTokensClientOptions): Promise<CodexAppServerClient> {
-    const client = new CodexAppServerClient(options.codexPath, options.spawnImpl, options.extraSpawnArgs);
+    const client = new CodexAppServerClient(options.codexPath, options.spawnImpl);
     await client.initialize(true);
     await client.loginWithTokens(options.tokens);
     return client;
@@ -217,7 +215,7 @@ export class CodexAppServerClient {
   // opt into the experimental app-server auth APIs or send an explicit login
   // request over JSON-RPC.
   static async createWithAmbientAuth(options: CreateAmbientAuthClientOptions): Promise<CodexAppServerClient> {
-    const client = new CodexAppServerClient(options.codexPath, options.spawnImpl, options.extraSpawnArgs);
+    const client = new CodexAppServerClient(options.codexPath, options.spawnImpl);
     await client.initialize(false);
     client.loggedIn = true;
     return client;
@@ -226,7 +224,7 @@ export class CodexAppServerClient {
   start(): void {
     if (this.child) return;
 
-    this.child = this.spawnImpl(this.codexPath, ["app-server", "--listen", "stdio://", ...this.extraSpawnArgs], {
+    this.child = this.spawnImpl(this.codexPath, ["app-server", "--listen", "stdio://"], {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env },
     });
@@ -372,7 +370,7 @@ export class CodexAppServerClient {
     this.loggedIn = true;
   }
 
-  async startThread(profile: AppServerThreadProfile, model?: string): Promise<string> {
+  async startThread(profile: ThreadStartParams, model?: string): Promise<string> {
     this.ensureReady("startThread");
     const result = await this.rpc.startThread(buildAppServerThreadStartParams(profile, model));
     return result.thread.id;
@@ -400,7 +398,7 @@ export class CodexAppServerClient {
     };
 
     this.activeNotificationHandler = (notification: ServerNotification) => {
-      const event = this.handleNotification(notification);
+      const event = this.selectEvent(notification);
       if (event) {
         pushEvent(event);
       }
@@ -472,42 +470,30 @@ export class CodexAppServerClient {
     }
   }
 
-  private parseNotification(notification: ServerNotification): AppServerEvent | null {
+  private selectEvent(notification: ServerNotification): AppServerEvent | null {
     switch (notification.method) {
       case "turn/completed": {
-        return notification;
+        return { method: "turn/completed", params: notification.params };
       }
       case "error": {
-        return notification;
+        return { method: "error", params: notification.params };
       }
       case "item/started": {
-        return notification;
+        return { method: "item/started", params: notification.params };
       }
       case "item/completed": {
-        return notification;
+        const itemType = notification.params.item?.type;
+        if (itemType !== "agentMessage" && itemType !== "contextCompaction") {
+          return null;
+        }
+        return { method: "item/completed", params: notification.params };
       }
       default:
+        if (!ignoredNotificationMethods.has(notification.method)) {
+          this.warnUnhandledNotification(notification.method, notification.params);
+        }
         return null;
     }
-  }
-
-  private handleNotification(notification: ServerNotification): AppServerEvent | null {
-    const event = this.parseNotification(notification);
-    if (!event) {
-      if (!ignoredNotificationMethods.has(notification.method)) {
-        this.warnUnhandledNotification(notification.method, notification.params);
-      }
-      return null;
-    }
-
-    if (event.method === "item/completed") {
-      const itemType = event.params.item?.type;
-      if (itemType !== "agentMessage" && itemType !== "contextCompaction") {
-        return null;
-      }
-    }
-
-    return event;
   }
 
   private warnUnhandledNotification(method: string, params: Record<string, unknown> | undefined): void {

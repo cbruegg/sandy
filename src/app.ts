@@ -117,10 +117,6 @@ export async function startApp(): Promise<void> {
 
   const mainAgentAppServer = await CodexAppServerClient.createWithAmbientAuth({
     codexPath: mainAgentCodexPath,
-    extraSpawnArgs: [
-      "-c",
-      "model_auto_compact_token_limit=200",
-    ],
   });
 
   const tokenBroker: ChatGPTTokenBroker | null = config.authMode.mode === "codex_auth_file"

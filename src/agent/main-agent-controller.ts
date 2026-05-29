@@ -14,8 +14,7 @@ import {
 } from "./main-agent-decision.js";
 import {sandyMcpServerId, workerToolEntries} from "../subagent/worker-tools.js";
 import {
-  type AppServerEvent,
-  type AppServerThreadProfile,
+  type AgentClient,
   type AuthRefreshCallback,
   createMainAgentProfile,
 } from "../codex-app-server-client/app-server-client.js";
@@ -25,16 +24,6 @@ export interface MainAgentController {
   decide(context: DecideContext): Promise<MainAgentDecision>;
 }
 
-export interface MainAgentAppServer {
-  startThread(profile: AppServerThreadProfile, model?: string): Promise<string>;
-  streamTurn(
-    threadId: string,
-    input: Input,
-    onAuthRefresh: AuthRefreshCallback,
-    abortSignal?: AbortSignal,
-  ): AsyncGenerator<AppServerEvent>;
-}
-
 const MAX_DECISION_VALIDATION_ATTEMPTS = 3;
 
 const noopAuthRefresh: AuthRefreshCallback = () => {
@@ -42,7 +31,7 @@ const noopAuthRefresh: AuthRefreshCallback = () => {
 };
 
 export class CodexMainAgentController implements MainAgentController {
-  private readonly appServer: MainAgentAppServer;
+  private readonly appServer: AgentClient;
   private readonly model: string | null;
   private readonly getSkills: () => SkillMetadata[];
   private readonly workerMcpServerIds: string[];
@@ -70,7 +59,7 @@ export class CodexMainAgentController implements MainAgentController {
   private readonly needsInstructionRefresh = new Map<string, boolean>();
 
   constructor(
-    appServer: MainAgentAppServer,
+    appServer: AgentClient,
     model: string | null = null,
     getSkills: () => SkillMetadata[] = () => [],
     workerMcpServerIds: string[] = [],
@@ -102,7 +91,6 @@ export class CodexMainAgentController implements MainAgentController {
       activeTask: context.activeTask,
       channelFormatting: context.channelFormatting,
       newVisibleEntries: context.newVisibleEntries,
-      isInitialTurn,
       includeFullInstructions,
       skills: this.getSkills(),
       workerMcpServerIds: this.workerMcpServerIds,
@@ -255,7 +243,6 @@ export function buildMainAgentPrompt(input: {
   newVisibleEntries: DecideContext["newVisibleEntries"];
   activeTask: DecideContext["activeTask"];
   channelFormatting: DecideContext["channelFormatting"];
-  isInitialTurn: boolean;
   includeFullInstructions: boolean;
   skills: SkillMetadata[];
   workerMcpServerIds: string[];
@@ -265,7 +252,7 @@ export function buildMainAgentPrompt(input: {
     ? [
         "You are Sandy's main orchestration controller.",
         "Decide whether Sandy should launch a new sub-agent task or reply directly.",
-        "This thread persists across decisions for one chat. Some prior context may have been compacted; use only the visible entries below plus any prior context still present in this thread.",
+        "This thread persists across decisions for one chat, so retain prior visible context from earlier turns in this thread.",
         "If some earlier sub-agent output or privilege request details are not present in this thread, treat them as unavailable and do not invent them.",
         "Return exactly one JSON object that matches the provided schema.",
       ]

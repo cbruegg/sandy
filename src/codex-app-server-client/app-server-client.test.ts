@@ -4,6 +4,7 @@ import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { PassThrough, Writable } from "node:stream";
 import { CodexAppServerClient, createMainAgentProfile } from "./app-server-client.js";
+import type { ThreadStartParams } from "./app-server-client.js";
 import type { ChatGPTExternalTokens } from "../types.js";
 import { configureLogger, type LogLevel } from "../logger.js";
 
@@ -11,7 +12,7 @@ const TEST_WORKER_PROFILE = {
   sandbox: "danger-full-access" as const,
   cwd: "/workspace/share",
   personality: "none" as const,
-};
+} satisfies ThreadStartParams;
 
 class CaptureWritable extends Writable {
   public readonly writes: string[] = [];

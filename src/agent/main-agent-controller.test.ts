@@ -4,15 +4,15 @@ import type { Input } from "@openai/codex-sdk";
 import {
   buildMainAgentPrompt,
   CodexMainAgentController,
-  type MainAgentAppServer,
 } from "./main-agent-controller.js";
 import type { SkillMetadata } from "../skills.js";
 import type { ChannelFormatting, DecideContext } from "../types.js";
 import type { HttpTokenConfig } from "../config.js";
 import type {
+  AgentClient,
   AppServerEvent,
-  AppServerThreadProfile,
   AuthRefreshCallback,
+  ThreadStartParams,
 } from "../codex-app-server-client/app-server-client.js";
 
 const testFormatting: ChannelFormatting = {
@@ -53,8 +53,8 @@ function buildTurnEventsWithCompaction(finalResponse: string): AppServerEvent[] 
 
 // ---- test double ----
 
-class FakeAppServerClient implements MainAgentAppServer {
-  public readonly startedProfiles: AppServerThreadProfile[] = [];
+class FakeAppServerClient implements AgentClient {
+  public readonly startedProfiles: ThreadStartParams[] = [];
   public readonly startedModels: Array<string | undefined> = [];
   public readonly threadInputs: string[][] = [];
   public readonly threadIds = new Map<string, string>();
@@ -63,7 +63,7 @@ class FakeAppServerClient implements MainAgentAppServer {
 
   constructor(private eventSequences: AppServerEvent[][] = []) {}
 
-  async startThread(profile: AppServerThreadProfile, model?: string): Promise<string> {
+  async startThread(profile: ThreadStartParams, model?: string): Promise<string> {
     this.startedProfiles.push(profile);
     this.startedModels.push(model);
     const threadId = `thread-${this.nextThreadId++}`;
@@ -142,7 +142,6 @@ test("buildMainAgentPrompt includes only the new visible entries for incremental
     newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: true,
     includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
@@ -152,7 +151,6 @@ test("buildMainAgentPrompt includes only the new visible entries for incremental
     newVisibleEntries: makeContext(["follow-up"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: false,
     includeFullInstructions: false,
     skills: [],
     workerMcpServerIds: [],
@@ -171,7 +169,6 @@ test("buildMainAgentPrompt includes full instructions on incremental turn when i
     newVisibleEntries: makeContext(["follow-up"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: false,
     includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
@@ -180,7 +177,7 @@ test("buildMainAgentPrompt includes full instructions on incremental turn when i
 
   assert.match(deltaPrompt, /Visible chat entries for this decision:/);
   assert.match(deltaPrompt, /You are Sandy's main orchestration controller/);
-  assert.match(deltaPrompt, /Some prior context may have been compacted/);
+  assert.match(deltaPrompt, /retain prior visible context from earlier turns/);
 });
 
 test("buildMainAgentPrompt includes current date and time on every turn", () => {
@@ -188,7 +185,6 @@ test("buildMainAgentPrompt includes current date and time on every turn", () => 
     newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: true,
     includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
@@ -198,7 +194,6 @@ test("buildMainAgentPrompt includes current date and time on every turn", () => 
     newVisibleEntries: makeContext(["follow-up"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: false,
     includeFullInstructions: false,
     skills: [],
     workerMcpServerIds: [],
@@ -214,7 +209,6 @@ test("buildMainAgentPrompt includes the precise decision schema", () => {
     newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: true,
     includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
@@ -294,7 +288,6 @@ test("buildMainAgentPrompt includes configured skill metadata on every turn", ()
     newVisibleEntries: makeContext(["add milk to my shopping list"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: true,
     includeFullInstructions: true,
     skills: testSkills,
     workerMcpServerIds: [],
@@ -304,7 +297,6 @@ test("buildMainAgentPrompt includes configured skill metadata on every turn", ()
     newVisibleEntries: makeContext(["another request"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: false,
     includeFullInstructions: false,
     skills: testSkills,
     workerMcpServerIds: [],
@@ -323,7 +315,6 @@ test("buildMainAgentPrompt does not include skill body text below the frontmatte
     newVisibleEntries: makeContext(["add bread"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: true,
     includeFullInstructions: true,
     skills: testSkills,
     workerMcpServerIds: [],
@@ -339,7 +330,6 @@ test("buildMainAgentPrompt includes configured MCP server ids only when includeF
     newVisibleEntries: makeContext(["check my tasks"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: true,
     includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: ["github", "todoist"],
@@ -349,7 +339,6 @@ test("buildMainAgentPrompt includes configured MCP server ids only when includeF
     newVisibleEntries: makeContext(["follow up"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: false,
     includeFullInstructions: false,
     skills: [],
     workerMcpServerIds: ["github", "todoist"],
@@ -367,7 +356,6 @@ test("buildMainAgentPrompt includes MCP server ids on incremental turn when incl
     newVisibleEntries: makeContext(["follow up"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: false,
     includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: ["github", "todoist"],
@@ -384,7 +372,6 @@ test("buildMainAgentPrompt omits the MCP section when no servers are configured"
     newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: true,
     includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
@@ -399,7 +386,6 @@ test("buildMainAgentPrompt includes configured HTTP token ids and descriptions w
     newVisibleEntries: makeContext(["transcribe this video"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: true,
     includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
@@ -409,7 +395,6 @@ test("buildMainAgentPrompt includes configured HTTP token ids and descriptions w
     newVisibleEntries: makeContext(["follow up"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: false,
     includeFullInstructions: false,
     skills: [],
     workerMcpServerIds: [],
@@ -426,7 +411,6 @@ test("buildMainAgentPrompt includes Sandy host-integration tools when includeFul
     newVisibleEntries: makeContext(["send me a file"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: true,
     includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
@@ -436,7 +420,6 @@ test("buildMainAgentPrompt includes Sandy host-integration tools when includeFul
     newVisibleEntries: makeContext(["follow up"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: false,
     includeFullInstructions: false,
     skills: [],
     workerMcpServerIds: [],
@@ -483,7 +466,7 @@ test("CodexMainAgentController detects compaction events and triggers instructio
 
   // Turn 4: flag was set → full instructions reappear
   assert.match(appServer.threadInputs[3]?.[0] ?? "", /Visible chat entries for this decision:/);
-  assert.match(appServer.threadInputs[3]?.[0] ?? "", /Some prior context may have been compacted/);
+  assert.match(appServer.threadInputs[3]?.[0] ?? "", /retain prior visible context from earlier turns/);
 });
 
 test("CodexMainAgentController does not re-include full instructions on subsequent normal turns after refresh", async () => {
@@ -585,7 +568,7 @@ test("CodexMainAgentController clears the instruction refresh flag after exactly
   assert.match(appServer.threadInputs[0]?.[0] ?? "", /Visible chat entries for this decision:/);
   // Turn 2: flag was set by compaction on turn 1 → full instructions
   assert.match(appServer.threadInputs[1]?.[0] ?? "", /Visible chat entries for this decision:/);
-  assert.match(appServer.threadInputs[1]?.[0] ?? "", /Some prior context may have been compacted/);
+  assert.match(appServer.threadInputs[1]?.[0] ?? "", /retain prior visible context from earlier turns/);
   // Turn 3: flag cleared → normal incremental
   assert.match(appServer.threadInputs[2]?.[0] ?? "", /New visible chat entries since your last decision:/);
   assert.match(appServer.threadInputs[2]?.[0] ?? "", /Continue acting as Sandy's main orchestration controller/);

@@ -1,7 +1,7 @@
 import { logger } from "../logger.js";
 import type { Input } from "@openai/codex-sdk";
 import type { ChatGPTExternalTokens, SubAgentEvent } from "../types.js";
-import { CodexAppServerClient } from "../codex-app-server-client/app-server-client.js";
+import { CodexAppServerClient, type ThreadStartParams } from "../codex-app-server-client/app-server-client.js";
 import { writeSubAgentEvent } from "./subagent-event-writer.js";
 import { buildTaskSummaryInput } from "./worker-prompt.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.ts";
@@ -10,7 +10,7 @@ const WORKER_PROFILE = {
   sandbox: "danger-full-access" as const,
   cwd: sharedWorkspaceMountPath,
   personality: "none" as const,
-};
+} satisfies ThreadStartParams;
 
 function buildTextInput(text: string): Input {
   return text.trim() ? [{ type: "text", text: text.trim() }] : [];
