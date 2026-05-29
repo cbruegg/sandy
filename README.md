@@ -31,7 +31,8 @@ If the config directory contains a sibling `skills/` folder, Sandy loads
 For the default config path, that means `~/.config/sandy/skills/`.
 
 Sandy also attempts to enable host-side memory via [MemPalace](https://github.com/MemPalace/mempalace).
-If MemPalace is unavailable, Sandy falls back to a no-op memory implementation and still starts normally.
+To make MemPalace available, install [uv](https://docs.astral.sh/uv/getting-started/installation/). When memory is enabled, Sandy runs MemPalace via `uv run --with mempalace python3 -m mempalace.mcp_server`, which automatically downloads MemPalace if needed.
+If MemPalace is unavailable, memory will be disabled.
 
 Example config:
 Commented entries below show built-in defaults. Uncommented values are required or example overrides.
@@ -144,8 +145,6 @@ Memory behavior:
 - Sub-agents never see MemPalace or any memory tools; memory management stays main-agent-only.
 - Sub-agents are prompted in their summary turn to identify stable facts and preferences worth remembering, which the main agent may choose to store.
 - If `uv` is not installed, Sandy simply starts without memory capabilities and continues normally.
-
-To make MemPalace available, install [uv](https://docs.astral.sh/uv/getting-started/installation/). Sandy uses `uv run --with mempalace` to manage the Python environment automatically — no separate `pip install` step is needed.
 
 Telegram auth behavior:
 
