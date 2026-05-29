@@ -16,7 +16,7 @@
     "build:exe:updater": "mkdir -p bin && bun ./scripts/build-with-constants.mjs --compile --outfile bin/sandy-updater --sourcemap ./src/entrypoint-updater.ts",
     "build:exe:worker": "mkdir -p bin && bun ./scripts/build-with-constants.mjs --compile --outfile bin/sandy-worker --sourcemap ./src/entrypoint-worker.ts",
     "build:exe:mcp": "mkdir -p bin && bun ./scripts/build-with-constants.mjs --compile --outfile bin/sandy-mcp-sidecar --sourcemap ./src/entrypoint-mcp-proxy.ts",
-    "build:ci-bundle": "sh -c 'bun run clean && bun run lint && bun run typecheck && bun run build:bundle -- \"$@\" && bun run knip' --",
+    "build:ci-bundle": "sh -c 'bun run clean && bun run codex:generate-ts && bun run lint && bun run typecheck && bun run build:bundle -- \"$@\" && bun run knip' --",
     "codex:generate-ts": "mkdir -p src/codex-app-server-client/generated && codex app-server generate-ts -o src/codex-app-server-client/generated",
     "build": "bun run clean && bun run codex:generate-ts && bun run lint && bun run typecheck && bun run build:bundle && bun run knip",
     "start": "bun run src/entrypoint-main.ts",
