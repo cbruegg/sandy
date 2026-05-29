@@ -258,6 +258,7 @@ test("buildMainAgentPrompt includes MemPalace MCP instructions when mempalaceAva
 
   assert.match(prompt, /MemPalace memory server is available to you via MCP/);
   assert.match(prompt, /Never delegate memory management to sub-agents/);
+  assert.match(prompt, /Before writing a task brief, search for memories relevant to the task/);
 });
 
 test("buildMainAgentPrompt omits MemPalace MCP instructions when mempalaceAvailable is false", () => {
@@ -273,6 +274,7 @@ test("buildMainAgentPrompt omits MemPalace MCP instructions when mempalaceAvaila
   });
 
   assert.doesNotMatch(prompt, /MemPalace memory server is available to you via MCP/);
+  assert.doesNotMatch(prompt, /Before writing a task brief, search for memories/);
 });
 
 test("CodexMainAgentController sends only the entries provided for each decision", async () => {

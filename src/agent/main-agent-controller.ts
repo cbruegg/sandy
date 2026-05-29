@@ -336,6 +336,7 @@ export function buildMainAgentPrompt(input: {
         "- Never delegate memory management to sub-agents.",
         "- Prefer current visible chat context over older memories.",
         "- Do not assume a memory is authoritative if it conflicts with current user input.",
+        "- Before writing a task brief, search for memories relevant to the task. Include any pertinent stored facts, user preferences, or past decisions in the task brief so the sub-agent benefits from that context.",
         "- Return your decision JSON after optional tool use.",
       ]
     : [];
