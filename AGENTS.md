@@ -53,6 +53,8 @@ Typical flow:
 - Reply with `./scripts/run-local-test-cli.sh approve ...` or `deny ...`
 - Verify the final `send_text` or `send_file` event through `wait-for`, `tail`, or `list-events`
 
+Prefer creating a tmp dir inside the project directory instead of reading/writing the global /tmp directory, as accessing the project directory is usually automatically approved.
+
 ## Coding Style & Naming Conventions
 
 Use strict TypeScript with ES modules and 2-space indentation. Prefer small modules with explicit types at subsystem boundaries. Use:
