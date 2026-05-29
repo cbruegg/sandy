@@ -1,16 +1,17 @@
 import { logger } from "../logger.js";
 import type { Input } from "@openai/codex-sdk";
 import type { ChatGPTExternalTokens, SubAgentEvent } from "../types.js";
-import { CodexAppServerClient, type ThreadStartParams } from "../codex-app-server-client/app-server-client.js";
+import { CodexAppServerClient } from "../codex-app-server-client/app-server-client.js";
 import { writeSubAgentEvent } from "./subagent-event-writer.js";
 import { buildTaskSummaryInput } from "./worker-prompt.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.ts";
+import type {ThreadStartParams} from "../codex-app-server-client/generated/v2";
 
-const WORKER_PROFILE = {
+const WORKER_PROFILE: ThreadStartParams = {
   sandbox: "danger-full-access" as const,
   cwd: sharedWorkspaceMountPath,
   personality: "none" as const,
-} satisfies ThreadStartParams;
+};
 
 function buildTextInput(text: string): Input {
   return text.trim() ? [{ type: "text", text: text.trim() }] : [];
@@ -185,7 +186,11 @@ export class AppServerWorkerSession {
       : await CodexAppServerClient.createWithAmbientAuth({
         codexPath: options.codexPath,
       });
-    const threadId = await appServer.startThread(WORKER_PROFILE, options.model);
+    const profile = {
+      ...WORKER_PROFILE,
+      ...(options.model ? { model: options.model } : {}),
+    };
+    const threadId = await appServer.startThread(profile);
     const session = new AppServerWorkerSession(
       appServer,
       threadId,

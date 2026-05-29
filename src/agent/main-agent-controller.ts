@@ -202,8 +202,11 @@ export class CodexMainAgentController implements MainAgentController {
       return existing;
     }
     const workingDirectory = this.getOrCreateThreadDirectory(chatId);
-    const profile = createMainAgentProfile(workingDirectory);
-    const threadId = await this.appServer.startThread(profile, this.model ?? undefined);
+    const profile = {
+      ...createMainAgentProfile(workingDirectory),
+      ...(this.model ? { model: this.model } : {}),
+    };
+    const threadId = await this.appServer.startThread(profile);
     this.threadIds.set(chatId, threadId);
     logger.debug("main_agent.thread_started", {
       chatId,

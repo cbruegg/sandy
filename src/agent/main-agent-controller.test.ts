@@ -9,11 +9,10 @@ import type { SkillMetadata } from "../skills.js";
 import type { ChannelFormatting, DecideContext } from "../types.js";
 import type { HttpTokenConfig } from "../config.js";
 import type {
-  AgentClient,
-  AppServerEvent,
+  AgentClient, AppServerEvent,
   AuthRefreshCallback,
-  ThreadStartParams,
 } from "../codex-app-server-client/app-server-client.js";
+import type {ThreadStartParams} from "../codex-app-server-client/generated/v2";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
@@ -55,7 +54,6 @@ function buildTurnEventsWithCompaction(finalResponse: string): AppServerEvent[] 
 
 class FakeAppServerClient implements AgentClient {
   public readonly startedProfiles: ThreadStartParams[] = [];
-  public readonly startedModels: Array<string | undefined> = [];
   public readonly threadInputs: string[][] = [];
   public readonly threadIds = new Map<string, string>();
   private nextThreadId = 1;
@@ -63,9 +61,8 @@ class FakeAppServerClient implements AgentClient {
 
   constructor(private eventSequences: AppServerEvent[][] = []) {}
 
-  async startThread(profile: ThreadStartParams, model?: string): Promise<string> {
+  async startThread(profile: ThreadStartParams): Promise<string> {
     this.startedProfiles.push(profile);
-    this.startedModels.push(model);
     const threadId = `thread-${this.nextThreadId++}`;
     this.threadIds.set(`chat-${this.nextChatId++}`, threadId);
     return threadId;
@@ -134,7 +131,7 @@ test("CodexMainAgentController includes a model override when configured", async
 
   await controller.decide(makeContext(["hello"]));
 
-  assert.equal(appServer.startedModels[0], "gpt-5.4-mini");
+  assert.equal(appServer.startedProfiles[0]?.model, "gpt-5.4-mini");
 });
 
 test("buildMainAgentPrompt includes only the new visible entries for incremental turns without full instructions", () => {
@@ -280,7 +277,7 @@ test("CodexMainAgentController passes a configured model override into new threa
 
   await controller.decide(makeContext(["hello"]));
 
-  assert.equal(appServer.startedModels[0], "gpt-5.4-mini");
+  assert.equal(appServer.startedProfiles[0]?.model, "gpt-5.4-mini");
 });
 
 test("buildMainAgentPrompt includes configured skill metadata on every turn", () => {

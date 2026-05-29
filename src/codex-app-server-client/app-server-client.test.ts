@@ -4,9 +4,9 @@ import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { PassThrough, Writable } from "node:stream";
 import { CodexAppServerClient, createMainAgentProfile } from "./app-server-client.js";
-import type { ThreadStartParams } from "./app-server-client.js";
 import type { ChatGPTExternalTokens } from "../types.js";
 import { configureLogger, type LogLevel } from "../logger.js";
+import type {ThreadStartParams} from "./generated/v2";
 
 const TEST_WORKER_PROFILE = {
   sandbox: "danger-full-access" as const,
@@ -97,7 +97,10 @@ test("CodexAppServerClient starts threads with kebab-case sandbox mode", async (
   };
   const client = await createExternalTokensClient(spawnImpl, child, tokens);
 
-  const startThreadPromise = client.startThread(TEST_WORKER_PROFILE, "gpt-5.4-mini");
+  const startThreadPromise = client.startThread({
+    ...TEST_WORKER_PROFILE,
+    model: "gpt-5.4-mini",
+  });
   await Promise.resolve();
 
   assert.deepEqual(spawns, [{

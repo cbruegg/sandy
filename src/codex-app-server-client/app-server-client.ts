@@ -31,12 +31,9 @@ type JsonRpcResponse = {
 
 type AppServerMessage = JsonRpcResponse | ServerRequest | ServerNotification;
 
-type AppServerEvent = Extract<ServerNotification, {
+export type AppServerEvent = Extract<ServerNotification, {
   method: "error" | "item/started" | "item/completed" | "turn/completed";
 }>;
-
-export type { AppServerEvent };
-export type { ThreadStartParams };
 
 const JSON_RPC_METHOD_NOT_FOUND = -32601;
 const JSON_RPC_INTERNAL_ERROR = -32603;
@@ -155,11 +152,9 @@ class AppServerTypedRpc {
 
 function buildAppServerThreadStartParams(
   profile: ThreadStartParams,
-  model?: string,
 ): ThreadStartParams {
   return {
     ...profile,
-    ...(model ? { model } : {}),
     approvalPolicy: "never",
     personality: profile.personality ?? "none",
   };
@@ -174,7 +169,7 @@ export function createMainAgentProfile(workingDirectory: string): ThreadStartPar
 }
 
 export interface AgentClient {
-  startThread(profile: ThreadStartParams, model?: string): Promise<string>;
+  startThread(profile: ThreadStartParams): Promise<string>;
   streamTurn(
     threadId: string,
     input: Input,
@@ -370,9 +365,9 @@ export class CodexAppServerClient implements AgentClient {
     this.loggedIn = true;
   }
 
-  async startThread(profile: ThreadStartParams, model?: string): Promise<string> {
+  async startThread(profile: ThreadStartParams): Promise<string> {
     this.ensureReady("startThread");
-    const result = await this.rpc.startThread(buildAppServerThreadStartParams(profile, model));
+    const result = await this.rpc.startThread(buildAppServerThreadStartParams(profile));
     return result.thread.id;
   }
 
