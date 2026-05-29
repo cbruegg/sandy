@@ -53,7 +53,6 @@ allowed_user_id = "@cbruegg:matrix.org"
 # spool_root = "/tmp/sandy-local-test"
 
 [auth]
-# codex_auth_file = "~/.codex/auth.json"
 # codex_auth_strategy = "copy_file" # or "external_tokens" (experimental)
 # openai_api_key = "sk-..." # optional override, no default
 
@@ -200,11 +199,13 @@ Local test channel behavior:
 
 Codex auth behavior:
 
-- `auth.codex_auth_strategy` defaults to `"copy_file"`.
-- If the host already has Codex logged in with ChatGPT, `auth.codex_auth_file` exists, and `auth.codex_auth_strategy = "copy_file"`, Sandy copies that file into each sub-agent container.
+- Sandy supports two Codex auth modes:
+  - `auth.openai_api_key`: Sandy passes the configured API key to the main agent and sub-agent worker.
+  - Host Codex ChatGPT login: Sandy infers the auth file from the host's default Codex location (`~/.codex/auth.json`).
+- If `auth.openai_api_key` is configured, it takes precedence over the inferred Codex auth file.
+- If Sandy uses the inferred Codex auth file, `auth.codex_auth_strategy` controls worker auth handling and defaults to `"copy_file"`.
+- With `auth.codex_auth_strategy = "copy_file"`, Sandy copies the inferred auth file into each sub-agent container.
 - `auth.codex_auth_strategy = "external_tokens"` is experimental. It is more secure because Sandy does not write the ChatGPT auth file into the container filesystem. Only the worker process receives the auth tokens it needs, which reduces the risk that other software in the container could read or exfiltrate the full auth file.
-- If `auth.openai_api_key` is set and no Codex auth file is available, Sandy passes the API key to the main agent and sub-agent worker.
-- If both are present, Sandy prefers the Codex ChatGPT auth file and does not pass the API key.
 - OAuth for upstream MCP servers is handled on the host through the Sandy CLI, not inside channel chats.
 
 MCP OAuth behavior:

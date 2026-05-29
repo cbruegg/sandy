@@ -63,6 +63,8 @@ Use strict TypeScript with ES modules and 2-space indentation. Prefer small modu
 - `PascalCase` for classes and exported types
 - `camelCase` for functions and variables
 
+Sandy is an application, not a library. There is no stable public API surface; all exported symbols are internal implementation details and subject to change without notice. Do not add `@public` annotations or maintain exported functions solely for external consumption.
+
 Keep all user-facing strings in `messages.ts` instead of scattering literals through runtime logic. This includes any text the user can see through a channel such as Telegram task updates, prompts, status messages, errors, summaries, and button labels. Add new channel-visible strings there so future i18n work stays localized.
 
 There is no formatter or linter configured yet, so keep style consistent with the existing code and avoid unrelated reformatting, especially w.r.t. to indentation.

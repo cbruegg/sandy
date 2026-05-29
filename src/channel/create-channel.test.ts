@@ -29,7 +29,8 @@ function baseConfig(): Omit<SandyConfig, "channel"> {
     sttBaseUrl: "https://api.openai.com/v1",
     sttModel: "gpt-4o-mini-transcribe",
     authMode: {
-      mode: "ambient_codex_auth",
+      mode: "codex_auth_file",
+      codexAuthStrategy: "copy_file",
     },
     mcpServers: {},
     httpTokens: {},

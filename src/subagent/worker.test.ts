@@ -543,8 +543,8 @@ test("streamAppServerTurn emits completed assistant messages", async () => {
   try {
     const appServer = {
       async *streamTurn() {
-        yield { type: "agent_message_completed", itemId: "item-1", text: "Using the Todoist skill." };
-        yield { type: "turn_completed" };
+        yield { method: "item/completed", params: { item: { type: "agentMessage", id: "item-1", text: "Using the Todoist skill.", phase: null, memoryCitation: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 } };
+        yield { method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "full", status: "completed", error: null, startedAt: null, completedAt: null, durationMs: null } } };
       },
     };
 
@@ -586,8 +586,8 @@ test("streamAppServerTurn ignores blank completed assistant messages", async () 
   try {
     const appServer = {
       async *streamTurn() {
-        yield { type: "agent_message_completed", itemId: "item-1", text: "   " };
-        yield { type: "turn_completed" };
+        yield { method: "item/completed", params: { item: { type: "agentMessage", id: "item-1", text: "   ", phase: null, memoryCitation: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 } };
+        yield { method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "full", status: "completed", error: null, startedAt: null, completedAt: null, durationMs: null } } };
       },
     };
 
@@ -625,7 +625,7 @@ test("AppServerWorkerSession accepts a synchronous auth refresh response", async
     ) {
       const tokens = await onAuthRefresh("acct-123");
       assert.deepEqual(tokens, refreshedTokens);
-      yield { type: "turn_completed" as const };
+      yield { method: "turn/completed" as const, params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "full" as const, status: "completed" as const, error: null, startedAt: null, completedAt: null, durationMs: null } } };
     },
   };
 

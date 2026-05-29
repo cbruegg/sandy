@@ -5,7 +5,59 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, parseConfigToml } from "./config.js";
 
-test("parseConfigToml prefers Codex auth file over openai_api_key when both are configured", () => {
+test("parseConfigToml prefers openai_api_key when it is configured", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sandy-config-"));
+  const fakeHome = await mkdtemp(join(root, "home-"));
+  const authDir = join(fakeHome, ".codex");
+  const authFilePath = join(authDir, "auth.json");
+
+  try {
+    await mkdir(authDir, { recursive: true });
+    await writeFile(authFilePath, "{}", "utf8");
+
+    const config = parseConfigToml(`
+[channel]
+kind = "telegram"
+
+[channel.telegram]
+bot_token = "telegram-token"
+allowed_user = "123456"
+
+[auth]
+openai_api_key = "sk-test"
+`, undefined, undefined, {
+      HOME: fakeHome,
+    });
+
+    assert.equal(config.channel.kind, "telegram");
+    assert.equal(config.channel.telegram.botToken, "telegram-token");
+    assert.equal(config.channel.telegram.allowedUser, "123456");
+    assert.deepEqual(config.authMode, {
+      mode: "api_key",
+      openAiApiKey: "sk-test",
+    });
+    assert.equal(config.sttApiKey, null);
+    assert.equal(config.sttBaseUrl, "https://api.openai.com/v1");
+    assert.equal(config.sttModel, "gpt-4o-mini-transcribe");
+    assert.equal(config.agentModel, null);
+    assert.equal(config.updateMode, "disabled");
+    assert.deepEqual(config.workerPreinstall, {
+      commands: [],
+      refresh: "weekly",
+    });
+    assert.deepEqual(config.workerNetwork, {
+      mode: "public_internet_only",
+      allowLocalCidrs: [],
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("parseConfigToml uses openai_api_key when the inferred Codex auth file is absent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sandy-config-"));
+  const fakeHome = await mkdtemp(join(root, "home-"));
+
   const config = parseConfigToml(`
 [channel]
 kind = "telegram"
@@ -16,30 +68,18 @@ allowed_user = "123456"
 
 [auth]
 openai_api_key = "sk-test"
-codex_auth_file = "/tmp/codex-auth.json"
-`);
+`, undefined, undefined, {
+    HOME: fakeHome,
+  });
 
-  assert.equal(config.channel.kind, "telegram");
-  assert.equal(config.channel.telegram.botToken, "telegram-token");
-  assert.equal(config.channel.telegram.allowedUser, "123456");
-  assert.deepEqual(config.authMode, {
-    mode: "codex_auth_file",
-    codexAuthFile: "/tmp/codex-auth.json",
-    codexAuthStrategy: "copy_file",
-  });
-  assert.equal(config.sttApiKey, null);
-  assert.equal(config.sttBaseUrl, "https://api.openai.com/v1");
-  assert.equal(config.sttModel, "gpt-4o-mini-transcribe");
-  assert.equal(config.agentModel, null);
-  assert.equal(config.updateMode, "disabled");
-  assert.deepEqual(config.workerPreinstall, {
-    commands: [],
-    refresh: "weekly",
-  });
-  assert.deepEqual(config.workerNetwork, {
-    mode: "public_internet_only",
-    allowLocalCidrs: [],
-  });
+  try {
+    assert.deepEqual(config.authMode, {
+      mode: "api_key",
+      openAiApiKey: "sk-test",
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("parseConfigToml accepts numeric telegram allowed_user values", () => {
@@ -91,13 +131,11 @@ bot_token = "telegram-token"
 allowed_user = "123456"
 
 [auth]
-codex_auth_file = "/tmp/codex-auth.json"
 codex_auth_strategy = "external_tokens"
 `);
 
   assert.deepEqual(config.authMode, {
     mode: "codex_auth_file",
-    codexAuthFile: "/tmp/codex-auth.json",
     codexAuthStrategy: "external_tokens",
   });
 });
@@ -532,41 +570,6 @@ allowed_user = "123456"
 
     assert.deepEqual(config.authMode, {
       mode: "codex_auth_file",
-      codexAuthFile: authFilePath,
-      codexAuthStrategy: "copy_file",
-    });
-  } finally {
-    await rm(root, { recursive: true, force: true });
-  }
-});
-
-test("parseConfigToml expands tilde-prefixed codex auth paths", async () => {
-  const root = await mkdtemp(join(tmpdir(), "sandy-config-"));
-  const fakeHome = await mkdtemp(join(root, "home-"));
-  const authDir = join(fakeHome, ".codex");
-  const authFilePath = join(authDir, "auth.json");
-
-  try {
-    await mkdir(authDir, { recursive: true });
-    await writeFile(authFilePath, "{}");
-
-    const config = parseConfigToml(`
-[channel]
-kind = "telegram"
-
-[channel.telegram]
-bot_token = "telegram-token"
-allowed_user = "123456"
-
-[auth]
-codex_auth_file = "~/.codex/auth.json"
-`, undefined, undefined, {
-      HOME: fakeHome,
-    });
-
-    assert.deepEqual(config.authMode, {
-      mode: "codex_auth_file",
-      codexAuthFile: authFilePath,
       codexAuthStrategy: "copy_file",
     });
   } finally {
