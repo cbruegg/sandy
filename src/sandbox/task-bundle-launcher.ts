@@ -20,6 +20,11 @@ import {createBundleSharePath} from "./task-bundle-share.js";
 import {SANDY_MANAGED_CONTAINER_LABEL} from "./container-label.js";
 import {randomUUID} from "node:crypto";
 import {SANDY_CODEX_PATH_ENV} from "../codex-client.ts";
+import {
+  HEARTBEAT_TIMEOUT_MS,
+  HEARTBEAT_FILE,
+  CONTROLLER_CONTROL_MOUNT_PATH,
+} from "./heartbeat.js";
 
 const workerCodexSeedMountPath = "/run/sandy-codex-seed";
 const workerCodexContainerPath = "/usr/local/bin/codex";
@@ -54,6 +59,8 @@ export type TaskBundleLauncherOptions = {
   resolveWorkerImage?: () => string;
   networkGuardImage?: string;
   shareRoot: string;
+  /** Host-side controller control directory shared across this Sandy instance. */
+  controllerControlDir: string;
   codexAuthFile: string | null;
   getSkillsDirectory: () => string | null;
   workerCodexBinaryPath: string;
@@ -142,7 +149,7 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
 
     const networkGuard = await (async (): Promise<StartedNetworkGuard | null> => {
       try {
-        return await this.launchNetworkGuard(bundleId);
+        return await this.launchNetworkGuard(bundleId, this.options.controllerControlDir);
       } catch (error) {
         await cleanupWorkerCodexConfig();
         throw error;
@@ -171,6 +178,12 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
         ...proxyCapabilityArgs,
         "-v",
         `${this.options.httpProxyConfDirPath}:/run/sandy-mitmproxy-conf:ro`,
+        "-v",
+        `${this.options.controllerControlDir}:${CONTROLLER_CONTROL_MOUNT_PATH}:ro`,
+        "-e",
+        `SANDY_CONTROLLER_HEARTBEAT_PATH=${CONTROLLER_CONTROL_MOUNT_PATH}/${HEARTBEAT_FILE}`,
+        "-e",
+        `SANDY_CONTROLLER_HEARTBEAT_TIMEOUT_MS=${HEARTBEAT_TIMEOUT_MS}`,
         "-e",
         "MITMPROXY_CONFDIR=/run/sandy-mitmproxy-conf",
         this.options.httpProxyImage,
@@ -240,6 +253,15 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
     if (hostfsVolumeName) {
       dockerArgs.push("-v", `${hostfsVolumeName}:${hostMountPath}`);
     }
+
+    dockerArgs.push(
+      "-v",
+      `${this.options.controllerControlDir}:${CONTROLLER_CONTROL_MOUNT_PATH}:ro`,
+      "-e",
+      `SANDY_CONTROLLER_HEARTBEAT_PATH=${CONTROLLER_CONTROL_MOUNT_PATH}/${HEARTBEAT_FILE}`,
+      "-e",
+      `SANDY_CONTROLLER_HEARTBEAT_TIMEOUT_MS=${HEARTBEAT_TIMEOUT_MS}`,
+    );
 
     dockerArgs.push("-v", `${shareHostPath}:${sharedWorkspaceMountPath}`, workerImage);
 
@@ -313,7 +335,7 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
     return this.options.resolveWorkerImage?.() ?? this.options.workerImage;
   }
 
-  private async launchNetworkGuard(bundleId: string): Promise<StartedNetworkGuard | null> {
+  private async launchNetworkGuard(bundleId: string, controllerControlDir: string): Promise<StartedNetworkGuard | null> {
     return await launchNetworkGuardContainer({
       taskId: bundleId,
       workerNetwork: this.options.workerNetwork,
@@ -325,6 +347,7 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
       setTimeoutImpl: this.setTimeoutImpl,
       clearTimeoutImpl: this.clearTimeoutImpl,
       cleanupContainer: async (containerName) => this.cleanupContainer(containerName),
+      controlDir: controllerControlDir,
     });
   }
 

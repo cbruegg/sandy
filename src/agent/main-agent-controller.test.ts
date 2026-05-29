@@ -1,14 +1,18 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import type { ThreadOptions } from "@openai/codex-sdk";
+import type { Input } from "@openai/codex-sdk";
 import {
   buildMainAgentPrompt,
-  buildMainAgentThreadOptions,
   CodexMainAgentController,
 } from "./main-agent-controller.js";
 import type { SkillMetadata } from "../skills.js";
 import type { ChannelFormatting, DecideContext } from "../types.js";
 import type { HttpTokenConfig } from "../config.js";
+import type {
+  AgentClient, AppServerEvent,
+  AuthRefreshCallback,
+} from "../codex-app-server-client/app-server-client.js";
+import type {ThreadStartParams} from "../codex-app-server-client/generated/v2";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
@@ -29,39 +33,60 @@ const testHttpTokens: Record<string, HttpTokenConfig> = {
   },
 };
 
-function expectDefined<T>(value: T | null | undefined, message: string): NonNullable<T> {
-  assert.notEqual(value, undefined, message);
-  assert.notEqual(value, null, message);
-  return value as NonNullable<T>;
+// ---- helpers for building AppServerEvent sequences ----
+
+function buildTurnEvents(finalResponse: string): AppServerEvent[] {
+  return [
+    { method: "item/completed", params: { item: { type: "agentMessage", text: finalResponse, id: "item-1", phase: null, memoryCitation: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 } },
+    { method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "full", status: "completed", error: null, startedAt: null, completedAt: null, durationMs: null } } },
+  ];
 }
 
-class RecordingThread {
-  public readonly inputs: string[] = [];
+function buildTurnEventsWithCompaction(finalResponse: string): AppServerEvent[] {
+  return [
+    { method: "item/started", params: { item: { type: "contextCompaction", id: "compaction-1" }, threadId: "thread-1", turnId: "turn-1", startedAtMs: 0 } },
+    { method: "item/completed", params: { item: { type: "agentMessage", text: finalResponse, id: "item-1", phase: null, memoryCitation: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 } },
+    { method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "full", status: "completed", error: null, startedAt: null, completedAt: null, durationMs: null } } },
+  ];
+}
 
-  constructor(private readonly finalResponses: string[]) {}
+// ---- test double ----
 
-  async run(input: string): Promise<{ finalResponse: string }> {
-    this.inputs.push(input);
-    const finalResponse = this.finalResponses.shift();
-    if (!finalResponse) {
-      throw new Error("No final response configured.");
-    }
-    return { finalResponse };
+class FakeAppServerClient implements AgentClient {
+  public readonly startedProfiles: ThreadStartParams[] = [];
+  public readonly threadInputs: string[][] = [];
+  public readonly threadIds = new Map<string, string>();
+  private nextThreadId = 1;
+  private nextChatId = 0;
+
+  constructor(private eventSequences: AppServerEvent[][] = []) {}
+
+  async startThread(profile: ThreadStartParams): Promise<string> {
+    this.startedProfiles.push(profile);
+    const threadId = `thread-${this.nextThreadId++}`;
+    this.threadIds.set(`chat-${this.nextChatId++}`, threadId);
+    return threadId;
   }
-}
 
-class RecordingCodexClient {
-  public readonly startedThreads: ThreadOptions[] = [];
-  public readonly threads: RecordingThread[] = [];
+  async *streamTurn(
+    _threadId: string,
+    input: Input,
+    _onAuthRefresh: AuthRefreshCallback,
+    _abortSignal?: AbortSignal,
+  ): AsyncGenerator<AppServerEvent> {
+    const promptText = (Array.isArray(input) && input[0]?.type === "text")
+      ? input[0].text
+      : "";
+    this.threadInputs.push([promptText]);
 
-  constructor(private readonly finalResponsesPerThread: string[][]) {}
+    const events = this.eventSequences.shift() ?? [];
+    for (const event of events) {
+      yield event;
+    }
+  }
 
-  startThread(options?: ThreadOptions): RecordingThread {
-    this.startedThreads.push(options ?? {});
-    const finalResponses = this.finalResponsesPerThread.shift() ?? [];
-    const thread = new RecordingThread(finalResponses);
-    this.threads.push(thread);
-    return thread;
+  close(): void {
+    // noop
   }
 }
 
@@ -87,28 +112,35 @@ function replyDecision(replyText: string): string {
   });
 }
 
-test("buildMainAgentThreadOptions locks the main agent down", () => {
-  const options = buildMainAgentThreadOptions("/tmp/sandy-main-agent-test");
+// ---- tests ----
 
-  assert.equal(options.approvalPolicy, "never");
-  assert.equal(options.model, undefined);
-  assert.equal(options.sandboxMode, "read-only");
-  assert.equal(options.workingDirectory, "/tmp/sandy-main-agent-test");
-  assert.equal(options.skipGitRepoCheck, true);
+test("CodexMainAgentController starts threads with read-only sandbox and working directory", async () => {
+  const appServer = new FakeAppServerClient([buildTurnEvents(replyDecision("hello"))]);
+  const controller = new CodexMainAgentController(appServer);
+
+  await controller.decide(makeContext(["hello"]));
+
+  assert.equal(appServer.startedProfiles.length, 1);
+  assert.equal(appServer.startedProfiles[0]?.sandbox, "read-only");
+  assert.equal(appServer.startedProfiles[0]?.personality, "none");
+  assert.match(appServer.startedProfiles[0]?.cwd ?? "", /^.+sandy-main-agent-/);
 });
 
-test("buildMainAgentThreadOptions includes a model override when configured", () => {
-  const options = buildMainAgentThreadOptions("/tmp/sandy-main-agent-test", "gpt-5.4-mini");
+test("CodexMainAgentController includes a model override when configured", async () => {
+  const appServer = new FakeAppServerClient([buildTurnEvents(replyDecision("hello"))]);
+  const controller = new CodexMainAgentController(appServer, "gpt-5.4-mini");
 
-  assert.equal(options.model, "gpt-5.4-mini");
+  await controller.decide(makeContext(["hello"]));
+
+  assert.equal(appServer.startedProfiles[0]?.model, "gpt-5.4-mini");
 });
 
-test("buildMainAgentPrompt includes only the new visible entries for incremental turns", () => {
+test("buildMainAgentPrompt includes only the new visible entries for incremental turns without full instructions", () => {
   const initialPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: true,
+    includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {}, relevantMemories: [],
@@ -117,17 +149,33 @@ test("buildMainAgentPrompt includes only the new visible entries for incremental
     newVisibleEntries: makeContext(["follow-up"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: false,
+    includeFullInstructions: false,
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {}, relevantMemories: [],
   });
 
-  assert.match(initialPrompt, /Visible chat entries for this first decision:/);
+  assert.match(initialPrompt, /Visible chat entries for this decision:/);
   assert.match(deltaPrompt, /New visible chat entries since your last decision:/);
   assert.doesNotMatch(deltaPrompt, /Visible chat entries for this first decision:/);
   assert.match(initialPrompt, /telegram_html/);
   assert.match(initialPrompt, /"allowedTags"/);
+});
+
+test("buildMainAgentPrompt includes full instructions on incremental turn when includeFullInstructions is true", () => {
+  const deltaPrompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["follow-up"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    includeFullInstructions: true,
+    skills: [],
+    workerMcpServerIds: [],
+    httpTokens: {},
+  });
+
+  assert.match(deltaPrompt, /Visible chat entries for this decision:/);
+  assert.match(deltaPrompt, /You are Sandy's main orchestration controller/);
+  assert.match(deltaPrompt, /retain prior visible context from earlier turns/);
 });
 
 test("buildMainAgentPrompt includes current date and time on every turn", () => {
@@ -135,7 +183,7 @@ test("buildMainAgentPrompt includes current date and time on every turn", () => 
     newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: true,
+    includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {}, relevantMemories: [],
@@ -144,7 +192,7 @@ test("buildMainAgentPrompt includes current date and time on every turn", () => 
     newVisibleEntries: makeContext(["follow-up"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: false,
+    includeFullInstructions: false,
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {}, relevantMemories: [],
@@ -154,30 +202,12 @@ test("buildMainAgentPrompt includes current date and time on every turn", () => 
   assert.match(deltaPrompt, /Current date and time: [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}/);
 });
 
-test("CodexMainAgentController starts threads in a unique temp directory with no approvals", async () => {
-  const codex = new RecordingCodexClient([[replyDecision("hello")]]);
-  const controller = new CodexMainAgentController(codex);
-
-  const decision = await controller.decide(makeContext(["hello"]));
-
-  assert.equal(decision.action, "reply");
-  assert.equal(codex.startedThreads.length, 1);
-
-  const options = expectDefined(codex.startedThreads[0], "Expected started thread options.");
-  assert.equal(options.approvalPolicy, "never");
-  assert.equal(options.model, undefined);
-  assert.equal(options.sandboxMode, "read-only");
-  assert.equal(options.skipGitRepoCheck, true);
-  assert.match(options.workingDirectory ?? "", /^.+sandy-main-agent-/);
-  assert.match(expectDefined(codex.threads[0], "Expected thread.").inputs[0] ?? "", /Required JSON schema:/);
-});
-
 test("buildMainAgentPrompt includes the precise decision schema", () => {
   const prompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: true,
+    includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {}, relevantMemories: [],
@@ -194,55 +224,61 @@ test("buildMainAgentPrompt includes the precise decision schema", () => {
 });
 
 test("CodexMainAgentController sends only the entries provided for each decision", async () => {
-  const codex = new RecordingCodexClient([[replyDecision("hello"), replyDecision("world")]]);
-  const controller = new CodexMainAgentController(codex);
+  const appServer = new FakeAppServerClient([
+    buildTurnEvents(replyDecision("hello")),
+    buildTurnEvents(replyDecision("world")),
+  ]);
+  const controller = new CodexMainAgentController(appServer);
 
   await controller.decide(makeContext(["hello"]));
   await controller.decide(makeContext(["world"]));
 
-  assert.equal(codex.threads.length, 1);
-  const thread = expectDefined(codex.threads[0], "Expected thread.");
-  assert.equal(thread.inputs.length, 2);
-
-  const [firstInput, secondInput] = thread.inputs;
+  assert.equal(appServer.threadInputs.length, 2);
+  const [firstInput, secondInput] = appServer.threadInputs;
   assert.ok(firstInput);
   assert.ok(secondInput);
-  assert.match(firstInput, /"text": "hello"/);
-  assert.doesNotMatch(firstInput, /"text": "world"/);
-  assert.match(secondInput, /"text": "world"/);
-  assert.doesNotMatch(secondInput, /"text": "hello"/);
+  assert.match(firstInput[0] ?? "", /"text": "hello"/);
+  assert.doesNotMatch(firstInput[0] ?? "", /"text": "world"/);
+  assert.match(secondInput[0] ?? "", /"text": "world"/);
+  assert.doesNotMatch(secondInput[0] ?? "", /"text": "hello"/);
 });
 
 test("CodexMainAgentController retries when the model returns invalid JSON", async () => {
-  const codex = new RecordingCodexClient([["not json", replyDecision("hello")]]);
-  const controller = new CodexMainAgentController(codex);
+  const appServer = new FakeAppServerClient([
+    buildTurnEvents("not json"),
+    buildTurnEvents(replyDecision("hello")),
+  ]);
+  const controller = new CodexMainAgentController(appServer);
 
   const decision = await controller.decide(makeContext(["hello"]));
 
   assert.equal(decision.action, "reply");
-  const thread = expectDefined(codex.threads[0], "Expected thread.");
-  assert.equal(thread.inputs.length, 2);
-  assert.match(thread.inputs[1] ?? "", /Your last response was not valid JSON/);
+  assert.equal(appServer.threadInputs.length, 2);
+  assert.match(appServer.threadInputs[1]?.[0] ?? "", /Your last response was not valid JSON/);
 });
 
 test("CodexMainAgentController gives up after repeated validation failures", async () => {
-  const codex = new RecordingCodexClient([["{}", "[]", "{\"action\":\"reply\"}"]]);
-  const controller = new CodexMainAgentController(codex);
+  const appServer = new FakeAppServerClient([
+    buildTurnEvents("{}"),
+    buildTurnEvents("[]"),
+    buildTurnEvents('{"action":"reply"}'), // valid Zod schema but missing replyText
+  ]);
+  const controller = new CodexMainAgentController(appServer);
 
   await assert.rejects(
     controller.decide(makeContext(["hello"])),
     /Main agent failed to return a valid decision after 3 attempts/,
   );
-  assert.equal(expectDefined(codex.threads[0], "Expected thread.").inputs.length, 3);
+  assert.equal(appServer.threadInputs.length, 3);
 });
 
 test("CodexMainAgentController passes a configured model override into new threads", async () => {
-  const codex = new RecordingCodexClient([[replyDecision("hello")]]);
-  const controller = new CodexMainAgentController(codex, "gpt-5.4-mini");
+  const appServer = new FakeAppServerClient([buildTurnEvents(replyDecision("hello"))]);
+  const controller = new CodexMainAgentController(appServer, "gpt-5.4-mini");
 
   await controller.decide(makeContext(["hello"]));
 
-  assert.equal(expectDefined(codex.startedThreads[0], "Expected started thread options.").model, "gpt-5.4-mini");
+  assert.equal(appServer.startedProfiles[0]?.model, "gpt-5.4-mini");
 });
 
 test("buildMainAgentPrompt includes configured skill metadata on every turn", () => {
@@ -250,7 +286,7 @@ test("buildMainAgentPrompt includes configured skill metadata on every turn", ()
     newVisibleEntries: makeContext(["add milk to my shopping list"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: true,
+    includeFullInstructions: true,
     skills: testSkills,
     workerMcpServerIds: [],
     httpTokens: {}, relevantMemories: [],
@@ -259,7 +295,7 @@ test("buildMainAgentPrompt includes configured skill metadata on every turn", ()
     newVisibleEntries: makeContext(["another request"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: false,
+    includeFullInstructions: false,
     skills: testSkills,
     workerMcpServerIds: [],
     httpTokens: {}, relevantMemories: [],
@@ -277,7 +313,7 @@ test("buildMainAgentPrompt does not include skill body text below the frontmatte
     newVisibleEntries: makeContext(["add bread"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: true,
+    includeFullInstructions: true,
     skills: testSkills,
     workerMcpServerIds: [],
     httpTokens: {}, relevantMemories: [],
@@ -287,12 +323,12 @@ test("buildMainAgentPrompt does not include skill body text below the frontmatte
   assert.doesNotMatch(prompt, /Alexa Shopping List/);
 });
 
-test("buildMainAgentPrompt includes configured MCP server ids only on the initial turn", () => {
+test("buildMainAgentPrompt includes configured MCP server ids only when includeFullInstructions is true", () => {
   const initialPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["check my tasks"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: true,
+    includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: ["github", "todoist"],
     httpTokens: {}, relevantMemories: [],
@@ -301,7 +337,7 @@ test("buildMainAgentPrompt includes configured MCP server ids only on the initia
     newVisibleEntries: makeContext(["follow up"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: false,
+    includeFullInstructions: false,
     skills: [],
     workerMcpServerIds: ["github", "todoist"],
     httpTokens: {}, relevantMemories: [],
@@ -313,12 +349,28 @@ test("buildMainAgentPrompt includes configured MCP server ids only on the initia
   assert.doesNotMatch(deltaPrompt, /Configured MCP servers available to sub-agents:/);
 });
 
+test("buildMainAgentPrompt includes MCP server ids on incremental turn when includeFullInstructions is true", () => {
+  const prompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["follow up"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    includeFullInstructions: true,
+    skills: [],
+    workerMcpServerIds: ["github", "todoist"],
+    httpTokens: {},
+  });
+
+  assert.match(prompt, /Configured MCP servers available to sub-agents:/);
+  assert.match(prompt, /- github/);
+  assert.match(prompt, /- todoist/);
+});
+
 test("buildMainAgentPrompt omits the MCP section when no servers are configured", () => {
   const prompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: true,
+    includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {}, relevantMemories: [],
@@ -327,12 +379,12 @@ test("buildMainAgentPrompt omits the MCP section when no servers are configured"
   assert.doesNotMatch(prompt, /Configured MCP servers available to sub-agents:/);
 });
 
-test("buildMainAgentPrompt includes configured HTTP token ids and descriptions only on the initial turn", () => {
+test("buildMainAgentPrompt includes configured HTTP token ids and descriptions when includeFullInstructions is true", () => {
   const initialPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["transcribe this video"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: true,
+    includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
     httpTokens: testHttpTokens, relevantMemories: [],
@@ -341,7 +393,7 @@ test("buildMainAgentPrompt includes configured HTTP token ids and descriptions o
     newVisibleEntries: makeContext(["follow up"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: false,
+    includeFullInstructions: false,
     skills: [],
     workerMcpServerIds: [],
     httpTokens: testHttpTokens, relevantMemories: [],
@@ -352,12 +404,12 @@ test("buildMainAgentPrompt includes configured HTTP token ids and descriptions o
   assert.doesNotMatch(deltaPrompt, /Configured HTTP tokens available to sub-agents:/);
 });
 
-test("buildMainAgentPrompt includes Sandy host-integration tools only on the initial turn", () => {
+test("buildMainAgentPrompt includes Sandy host-integration tools when includeFullInstructions is true", () => {
   const initialPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["send me a file"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: true,
+    includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {}, relevantMemories: [],
@@ -366,7 +418,7 @@ test("buildMainAgentPrompt includes Sandy host-integration tools only on the ini
     newVisibleEntries: makeContext(["follow up"]).newVisibleEntries,
     activeTask: null,
     channelFormatting: testFormatting,
-    isInitialTurn: false,
+    includeFullInstructions: false,
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {}, relevantMemories: [],
@@ -375,4 +427,147 @@ test("buildMainAgentPrompt includes Sandy host-integration tools only on the ini
   assert.match(initialPrompt, /MCP server "sandy" available to the worker\/sub-agent exposes these host-integration tools:/);
   assert.match(initialPrompt, /send_file_to_channel/);
   assert.doesNotMatch(deltaPrompt, /MCP server "sandy" exposes these host-integration tools:/);
+});
+
+// ---- compaction detection tests ----
+
+test("CodexMainAgentController detects compaction events and triggers instruction refresh on next turn", async () => {
+  const appServer = new FakeAppServerClient([
+    buildTurnEvents(replyDecision("hello")),
+    buildTurnEvents(replyDecision("world")),
+    buildTurnEventsWithCompaction(replyDecision("compacted turn")),
+    buildTurnEvents(replyDecision("after compaction")),
+  ]);
+  const controller = new CodexMainAgentController(appServer);
+
+  // Turn 1: initial, should have full instructions
+  await controller.decide(makeContext(["msg1"]));
+  // Turn 2: normal incremental, no full instructions
+  await controller.decide(makeContext(["msg2"]));
+  // Turn 3: during this turn, compaction events are observed
+  await controller.decide(makeContext(["msg3"]));
+  // Turn 4: should have full instructions because compaction was detected on turn 3
+  await controller.decide(makeContext(["msg4"]));
+
+  assert.equal(appServer.threadInputs.length, 4);
+
+  // Turn 1: initial → full instructions (visible chat entries for this decision)
+  assert.match(appServer.threadInputs[0]?.[0] ?? "", /Visible chat entries for this decision:/);
+  assert.match(appServer.threadInputs[0]?.[0] ?? "", /You are Sandy's main orchestration controller/);
+
+  // Turn 2: normal incremental → no full instructions
+  assert.match(appServer.threadInputs[1]?.[0] ?? "", /New visible chat entries since your last decision:/);
+  assert.match(appServer.threadInputs[1]?.[0] ?? "", /Continue acting as Sandy's main orchestration controller/);
+
+  // Turn 3: compaction happens during this turn → still normal incremental (flag set for next turn)
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /New visible chat entries since your last decision:/);
+
+  // Turn 4: flag was set → full instructions reappear
+  assert.match(appServer.threadInputs[3]?.[0] ?? "", /Visible chat entries for this decision:/);
+  assert.match(appServer.threadInputs[3]?.[0] ?? "", /retain prior visible context from earlier turns/);
+});
+
+test("CodexMainAgentController does not re-include full instructions on subsequent normal turns after refresh", async () => {
+  const appServer = new FakeAppServerClient([
+    buildTurnEvents(replyDecision("hello")),
+    buildTurnEventsWithCompaction(replyDecision("compacted")),
+    buildTurnEvents(replyDecision("after refresh")),
+    buildTurnEvents(replyDecision("normal again")),
+  ]);
+  const controller = new CodexMainAgentController(appServer);
+
+  await controller.decide(makeContext(["msg1"]));
+  await controller.decide(makeContext(["msg2"])); // compaction detected here
+  await controller.decide(makeContext(["msg3"])); // full instructions due to flag
+  await controller.decide(makeContext(["msg4"])); // back to normal
+
+  assert.equal(appServer.threadInputs.length, 4);
+
+  // Turn 3: refresh → full instructions
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /Visible chat entries for this decision:/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /You are Sandy's main orchestration controller/);
+
+  // Turn 4: back to normal incremental
+  assert.match(appServer.threadInputs[3]?.[0] ?? "", /New visible chat entries since your last decision:/);
+  assert.match(appServer.threadInputs[3]?.[0] ?? "", /Continue acting as Sandy's main orchestration controller/);
+});
+
+test("CodexMainAgentController includes Sandy tools and MCP configs again after compaction refresh", async () => {
+  const appServer = new FakeAppServerClient([
+    buildTurnEvents(replyDecision("hello")),
+    buildTurnEventsWithCompaction(replyDecision("compacted")),
+    buildTurnEvents(replyDecision("refreshed")),
+  ]);
+  const controller = new CodexMainAgentController(
+    appServer,
+    null,
+    () => testSkills,
+    ["github", "todoist"],
+    testHttpTokens,
+  );
+
+  await controller.decide(makeContext(["msg1"]));
+  await controller.decide(makeContext(["msg2"])); // compaction detected
+  await controller.decide(makeContext(["msg3"])); // full instructions
+
+  assert.equal(appServer.threadInputs.length, 3);
+
+  // Turn 2 (compaction happens): should NOT include full instructions
+  assert.match(appServer.threadInputs[1]?.[0] ?? "", /New visible chat entries since your last decision:/);
+  assert.doesNotMatch(appServer.threadInputs[1]?.[0] ?? "", /Configured MCP servers available to sub-agents:/);
+
+  // Turn 3 (refresh): should include full instructions with MCP/token/tool config
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /Visible chat entries for this decision:/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /Configured MCP servers available to sub-agents:/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /- github/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /- todoist/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /Configured HTTP tokens available to sub-agents:/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /vid2text: Token for the video transcription API\./);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /send_file_to_channel/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /Configured skills available to sub-agents:/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /Adding task to Todoist/);
+});
+
+test("CodexMainAgentController detects context_compaction in item events", async () => {
+  // A single context_compaction event should trigger the flag
+  const appServer = new FakeAppServerClient([
+    buildTurnEvents(replyDecision("hello")),
+    buildTurnEventsWithCompaction(replyDecision("turn after compaction")),
+    buildTurnEvents(replyDecision("refreshed")),
+  ]);
+  const controller = new CodexMainAgentController(appServer);
+
+  await controller.decide(makeContext(["msg1"]));
+  await controller.decide(makeContext(["msg2"])); // context_compaction event → flag set
+  await controller.decide(makeContext(["msg3"])); // should have full instructions
+
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /Visible chat entries for this decision:/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /You are Sandy's main orchestration controller/);
+});
+
+test("CodexMainAgentController clears the instruction refresh flag after exactly one turn", async () => {
+  // Compaction happens on the first turn. Flag is set.
+  // Next turn includes full instructions and clears the flag.
+  // The turn after that returns to normal incremental mode.
+  const appServer = new FakeAppServerClient([
+    buildTurnEventsWithCompaction(replyDecision("compacted turn")),
+    buildTurnEvents(replyDecision("turn after compaction")),
+    buildTurnEvents(replyDecision("turn after refresh")),
+  ]);
+  const controller = new CodexMainAgentController(appServer);
+
+  await controller.decide(makeContext(["msg1"])); // compaction detected → flag set
+  await controller.decide(makeContext(["msg2"])); // flag consumed → full instructions
+  await controller.decide(makeContext(["msg3"])); // flag cleared → normal incremental
+
+  assert.equal(appServer.threadInputs.length, 3);
+
+  // Turn 1: initial (first call, isInitialTurn = true)
+  assert.match(appServer.threadInputs[0]?.[0] ?? "", /Visible chat entries for this decision:/);
+  // Turn 2: flag was set by compaction on turn 1 → full instructions
+  assert.match(appServer.threadInputs[1]?.[0] ?? "", /Visible chat entries for this decision:/);
+  assert.match(appServer.threadInputs[1]?.[0] ?? "", /retain prior visible context from earlier turns/);
+  // Turn 3: flag cleared → normal incremental
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /New visible chat entries since your last decision:/);
+  assert.match(appServer.threadInputs[2]?.[0] ?? "", /Continue acting as Sandy's main orchestration controller/);
 });

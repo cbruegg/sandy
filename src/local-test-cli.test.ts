@@ -71,3 +71,40 @@ test("local-test CLI rejects unknown commands", async () => {
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("local-test CLI cancel-all writes a cancel_request event", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sandy-local-cli-"));
+  try {
+    await runLocalTestCli(["cancel-all", "--spool-root", root]);
+    const files = await readdir(join(root, "inbox"));
+    assert.equal(files.length, 1);
+    const event = inboxEventSchema.parse(JSON.parse(await readFile(join(root, "inbox", files[0]!), "utf8")) as unknown);
+    assert.equal(event.kind, "cancel_request");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local-test CLI status shows container status header and managed count", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sandy-local-cli-"));
+  try {
+    let output = "";
+    const io = {
+      stdout: { write: (s: string) => { output += s; return true; } } as unknown as NodeJS.WriteStream,
+      stderr: { write: () => true } as unknown as NodeJS.WriteStream,
+    };
+    await runLocalTestCli(["status", "--spool-root", root], io);
+    assert.ok(output.includes("=== Sandy Container Status ==="), "Should show container status header");
+    assert.ok(output.includes("Spool root:"), "Should show spool root");
+    assert.ok(output.includes("Managed containers:"), "Should show managed container count");
+    // When no containers exist, status shows "(none)"
+    if (output.includes("(none)")) {
+      // expected for clean environments
+    } else {
+      // When containers exist, status shows container IDs and names
+      assert.ok(output.match(/[0-9a-f]{12}/), "Should show container ID prefix");
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

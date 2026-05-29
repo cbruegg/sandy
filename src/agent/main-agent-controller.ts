@@ -2,7 +2,6 @@ import type { HttpTokenConfig } from "../config.js";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ThreadOptions } from "@openai/codex-sdk";
 import { ZodError } from "zod";
 import { formatDateTimePrefix } from "../datetime-prefix.js";
 import { logger } from "../logger.js";
@@ -15,41 +14,59 @@ import {
   parseMainAgentDecision,
 } from "./main-agent-decision.js";
 import {sandyMcpServerId, workerToolEntries} from "../subagent/worker-tools.js";
+import {
+  type AgentClient,
+  type AuthRefreshCallback,
+  createMainAgentProfile,
+} from "../codex-app-server-client/app-server-client.js";
+import type { Input } from "@openai/codex-sdk";
 
 export interface MainAgentController {
   decide(context: DecideContext): Promise<MainAgentDecision>;
 }
 
-type MainAgentTurn = {
-  finalResponse: string;
-};
-
-type MainAgentThread = {
-  run(input: string): Promise<MainAgentTurn>;
-};
-type CodexClient = {
-  startThread(options?: ThreadOptions): MainAgentThread;
-};
-
 const MAX_DECISION_VALIDATION_ATTEMPTS = 3;
 
+const noopAuthRefresh: AuthRefreshCallback = () => {
+  throw new Error("Auth refresh not supported for main agent.");
+};
+
 export class CodexMainAgentController implements MainAgentController {
-  private readonly codex: CodexClient;
+  private readonly appServer: AgentClient;
   private readonly model: string | null;
   private readonly getSkills: () => SkillMetadata[];
   private readonly workerMcpServerIds: string[];
+  /**
+   * Configured HTTP tokens keyed by token ID (from config.toml).
+   * Each value carries a description used in the main-agent prompt so
+   * the model knows which tokens are available for sub-agent tasks.
+   */
   private readonly httpTokens: Record<string, HttpTokenConfig>;
-  private readonly threads = new Map<string, MainAgentThread>();
+  /**
+   * Active app-server thread IDs keyed by Sandy chat ID.
+   * One chat may have at most one active thread at any time.
+   */
+  private readonly threadIds = new Map<string, string>();
+  /**
+   * Temporary working directories keyed by Sandy chat ID.
+   * Each directory is created on first use and kept for the chat lifetime.
+   */
   private readonly threadDirectories = new Map<string, string>();
+  /**
+   * Whether the next decide() call for a chat should re-inject the
+   * full orchestration instructions. Set after auto-compaction is
+   * detected and cleared immediately after the restored prompt is built.
+   */
+  private readonly needsInstructionRefresh = new Map<string, boolean>();
 
   constructor(
-    codex: CodexClient,
+    appServer: AgentClient,
     model: string | null = null,
     getSkills: () => SkillMetadata[] = () => [],
     workerMcpServerIds: string[] = [],
     httpTokens: Record<string, HttpTokenConfig> = {},
   ) {
-    this.codex = codex;
+    this.appServer = appServer;
     this.model = model;
     this.getSkills = getSkills;
     this.workerMcpServerIds = [...workerMcpServerIds].sort();
@@ -57,25 +74,33 @@ export class CodexMainAgentController implements MainAgentController {
   }
 
   async decide(context: DecideContext): Promise<MainAgentDecision> {
-    const isInitialTurn = !this.threads.has(context.chatId);
-    const thread = this.getOrCreateThread(context.chatId);
+    const isInitialTurn = !this.threadIds.has(context.chatId);
+    const includeFullInstructions = isInitialTurn || this.needsInstructionRefresh.get(context.chatId) === true;
+    if (!isInitialTurn) {
+      this.needsInstructionRefresh.delete(context.chatId);
+    }
+
+    const threadId = await this.getOrCreateThreadId(context.chatId);
     logger.info("main_agent.decision_requested", {
       chatId: context.chatId,
       newVisibleEntryCount: context.newVisibleEntries.length,
       hasActiveTask: context.activeTask !== null,
       relevantMemoryCount: context.relevantMemories.length,
+      includeFullInstructions,
+      isInitialTurn,
     });
     const prompt = buildMainAgentPrompt({
       activeTask: context.activeTask,
       channelFormatting: context.channelFormatting,
       newVisibleEntries: context.newVisibleEntries,
-      isInitialTurn,
+      includeFullInstructions,
       skills: this.getSkills(),
       workerMcpServerIds: this.workerMcpServerIds,
       httpTokens: this.httpTokens,
       relevantMemories: context.relevantMemories,
     });
-    const decision = await this.runValidatedDecision(thread, prompt, context.chatId);
+    const input: Input = [{ type: "text", text: prompt }];
+    const decision = await this.runValidatedDecision(threadId, input, context);
     logger.info("main_agent.decision_received", {
       chatId: context.chatId,
       action: decision.action,
@@ -84,25 +109,77 @@ export class CodexMainAgentController implements MainAgentController {
     return decision;
   }
 
-  private async runValidatedDecision(thread: MainAgentThread, prompt: string, chatId: string): Promise<MainAgentDecision> {
-    let nextInput = prompt;
+  private async runValidatedDecision(
+    threadId: string,
+    initialInput: Input,
+    context: { chatId: string },
+  ): Promise<MainAgentDecision> {
+    let nextInput = initialInput;
 
     for (let attempt = 1; attempt <= MAX_DECISION_VALIDATION_ATTEMPTS; attempt += 1) {
-      const turn = await thread.run(nextInput);
+      let finalResponse = "";
+      let sawCompaction = false;
+
+      for await (const event of this.appServer.streamTurn(
+        threadId,
+        nextInput,
+        noopAuthRefresh,
+      )) {
+        switch (event.method) {
+          case "item/completed":
+            if (event.params.item.type === "agentMessage") {
+              finalResponse = event.params.item.text;
+            }
+            if (event.params.item.type === "contextCompaction") {
+              sawCompaction = true;
+              logger.info("main_agent.compaction_detected", {
+                chatId: context.chatId,
+                attempt,
+                detectionMethod: "app_server_item",
+              });
+            }
+            break;
+
+          case "item/started":
+            if (event.params.item.type === "contextCompaction") {
+              sawCompaction = true;
+              logger.info("main_agent.compaction_detected", {
+                chatId: context.chatId,
+                attempt,
+                detectionMethod: "app_server_item",
+              });
+            }
+            break;
+
+          case "turn/completed":
+            if (event.params.turn?.status === "failed") {
+              throw new Error(`Turn failed: ${event.params.turn.error?.message ?? "Unknown turn failure."}`);
+            }
+            break;
+
+          case "error":
+            throw new Error(`App server error: ${event.params.error?.message ?? "Unknown app-server error."}`);
+        }
+      }
+
+      if (sawCompaction) {
+        this.needsInstructionRefresh.set(context.chatId, true);
+      }
+
       logger.debugContent("main_agent.model_response", {
-        chatId,
+        chatId: context.chatId,
         attempt,
-        response: turn.finalResponse,
+        response: finalResponse,
       });
       try {
-        return parseMainAgentDecision(turn.finalResponse);
+        return parseMainAgentDecision(finalResponse);
       } catch (error) {
         if (!(error instanceof SyntaxError) && !(error instanceof ZodError)) {
           throw error;
         }
 
         logger.warn("main_agent.decision_validation_failed", {
-          chatId,
+          chatId: context.chatId,
           attempt,
           maxAttempts: MAX_DECISION_VALIDATION_ATTEMPTS,
           message: error.message,
@@ -115,31 +192,31 @@ export class CodexMainAgentController implements MainAgentController {
           );
         }
 
-        nextInput = formatMainAgentDecisionValidationError(turn.finalResponse, error);
+        nextInput = [{ type: "text", text: formatMainAgentDecisionValidationError(finalResponse, error) }];
       }
     }
 
     throw new Error("Unreachable.");
   }
 
-  private getOrCreateThread(chatId: string): MainAgentThread {
-    const existing = this.threads.get(chatId);
+  private async getOrCreateThreadId(chatId: string): Promise<string> {
+    const existing = this.threadIds.get(chatId);
     if (existing) {
       return existing;
     }
-    const created = this.createThread(chatId);
-    this.threads.set(chatId, created);
-    return created;
-  }
-
-  private createThread(chatId: string): MainAgentThread {
     const workingDirectory = this.getOrCreateThreadDirectory(chatId);
-    const thread = this.codex.startThread(buildMainAgentThreadOptions(workingDirectory, this.model));
+    const profile = {
+      ...createMainAgentProfile(workingDirectory),
+      ...(this.model ? { model: this.model } : {}),
+    };
+    const threadId = await this.appServer.startThread(profile);
+    this.threadIds.set(chatId, threadId);
     logger.debug("main_agent.thread_started", {
       chatId,
       workingDirectory,
+      threadId,
     });
-    return thread;
+    return threadId;
   }
 
   private getOrCreateThreadDirectory(chatId: string): string {
@@ -158,16 +235,6 @@ export class CodexMainAgentController implements MainAgentController {
   }
 }
 
-export function buildMainAgentThreadOptions(workingDirectory: string, model: string | null = null): ThreadOptions {
-  return {
-    approvalPolicy: "never",
-    ...(model ? { model } : {}),
-    sandboxMode: "read-only",
-    workingDirectory,
-    skipGitRepoCheck: true,
-  };
-}
-
 function buildSandyToolsPromptSection(): string {
   const lines = [
     `The MCP server "${sandyMcpServerId}" available to the worker/sub-agent exposes these host-integration tools:`,
@@ -182,13 +249,13 @@ export function buildMainAgentPrompt(input: {
   newVisibleEntries: DecideContext["newVisibleEntries"];
   activeTask: DecideContext["activeTask"];
   channelFormatting: DecideContext["channelFormatting"];
-  isInitialTurn: boolean;
+  includeFullInstructions: boolean;
   skills: SkillMetadata[];
   workerMcpServerIds: string[];
   httpTokens: Record<string, HttpTokenConfig>;
   relevantMemories: RelevantMemory[];
 }): string {
-  const intro = input.isInitialTurn
+  const intro = input.includeFullInstructions
     ? [
         "You are Sandy's main orchestration controller.",
         "Decide whether Sandy should launch a new sub-agent task or reply directly.",
@@ -211,7 +278,7 @@ export function buildMainAgentPrompt(input: {
       ]
     : [];
 
-  const workerMcpSection = input.isInitialTurn && input.workerMcpServerIds.length > 0
+  const workerMcpSection = input.includeFullInstructions && input.workerMcpServerIds.length > 0
     ? [
         "",
         "Configured MCP servers available to sub-agents:",
@@ -220,7 +287,7 @@ export function buildMainAgentPrompt(input: {
     : [];
 
   const httpTokenEntries = Object.entries(input.httpTokens);
-  const httpTokenSection = input.isInitialTurn && httpTokenEntries.length > 0
+  const httpTokenSection = input.includeFullInstructions && httpTokenEntries.length > 0
     ? [
         "",
         "Configured HTTP tokens available to sub-agents:",
@@ -228,14 +295,14 @@ export function buildMainAgentPrompt(input: {
       ]
     : [];
 
-  const sandyToolsSection = input.isInitialTurn
+  const sandyToolsSection = input.includeFullInstructions
     ? [
         "",
         buildSandyToolsPromptSection(),
       ]
     : [];
 
-  const skillDecisionRules = input.isInitialTurn && input.skills.length > 0
+  const skillDecisionRules = input.includeFullInstructions && input.skills.length > 0
     ? [
         "- You know configured skills only by the name and description listed above. Do not assume any other skill content.",
         "- If the user's request requires one of the configured skills, you must launch a sub-agent instead of replying directly.",
@@ -243,7 +310,7 @@ export function buildMainAgentPrompt(input: {
       ]
     : [];
 
-  const skillManagementRules = input.isInitialTurn
+  const skillManagementRules = input.includeFullInstructions
     ? [
         "- If the user asks to list, add, edit, or remove Sandy skills, you must launch a sub-agent task instead of replying directly.",
         "- The sub-agent can use the create_skill, update_skill, and delete_skill host tools to perform skill changes.",
@@ -282,7 +349,7 @@ export function buildMainAgentPrompt(input: {
     "Required JSON schema:",
     JSON.stringify(mainAgentDecisionPromptSchema, null, 2),
     "",
-    input.isInitialTurn ? "Visible chat entries for this first decision:" : "New visible chat entries since your last decision:",
+    input.includeFullInstructions ? "Visible chat entries for this decision:" : "New visible chat entries since your last decision:",
     JSON.stringify(input.newVisibleEntries, null, 2),
     "",
     "Current active task metadata:",

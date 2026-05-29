@@ -1,4 +1,4 @@
-import {existsSync, readFileSync} from "node:fs";
+import {readFileSync} from "node:fs";
 import {isIP} from "node:net";
 import {dirname, isAbsolute, join, resolve} from "node:path";
 import * as toml from "@iarna/toml";
@@ -81,7 +81,7 @@ const telegramChannelSchema = z.object({
     .pipe(z.string().min(1)),
 });
 
-function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages: SandyImageDefaults) {
+function buildSandyConfigSchema(defaultImages: SandyImageDefaults) {
   return z.object({
     logging: z.object({
       level: logLevelSchema.default(DEFAULT_LOG_LEVEL),
@@ -120,10 +120,8 @@ function buildSandyConfigSchema(defaultCodexAuthFilePath: string, defaultImages:
     }),
     auth: z.object({
       openai_api_key: z.string().min(1).nullable().optional(),
-      codex_auth_file: z.string().min(1).nullable().default(defaultCodexAuthFilePath),
       codex_auth_strategy: codexAuthStrategySchema.default(DEFAULT_CODEX_AUTH_STRATEGY),
     }).default({
-      codex_auth_file: defaultCodexAuthFilePath,
       codex_auth_strategy: DEFAULT_CODEX_AUTH_STRATEGY,
     }),
     agent: z.object({
@@ -256,10 +254,8 @@ type SandyAuthMode =
   | { mode: "api_key"; openAiApiKey: string }
   | {
       mode: "codex_auth_file";
-      codexAuthFile: string;
       codexAuthStrategy: z.infer<typeof codexAuthStrategySchema>;
-    }
-  | { mode: "ambient_codex_auth" };
+    };
 
 export type SandyConfig = {
   configFilePath: string;
@@ -326,7 +322,7 @@ function defaultConfigPathForEnv(env: EnvSource = process.env): string {
   return join(resolveHomeDirectory(env), ".config", "sandy", "config.toml");
 }
 
-function defaultCodexAuthFilePath(env: EnvSource = process.env): string {
+export function defaultCodexAuthFilePath(env: EnvSource = process.env): string {
   return join(resolveHomeDirectory(env), ".codex", "auth.json");
 }
 
@@ -346,17 +342,6 @@ function expandHomeShorthand(path: string, env: EnvSource): string {
     return join(resolveHomeDirectory(env), path.slice(2));
   }
   return path;
-}
-
-function resolveCodexAuthFile(configuredPath: string | null | undefined, env: EnvSource): string | null {
-  if (configuredPath) {
-    const resolvedPath = resolve(expandHomeShorthand(configuredPath, env));
-    if (resolvedPath !== defaultCodexAuthFilePath(env)) {
-      return resolvedPath;
-    }
-    return existsSync(resolvedPath) ? resolvedPath : null;
-  }
-  return null;
 }
 
 function resolveMcpWorkingDirectory(configuredPath: string, env: EnvSource): string {
@@ -394,21 +379,17 @@ export function parseConfigToml(
   env: EnvSource = process.env,
 ): SandyConfig {
   const resolvedConfigFilePath = configFilePath ?? defaultConfigPathForEnv(env);
-  const parsedFile = parseConfigTomlFile(raw, buildMetadata, env);
+  const parsedFile = parseConfigTomlFile(raw, buildMetadata);
   const parsed = parsedFile.data;
   const defaultImages = resolveDefaultImageReferences(buildMetadata);
   const configDirectory = dirname(resolvedConfigFilePath);
-  const codexAuthFile = resolveCodexAuthFile(parsed.auth.codex_auth_file, env);
   const rawApiKey = parsed.auth.openai_api_key ?? null;
-  const authMode: SandyAuthMode = codexAuthFile
-    ? {
+  const authMode: SandyAuthMode = rawApiKey
+    ? { mode: "api_key", openAiApiKey: rawApiKey }
+    : {
       mode: "codex_auth_file",
-      codexAuthFile,
       codexAuthStrategy: parsed.auth.codex_auth_strategy,
-    }
-    : rawApiKey
-      ? { mode: "api_key", openAiApiKey: rawApiKey }
-      : { mode: "ambient_codex_auth" };
+    };
 
   if (parsed.mcp.servers[sandyMcpServerId]) {
     throw new Error(`mcp.servers.${sandyMcpServerId} is reserved for Sandy's built-in worker tools.`);
@@ -502,7 +483,6 @@ export function loadConfig(env: EnvSource = process.env): SandyConfig {
 function parseConfigTomlFile(
   raw: string,
   buildMetadata?: SandyBuildMetadata,
-  env: EnvSource = process.env,
 ): {
   data: SandyConfigFileData;
   explicitImageOverrides: {
@@ -525,10 +505,7 @@ function parseConfigTomlFile(
   };
 
   return {
-    data: buildSandyConfigSchema(
-      defaultCodexAuthFilePath(env),
-      resolveDefaultImageReferences(buildMetadata),
-    ).parse(parsedToml),
+    data: buildSandyConfigSchema(resolveDefaultImageReferences(buildMetadata)).parse(parsedToml),
     explicitImageOverrides,
   };
 }

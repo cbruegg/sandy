@@ -157,6 +157,7 @@ async function launchRunnerWithChild(
     resolveWorkerImage: options?.resolveWorkerImage,
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: options?.shareRoot ?? "/tmp/sandy-test-shares",
+    controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
     getSkillsDirectory: options?.getSkillsDirectory ?? (() => null),
     workerCodexBinaryPath: options?.workerCodexBinaryPath ?? defaultWorkerCodexBinaryPath,
@@ -221,7 +222,11 @@ async function launchRunnerWithChild(
 
 function flushEvents(): Promise<void> {
   return new Promise((resolve) => {
-    setImmediate(resolve);
+    // setImmediate fires in the check phase. Follow with setTimeout(0) in the
+    // timers phase to give the event loop an additional full iteration (including
+    // the poll phase where pending filesystem callbacks such as real mkdir /
+    // writeFile / rm are resolved).
+    setImmediate(() => setTimeout(resolve, 0));
   });
 }
 
@@ -278,6 +283,7 @@ test("DockerSandboxRunner passes the configured Codex model in the start_task pa
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
+    controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
     getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
@@ -549,6 +555,7 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
+    controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
     getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
@@ -611,6 +618,7 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
+    controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
     getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
@@ -674,6 +682,7 @@ test("DockerSandboxRunner falls back to a root Docker container when host rm fai
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
+    controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
     getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
@@ -831,6 +840,7 @@ test("DockerSandboxRunner launches a network guard and shares its network namesp
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
+    controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
     getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
@@ -929,6 +939,7 @@ test("DockerSandboxRunner reports a disconnect when the network guard exits mid-
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
+    controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
     getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
@@ -991,6 +1002,7 @@ test("DockerSandboxRunner rejects share inspection for unknown tasks", async () 
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
+    controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
     getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
@@ -1028,6 +1040,7 @@ test("DockerSandboxRunner rejects share deletion for unknown tasks", async () =>
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot,
+    controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
     getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
@@ -1096,6 +1109,7 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
+    controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
     getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
@@ -1222,6 +1236,7 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
+    controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
     getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
@@ -1324,6 +1339,7 @@ test("DockerSandboxRunner adds managed label to worker, guard and proxy containe
     workerImage: "sandy-subagent:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-test-shares",
+    controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
     getSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
@@ -1388,4 +1404,16 @@ test("DockerSandboxRunner adds managed label to worker, guard and proxy containe
   assert.ok(workerRunInvocation);
   assert.ok(workerRunInvocation.args.includes("--label"));
   assert.ok(workerRunInvocation.args.includes(SANDY_MANAGED_CONTAINER_LABEL));
+
+  // Verify heartbeat mount and env vars are passed to all three containers.
+  for (const inv of [guardRunInvocation, proxyRunInvocation, workerRunInvocation]) {
+    assert.ok(inv);
+    assert.ok(inv.args.includes("-v"), "Expected -v mount flag");
+    assert.ok(inv.args.some((arg) => arg.includes("/run/sandy-controller:ro")),
+      "Expected /run/sandy-controller:ro mount");
+    assert.ok(inv.args.some((arg) => arg.startsWith("SANDY_CONTROLLER_HEARTBEAT_PATH=")),
+      "Expected SANDY_CONTROLLER_HEARTBEAT_PATH env var");
+    assert.ok(inv.args.some((arg) => arg.startsWith("SANDY_CONTROLLER_HEARTBEAT_TIMEOUT_MS=")),
+      "Expected SANDY_CONTROLLER_HEARTBEAT_TIMEOUT_MS env var");
+  }
 });

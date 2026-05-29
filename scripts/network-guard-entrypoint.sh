@@ -146,7 +146,48 @@ fi
 
 echo "ready"
 
-while true; do
-  sleep 86400 &
-  wait $!
-done
+# If a controller heartbeat file is configured, poll it instead of sleeping
+# forever. When the file stops being refreshed (host process died), the guard
+# exits, which terminates all containers sharing its network namespace.
+HEARTBEAT_PATH="${SANDY_CONTROLLER_HEARTBEAT_PATH:-}"
+HEARTBEAT_TIMEOUT_MS="${SANDY_CONTROLLER_HEARTBEAT_TIMEOUT_MS:-30000}"
+
+# Convert timeout from ms to seconds (ceiling division).
+HEARTBEAT_TIMEOUT_S=$(( (HEARTBEAT_TIMEOUT_MS + 999) / 1000 ))
+# Poll at half the timeout, at least every 2 seconds.
+POLL_INTERVAL=$(( HEARTBEAT_TIMEOUT_S / 2 ))
+if [ "$POLL_INTERVAL" -lt 2 ]; then
+  POLL_INTERVAL=2
+fi
+
+check_heartbeat() {
+  if [ ! -f "$HEARTBEAT_PATH" ]; then
+    echo "heartbeat file missing, exiting" >&2
+    exit 1
+  fi
+  # Uses the POSIX-compatible approach: [ file -nt reference ]
+  # Create a temp reference file with an mtime of (now - timeout).
+  REF_FILE="$(mktemp)"
+  touch -d "${HEARTBEAT_TIMEOUT_S} seconds ago" "$REF_FILE" 2>/dev/null || touch -t "$(date -d "${HEARTBEAT_TIMEOUT_S} seconds ago" +%Y%m%d%H%M.%S 2>/dev/null || date -v-${HEARTBEAT_TIMEOUT_S}S +%Y%m%d%H%M.%S)" "$REF_FILE"
+  if [ "$HEARTBEAT_PATH" -nt "$REF_FILE" ]; then
+    rm -f "$REF_FILE"
+    return 0
+  fi
+  rm -f "$REF_FILE"
+  echo "heartbeat stale, exiting" >&2
+  return 1
+}
+
+if [ -n "$HEARTBEAT_PATH" ]; then
+  while true; do
+    sleep "$POLL_INTERVAL"
+    if ! check_heartbeat; then
+      exit 1
+    fi
+  done
+else
+  while true; do
+    sleep 86400 &
+    wait $!
+  done
+fi

@@ -6,6 +6,11 @@ import type { McpServerConfig } from "../config.js";
 import { logger } from "../logger.js";
 import type { PrivilegeResolutionResult } from "../types.js";
 import { ProxyAccess } from "../proxy-access.js";
+import {
+  CONTROLLER_CONTROL_MOUNT_PATH,
+  HEARTBEAT_FILE,
+  HEARTBEAT_TIMEOUT_MS,
+} from "../sandbox/heartbeat.js";
 import type { McpUpstreamMethod } from "./sidecar-protocol.js";
 import type {
   AuthorizeMcpResourceRead,
@@ -14,7 +19,10 @@ import type {
 } from "./proxy-contract.js";
 import { buildHostOauthStateDirectory, sidecarOauthMountPath } from "./oauth-paths.js";
 import { mcpProxyContainerAlias } from "./proxy-route.js";
-import { mcpWorkerNetworkNamePrefix } from "./worker-network-name.js";
+import {
+  buildManagedNetworkCreateArgs,
+  pruneStaleManagedNetworks,
+} from "./network-pruning.js";
 import {
   parseMcpSidecarToHostMessage,
   type McpSidecarAuthorizationRequestMessage,
@@ -26,6 +34,7 @@ import {
 
 type McpSidecarManagerOptions = {
   configDirectory: string;
+  controllerControlDir: string;
   mcpServers: Record<string, McpServerConfig>;
   workerNetworkName: string;
   sidecarImage: string;
@@ -73,137 +82,152 @@ export class McpSidecarManager {
     this.started = true;
     const oauthStateDirectory = buildHostOauthStateDirectory(this.options.configDirectory);
     await mkdir(oauthStateDirectory, { recursive: true });
-    await this.pruneStaleNetworks();
-    await this.runDockerCommand(["network", "create", this.options.workerNetworkName]);
-
-    const child = this.spawnImpl("docker", [
-      "run",
-      "--rm",
-      "-i",
-      "--name",
-      this.containerName,
-      "--network",
+    // Label the network with the controller heartbeat path so the next startup
+    // can reclaim only networks whose owning Sandy instance is gone.
+    await pruneStaleManagedNetworks({
+      runDockerCommand: this.runDockerCommand.bind(this),
+      runDockerCommandCapture: this.runDockerCommandCapture.bind(this),
+    });
+    await this.runDockerCommand(buildManagedNetworkCreateArgs(
       this.options.workerNetworkName,
-      "--network-alias",
-      mcpProxyContainerAlias,
-      "--add-host",
-      this.hostGatewayAlias,
-      "-v",
-      `${oauthStateDirectory}:${sidecarOauthMountPath}`,
-      this.options.sidecarImage,
-    ], {
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    this.child = child;
+      this.options.controllerControlDir,
+    ));
 
-    const stdout = createInterface({
-      input: child.stdout,
-      crlfDelay: Infinity,
-    });
+    try {
+      const child = this.spawnImpl("docker", [
+        "run",
+        "--rm",
+        "-i",
+        "--name",
+        this.containerName,
+        "--network",
+        this.options.workerNetworkName,
+        "--network-alias",
+        mcpProxyContainerAlias,
+        "--add-host",
+        this.hostGatewayAlias,
+        "-v",
+        `${oauthStateDirectory}:${sidecarOauthMountPath}`,
+        "-v",
+        `${this.options.controllerControlDir}:${CONTROLLER_CONTROL_MOUNT_PATH}:ro`,
+        "-e",
+        `SANDY_CONTROLLER_HEARTBEAT_PATH=${CONTROLLER_CONTROL_MOUNT_PATH}/${HEARTBEAT_FILE}`,
+        "-e",
+        `SANDY_CONTROLLER_HEARTBEAT_TIMEOUT_MS=${HEARTBEAT_TIMEOUT_MS}`,
+        this.options.sidecarImage,
+      ], {
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      this.child = child;
 
-    let ready = false;
-    let startupResolved = false;
-    let startupReject: ((reason?: unknown) => void) | null = null;
-    const startupPromise = new Promise<void>((resolve, reject) => {
-      startupReject = reject;
-      const timer = this.setTimeoutImpl(() => {
-        if (!ready) {
-          reject(new Error("MCP sidecar did not become ready in time."));
-        }
-      }, this.startupTimeoutMs);
+      const stdout = createInterface({
+        input: child.stdout,
+        crlfDelay: Infinity,
+      });
 
-      const finish = (fn: () => void) => {
-        if (startupResolved) {
-          return;
-        }
-        startupResolved = true;
-        this.clearTimeoutImpl(timer);
-        fn();
-      };
+      let ready = false;
+      let startupResolved = false;
+      let startupReject: ((reason?: unknown) => void) | null = null;
+      const startupPromise = new Promise<void>((resolve, reject) => {
+        startupReject = reject;
+        const timer = this.setTimeoutImpl(() => {
+          if (!ready) {
+            reject(new Error("MCP sidecar did not become ready in time."));
+          }
+        }, this.startupTimeoutMs);
 
-      stdout.on("line", (line) => {
-        const trimmed = line.trim();
-        if (!trimmed) {
-          return;
-        }
+        const finish = (fn: () => void) => {
+          if (startupResolved) {
+            return;
+          }
+          startupResolved = true;
+          this.clearTimeoutImpl(timer);
+          fn();
+        };
 
-        try {
-          const message = parseMcpSidecarToHostMessage(trimmed);
-          if (message.type === "ready") {
-            ready = true;
-            finish(resolve);
+        stdout.on("line", (line) => {
+          const trimmed = line.trim();
+          if (!trimmed) {
             return;
           }
-          if (message.type === "fatal_error") {
-            finish(() => reject(new Error(`MCP sidecar failed: ${message.message}`)));
+
+          try {
+            const message = parseMcpSidecarToHostMessage(trimmed);
+            if (message.type === "ready") {
+              ready = true;
+              finish(resolve);
+              return;
+            }
+            if (message.type === "fatal_error") {
+              finish(() => reject(new Error(`MCP sidecar failed: ${message.message}`)));
+              return;
+            }
+            if (message.type === "authorization_request") {
+              this.dispatchAuthorizationRequest(message);
+              return;
+            }
+            if (message.type === "resource_authorization_request") {
+              this.dispatchResourceAuthorizationRequest(message);
+              return;
+            }
+            if (message.type === "native_tool_call_request") {
+              this.dispatchNativeToolCallRequest(message);
+              return;
+            }
+            if (message.type === "upstream_request") {
+              this.dispatchUpstreamRequest(message);
+              return;
+            }
+            if (message.type === "log") {
+              this.forwardSidecarLog(message);
+              return;
+            }
+          } catch (error) {
+            logger.warn("mcp.sidecar.stdout_invalid", {
+              message: error instanceof Error ? error.message : "Invalid sidecar output.",
+              line: trimmed,
+            });
+          }
+        });
+
+        child.once("exit", (code, signal) => {
+          this.child = null;
+          if (!ready) {
+            finish(() => reject(new Error(`MCP sidecar exited before ready (code=${code}, signal=${signal}).`)));
             return;
           }
-          if (message.type === "authorization_request") {
-            this.dispatchAuthorizationRequest(message);
-            return;
-          }
-          if (message.type === "resource_authorization_request") {
-            this.dispatchResourceAuthorizationRequest(message);
-            return;
-          }
-          if (message.type === "native_tool_call_request") {
-            this.dispatchNativeToolCallRequest(message);
-            return;
-          }
-          if (message.type === "upstream_request") {
-            this.dispatchUpstreamRequest(message);
-            return;
-          }
-          if (message.type === "log") {
-            this.forwardSidecarLog(message);
-            return;
-          }
-        } catch (error) {
-          logger.warn("mcp.sidecar.stdout_invalid", {
-            message: error instanceof Error ? error.message : "Invalid sidecar output.",
-            line: trimmed,
+          logger.warn("mcp.sidecar.exited", {
+            code,
+            signal,
+          });
+        });
+      });
+
+      child.stderr.on("data", (chunk) => {
+        const message = String(chunk).trim();
+        if (message) {
+          logger.warn("mcp.sidecar.stderr", {
+            message,
           });
         }
       });
 
-      child.once("exit", (code, signal) => {
-        this.child = null;
-        if (!ready) {
-          finish(() => reject(new Error(`MCP sidecar exited before ready (code=${code}, signal=${signal}).`)));
-          return;
-        }
-        logger.warn("mcp.sidecar.exited", {
-          code,
-          signal,
-        });
+      child.once("error", (error) => {
+        startupReject?.(error);
       });
-    });
 
-    child.stderr.on("data", (chunk) => {
-      const message = String(chunk).trim();
-      if (message) {
-        logger.warn("mcp.sidecar.stderr", {
-          message,
-        });
-      }
-    });
+      this.sendToSidecar({
+        type: "bootstrap",
+        oauthStateDirectory: sidecarOauthMountPath,
+        workerProxyTokenSecret: this.access.sharedSecret,
+        mcpServers: this.options.mcpServers,
+      });
 
-    child.once("error", (error) => {
-      startupReject?.(error);
-    });
-
-    this.sendToSidecar({
-      type: "bootstrap",
-      oauthStateDirectory: sidecarOauthMountPath,
-      workerProxyTokenSecret: this.access.sharedSecret,
-      mcpServers: this.options.mcpServers,
-    });
-
-    try {
       await startupPromise;
       logger.info("mcp.sidecar.started", {
         containerName: this.containerName,
         networkName: this.options.workerNetworkName,
+        controllerControlDir: this.options.controllerControlDir,
       });
     } catch (error) {
       await this.stop();
@@ -452,18 +476,6 @@ export class McpSidecarManager {
       throw new Error("MCP sidecar is not running.");
     }
     this.child.stdin.write(`${JSON.stringify(message)}\n`);
-  }
-
-  private async pruneStaleNetworks(): Promise<void> {
-    const existingNetworkNames = await this.runDockerCommandCapture(["network", "ls", "--format", "{{.Name}}"]);
-    const staleNetworkNames = existingNetworkNames
-      .split("\n")
-      .map((name) => name.trim())
-      .filter((name) => name.startsWith(mcpWorkerNetworkNamePrefix) && name !== this.options.workerNetworkName);
-
-    for (const networkName of staleNetworkNames) {
-      await this.runDockerCommand(["network", "rm", networkName], true);
-    }
   }
 
   private async runDockerCommand(args: string[], ignoreFailure = false): Promise<void> {

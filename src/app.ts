@@ -1,8 +1,8 @@
 import { CodexMainAgentController } from "./agent/main-agent-controller.js";
 import { createChannelAdapter } from "./channel/create-channel.js";
 import type { WorkerAuthConfig } from "./types.js";
-import { loadConfig } from "./config.js";
-import { createCodexClient, ensureManagedCodexPath } from "./codex-client.js";
+import { defaultCodexAuthFilePath, loadConfig } from "./config.js";
+import { CODEX_API_KEY_ENV, ensureManagedCodexPath } from "./codex-client.js";
 import { resolveSandyCacheRoot } from "./cache-paths.js";
 import { configureLogger, logger } from "./logger.js";
 import { ProxyAccess } from "./proxy-access.js";
@@ -21,7 +21,6 @@ import {DockerSandboxRunner, type DockerSandboxRunnerOptions} from "./sandbox/do
 import {TaskBundleLauncherImpl, type TaskBundleLauncherOptions} from "./sandbox/task-bundle-launcher.js";
 import { TaskBundlePoolImpl } from "./sandbox/task-bundle-pool.js";
 import { TaskBundleAssignmentRegistry } from "./sandbox/task-bundle-assignment-registry.js";
-import { cleanupStaleContainers } from "./sandbox/stale-container-janitor.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
 import { OpenAiTranscriptionProvider } from "./transcription/openai-transcription-provider.js";
 import { resolvePublishedUpdateSource } from "./build-metadata.js";
@@ -33,6 +32,9 @@ import {createNoopHostfsBroker} from "./hostfs/hostfs-broker.js";
 import {initializeHostfs, type HostfsServices} from "./hostfs/index.js";
 import { ChatGPTTokenBroker } from "./auth/chatgpt-token-broker.js";
 import { SkillService } from "./skills.js";
+import { randomUUID } from "node:crypto";
+import { createControlDir, removeControlDir, startHeartbeat } from "./sandbox/heartbeat.js";
+import { CodexAppServerClient } from "./codex-app-server-client/app-server-client.js";
 import { MemPalaceMainAgentMemory } from "./memory/mempalace-memory.js";
 import { NoopMainAgentMemory } from "./memory/noop-memory.js";
 
@@ -95,30 +97,35 @@ export async function startApp(): Promise<void> {
   };
 
   const channel = createRetryingChannelAdapter(rawChannel, triggerFatalChannelError);
+  const sandyCacheRoot = resolveSandyCacheRoot();
 
   const workerImageManager = new WorkerImageManager({
     baseImage: config.workerImage,
     preinstall: config.workerPreinstall,
-    cacheRoot: resolveSandyCacheRoot(),
+    cacheRoot: sandyCacheRoot,
   });
 
-  // Pre-resolve the worker Codex binary so each container can reuse the cache instead of re-downloading it.
-  const [codex, workerCodexBinaryPath, initialWorkerImage] = await Promise.all([
-    config.authMode.mode === "api_key"
-      ? createCodexClient({
-          apiKey: config.authMode.openAiApiKey,
-        })
-      : createCodexClient(),
+  // Pre-resolve the worker Codex binary so each container can reuse the cache
+  // instead of re-downloading it.  Also resolve the host-platform Codex binary
+  // for the main agent's app-server process.
+  const [mainAgentCodexPath, workerCodexBinaryPath, initialWorkerImage] = await Promise.all([
+    ensureManagedCodexPath(),
     ensureManagedCodexPath({
       platform: "linux",
       arch: process.arch,
     }),
     workerImageManager.start(),
   ]);
+  const mainAgentAppServer = await CodexAppServerClient.createWithAmbientAuth({
+    codexPath: mainAgentCodexPath,
+    env: config.authMode.mode === "api_key"
+      ? { [CODEX_API_KEY_ENV]: config.authMode.openAiApiKey }
+      : undefined,
+  });
 
   const tokenBroker: ChatGPTTokenBroker | null = config.authMode.mode === "codex_auth_file"
     && config.authMode.codexAuthStrategy === "external_tokens"
-    ? new ChatGPTTokenBroker(config.authMode.codexAuthFile)
+    ? new ChatGPTTokenBroker(defaultCodexAuthFilePath())
     : null;
 
   logger.info("worker_image.ready", {
@@ -129,10 +136,17 @@ export async function startApp(): Promise<void> {
   const hostMcpRegistry = new HostMcpServerRegistry(config.mcpServers);
   await hostMcpRegistry.start();
 
+  const controllerControlDir = await createControlDir(sandyCacheRoot, `controller-${randomUUID()}`);
+  const controllerHeartbeat = startHeartbeat(controllerControlDir);
+  const stopControllerHeartbeat = async (): Promise<void> => {
+    controllerHeartbeat.stop();
+    await removeControlDir(controllerControlDir);
+  };
+
   const skillService = new SkillService(config.configDirectory);
 
   const mainAgent = new CodexMainAgentController(
-    codex,
+    mainAgentAppServer,
     config.agentModel,
     () => skillService.getSkills(),
     Object.keys(config.mcpServers),
@@ -229,9 +243,10 @@ export async function startApp(): Promise<void> {
     workerImage: config.workerImage,
     resolveWorkerImage: () => workerImageManager.getLaunchImage(),
     shareRoot: config.shareRoot,
+    controllerControlDir,
     codexAuthFile: config.authMode.mode === "codex_auth_file"
       && config.authMode.codexAuthStrategy === "copy_file"
-      ? config.authMode.codexAuthFile
+      ? defaultCodexAuthFilePath()
       : null,
     getSkillsDirectory: () => skillService.getSkillsDirectory(),
     workerCodexBinaryPath,
@@ -263,8 +278,6 @@ export async function startApp(): Promise<void> {
         }
         : undefined,
   };
-
-  await cleanupStaleContainers();
 
   const taskBundleLauncher = new TaskBundleLauncherImpl(taskBundleLauncherOptions);
   const taskBundleAssignmentRegistry = new TaskBundleAssignmentRegistry();
@@ -355,6 +368,7 @@ export async function startApp(): Promise<void> {
     mcpServers: config.mcpServers,
     workerNetworkName,
     sidecarImage: config.mcpSidecarImage,
+    controllerControlDir,
     authorizeToolCall: orchestrator.authorizeMcpToolCall.bind(orchestrator),
     authorizeResourceRead: orchestrator.authorizeMcpResourceRead.bind(orchestrator),
     executeNativeToolCall: orchestrator.executeNativeWorkerToolCall.bind(orchestrator),
@@ -381,6 +395,8 @@ export async function startApp(): Promise<void> {
     await stopWithLogging("sidecarManager.stop", sidecarManager?.stop.bind(sidecarManager));
     await stopWithLogging("hostMcpRegistry.close", () => hostMcpRegistry.close());
     await stopWithLogging("sandboxRunner.shutdown", sandboxRunner.shutdown?.bind(sandboxRunner));
+    await stopWithLogging("mainAgentAppServer.close", () => Promise.resolve(mainAgentAppServer.close()));
+    await stopWithLogging("controllerHeartbeat.stop", stopControllerHeartbeat);
     await stopWithLogging("workerImageManager.stop", () => workerImageManager.stop());
     if (hostfsServices) {
       await stopWithLogging("hostfs.webdav.stop", () => hostfsServices.webdavServer.stop());

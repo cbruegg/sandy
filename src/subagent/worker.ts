@@ -1,4 +1,5 @@
 import { type Input, type Thread, type ThreadEvent, type TodoListItem } from "@openai/codex-sdk";
+import { isHeartbeatFreshSync } from "../sandbox/heartbeat.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -39,6 +40,7 @@ type WorkerCommandProcessorOptions = {
 
 type WorkerCommandProcessor = {
   handleLine: (line: string) => Promise<void>;
+  shutdown: () => void;
 };
 
 function assertTaskStarted(taskStarted: boolean, commandType: HostCommand["type"]): void {
@@ -300,6 +302,13 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
     }
   };
 
+  const shutdown = (): void => {
+    currentAbort?.abort();
+    appServerSession?.cancelPendingAuthRefresh();
+    appServerSession?.close();
+    options.onShutdown();
+  };
+
   return {
     handleLine: (line: string) => {
       commandQueue = commandQueue.then(() => handleCommandLine(line)).catch((error) => {
@@ -307,6 +316,7 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
       });
       return commandQueue;
     },
+    shutdown,
   };
 }
 
@@ -337,24 +347,62 @@ export async function main(): Promise<void> {
 
   writeSubAgentEvent({ type: "worker_connected" });
 
+  let shutdownStarted = false;
+  const finishShutdown = (): void => {
+    if (shutdownStarted) {
+      return;
+    }
+    shutdownStarted = true;
+    shutdownResolver?.();
+    process.exit(0);
+  };
+
   const processor = createWorkerCommandProcessor({
     sendEvent: writeSubAgentEvent,
     env: process.env,
     applyWorkerCodexConfigPatch,
     startAppServerWorkerSession: async (options) => await AppServerWorkerSession.start(options),
-    onShutdown: () => {
-      shutdownResolver?.();
-      process.exit(0);
-    },
+    onShutdown: finishShutdown,
   });
+
+  const doShutdown = (reason: string): void => {
+    if (shutdownStarted) {
+      return;
+    }
+    logger.info("worker.shutting_down", { reason });
+    processor.shutdown();
+  };
 
   input.on("line", (line) => {
     void processor.handleLine(line);
   });
 
   input.on("close", () => {
-    shutdownResolver?.();
+    doShutdown("stdin_closed");
   });
+
+  // Watch the controller heartbeat file. If the host process dies without
+  // closing stdin (e.g. SIGKILL), the heartbeat will stop being refreshed
+  // and the container will self-terminate.
+  const heartbeatPath = process.env["SANDY_CONTROLLER_HEARTBEAT_PATH"];
+  const heartbeatTimeoutMs = Number(process.env["SANDY_CONTROLLER_HEARTBEAT_TIMEOUT_MS"] ?? 30_000);
+
+  if (heartbeatPath) {
+    // Poll at half the timeout so we notice a stale heartbeat promptly
+    // without checking more frequently than necessary.
+    const pollIntervalMs = Math.min(heartbeatTimeoutMs / 2, 5_000);
+    const interval = setInterval(() => {
+      try {
+        if (!isHeartbeatFreshSync(heartbeatPath, heartbeatTimeoutMs)) {
+          doShutdown("heartbeat_stale");
+        }
+      } catch {
+        // File missing — controller directory may be gone.
+        doShutdown("heartbeat_missing");
+      }
+    }, pollIntervalMs);
+    interval.unref();
+  }
 
   await waitForShutdown;
 }

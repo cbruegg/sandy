@@ -61,6 +61,8 @@ Use strict TypeScript with ES modules and 2-space indentation. Prefer small modu
 - `PascalCase` for classes and exported types
 - `camelCase` for functions and variables
 
+Sandy is an application, not a library. There is no stable public API surface; all exported symbols are internal implementation details and subject to change without notice. Do not add `@public` annotations or maintain exported functions solely for external consumption.
+
 Keep all user-facing strings in `messages.ts` instead of scattering literals through runtime logic. This includes any text the user can see through a channel such as Telegram task updates, prompts, status messages, errors, summaries, and button labels. Add new channel-visible strings there so future i18n work stays localized.
 
 There is no formatter or linter configured yet, so keep style consistent with the existing code and avoid unrelated reformatting, especially w.r.t. to indentation.
@@ -74,6 +76,7 @@ Do not make functions return a Promise when they can complete synchronously. Pre
 
 Tests use Bun's test runner via `bun test`. Place tests next to the related code as `*.test.ts`. High test coverage is expected for orchestration behavior, normalization, privilege routing, and failure handling. Prefer small fakes over networked or Docker-backed integration in unit tests.
 Do not make properties or parameters nullable merely to avoid constructing fakes or dummies in tests. Prefer explicit test doubles at the boundary so production dependencies stay accurately typed.
+Prefer `$projectDir/tmp` over `/tmp` when creating temporary files or directories during the dev/test cycle. Accessing `/tmp/` may require user approval on each invocation, while project-local `tmp/` avoids that friction.
 Do not commit without asking, unless the user specifically requested it.
 
 ## Maintenance
