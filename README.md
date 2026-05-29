@@ -30,6 +30,9 @@ If the config directory contains a sibling `skills/` folder, Sandy loads
 [skills](https://developers.openai.com/codex/skills) from there at startup.
 For the default config path, that means `~/.config/sandy/skills/`.
 
+Sandy also attempts to enable host-side memory via [MemPalace](https://github.com/MemPalace/mempalace).
+If MemPalace is unavailable, Sandy falls back to a no-op memory implementation and still starts normally.
+
 Example config:
 Commented entries below show built-in defaults. Uncommented values are required or example overrides.
 
@@ -128,6 +131,28 @@ SPOTIFY_CLIENT_SECRET = "your_client_secret_here"
 `agent.model` optionally overrides the Codex model used by both Sandy's main agent and worker sub-agents.
 If unset, Sandy lets Codex use its current built-in default model. For cheaper/faster runs, consider setting a
 small model such as `gpt-5.4-mini`.
+
+Memory behavior:
+
+- Sandy uses MemPalace as a local-first memory store when the Python `mempalace` package is installed and importable by `python3`.
+- By default, Sandy uses the palace at `~/.mempalace/palace`.
+- Sandy currently files trusted memories into one shared Sandy wing so they can be recalled across chats for the same controlling user.
+- Conversation entries and released sub-agent summaries are stored in separate MemPalace rooms.
+- Before each main-agent decision, Sandy searches for relevant memories and includes the top hits as additional context.
+- When Sandy launches a sub-agent task, those retrieved memories are also injected into the worker's initial input.
+- If MemPalace is missing or fails at runtime, Sandy logs a warning and continues without memory rather than refusing to boot.
+
+One way to install MemPalace is:
+
+```bash
+uv tool install mempalace
+```
+
+After installing the CLI, initialize the default palace once:
+
+```bash
+mempalace init ~/.mempalace/palace
+```
 
 Telegram auth behavior:
 

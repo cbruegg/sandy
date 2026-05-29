@@ -86,7 +86,7 @@ export function buildWorkerFollowUpInput(text: string, attachments: SharedAttach
 /**
  * Build a plain-text context block from host-retrieved relevant memories.
  * This block is injected into the sub-agent's initial task input so it has
- * background from past trusted work in the same chat.
+ * background from past trusted Sandy interactions.
  */
 function buildMemoryContextText(memories: RelevantMemory[]): string {
   if (memories.length === 0) {
@@ -94,7 +94,7 @@ function buildMemoryContextText(memories: RelevantMemory[]): string {
   }
 
   const lines = [
-    "Trusted memories from past work in this chat (provided by Sandy host, use when relevant):",
+    "Trusted memories from past Sandy interactions (provided by Sandy host, use when relevant):",
   ];
 
   for (const memory of memories) {

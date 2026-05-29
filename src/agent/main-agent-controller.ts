@@ -321,10 +321,10 @@ export function buildMainAgentPrompt(input: {
   const relevantMemoriesSection = input.relevantMemories.length > 0
     ? [
         "",
-        "Relevant trusted memories from past interactions in this chat (use only when helpful):",
-        ...input.relevantMemories.map((m, i) => {
+        "Relevant trusted memories from past Sandy interactions (use only when helpful):",
+        ...input.relevantMemories.map((m) => {
           const date = m.createdAt ? `[${m.createdAt.substring(0, 10)}] ` : "";
-          return `- Memory ${i + 1}: ${date}${m.text}`;
+          return `- ${date}${m.text}`;
         }),
       ]
     : [];

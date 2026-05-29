@@ -118,6 +118,7 @@ test("buildTaskSummaryInput requests a host-facing handoff summary", () => {
   const input = buildTaskSummaryInput();
 
   assert.match(input, /host-facing handoff summary/);
+  assert.match(input, /Potential memories:/);
   assert.match(input, /Do not emit any Sandy tool calls/);
   assert.match(input, /Artifacts:/);
 });

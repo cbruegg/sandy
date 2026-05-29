@@ -5,6 +5,7 @@ import {
   MEMPALACE_PALACE_PATH,
   MEMORY_ROOM_CONVERSATION,
   MEMORY_ROOM_TASK_SUMMARY,
+  SANDY_MEMORY_WING,
 } from "./constants.js";
 import type { MainAgentMemory, MemorySearchInput, RelevantMemory } from "./types.js";
 
@@ -89,8 +90,9 @@ function parseHelperOutput<T>(stdout: string): T {
  * MemPalace-backed memory service that uses a Python helper script wrapping
  * the `mempalace` package for search and write operations.
  *
- * Per-chat wing strategy: each chat ID becomes its own wing in the palace.
- * Rooms separate conversation history from task summaries.
+ * Sandy stores memories in one shared wing so recall can span chats for the
+ * single controlling user. Rooms separate conversation history from task
+ * summaries.
  */
 export class MemPalaceMainAgentMemory implements MainAgentMemory {
   private readonly palacePath: string;
@@ -109,7 +111,6 @@ export class MemPalaceMainAgentMemory implements MainAgentMemory {
         "search",
         "--palace", this.palacePath,
         "--query", input.query,
-        "--wing", input.chatId,
         "--results", String(MAX_RELEVANT_MEMORIES),
       ];
 
@@ -160,7 +161,7 @@ export class MemPalaceMainAgentMemory implements MainAgentMemory {
       const args = [
         "add",
         "--palace", this.palacePath,
-        "--wing", params.chatId,
+        "--wing", SANDY_MEMORY_WING,
         "--room", params.room,
         "--content", params.content,
         "--source-file", params.sourceLabel,

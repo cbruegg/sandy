@@ -203,6 +203,30 @@ test("buildMainAgentPrompt includes current date and time on every turn", () => 
   assert.match(deltaPrompt, /Current date and time: [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}/);
 });
 
+test("buildMainAgentPrompt renders relevant memories as plain bullets", () => {
+  const prompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    includeFullInstructions: true,
+    skills: [],
+    workerMcpServerIds: [],
+    httpTokens: {},
+    relevantMemories: [{
+      text: "The user prefers Bun over npm.",
+      wing: "sandy",
+      room: "conversation",
+      similarity: 0.9,
+      sourceFile: "user_message",
+      createdAt: "2026-04-01T00:00:00.000Z",
+    }],
+  });
+
+  assert.match(prompt, /Relevant trusted memories from past Sandy interactions/);
+  assert.match(prompt, /- \[2026-04-01\] The user prefers Bun over npm\./);
+  assert.doesNotMatch(prompt, /Memory 1:/);
+});
+
 test("buildMainAgentPrompt includes the precise decision schema", () => {
   const prompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
