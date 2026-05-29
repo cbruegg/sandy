@@ -38,6 +38,9 @@ function baseConfig(): Omit<SandyConfig, "channel"> {
     persistentMcpResourceApprovals: {},
     persistentHttpApprovals: {},
     persistentHostDirectoryApprovals: [],
+    memory: {
+      enabled: true,
+    },
     updateMode: "disabled",
     explicitImageOverrides: {
       workerImage: false,

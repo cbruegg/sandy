@@ -35,7 +35,7 @@ import { SkillService } from "./skills.js";
 import { randomUUID } from "node:crypto";
 import { createControlDir, removeControlDir, startHeartbeat } from "./sandbox/heartbeat.js";
 import { CodexAppServerClient } from "./codex-app-server-client/app-server-client.js";
-import { buildMainAgentMcpConfig } from "./mempalace-availability.js";
+import { buildMainAgentConfig, isMemPalaceAvailable } from "./mempalace-availability.js";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -144,14 +144,11 @@ export async function startApp(): Promise<void> {
 
   const skillService = new SkillService(config.configDirectory);
 
-  const mempalaceMcpConfig = buildMainAgentMcpConfig();
-  if (mempalaceMcpConfig) {
-    logger.info("mempalace.available", {
-      backend: "mempalace",
-    });
-  } else {
-    logger.info("mempalace.unavailable");
-  }
+  const mainAgentConfig = buildMainAgentConfig(config.configDirectory, config.memory.enabled);
+  const mempalaceAvailable = config.memory.enabled && isMemPalaceAvailable();
+  logger.info("memory.init", {
+    backend: mempalaceAvailable ? "mempalace" : "none",
+  });
 
   const mainAgent = new CodexMainAgentController(
     mainAgentAppServer,
@@ -159,7 +156,8 @@ export async function startApp(): Promise<void> {
     () => skillService.getSkills(),
     Object.keys(config.mcpServers),
     config.httpTokens,
-    mempalaceMcpConfig,
+    mainAgentConfig,
+    mempalaceAvailable,
   );
 
   const workerAccess = new ProxyAccess();

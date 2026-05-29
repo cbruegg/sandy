@@ -1,37 +1,35 @@
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import type {ThreadStartParams} from "./codex-app-server-client/generated/v2";
 
-/** Default MemPalace palace directory. */
-const MEMPALACE_PALACE_PATH = join(homedir(), ".mempalace", "palace");
+let cachedAvailable: boolean | null = null;
 
-let cachedAvailability: boolean | null = null;
-
-function isMemPalaceAvailable(): boolean {
-  if (cachedAvailability !== null) {
-    return cachedAvailability;
+export function isMemPalaceAvailable(): boolean {
+  if (cachedAvailable !== null) {
+    return cachedAvailable;
   }
 
-  const result = spawnSync("python3", ["-c", "import mempalace"], {
+  const result = spawnSync("uv", ["--version"], {
     stdio: ["ignore", "ignore", "ignore"],
     timeout: 5000,
   });
 
-  cachedAvailability = result.status === 0;
-  return cachedAvailability;
+  cachedAvailable = result.status === 0;
+  return cachedAvailable;
 }
 
-export function buildMainAgentMcpConfig(): ThreadStartParams["config"] | null {
-  if (!isMemPalaceAvailable()) {
-    return null;
+export function buildMainAgentConfig(configDirectory: string, enabled: boolean): ThreadStartParams["config"] {
+  if (!enabled || !isMemPalaceAvailable()) {
+    return {};
   }
+
+  const palacePath = join(configDirectory, "mempalace", "palace");
 
   return {
     mcp_servers: {
       mempalace: {
-        command: "python3",
-        args: ["-m", "mempalace.mcp_server", "--palace", MEMPALACE_PALACE_PATH],
+        command: "uv",
+        args: ["run", "--with", "mempalace", "python3", "-m", "mempalace.mcp_server", "--palace", palacePath],
       },
     },
   };

@@ -62,6 +62,9 @@ allowed_user_id = "@cbruegg:matrix.org"
 [agent]
 # model = "gpt-5.4-mini" # optional override, no default
 
+[memory]
+# enabled = true
+
 [worker]
 # image = "sandy-subagent:latest" # explicit override; otherwise Sandy uses a baked GHCR sha tag when present, or this local default
 # share_root = "/tmp/sandy-shares"
@@ -134,13 +137,15 @@ small model such as `gpt-5.4-mini`.
 
 Memory behavior:
 
-- Sandy auto-configures a MemPalace MCP server for its main agent when the Python `mempalace` package is installed and importable by `python3`.
-- By default, Sandy uses the palace at `~/.mempalace/palace`.
+- Sandy auto-configures a MemPalace MCP server for its main agent when `uv` is available on the host.
+- The palace is stored under Sandy's config directory (e.g. `~/.config/sandy/mempalace/palace`).
+- Memory is **enabled by default**. Set `memory.enabled = false` in the config file to disable it.
 - MemPalace memories are managed directly by the main agent via MCP tool calls. The main agent can search past memories and file new stable facts and preferences.
 - Sub-agents never see MemPalace or any memory tools; memory management stays main-agent-only.
-- If MemPalace is missing, Sandy simply starts without memory capabilities and continues normally.
+- Sub-agents are prompted in their summary turn to identify stable facts and preferences worth remembering, which the main agent may choose to store.
+- If `uv` is not installed, Sandy simply starts without memory capabilities and continues normally.
 
-To make MemPalace available, install the Python package (for example with `uv tool install mempalace` or `pip install mempalace`) and ensure `python3 -c "import mempalace"` succeeds.
+To make MemPalace available, install [uv](https://docs.astral.sh/uv/getting-started/installation/). Sandy uses `uv run --with mempalace` to manage the Python environment automatically — no separate `pip install` step is needed.
 
 Telegram auth behavior:
 

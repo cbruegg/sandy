@@ -163,7 +163,7 @@ function buildAppServerThreadStartParams(
 
 export function createMainAgentProfile(
   workingDirectory: string,
-  config?: ThreadStartParams["config"] | null,
+  config?: ThreadStartParams["config"],
 ): ThreadStartParams {
   return {
     sandbox: "read-only",

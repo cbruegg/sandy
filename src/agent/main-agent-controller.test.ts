@@ -123,7 +123,7 @@ test("CodexMainAgentController starts threads with read-only sandbox and working
   assert.equal(appServer.startedProfiles[0]?.sandbox, "read-only");
   assert.equal(appServer.startedProfiles[0]?.personality, "none");
   assert.match(appServer.startedProfiles[0]?.cwd ?? "", /^.+sandy-main-agent-/);
-  assert.equal(appServer.startedProfiles[0]?.config, null);
+  assert.equal(Object.keys(appServer.startedProfiles[0]?.config ?? {}).length, 0);
 });
 
 test("CodexMainAgentController passes MemPalace MCP config when mempalaceAvailable is true", async () => {
@@ -136,7 +136,7 @@ test("CodexMainAgentController passes MemPalace MCP config when mempalaceAvailab
       },
     },
   };
-  const controller = new CodexMainAgentController(appServer, null, () => [], [], {}, fakeConfig);
+  const controller = new CodexMainAgentController(appServer, null, () => [], [], {}, fakeConfig, true);
 
   await controller.decide(makeContext(["hello"]));
 

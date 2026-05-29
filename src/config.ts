@@ -212,6 +212,11 @@ function buildSandyConfigSchema(defaultImages: SandyImageDefaults) {
       http: {},
       host_directories: [],
     }),
+    memory: z.object({
+      enabled: z.boolean().default(true),
+    }).default({
+      enabled: true,
+    }),
     updates: z.object({
       mode: updateModeSchema.default(DEFAULT_UPDATE_MODE),
     }).default({
@@ -304,6 +309,9 @@ export type SandyConfig = {
   persistentMcpResourceApprovals: Record<string, string[]>;
   persistentHttpApprovals: Record<string, string[]>;
   persistentHostDirectoryApprovals: Array<{path: string; level: "read_only" | "read_write"}>;
+  memory: {
+    enabled: boolean;
+  };
   updateMode: SandyUpdateMode;
   // The resolved image values alone are not enough here because a user may
   // explicitly pin an image to the same string as the baked default. The
@@ -456,6 +464,9 @@ export function parseConfigToml(
       path: entry.path,
       level: entry.level,
     })),
+    memory: {
+      enabled: parsed.memory.enabled,
+    },
     updateMode: parsed.updates.mode,
     explicitImageOverrides: parsedFile.explicitImageOverrides,
   };

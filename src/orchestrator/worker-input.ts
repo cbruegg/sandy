@@ -81,5 +81,3 @@ export function buildWorkerFollowUpInput(text: string, attachments: SharedAttach
     })),
   };
 }
-
-

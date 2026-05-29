@@ -43,9 +43,11 @@ export class CodexMainAgentController implements MainAgentController {
    */
   private readonly httpTokens: Record<string, HttpTokenConfig>;
   /**
-   * Pre-built MemPalace MCP config for thread start, or null if unavailable.
+   * Pre-built main-agent config for thread start (e.g. MemPalace MCP server).
+   * An empty object means no extra servers are configured.
    */
-  private readonly mempalaceMcpConfig: ThreadStartParams["config"] | null;
+  private readonly mainAgentConfig: ThreadStartParams["config"];
+  private readonly mempalaceAvailable: boolean;
   /**
    * Active app-server thread IDs keyed by Sandy chat ID.
    * One chat may have at most one active thread at any time.
@@ -69,14 +71,16 @@ export class CodexMainAgentController implements MainAgentController {
     getSkills: () => SkillMetadata[] = () => [],
     workerMcpServerIds: string[] = [],
     httpTokens: Record<string, HttpTokenConfig> = {},
-    mempalaceMcpConfig: ThreadStartParams["config"] | null = null,
+    mainAgentConfig: ThreadStartParams["config"] = {},
+    mempalaceAvailable = false,
   ) {
     this.appServer = appServer;
     this.model = model;
     this.getSkills = getSkills;
     this.workerMcpServerIds = [...workerMcpServerIds].sort();
     this.httpTokens = {...httpTokens};
-    this.mempalaceMcpConfig = mempalaceMcpConfig;
+    this.mainAgentConfig = mainAgentConfig;
+    this.mempalaceAvailable = mempalaceAvailable;
   }
 
   async decide(context: DecideContext): Promise<MainAgentDecision> {
@@ -102,7 +106,7 @@ export class CodexMainAgentController implements MainAgentController {
       skills: this.getSkills(),
       workerMcpServerIds: this.workerMcpServerIds,
       httpTokens: this.httpTokens,
-      mempalaceAvailable: this.mempalaceMcpConfig !== null,
+      mempalaceAvailable: this.mempalaceAvailable,
     });
     const input: Input = [{ type: "text", text: prompt }];
     const decision = await this.runValidatedDecision(threadId, input, context);
@@ -211,7 +215,7 @@ export class CodexMainAgentController implements MainAgentController {
     }
     const workingDirectory = this.getOrCreateThreadDirectory(chatId);
     const profile = {
-      ...createMainAgentProfile(workingDirectory, this.mempalaceMcpConfig),
+      ...createMainAgentProfile(workingDirectory, this.mainAgentConfig),
       ...(this.model ? { model: this.model } : {}),
     };
     const threadId = await this.appServer.startThread(profile);

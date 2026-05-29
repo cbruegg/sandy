@@ -161,11 +161,6 @@ export class SandyOrchestrator {
           channelFormatting: this.channelFormatting,
         });
 
-        if (decision.action === "reply") {
-          await this.taskLifecycle.executeMainAgentDecision(session, event, decision);
-          return;
-        }
-
         await this.taskLifecycle.executeMainAgentDecision(session, event, decision);
         return;
       }

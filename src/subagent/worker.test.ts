@@ -120,7 +120,7 @@ test("buildTaskSummaryInput requests a host-facing handoff summary", () => {
   assert.match(input, /host-facing handoff summary/);
   assert.match(input, /Do not emit any Sandy tool calls/);
   assert.match(input, /Artifacts:/);
-  assert.doesNotMatch(input, /Potential memories:/);
+  assert.match(input, /Potential memories:/);
 });
 
 test("buildInitialTaskInput includes current date and time", () => {
