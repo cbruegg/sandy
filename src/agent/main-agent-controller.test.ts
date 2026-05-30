@@ -13,6 +13,7 @@ import type {
   AuthRefreshCallback,
   ServerRequestHandler,
 } from "../codex-app-server-client/app-server-client.js";
+import { createMainAgentProfile } from "./main-agent-controller.js";
 import type {ThreadStartParams} from "../codex-app-server-client/generated/v2";
 
 const testFormatting: ChannelFormatting = {
@@ -640,4 +641,17 @@ test("CodexMainAgentController clears the instruction refresh flag after exactly
   // Turn 3: flag cleared → normal incremental
   assert.match(appServer.threadInputs[2]?.[0] ?? "", /New visible chat entries since your last decision:/);
   assert.match(appServer.threadInputs[2]?.[0] ?? "", /Continue acting as Sandy's main orchestration controller/);
+});
+
+test("createMainAgentProfile uses read-only sandbox and given cwd", () => {
+  const profile = createMainAgentProfile("/tmp/sandy-main-agent-test");
+  assert.equal(profile.sandbox, "read-only");
+  assert.equal(profile.cwd, "/tmp/sandy-main-agent-test");
+  assert.equal(profile.personality, "none");
+  assert.equal("model" in profile, false);
+});
+
+test("createMainAgentProfile includes model when provided", () => {
+  const profile = createMainAgentProfile("/tmp/sandy-main-agent-test", undefined, "gpt-5.4-mini");
+  assert.equal(profile.model, "gpt-5.4-mini");
 });

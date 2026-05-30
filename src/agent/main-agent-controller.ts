@@ -16,12 +16,34 @@ import {sandyMcpServerId, workerToolEntries} from "../subagent/worker-tools.js";
 import {
   type AgentClient,
   type AuthRefreshCallback,
-  createMainAgentProfile,
   denyAllServerRequests,
 } from "../codex-app-server-client/app-server-client.js";
 import type { ServerRequest } from "../codex-app-server-client/generated/ServerRequest.js";
 import type { Input } from "@openai/codex-sdk";
 import type {ThreadStartParams} from "../codex-app-server-client/generated/v2";
+
+/**
+ * Create a thread-start profile for the main agent controller.
+ * Uses a read-only sandbox and "on-request" approval policy so the
+ * Codex app-server exposes all MCP tools to the model.
+ */
+export function createMainAgentProfile(
+  workingDirectory: string,
+  config?: ThreadStartParams["config"],
+  model?: string | null,
+): ThreadStartParams {
+  return {
+    sandbox: "read-only",
+    cwd: workingDirectory,
+    personality: "none",
+    // Use "on-request" instead of the default "never" so the Codex app-server
+    // exposes all MCP tools (including write/destructive ones) to the model.
+    // "untrusted" still hides some tools; "on-request" is fully permissive.
+    approvalPolicy: "on-request" as const,
+    config,
+    ...(model ? { model } : {}),
+  };
+}
 
 export interface MainAgentController {
   decide(context: DecideContext): Promise<MainAgentDecision>;
@@ -235,14 +257,7 @@ export class CodexMainAgentController implements MainAgentController {
       return existing;
     }
     const workingDirectory = this.getOrCreateThreadDirectory(chatId);
-    const profile = {
-      ...createMainAgentProfile(workingDirectory, this.mainAgentConfig),
-      ...(this.model ? { model: this.model } : {}),
-      // Use "on-request" instead of the default "never" so the Codex app-server
-      // exposes all MCP tools (including write/destructive ones) to the model.
-      // "untrusted" still hides some tools; "on-request" is fully permissive.
-      approvalPolicy: "on-request" as const,
-    };
+    const profile = createMainAgentProfile(workingDirectory, this.mainAgentConfig, this.model);
     const threadId = await this.appServer.startThread(profile);
     this.threadIds.set(chatId, threadId);
     logger.debug("main_agent.thread_started", {

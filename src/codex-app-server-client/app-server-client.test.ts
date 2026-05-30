@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { PassThrough, Writable } from "node:stream";
-import { CodexAppServerClient, createMainAgentProfile, denyAllServerRequests, type ServerRequestHandler } from "./app-server-client.js";
+import { CodexAppServerClient, denyAllServerRequests, type ServerRequestHandler } from "./app-server-client.js";
 import type { ChatGPTExternalTokens } from "../types.js";
 import { configureLogger, type LogLevel } from "../logger.js";
 import type {ThreadStartParams} from "./generated/v2";
@@ -1101,13 +1101,6 @@ test("denyAllServerRequests declines MCP elicitation and denies command/file app
     params: {},
   } as unknown as Parameters<typeof denyAllServerRequests>[0]);
   assert.equal(result, null);
-});
-
-test("createMainAgentProfile uses read-only sandbox and given cwd", () => {
-  const profile = createMainAgentProfile("/tmp/sandy-main-agent-test");
-  assert.equal(profile.sandbox, "read-only");
-  assert.equal(profile.cwd, "/tmp/sandy-main-agent-test");
-  assert.equal(profile.personality, "none");
 });
 
 test("TEST_WORKER_PROFILE uses danger-full-access sandbox and workspace share", () => {

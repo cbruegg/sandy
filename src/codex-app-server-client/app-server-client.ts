@@ -174,18 +174,6 @@ function buildAppServerThreadStartParams(
   };
 }
 
-export function createMainAgentProfile(
-  workingDirectory: string,
-  config?: ThreadStartParams["config"],
-): ThreadStartParams {
-  return {
-    sandbox: "read-only",
-    cwd: workingDirectory,
-    personality: "none",
-    config,
-  };
-}
-
 /**
  * Default server-request handler that denies/declines every known
  * request type and returns null (method-not-found) for unknown types.
