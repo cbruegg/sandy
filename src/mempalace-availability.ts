@@ -2,7 +2,6 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import type {ThreadStartParams} from "./codex-app-server-client/generated/v2";
 import { logger } from "./logger.js";
 
 let cachedAvailable: boolean | null = null;
@@ -81,23 +80,19 @@ export function isMemPalaceAvailable(): boolean {
   return cachedAvailable;
 }
 
-export function buildMainAgentConfig(configDirectory: string, enabled: boolean): ThreadStartParams["config"] {
+export function buildMempalaceMcpServerConfig(configDirectory: string, enabled: boolean): { command: string, args: string[] } | null {
   if (!enabled || !isMemPalaceAvailable()) {
-    return {};
+    return null;
   }
 
   const palacePath = join(configDirectory, "mempalace", "palace");
 
   if (!ensurePalaceInitialized(palacePath)) {
-    return {};
+    return null;
   }
 
   return {
-    mcp_servers: {
-      mempalace: {
-        command: "uv",
-        args: ["run", "--with", "mempalace", "python3", "-m", "mempalace.mcp_server", "--palace", palacePath],
-      },
-    },
-  };
+    command: "uv",
+    args: ["run", "--with", "mempalace", "python3", "-m", "mempalace.mcp_server", "--palace", palacePath],
+  }
 }
