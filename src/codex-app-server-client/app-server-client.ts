@@ -14,6 +14,13 @@ import type { TurnStartParams } from "./generated/v2/TurnStartParams.js";
 import type { TurnStartResponse } from "./generated/v2/TurnStartResponse.js";
 import type { TurnInterruptParams } from "./generated/v2/TurnInterruptParams.js";
 import type { ChatgptAuthTokensRefreshResponse } from "./generated/v2/ChatgptAuthTokensRefreshResponse.js";
+import type { McpServerElicitationRequestResponse } from "./generated/v2/McpServerElicitationRequestResponse.js";
+import type { CommandExecutionRequestApprovalResponse } from "./generated/v2/CommandExecutionRequestApprovalResponse.js";
+import type { FileChangeRequestApprovalResponse } from "./generated/v2/FileChangeRequestApprovalResponse.js";
+import type { PermissionsRequestApprovalResponse } from "./generated/v2/PermissionsRequestApprovalResponse.js";
+import type { ToolRequestUserInputResponse } from "./generated/v2/ToolRequestUserInputResponse.js";
+import type { ApplyPatchApprovalResponse } from "./generated/ApplyPatchApprovalResponse.js";
+import type { ExecCommandApprovalResponse } from "./generated/ExecCommandApprovalResponse.js";
 
 type PendingRequest<T = unknown> = {
   resolve: (result: T) => void;
@@ -44,6 +51,8 @@ const ignoredNotificationMethods = new Set([
   // assistant message text and ignores intermediate delta notifications.
   "item/agentMessage/delta",
   "mcpServer/startupStatus/updated",
+  // Fired after an elicitation/approval request is resolved by the client.
+  "serverRequest/resolved",
   "skills/changed",
   "thread/started",
   "thread/status/changed",
@@ -156,7 +165,7 @@ function buildAppServerThreadStartParams(
 ): ThreadStartParams {
   return {
     ...profile,
-    approvalPolicy: "never",
+    approvalPolicy: profile.approvalPolicy ?? "never",
     personality: profile.personality ?? "none",
   };
 }
@@ -297,6 +306,85 @@ export class CodexAppServerClient implements AgentClient {
               });
             });
         }
+        return;
+
+      case "mcpServer/elicitation/request": {
+        const isMemPalace = request.params.serverName === "mempalace";
+        this.writeJsonRpcMessage({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: {
+            action: isMemPalace ? "accept" : "decline" as const,
+            content: null,
+            _meta: null,
+          } satisfies McpServerElicitationRequestResponse,
+        });
+        logger.debug("appserver.mcp_elicitation_responded", {
+          serverName: request.params.serverName,
+          action: isMemPalace ? "accept" : "decline",
+        });
+        return;
+      }
+
+      case "item/commandExecution/requestApproval":
+        this.writeJsonRpcMessage({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: {
+            decision: "decline" as const,
+          } satisfies CommandExecutionRequestApprovalResponse,
+        });
+        return;
+
+      case "item/fileChange/requestApproval":
+        this.writeJsonRpcMessage({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: {
+            decision: "decline" as const,
+          } satisfies FileChangeRequestApprovalResponse,
+        });
+        return;
+
+      case "item/permissions/requestApproval":
+        this.writeJsonRpcMessage({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: {
+            permissions: {},
+            scope: "turn" as const,
+          } satisfies PermissionsRequestApprovalResponse,
+        });
+        return;
+
+      case "item/tool/requestUserInput":
+        this.writeJsonRpcMessage({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: {
+            answers: {},
+          } satisfies ToolRequestUserInputResponse,
+        });
+        return;
+
+      case "applyPatchApproval":
+        this.writeJsonRpcMessage({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: {
+            decision: "denied" as const,
+          } satisfies ApplyPatchApprovalResponse,
+        });
+        return;
+
+      case "execCommandApproval":
+        this.writeJsonRpcMessage({
+          jsonrpc: "2.0",
+          id: request.id,
+          result: {
+            decision: "denied" as const,
+          } satisfies ExecCommandApprovalResponse,
+        });
         return;
 
       default:

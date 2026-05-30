@@ -217,6 +217,10 @@ export class CodexMainAgentController implements MainAgentController {
     const profile = {
       ...createMainAgentProfile(workingDirectory, this.mainAgentConfig),
       ...(this.model ? { model: this.model } : {}),
+      // Use "on-request" instead of the default "never" so the Codex app-server
+      // exposes all MCP tools (including write/destructive ones) to the model.
+      // "untrusted" still hides some tools; "on-request" is fully permissive.
+      approvalPolicy: "on-request" as const,
     };
     const threadId = await this.appServer.startThread(profile);
     this.threadIds.set(chatId, threadId);
