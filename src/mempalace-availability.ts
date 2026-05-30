@@ -27,11 +27,10 @@ function ensurePalaceInitialized(palacePath: string): boolean {
     // The `--yes` flag skips entity detection prompts but NOT the
     // "Mine this directory now?" prompt. Pipe "y\n" to auto-confirm it.
     const result = spawnSync("uv", [
-      "run", "--with", "mempalace", "mempalace", "init", tempDir, "--yes", "--no-llm",
+      "run", "--with", "mempalace", "mempalace", "--palace", palacePath, "init", tempDir, "--auto-mine", "--yes", "--no-llm"
     ], {
       input: "y\n",
       encoding: "utf-8",
-      env: { ...process.env, MEMPALACE_PALACE_PATH: palacePath },
       timeout: PALACE_INIT_TIMEOUT,
     });
 
@@ -39,7 +38,7 @@ function ensurePalaceInitialized(palacePath: string): boolean {
 
     if (result.status !== 0) {
       const stderr = result.stderr?.toString().trim() || "";
-      logger.error("mempalace.init_failed", {
+      logger.error("mempalace.init_failed", null, undefined, {
         palacePath,
         exitCode: result.status,
         stderr: stderr || "(no output)",
@@ -58,7 +57,7 @@ function ensurePalaceInitialized(palacePath: string): boolean {
     return created;
   } catch (error) {
     palaceInitAttempted = true;
-    logger.error("mempalace.init_failed", {
+    logger.error("mempalace.init_failed", null, undefined, {
       palacePath,
       error: error instanceof Error ? error.message : String(error),
     });
