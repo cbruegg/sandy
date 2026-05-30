@@ -1,7 +1,7 @@
 import { logger } from "../logger.js";
 import type { Input } from "@openai/codex-sdk";
 import type { ChatGPTExternalTokens, SubAgentEvent } from "../types.js";
-import { CodexAppServerClient } from "../codex-app-server-client/app-server-client.js";
+import { CodexAppServerClient, denyAllServerRequests } from "../codex-app-server-client/app-server-client.js";
 import { writeSubAgentEvent } from "./subagent-event-writer.js";
 import { buildTaskSummaryInput } from "./worker-prompt.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.ts";
@@ -74,6 +74,7 @@ export async function streamAppServerTurn(options: StreamAppServerTaskTurnOption
       options.input,
       options.onAuthRefresh,
       options.abortSignal,
+      (req) => Promise.resolve(denyAllServerRequests(req)),
     )) {
       logger.debug("appserver.event_received", { eventType: event.method, event });
 
@@ -127,6 +128,7 @@ async function streamAppServerSummary(options: StreamAppServerSummaryOptions): P
       options.input,
       options.onAuthRefresh,
       options.abortSignal,
+      (req) => Promise.resolve(denyAllServerRequests(req)),
     )) {
       logger.debug("appserver.event_received", { eventType: event.method, event });
 

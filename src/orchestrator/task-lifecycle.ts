@@ -128,6 +128,7 @@ export class OrchestratorTaskLifecycle {
         const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskId);
         const taskBrief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
         const initialInput = buildTaskInputPayload(stagedAttachments);
+
         logger.info("task.launching", {
           chatId: event.chatId,
           taskId,
@@ -202,6 +203,7 @@ export class OrchestratorTaskLifecycle {
       timestamp,
       text: session.pendingTaskSummary.summary,
     }];
+
     session.pendingTaskSummary = null;
     return releasedEntries;
   }

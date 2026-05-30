@@ -123,6 +123,7 @@ export function buildTaskSummaryInput(): string {
     "Summary: <what you accomplished and the current state>",
     "Artifacts: <files created or updated in /workspace/share, or \"none\">",
     "Open questions: <remaining blockers, follow-ups, or \"none\">",
+    "Potential memories: <stable facts, user preferences, or longer-lived context worth remembering, or \"none\">",
   ].join("\n");
 }
 

@@ -30,6 +30,10 @@ If the config directory contains a sibling `skills/` folder, Sandy loads
 [skills](https://developers.openai.com/codex/skills) from there at startup.
 For the default config path, that means `~/.config/sandy/skills/`.
 
+Sandy also attempts to enable host-side memory via [MemPalace](https://github.com/MemPalace/mempalace).
+To make MemPalace available, install [uv](https://docs.astral.sh/uv/getting-started/installation/). When memory is enabled, Sandy runs MemPalace via `uv run --with mempalace python3 -m mempalace.mcp_server`, which automatically downloads MemPalace if needed.
+If MemPalace is unavailable, memory will be disabled.
+
 Example config:
 Commented entries below show built-in defaults. Uncommented values are required or example overrides.
 
@@ -58,6 +62,9 @@ allowed_user_id = "@cbruegg:matrix.org"
 
 [agent]
 # model = "gpt-5.4-mini" # optional override, no default
+
+[memory]
+# enabled = true
 
 [worker]
 # image = "sandy-subagent:latest" # explicit override; otherwise Sandy uses a baked GHCR sha tag when present, or this local default
@@ -128,6 +135,16 @@ SPOTIFY_CLIENT_SECRET = "your_client_secret_here"
 `agent.model` optionally overrides the Codex model used by both Sandy's main agent and worker sub-agents.
 If unset, Sandy lets Codex use its current built-in default model. For cheaper/faster runs, consider setting a
 small model such as `gpt-5.4-mini`.
+
+Memory behavior:
+
+- Sandy auto-configures a MemPalace MCP server for its main agent when `uv` is available on the host.
+- The palace is stored under Sandy's config directory (e.g. `~/.config/sandy/mempalace/palace`).
+- Memory is **enabled by default**. Set `memory.enabled = false` in the config file to disable it.
+- MemPalace memories are managed directly by the main agent via MCP tool calls. The main agent can search past memories and file new stable facts and preferences.
+- Sub-agents never see MemPalace or any memory tools; memory management stays main-agent-only.
+- Sub-agents are prompted in their summary turn to identify stable facts and preferences worth remembering, which the main agent may choose to store.
+- If `uv` is not installed, Sandy simply starts without memory capabilities and continues normally.
 
 Telegram auth behavior:
 
@@ -505,8 +522,7 @@ non-deterministic components such as the LLM and TTS providers should be mocked 
 - Add support for more channels, such as Discord, Slack, etc.
 - Add support for more LLM providers, such as Anthropic, etc.
 - Add support for more TTS providers, such as Google Cloud Speech-to-Text, AWS
-- Add support for scheduled tasks, allowing sub-agents to schedule tasks for later execution, 
+- Add support for scheduled tasks, allowing sub-agents to schedule tasks for later execution,
   and notify the user when they are executed.
-- Add support for memory.
 - Add tools for audio and video transcription
 - Add support for sandboxed headless browser use

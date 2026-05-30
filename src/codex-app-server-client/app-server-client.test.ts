@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { PassThrough, Writable } from "node:stream";
-import { CodexAppServerClient, createMainAgentProfile } from "./app-server-client.js";
+import { CodexAppServerClient, denyAllServerRequests, type ServerRequestHandler } from "./app-server-client.js";
 import type { ChatGPTExternalTokens } from "../types.js";
 import { configureLogger, type LogLevel } from "../logger.js";
 import type {ThreadStartParams} from "./generated/v2";
@@ -827,11 +827,280 @@ test("CodexAppServerClient yields item/started with non-compaction types", async
   ]);
 });
 
-test("createMainAgentProfile uses read-only sandbox and given cwd", () => {
-  const profile = createMainAgentProfile("/tmp/sandy-main-agent-test");
-  assert.equal(profile.sandbox, "read-only");
-  assert.equal(profile.cwd, "/tmp/sandy-main-agent-test");
-  assert.equal(profile.personality, "none");
+test("CodexAppServerClient delegates mcpServer/elicitation/request to onServerRequest callback", async () => {
+  const child = new FakeChildProcess();
+  const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
+  const tokens: ChatGPTExternalTokens = {
+    accessToken: "access-token",
+    chatgptAccountId: "acct-123",
+    chatgptPlanType: "plus",
+  };
+  const client = await createExternalTokensClient(spawnImpl, child, tokens);
+
+  const startThreadPromise = client.startThread(TEST_WORKER_PROFILE);
+  await Promise.resolve();
+  respond(child, 3, { thread: { id: "thread-1" } });
+  const threadId = await startThreadPromise;
+
+  const serverRequestCalls: Array<{ method: string; params: unknown }> = [];
+  const handler: ServerRequestHandler = async (request) => {
+    serverRequestCalls.push({ method: request.method, params: request.params });
+    if (request.method === "mcpServer/elicitation/request" && request.params.serverName === "mempalace") {
+      return { action: "accept", content: null, _meta: null };
+    }
+    return { action: "decline", content: null, _meta: null };
+  };
+
+  const streamPromise = (async () => {
+    const events: Array<{ method: string; params?: unknown }> = [];
+    for await (const event of client.streamTurn(
+      threadId,
+      [{ type: "text", text: "hello" }],
+      async () => tokens,
+      undefined,
+      handler,
+    )) {
+      events.push(event);
+    }
+    return events;
+  })();
+
+  await Promise.resolve();
+  respond(child, 4, {});
+  await new Promise((resolve) => setImmediate(resolve));
+
+  child.stdout.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    id: 55,
+    method: "mcpServer/elicitation/request",
+    params: {
+      serverName: "mempalace",
+      requestId: "req-1",
+    },
+  })}\n`);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const messages = parseWrittenJsonLines(child);
+  assert.deepEqual(messages.at(-1), {
+    jsonrpc: "2.0",
+    id: 55,
+    result: {
+      action: "accept",
+      content: null,
+      _meta: null,
+    },
+  });
+
+  child.stdout.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    id: 56,
+    method: "mcpServer/elicitation/request",
+    params: {
+      serverName: "other-server",
+      requestId: "req-2",
+    },
+  })}\n`);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const messages2 = parseWrittenJsonLines(child);
+  assert.deepEqual(messages2.at(-1), {
+    jsonrpc: "2.0",
+    id: 56,
+    result: {
+      action: "decline",
+      content: null,
+      _meta: null,
+    },
+  });
+
+  assert.equal(serverRequestCalls.length, 2);
+  assert.deepEqual(serverRequestCalls[0], { method: "mcpServer/elicitation/request", params: { serverName: "mempalace", requestId: "req-1" } });
+  assert.deepEqual(serverRequestCalls[1], { method: "mcpServer/elicitation/request", params: { serverName: "other-server", requestId: "req-2" } });
+
+  // Complete turn
+  child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method: "turn/completed", params: {} })}\n`);
+  await streamPromise;
+});
+
+test("CodexAppServerClient returns method-not-found when onServerRequest callback returns null", async () => {
+  const child = new FakeChildProcess();
+  const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
+  const tokens: ChatGPTExternalTokens = {
+    accessToken: "access-token",
+    chatgptAccountId: "acct-123",
+    chatgptPlanType: "plus",
+  };
+  const client = await createExternalTokensClient(spawnImpl, child, tokens);
+
+  const startThreadPromise = client.startThread(TEST_WORKER_PROFILE);
+  await Promise.resolve();
+  respond(child, 3, { thread: { id: "thread-1" } });
+  const threadId = await startThreadPromise;
+
+  const logs: Array<{ level: LogLevel; event: string; data?: Record<string, unknown> }> = [];
+  configureLogger({
+    minLevel: "debug",
+    forwardLog: (payload) => {
+      logs.push({ level: payload.level, event: payload.event, data: payload.data });
+    },
+  });
+
+  try {
+    const handler: ServerRequestHandler = async () => null;
+
+    const streamPromise = (async () => {
+      const events: Array<{ method: string; params?: unknown }> = [];
+      for await (const event of client.streamTurn(
+        threadId,
+        [{ type: "text", text: "hello" }],
+        async () => tokens,
+        undefined,
+        handler,
+      )) {
+        events.push(event);
+      }
+      return events;
+    })();
+
+    await Promise.resolve();
+    respond(child, 4, {});
+    await new Promise((resolve) => setImmediate(resolve));
+
+    child.stdout.write(`${JSON.stringify({
+      jsonrpc: "2.0",
+      id: 66,
+      method: "attestation/generate",
+      params: { attestationKind: "attestation" },
+    })}\n`);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const messages = parseWrittenJsonLines(child);
+    assert.deepEqual(messages.at(-1), {
+      jsonrpc: "2.0",
+      id: 66,
+      error: {
+        code: -32601,
+        message: "Method not found: attestation/generate",
+      },
+    });
+
+    const warnLog = logs.find((entry) => entry.event === "appserver.server_request_unhandled");
+    assert.ok(warnLog);
+
+    // Complete the turn so the stream resolves.
+    child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method: "turn/completed", params: {} })}\n`);
+    await streamPromise;
+  } finally {
+    configureLogger({
+      minLevel: "info",
+      outputMode: "split",
+      forwardLog: undefined,
+    });
+  }
+});
+
+test("CodexAppServerClient does not hardcode mempalace MCP elicitation response without callback", async () => {
+  const child = new FakeChildProcess();
+  const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
+  const tokens: ChatGPTExternalTokens = {
+    accessToken: "access-token",
+    chatgptAccountId: "acct-123",
+    chatgptPlanType: "plus",
+  };
+  const client = await createExternalTokensClient(spawnImpl, child, tokens);
+
+  const startThreadPromise = client.startThread(TEST_WORKER_PROFILE);
+  await Promise.resolve();
+  respond(child, 3, { thread: { id: "thread-1" } });
+  const threadId = await startThreadPromise;
+
+  const streamPromise = (async () => {
+    const events: Array<{ method: string; params?: unknown }> = [];
+    for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async () => tokens)) {
+      events.push(event);
+    }
+    return events;
+  })();
+
+  await Promise.resolve();
+  respond(child, 4, {});
+  await new Promise((resolve) => setImmediate(resolve));
+
+  // Without callback, mempalace MCP elicitation should NOT be auto-accepted.
+  child.stdout.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    id: 77,
+    method: "mcpServer/elicitation/request",
+    params: {
+      serverName: "mempalace",
+      requestId: "req-mp",
+    },
+  })}\n`);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const messages = parseWrittenJsonLines(child);
+  // Expect method-not-found (or deny) — definitely NOT an accept.
+  const lastMessage = messages.at(-1) as Record<string, unknown>;
+  assert.ok(lastMessage);
+  // Verify it's not an accept response.
+  assert.ok(
+    !lastMessage["result"] || (lastMessage["result"] as Record<string, unknown>)?.["action"] !== "accept",
+    "Client must not auto-accept mempalace without a callback",
+  );
+
+  // Complete turn
+  child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method: "turn/completed", params: {} })}\n`);
+  await streamPromise;
+});
+
+test("denyAllServerRequests declines MCP elicitation and denies command/file approvals", () => {
+  // MCP elicitation → decline
+  let result = denyAllServerRequests({
+    method: "mcpServer/elicitation/request",
+    id: 1,
+    params: { serverName: "any-server", requestId: "r1" },
+  } as unknown as Parameters<typeof denyAllServerRequests>[0]);
+  assert.deepEqual(result, { action: "decline", content: null, _meta: null });
+
+  // Command execution → decline
+  result = denyAllServerRequests({
+    method: "item/commandExecution/requestApproval",
+    id: 1,
+    params: { command: "ls" },
+  } as unknown as Parameters<typeof denyAllServerRequests>[0]);
+  assert.deepEqual(result, { decision: "decline" });
+
+  // File change → decline
+  result = denyAllServerRequests({
+    method: "item/fileChange/requestApproval",
+    id: 1,
+    params: { filePath: "test.txt" },
+  } as unknown as Parameters<typeof denyAllServerRequests>[0]);
+  assert.deepEqual(result, { decision: "decline" });
+
+  // applyPatchApproval → denied
+  result = denyAllServerRequests({
+    method: "applyPatchApproval",
+    id: 1,
+    params: { filePath: "test.txt" },
+  } as unknown as Parameters<typeof denyAllServerRequests>[0]);
+  assert.deepEqual(result, { decision: "denied" });
+
+  // execCommandApproval → denied
+  result = denyAllServerRequests({
+    method: "execCommandApproval",
+    id: 1,
+    params: { command: "ls" },
+  } as unknown as Parameters<typeof denyAllServerRequests>[0]);
+  assert.deepEqual(result, { decision: "denied" });
+
+  // Unknown method → null (method-not-found)
+  result = denyAllServerRequests({
+    method: "unknown/method",
+    id: 1,
+    params: {},
+  } as unknown as Parameters<typeof denyAllServerRequests>[0]);
+  assert.equal(result, null);
 });
 
 test("TEST_WORKER_PROFILE uses danger-full-access sandbox and workspace share", () => {

@@ -16,9 +16,34 @@ import {sandyMcpServerId, workerToolEntries} from "../subagent/worker-tools.js";
 import {
   type AgentClient,
   type AuthRefreshCallback,
-  createMainAgentProfile,
+  denyAllServerRequests,
 } from "../codex-app-server-client/app-server-client.js";
+import type { ServerRequest } from "../codex-app-server-client/generated/ServerRequest.js";
 import type { Input } from "@openai/codex-sdk";
+import type {ThreadStartParams} from "../codex-app-server-client/generated/v2";
+
+/**
+ * Create a thread-start profile for the main agent controller.
+ * Uses a read-only sandbox and "on-request" approval policy so the
+ * Codex app-server exposes all MCP tools to the model.
+ */
+export function createMainAgentProfile(
+  workingDirectory: string,
+  config?: ThreadStartParams["config"],
+  model?: string | null,
+): ThreadStartParams {
+  return {
+    sandbox: "read-only",
+    cwd: workingDirectory,
+    personality: "none",
+    // Use "on-request" instead of the default "never" so the Codex app-server
+    // exposes all MCP tools (including write/destructive ones) to the model.
+    // "untrusted" still hides some tools; "on-request" is fully permissive.
+    approvalPolicy: "on-request" as const,
+    config,
+    ...(model ? { model } : {}),
+  };
+}
 
 export interface MainAgentController {
   decide(context: DecideContext): Promise<MainAgentDecision>;
@@ -42,6 +67,12 @@ export class CodexMainAgentController implements MainAgentController {
    */
   private readonly httpTokens: Record<string, HttpTokenConfig>;
   /**
+   * Pre-built main-agent config for thread start (e.g. MemPalace MCP server).
+   * An empty object means no extra servers are configured.
+   */
+  private readonly mainAgentConfig: ThreadStartParams["config"];
+  private readonly mempalaceAvailable: boolean;
+  /**
    * Active app-server thread IDs keyed by Sandy chat ID.
    * One chat may have at most one active thread at any time.
    */
@@ -64,12 +95,16 @@ export class CodexMainAgentController implements MainAgentController {
     getSkills: () => SkillMetadata[] = () => [],
     workerMcpServerIds: string[] = [],
     httpTokens: Record<string, HttpTokenConfig> = {},
+    mainAgentConfig: ThreadStartParams["config"] = {},
+    mempalaceAvailable = false,
   ) {
     this.appServer = appServer;
     this.model = model;
     this.getSkills = getSkills;
     this.workerMcpServerIds = [...workerMcpServerIds].sort();
     this.httpTokens = {...httpTokens};
+    this.mainAgentConfig = mainAgentConfig;
+    this.mempalaceAvailable = mempalaceAvailable;
   }
 
   async decide(context: DecideContext): Promise<MainAgentDecision> {
@@ -95,6 +130,7 @@ export class CodexMainAgentController implements MainAgentController {
       skills: this.getSkills(),
       workerMcpServerIds: this.workerMcpServerIds,
       httpTokens: this.httpTokens,
+      mempalaceAvailable: this.mempalaceAvailable,
     });
     const input: Input = [{ type: "text", text: prompt }];
     const decision = await this.runValidatedDecision(threadId, input, context);
@@ -121,6 +157,8 @@ export class CodexMainAgentController implements MainAgentController {
         threadId,
         nextInput,
         noopAuthRefresh,
+        undefined,
+        (req) => Promise.resolve(this.createServerRequestHandler(req)),
       )) {
         switch (event.method) {
           case "item/completed":
@@ -196,16 +234,30 @@ export class CodexMainAgentController implements MainAgentController {
     throw new Error("Unreachable.");
   }
 
+  private createServerRequestHandler(request: ServerRequest): Record<string, unknown> | null {
+    // Accept mempalace MCP elicitation; delegate everything else to the deny-all default.
+    if (request.method === "mcpServer/elicitation/request" && request.params.serverName === "mempalace") {
+      logger.debug("main_agent.mcp_elicitation_accepted", {
+        serverName: request.params.serverName,
+      });
+      return { action: "accept" as const, content: null, _meta: null };
+    }
+    const result = denyAllServerRequests(request);
+    if (result !== null && request.method === "mcpServer/elicitation/request") {
+      logger.debug("main_agent.mcp_elicitation_declined", {
+        serverName: request.params.serverName,
+      });
+    }
+    return result;
+  }
+
   private async getOrCreateThreadId(chatId: string): Promise<string> {
     const existing = this.threadIds.get(chatId);
     if (existing) {
       return existing;
     }
     const workingDirectory = this.getOrCreateThreadDirectory(chatId);
-    const profile = {
-      ...createMainAgentProfile(workingDirectory),
-      ...(this.model ? { model: this.model } : {}),
-    };
+    const profile = createMainAgentProfile(workingDirectory, this.mainAgentConfig, this.model);
     const threadId = await this.appServer.startThread(profile);
     this.threadIds.set(chatId, threadId);
     logger.debug("main_agent.thread_started", {
@@ -250,6 +302,7 @@ export function buildMainAgentPrompt(input: {
   skills: SkillMetadata[];
   workerMcpServerIds: string[];
   httpTokens: Record<string, HttpTokenConfig>;
+  mempalaceAvailable: boolean;
 }): string {
   const intro = input.includeFullInstructions
     ? [
@@ -314,6 +367,22 @@ export function buildMainAgentPrompt(input: {
       ]
     : [];
 
+  const mempalaceSection = input.includeFullInstructions && input.mempalaceAvailable
+    ? [
+        "",
+        "A MemPalace memory server is available to you via MCP. Before doing anything else, call mempalace_status to check connection health and available operations.",
+        "Use MCP tool discovery to list its tools. Use it to:",
+        "- Search memories before answering questions about past events, decisions, user preferences or other information you are currently unaware of but that the user may have mentioned in other conversations.",
+        "- File stable facts, preferences, and longer-lived context worth remembering. Do this especially whenever the user asks you to remember or save something.",
+        "- Never delegate memory management to sub-agents.",
+        "- Prefer current visible chat context over older memories.",
+        "- Do not assume a memory is authoritative if it conflicts with current user input.",
+        "- Before writing a task brief, search for memories relevant to the task. Include any pertinent stored facts, user preferences, or past decisions in the task brief so the sub-agent benefits from that context.",
+        "- Return your decision JSON after optional tool use.",
+        "- When you save or update a memory, briefly acknowledge it in your replyText so the user knows their information has been remembered.",
+      ]
+    : [];
+
   return [
     formatDateTimePrefix(),
     ...intro,
@@ -321,6 +390,7 @@ export function buildMainAgentPrompt(input: {
     ...workerMcpSection,
     ...httpTokenSection,
     ...sandyToolsSection,
+    ...mempalaceSection,
     "",
     "Required JSON schema:",
     JSON.stringify(mainAgentDecisionPromptSchema, null, 2),

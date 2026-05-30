@@ -11,7 +11,9 @@ import type { HttpTokenConfig } from "../config.js";
 import type {
   AgentClient, AppServerEvent,
   AuthRefreshCallback,
+  ServerRequestHandler,
 } from "../codex-app-server-client/app-server-client.js";
+import { createMainAgentProfile } from "./main-agent-controller.js";
 import type {ThreadStartParams} from "../codex-app-server-client/generated/v2";
 
 const testFormatting: ChannelFormatting = {
@@ -73,6 +75,7 @@ class FakeAppServerClient implements AgentClient {
     input: Input,
     _onAuthRefresh: AuthRefreshCallback,
     _abortSignal?: AbortSignal,
+    _onServerRequest?: ServerRequestHandler,
   ): AsyncGenerator<AppServerEvent> {
     const promptText = (Array.isArray(input) && input[0]?.type === "text")
       ? input[0].text
@@ -123,6 +126,27 @@ test("CodexMainAgentController starts threads with read-only sandbox and working
   assert.equal(appServer.startedProfiles[0]?.sandbox, "read-only");
   assert.equal(appServer.startedProfiles[0]?.personality, "none");
   assert.match(appServer.startedProfiles[0]?.cwd ?? "", /^.+sandy-main-agent-/);
+  assert.equal(Object.keys(appServer.startedProfiles[0]?.config ?? {}).length, 0);
+});
+
+test("CodexMainAgentController passes MemPalace MCP config when mempalaceAvailable is true", async () => {
+  const appServer = new FakeAppServerClient([buildTurnEvents(replyDecision("hello"))]);
+  const fakeConfig = {
+    mcp_servers: {
+      mempalace: {
+        command: "python3",
+        args: ["-m", "mempalace.mcp_server", "--palace", "/tmp/test-palace"],
+      },
+    },
+  };
+  const controller = new CodexMainAgentController(appServer, null, () => [], [], {}, fakeConfig, true);
+
+  await controller.decide(makeContext(["hello"]));
+
+  assert.equal(appServer.startedProfiles.length, 1);
+  const config = appServer.startedProfiles[0]?.config;
+  assert.ok(config);
+  assert.ok(config && typeof config === "object" && "mcp_servers" in config);
 });
 
 test("CodexMainAgentController includes a model override when configured", async () => {
@@ -143,6 +167,7 @@ test("buildMainAgentPrompt includes only the new visible entries for incremental
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {},
+    mempalaceAvailable: false,
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["follow-up"]).newVisibleEntries,
@@ -152,6 +177,7 @@ test("buildMainAgentPrompt includes only the new visible entries for incremental
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {},
+    mempalaceAvailable: false,
   });
 
   assert.match(initialPrompt, /Visible chat entries for this decision:/);
@@ -170,6 +196,7 @@ test("buildMainAgentPrompt includes full instructions on incremental turn when i
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {},
+    mempalaceAvailable: false,
   });
 
   assert.match(deltaPrompt, /Visible chat entries for this decision:/);
@@ -186,6 +213,7 @@ test("buildMainAgentPrompt includes current date and time on every turn", () => 
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {},
+    mempalaceAvailable: false,
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["follow-up"]).newVisibleEntries,
@@ -195,6 +223,7 @@ test("buildMainAgentPrompt includes current date and time on every turn", () => 
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {},
+    mempalaceAvailable: false,
   });
 
   assert.match(initialPrompt, /Current date and time: [A-Z][a-z]{2} [A-Z][a-z]{2} \d{1,2} \d{4} \d{2}:\d{2}:\d{2} GMT[+-]\d{4}/);
@@ -210,6 +239,7 @@ test("buildMainAgentPrompt includes the precise decision schema", () => {
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {},
+    mempalaceAvailable: false,
   });
 
   assert.match(prompt, /Required JSON schema:/);
@@ -220,6 +250,39 @@ test("buildMainAgentPrompt includes the precise decision schema", () => {
   assert.match(prompt, /"taskPolicy"/);
   assert.match(prompt, /autoApproveMcpServers/);
   assert.match(prompt, /autoApproveHttpTokens/);
+});
+
+test("buildMainAgentPrompt includes MemPalace MCP instructions when mempalaceAvailable is true", () => {
+  const prompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    includeFullInstructions: true,
+    skills: [],
+    workerMcpServerIds: [],
+    httpTokens: {},
+    mempalaceAvailable: true,
+  });
+
+  assert.match(prompt, /MemPalace memory server is available to you via MCP/);
+  assert.match(prompt, /Never delegate memory management to sub-agents/);
+  assert.match(prompt, /Before writing a task brief, search for memories relevant to the task/);
+});
+
+test("buildMainAgentPrompt omits MemPalace MCP instructions when mempalaceAvailable is false", () => {
+  const prompt = buildMainAgentPrompt({
+    newVisibleEntries: makeContext(["hello"]).newVisibleEntries,
+    activeTask: null,
+    channelFormatting: testFormatting,
+    includeFullInstructions: true,
+    skills: [],
+    workerMcpServerIds: [],
+    httpTokens: {},
+    mempalaceAvailable: false,
+  });
+
+  assert.doesNotMatch(prompt, /MemPalace memory server is available to you via MCP/);
+  assert.doesNotMatch(prompt, /Before writing a task brief, search for memories/);
 });
 
 test("CodexMainAgentController sends only the entries provided for each decision", async () => {
@@ -289,6 +352,7 @@ test("buildMainAgentPrompt includes configured skill metadata on every turn", ()
     skills: testSkills,
     workerMcpServerIds: [],
     httpTokens: {},
+    mempalaceAvailable: false,
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["another request"]).newVisibleEntries,
@@ -298,6 +362,7 @@ test("buildMainAgentPrompt includes configured skill metadata on every turn", ()
     skills: testSkills,
     workerMcpServerIds: [],
     httpTokens: {},
+    mempalaceAvailable: false,
   });
 
   assert.match(initialPrompt, /Configured skills available to sub-agents:/);
@@ -316,6 +381,7 @@ test("buildMainAgentPrompt does not include skill body text below the frontmatte
     skills: testSkills,
     workerMcpServerIds: [],
     httpTokens: {},
+    mempalaceAvailable: false,
   });
 
   assert.doesNotMatch(prompt, /Use the Todoist MCP/);
@@ -331,6 +397,7 @@ test("buildMainAgentPrompt includes configured MCP server ids only when includeF
     skills: [],
     workerMcpServerIds: ["github", "todoist"],
     httpTokens: {},
+    mempalaceAvailable: false,
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["follow up"]).newVisibleEntries,
@@ -340,6 +407,7 @@ test("buildMainAgentPrompt includes configured MCP server ids only when includeF
     skills: [],
     workerMcpServerIds: ["github", "todoist"],
     httpTokens: {},
+    mempalaceAvailable: false,
   });
 
   assert.match(initialPrompt, /Configured MCP servers available to sub-agents:/);
@@ -357,6 +425,7 @@ test("buildMainAgentPrompt includes MCP server ids on incremental turn when incl
     skills: [],
     workerMcpServerIds: ["github", "todoist"],
     httpTokens: {},
+    mempalaceAvailable: false,
   });
 
   assert.match(prompt, /Configured MCP servers available to sub-agents:/);
@@ -373,6 +442,7 @@ test("buildMainAgentPrompt omits the MCP section when no servers are configured"
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {},
+    mempalaceAvailable: false,
   });
 
   assert.doesNotMatch(prompt, /Configured MCP servers available to sub-agents:/);
@@ -386,7 +456,7 @@ test("buildMainAgentPrompt includes configured HTTP token ids and descriptions w
     includeFullInstructions: true,
     skills: [],
     workerMcpServerIds: [],
-    httpTokens: testHttpTokens,
+    httpTokens: testHttpTokens, mempalaceAvailable: false,
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["follow up"]).newVisibleEntries,
@@ -395,7 +465,7 @@ test("buildMainAgentPrompt includes configured HTTP token ids and descriptions w
     includeFullInstructions: false,
     skills: [],
     workerMcpServerIds: [],
-    httpTokens: testHttpTokens,
+    httpTokens: testHttpTokens, mempalaceAvailable: false,
   });
 
   assert.match(initialPrompt, /Configured HTTP tokens available to sub-agents:/);
@@ -412,6 +482,7 @@ test("buildMainAgentPrompt includes Sandy host-integration tools when includeFul
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {},
+    mempalaceAvailable: false,
   });
   const deltaPrompt = buildMainAgentPrompt({
     newVisibleEntries: makeContext(["follow up"]).newVisibleEntries,
@@ -421,6 +492,7 @@ test("buildMainAgentPrompt includes Sandy host-integration tools when includeFul
     skills: [],
     workerMcpServerIds: [],
     httpTokens: {},
+    mempalaceAvailable: false,
   });
 
   assert.match(initialPrompt, /MCP server "sandy" available to the worker\/sub-agent exposes these host-integration tools:/);
@@ -569,4 +641,17 @@ test("CodexMainAgentController clears the instruction refresh flag after exactly
   // Turn 3: flag cleared → normal incremental
   assert.match(appServer.threadInputs[2]?.[0] ?? "", /New visible chat entries since your last decision:/);
   assert.match(appServer.threadInputs[2]?.[0] ?? "", /Continue acting as Sandy's main orchestration controller/);
+});
+
+test("createMainAgentProfile uses read-only sandbox and given cwd", () => {
+  const profile = createMainAgentProfile("/tmp/sandy-main-agent-test");
+  assert.equal(profile.sandbox, "read-only");
+  assert.equal(profile.cwd, "/tmp/sandy-main-agent-test");
+  assert.equal(profile.personality, "none");
+  assert.equal("model" in profile, false);
+});
+
+test("createMainAgentProfile includes model when provided", () => {
+  const profile = createMainAgentProfile("/tmp/sandy-main-agent-test", undefined, "gpt-5.4-mini");
+  assert.equal(profile.model, "gpt-5.4-mini");
 });

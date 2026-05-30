@@ -35,6 +35,8 @@ import { SkillService } from "./skills.js";
 import { randomUUID } from "node:crypto";
 import { createControlDir, removeControlDir, startHeartbeat } from "./sandbox/heartbeat.js";
 import { CodexAppServerClient } from "./codex-app-server-client/app-server-client.js";
+import {buildMempalaceMcpServerConfig, isMemPalaceAvailable} from "./mempalace-availability.js";
+import type {ThreadStartParams} from "./codex-app-server-client/generated/v2";
 
 export async function startApp(): Promise<void> {
   const config = loadConfig();
@@ -143,12 +145,20 @@ export async function startApp(): Promise<void> {
 
   const skillService = new SkillService(config.configDirectory);
 
+  const mainAgentConfig = buildMainAgentConfig(config.configDirectory, config.memory.enabled);
+  const mempalaceAvailable = config.memory.enabled && isMemPalaceAvailable();
+  logger.info("memory.init", {
+    backend: mempalaceAvailable ? "mempalace" : "none",
+  });
+
   const mainAgent = new CodexMainAgentController(
     mainAgentAppServer,
     config.agentModel,
     () => skillService.getSkills(),
     Object.keys(config.mcpServers),
     config.httpTokens,
+    mainAgentConfig,
+    mempalaceAvailable,
   );
 
   const workerAccess = new ProxyAccess();
@@ -443,4 +453,12 @@ export async function startApp(): Promise<void> {
   });
   logger.info("app.started");
   await fatalErrorPromise;
+}
+
+function buildMainAgentConfig(configDirectory: string, isMempalaceEnabled: boolean): ThreadStartParams["config"] {
+  return {
+    mcp_servers: {
+      mempalace: buildMempalaceMcpServerConfig(configDirectory, isMempalaceEnabled)
+    },
+  };
 }
