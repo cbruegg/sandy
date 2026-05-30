@@ -11,6 +11,7 @@ import type { HttpTokenConfig } from "../config.js";
 import type {
   AgentClient, AppServerEvent,
   AuthRefreshCallback,
+  ServerRequestHandler,
 } from "../codex-app-server-client/app-server-client.js";
 import type {ThreadStartParams} from "../codex-app-server-client/generated/v2";
 
@@ -73,6 +74,7 @@ class FakeAppServerClient implements AgentClient {
     input: Input,
     _onAuthRefresh: AuthRefreshCallback,
     _abortSignal?: AbortSignal,
+    _onServerRequest?: ServerRequestHandler,
   ): AsyncGenerator<AppServerEvent> {
     const promptText = (Array.isArray(input) && input[0]?.type === "text")
       ? input[0].text

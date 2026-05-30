@@ -17,7 +17,9 @@ import {
   type AgentClient,
   type AuthRefreshCallback,
   createMainAgentProfile,
+  denyAllServerRequests,
 } from "../codex-app-server-client/app-server-client.js";
+import type { ServerRequest } from "../codex-app-server-client/generated/ServerRequest.js";
 import type { Input } from "@openai/codex-sdk";
 import type {ThreadStartParams} from "../codex-app-server-client/generated/v2";
 
@@ -133,6 +135,8 @@ export class CodexMainAgentController implements MainAgentController {
         threadId,
         nextInput,
         noopAuthRefresh,
+        undefined,
+        (req) => Promise.resolve(this.createServerRequestHandler(req)),
       )) {
         switch (event.method) {
           case "item/completed":
@@ -206,6 +210,23 @@ export class CodexMainAgentController implements MainAgentController {
     }
 
     throw new Error("Unreachable.");
+  }
+
+  private createServerRequestHandler(request: ServerRequest): Record<string, unknown> | null {
+    // Accept mempalace MCP elicitation; delegate everything else to the deny-all default.
+    if (request.method === "mcpServer/elicitation/request" && request.params.serverName === "mempalace") {
+      logger.debug("main_agent.mcp_elicitation_accepted", {
+        serverName: request.params.serverName,
+      });
+      return { action: "accept" as const, content: null, _meta: null };
+    }
+    const result = denyAllServerRequests(request);
+    if (result !== null && request.method === "mcpServer/elicitation/request") {
+      logger.debug("main_agent.mcp_elicitation_declined", {
+        serverName: request.params.serverName,
+      });
+    }
+    return result;
   }
 
   private async getOrCreateThreadId(chatId: string): Promise<string> {

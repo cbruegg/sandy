@@ -14,13 +14,6 @@ import type { TurnStartParams } from "./generated/v2/TurnStartParams.js";
 import type { TurnStartResponse } from "./generated/v2/TurnStartResponse.js";
 import type { TurnInterruptParams } from "./generated/v2/TurnInterruptParams.js";
 import type { ChatgptAuthTokensRefreshResponse } from "./generated/v2/ChatgptAuthTokensRefreshResponse.js";
-import type { McpServerElicitationRequestResponse } from "./generated/v2/McpServerElicitationRequestResponse.js";
-import type { CommandExecutionRequestApprovalResponse } from "./generated/v2/CommandExecutionRequestApprovalResponse.js";
-import type { FileChangeRequestApprovalResponse } from "./generated/v2/FileChangeRequestApprovalResponse.js";
-import type { PermissionsRequestApprovalResponse } from "./generated/v2/PermissionsRequestApprovalResponse.js";
-import type { ToolRequestUserInputResponse } from "./generated/v2/ToolRequestUserInputResponse.js";
-import type { ApplyPatchApprovalResponse } from "./generated/ApplyPatchApprovalResponse.js";
-import type { ExecCommandApprovalResponse } from "./generated/ExecCommandApprovalResponse.js";
 
 type PendingRequest<T = unknown> = {
   resolve: (result: T) => void;
@@ -63,6 +56,17 @@ const ignoredNotificationMethods = new Set([
 export type AuthRefreshCallback = (
   previousAccountId: string | null,
 ) => Promise<ChatgptAuthTokensRefreshResponse>;
+
+/**
+ * Callback invoked for every JSON-RPC server request during a turn
+ * (excluding auth refresh, which is handled separately).
+ *
+ * Return a JSON-RPC `result` object to send a success response, or
+ * `null` to have the client respond with method-not-found.
+ */
+export type ServerRequestHandler = (
+  request: ServerRequest,
+) => Promise<Record<string, unknown> | null>;
 
 type CreateExternalTokensClientOptions = {
   codexPath: string;
@@ -182,6 +186,36 @@ export function createMainAgentProfile(
   };
 }
 
+/**
+ * Default server-request handler that denies/declines every known
+ * request type and returns null (method-not-found) for unknown types.
+ *
+ * Callers can wrap this with their own logic to selectively accept
+ * specific requests (e.g. accept MCP elicitation for MemPalace).
+ */
+export function denyAllServerRequests(
+  request: ServerRequest,
+): Record<string, unknown> | null {
+  switch (request.method) {
+    case "mcpServer/elicitation/request":
+      return { action: "decline", content: null, _meta: null };
+    case "item/commandExecution/requestApproval":
+      return { decision: "decline" };
+    case "item/fileChange/requestApproval":
+      return { decision: "decline" };
+    case "item/permissions/requestApproval":
+      return { permissions: {}, scope: "turn" };
+    case "item/tool/requestUserInput":
+      return { answers: {} };
+    case "applyPatchApproval":
+      return { decision: "denied" };
+    case "execCommandApproval":
+      return { decision: "denied" };
+    default:
+      return null;
+  }
+}
+
 export interface AgentClient {
   startThread(profile: ThreadStartParams): Promise<string>;
   streamTurn(
@@ -189,6 +223,7 @@ export interface AgentClient {
     input: Input,
     onAuthRefresh: AuthRefreshCallback,
     abortSignal?: AbortSignal,
+    onServerRequest?: ServerRequestHandler,
   ): AsyncGenerator<AppServerEvent>;
 }
 
@@ -196,6 +231,7 @@ export class CodexAppServerClient implements AgentClient {
   private child: ChildProcessWithoutNullStreams | null = null;
   private activeNotificationHandler: ((notification: ServerNotification) => void) | null = null;
   private activeAuthRefreshHandler: ((id: RequestId, previousAccountId: string | null) => Promise<void>) | null = null;
+  private activeServerRequestHandler: ServerRequestHandler | null = null;
   private nextId = 1;
   private pendingRequests = new Map<number, PendingRequest>();
   private initialized = false;
@@ -278,7 +314,9 @@ export class CodexAppServerClient implements AgentClient {
 
     // JSON-RPC request from server to client
     if ("id" in msg && "method" in msg) {
-      this.processServerRequest(msg);
+      void this.processServerRequest(msg).catch((err: unknown) => {
+        logger.error("appserver.process_server_request_failed", err, "Unknown error processing server request");
+      });
       return;
     }
 
@@ -289,7 +327,7 @@ export class CodexAppServerClient implements AgentClient {
     }
   }
 
-  private processServerRequest(request: ServerRequest): void {
+  private async processServerRequest(request: ServerRequest): Promise<void> {
     switch (request.method) {
       case "account/chatgptAuthTokens/refresh":
         if (this.activeAuthRefreshHandler) {
@@ -308,96 +346,30 @@ export class CodexAppServerClient implements AgentClient {
         }
         return;
 
-      case "mcpServer/elicitation/request": {
-        const isMemPalace = request.params.serverName === "mempalace";
-        this.writeJsonRpcMessage({
-          jsonrpc: "2.0",
-          id: request.id,
-          result: {
-            action: isMemPalace ? "accept" : "decline" as const,
-            content: null,
-            _meta: null,
-          } satisfies McpServerElicitationRequestResponse,
-        });
-        logger.debug("appserver.mcp_elicitation_responded", {
-          serverName: request.params.serverName,
-          action: isMemPalace ? "accept" : "decline",
-        });
+      default: {
+        let result: Record<string, unknown> | null = null;
+        if (this.activeServerRequestHandler) {
+          result = await this.activeServerRequestHandler(request);
+        }
+        if (result !== null) {
+          this.writeJsonRpcMessage({
+            jsonrpc: "2.0",
+            id: request.id,
+            result,
+          });
+        } else {
+          this.warnUnhandledServerRequest(request.method, request.params);
+          this.rpc.respondMethodNotFound({
+            jsonrpc: "2.0",
+            id: request.id,
+            error: {
+              code: JSON_RPC_METHOD_NOT_FOUND,
+              message: `Method not found: ${request.method}`,
+            },
+          });
+        }
         return;
       }
-
-      case "item/commandExecution/requestApproval":
-        this.writeJsonRpcMessage({
-          jsonrpc: "2.0",
-          id: request.id,
-          result: {
-            decision: "decline" as const,
-          } satisfies CommandExecutionRequestApprovalResponse,
-        });
-        return;
-
-      case "item/fileChange/requestApproval":
-        this.writeJsonRpcMessage({
-          jsonrpc: "2.0",
-          id: request.id,
-          result: {
-            decision: "decline" as const,
-          } satisfies FileChangeRequestApprovalResponse,
-        });
-        return;
-
-      case "item/permissions/requestApproval":
-        this.writeJsonRpcMessage({
-          jsonrpc: "2.0",
-          id: request.id,
-          result: {
-            permissions: {},
-            scope: "turn" as const,
-          } satisfies PermissionsRequestApprovalResponse,
-        });
-        return;
-
-      case "item/tool/requestUserInput":
-        this.writeJsonRpcMessage({
-          jsonrpc: "2.0",
-          id: request.id,
-          result: {
-            answers: {},
-          } satisfies ToolRequestUserInputResponse,
-        });
-        return;
-
-      case "applyPatchApproval":
-        this.writeJsonRpcMessage({
-          jsonrpc: "2.0",
-          id: request.id,
-          result: {
-            decision: "denied" as const,
-          } satisfies ApplyPatchApprovalResponse,
-        });
-        return;
-
-      case "execCommandApproval":
-        this.writeJsonRpcMessage({
-          jsonrpc: "2.0",
-          id: request.id,
-          result: {
-            decision: "denied" as const,
-          } satisfies ExecCommandApprovalResponse,
-        });
-        return;
-
-      default:
-        this.warnUnhandledServerRequest(request.method, request.params);
-        this.rpc.respondMethodNotFound({
-          jsonrpc: "2.0",
-          id: request.id,
-          error: {
-            code: JSON_RPC_METHOD_NOT_FOUND,
-            message: `Method not found: ${request.method}`,
-          },
-        });
-        return;
     }
   }
 
@@ -470,6 +442,7 @@ export class CodexAppServerClient implements AgentClient {
     input: Input,
     onAuthRefresh: AuthRefreshCallback,
     abortSignal?: AbortSignal,
+    onServerRequest?: ServerRequestHandler,
   ): AsyncGenerator<AppServerEvent> {
     this.ensureReady("streamTurn");
 
@@ -505,6 +478,8 @@ export class CodexAppServerClient implements AgentClient {
         } satisfies ChatgptAuthTokensRefreshResponse,
       });
     };
+
+    this.activeServerRequestHandler = onServerRequest ?? null;
 
     const turnStartResponse = await this.rpc.turnStart({ threadId, input });
 
@@ -556,6 +531,7 @@ export class CodexAppServerClient implements AgentClient {
     } finally {
       this.activeNotificationHandler = null;
       this.activeAuthRefreshHandler = null;
+      this.activeServerRequestHandler = null;
     }
   }
 
@@ -610,6 +586,7 @@ export class CodexAppServerClient implements AgentClient {
   close(): void {
     this.activeNotificationHandler = null;
     this.activeAuthRefreshHandler = null;
+    this.activeServerRequestHandler = null;
     if (this.child) {
       this.child.stdin.end();
       this.child.kill("SIGTERM");
