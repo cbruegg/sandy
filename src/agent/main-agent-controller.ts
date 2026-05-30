@@ -355,7 +355,8 @@ export function buildMainAgentPrompt(input: {
   const mempalaceSection = input.includeFullInstructions && input.mempalaceAvailable
     ? [
         "",
-        "A MemPalace memory server is available to you via MCP. Use MCP tool discovery to list its tools. Use it to:",
+        "A MemPalace memory server is available to you via MCP. Before doing anything else, call mempalace_status to check connection health and available operations.",
+        "Use MCP tool discovery to list its tools. Use it to:",
         "- Search past Sandy memories before answering questions about past events, decisions, or user preferences.",
         "- File stable facts, preferences, and longer-lived context worth remembering.",
         "- Never delegate memory management to sub-agents.",
