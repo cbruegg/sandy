@@ -379,6 +379,7 @@ export function buildMainAgentPrompt(input: {
         "- Do not assume a memory is authoritative if it conflicts with current user input.",
         "- Before writing a task brief, search for memories relevant to the task. Include any pertinent stored facts, user preferences, or past decisions in the task brief so the sub-agent benefits from that context.",
         "- Return your decision JSON after optional tool use.",
+        "- When you save or update a memory, briefly acknowledge it in your replyText so the user knows their information has been remembered.",
       ]
     : [];
 
