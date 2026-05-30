@@ -373,7 +373,7 @@ export function buildMainAgentPrompt(input: {
         "A MemPalace memory server is available to you via MCP. Before doing anything else, call mempalace_status to check connection health and available operations.",
         "Use MCP tool discovery to list its tools. Use it to:",
         "- Search past Sandy memories before answering questions about past events, decisions, or user preferences.",
-        "- File stable facts, preferences, and longer-lived context worth remembering.",
+        "- File stable facts, preferences, and longer-lived context worth remembering. Do this especially whenever the user asks you to remember something.",
         "- Never delegate memory management to sub-agents.",
         "- Prefer current visible chat context over older memories.",
         "- Do not assume a memory is authoritative if it conflicts with current user input.",
