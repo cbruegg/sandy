@@ -54,7 +54,8 @@ bot_user_id = "@sandy:matrix.org"
 allowed_user_id = "@cbruegg:matrix.org"
 
 [channel.local_test]
-# spool_root = "/tmp/sandy-local-test"
+# Only mandatory if the local_test channel is configured:
+# spool_root = "/tmp/sandy-local-test-XXXXXX/spool"
 
 [auth]
 # codex_auth_strategy = "copy_file" # or "external_tokens" (experimental)
@@ -72,13 +73,10 @@ allowed_user_id = "@cbruegg:matrix.org"
 
 [worker.network]
 # mode = "public_internet_only" # one of: "public_internet_only", "unrestricted"
-# allow_local_cidrs = ["192.168.1.0/24"]
+# allow_local_cidrs = [] # can contain values like "192.168.1.0/24"
 
 [worker.preinstall]
-# commands = [
-#   "zypper --non-interactive install jq",
-#   "brew install gh"
-# ]
+# commands = [] # e.g. "zypper --non-interactive install jq" or "brew install gh"
 # refresh = "weekly" # one of: "weekly", "manual"
 
 # Optional STT config for voice message support.
@@ -124,7 +122,7 @@ SPOTIFY_CLIENT_SECRET = "your_client_secret_here"
 # value = "real-api-key-or-token"
 
 [approvals.http.vid2text]
-# always_allow_hosts = ["api.vid2text.example"]
+# always_allow_hosts = [] # e.g. "api.vid2text.example"
 
 # Optional persisted host-directory approvals:
 # [[approvals.host_directories]]
