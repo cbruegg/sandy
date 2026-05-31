@@ -69,6 +69,7 @@ export function buildInitialTaskInputWithCapabilities(
     `A host filesystem mount is available at ${hostMountPath}. To access host directories, do not ask the user in plain text.`,
     `Call ${sandyMcpServerId}.request_host_directory_access with the absolute host path and desired access level.`,
     "The tool response will provide the exact worker-visible path you should use. Only use the returned grant path.",
+    "Whenever you use tool_search to discover MCP tools, set limit to 30 or higher. If that returned 30 tools, increase the limit until you obtained the full list."
   ];
 
   if (runtimeCapabilities.length > 0) {
