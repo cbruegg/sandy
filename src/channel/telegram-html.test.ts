@@ -94,3 +94,38 @@ test("splitTelegramHtml never produces chunks longer than maxLength even with bo
     );
   }
 });
+
+test("splitTelegramHtml makes forward progress with many nested open tags", () => {
+  // When a message starts with many nested allowed tags, the reopening
+  // prefix added to the next chunk can be as large as the characters
+  // consumed.  This used to cause an infinite loop.
+  const open = "<b>".repeat(600);
+  const content = "a".repeat(100);
+  const close = "</b>".repeat(600);
+  const text = open + content + close;
+  const chunks = splitTelegramHtml(text);
+  assert.ok(chunks.length >= 2);
+  for (const chunk of chunks) {
+    assert.ok(
+      chunk.length < TELEGRAM_MAX_MESSAGE_LENGTH,
+      `chunk length ${chunk.length} exceeds limit`,
+    );
+  }
+});
+
+test("splitTelegramHtml does not split surrogate pairs", () => {
+  // Astral Unicode characters (e.g. emoji) are encoded as surrogate pairs
+  // in UTF-16.  The split point must not land between the two halves.
+  const text = "😀".repeat(3000);
+  const chunks = splitTelegramHtml(text, 100);
+  assert.ok(chunks.length >= 2);
+  for (const chunk of chunks) {
+    assert.ok(chunk.length <= 100);
+  }
+  // Verify no lone surrogates by round-tripping through encode/decode.
+  for (const chunk of chunks) {
+    const encoded = new TextEncoder().encode(chunk);
+    const decoded = new TextDecoder().decode(encoded);
+    assert.equal(decoded, chunk);
+  }
+});
