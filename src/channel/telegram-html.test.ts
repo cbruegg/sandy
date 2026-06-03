@@ -79,3 +79,18 @@ test("splitTelegramHtml default maxLength stays under Telegram limit", () => {
     assert.ok(chunk.length < TELEGRAM_MAX_MESSAGE_LENGTH);
   }
 });
+
+test("splitTelegramHtml never produces chunks longer than maxLength even with boundary newlines", () => {
+  // Construct text where a newline sits exactly at maxLength.
+  // This used to trigger an infinite loop because findSafeSplitPoint
+  // could return maxLength + 1.
+  const prefix = "a".repeat(45);
+  const text = `${prefix}\n${prefix}\n${prefix}`;
+  const chunks = splitTelegramHtml(text, 50);
+  for (const chunk of chunks) {
+    assert.ok(
+      chunk.length <= 50,
+      `chunk length ${chunk.length} exceeds maxLength 50`,
+    );
+  }
+});

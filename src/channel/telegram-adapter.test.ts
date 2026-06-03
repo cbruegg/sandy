@@ -815,7 +815,7 @@ test("TelegramBotApiAdapter retries a 429 chunk and then continues", async () =>
   assert.equal(sleepCalls[0], 2_000);
 });
 
-test("TelegramBotApiAdapter does not retry non-429 errors", async () => {
+test("TelegramBotApiAdapter does not retry non-429 errors for single-chunk messages", async () => {
   const fakeBot = new FakeTelegramBot();
   fakeBot.sendMessageFailures = [
     createFakeGrammyError(400, {}),
@@ -830,6 +830,30 @@ test("TelegramBotApiAdapter does not retry non-429 errors", async () => {
 
   await assert.rejects(() => adapter.sendText("7", "short"), /message is too long/);
   assert.equal(fakeBot.sentMessages.length, 0);
+});
+
+test("TelegramBotApiAdapter retries non-429 errors for multi-chunk messages to avoid outer-layer duplication", async () => {
+  const fakeBot = new FakeTelegramBot();
+  fakeBot.sendMessageFailures = [
+    createFakeGrammyError(400, {}),
+    createFakeGrammyError(400, {}),
+  ];
+
+  const sleepCalls: number[] = [];
+  const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
+    token: "test-token",
+    botFactory: () => fakeBot,
+    sleep: async (ms) => {
+      sleepCalls.push(ms);
+    },
+  });
+
+  const longText = "d".repeat(5000);
+  await adapter.sendText("7", longText);
+
+  assert.ok(fakeBot.sentMessages.length > 1);
+  assert.equal(sleepCalls.length, 2);
 });
 
 function createFakeGrammyError(errorCode: number, parameters: Record<string, unknown>): GrammyError {

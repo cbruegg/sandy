@@ -4,7 +4,7 @@ import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
 import { sanitizeTelegramHtml, splitTelegramHtml, telegramHtmlAllowedTags } from "./telegram-html.js";
-import { runWithTelegramSendRetry, type TelegramSleep } from "./telegram-send-retry.js";
+import { runWithTelegramChunkRetry, runWithTelegramSendRetry, type TelegramSleep } from "./telegram-send-retry.js";
 import {
   buildPrivilegeControls,
   buildReportControls,
@@ -277,17 +277,24 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     const sanitized = sanitizeTelegramHtml(text);
     const chunks = splitTelegramHtml(sanitized);
 
+    // Single-chunk messages rely on the outer createRetryingChannelAdapter
+    // wrapper for generic retries. Multi-chunk messages retry per-chunk
+    // comprehensively here so the outer wrapper cannot duplicate already-sent
+    // chunks by restarting the whole operation.
+    const retryChunk = chunks.length === 1
+      ? (operation: () => Promise<unknown>) =>
+          runWithTelegramSendRetry("telegram.sendMessage", operation, this.sleep)
+      : (operation: () => Promise<unknown>) =>
+          runWithTelegramChunkRetry("telegram.sendMessage", operation, this.sleep);
+
     for (let i = 0; i < chunks.length; i += 1) {
       const isLastChunk = i === chunks.length - 1;
       const payloadOther = isLastChunk ? other : undefined;
-      await runWithTelegramSendRetry(
-        "telegram.sendMessage",
-        () =>
-          this.bot.api.sendMessage(chatId, chunks[i]!, {
-            parse_mode: "HTML",
-            ...payloadOther,
-          }),
-        this.sleep,
+      await retryChunk(() =>
+        this.bot.api.sendMessage(chatId, chunks[i]!, {
+          parse_mode: "HTML",
+          ...payloadOther,
+        }),
       );
     }
   }

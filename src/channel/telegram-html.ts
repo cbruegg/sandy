@@ -122,13 +122,14 @@ function findSafeSplitPoint(text: string, maxLength: number): number {
     return candidate;
   }
 
-  // Prefer splitting on a newline or a space
-  const newlineIndex = text.lastIndexOf("\n", candidate);
+  // Prefer splitting on a newline or a space.
+  // Search up to candidate - 1 so the returned split point never exceeds maxLength.
+  const newlineIndex = text.lastIndexOf("\n", candidate - 1);
   if (newlineIndex > candidate * 0.5) {
     return newlineIndex + 1;
   }
 
-  const spaceIndex = text.lastIndexOf(" ", candidate);
+  const spaceIndex = text.lastIndexOf(" ", candidate - 1);
   if (spaceIndex > candidate * 0.5) {
     return spaceIndex + 1;
   }
