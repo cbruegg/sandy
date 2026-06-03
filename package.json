@@ -27,7 +27,7 @@
     "@iarna/toml": "^2.2.5",
     "@matrix-org/matrix-sdk-crypto-nodejs": "^0.6.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@openai/codex-sdk": "^0.133.0",
+    "@openai/codex-sdk": "^0.136.0",
     "grammy": "^1.43.0",
     "jsonwebtoken": "^9.0.3",
     "matrix-bot-sdk": "0.8.0",
@@ -38,11 +38,11 @@
     "@eslint/js": "^10.0.1",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^25.9.1",
-    "eslint": "^10.4.0",
+    "eslint": "^10.4.1",
     "globals": "^17.6.0",
-    "knip": "^6.14.2",
+    "knip": "^6.15.0",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.60.0"
+    "typescript-eslint": "^8.60.1"
   },
   "private": true,
   "trustedDependencies": [
