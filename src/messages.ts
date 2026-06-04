@@ -138,15 +138,23 @@ export const messages = {
 } as const;
 
 function formatCommandForChannel(command: string, channelFormatting: ChannelFormatting | null): string {
-  if (!channelFormatting || channelFormatting.markup === "plain_text") {
+  if (!channelFormatting) {
     return command;
   }
 
-  if (channelFormatting.markup === "telegram_markdown") {
-    return wrapMarkdownCode(command);
-  }
+  switch (channelFormatting.markup) {
+    case "plain_text":
+      return command;
 
-  return `<code>${command}</code>`;
+    case "telegram_markdown":
+      return wrapMarkdownCode(command);
+
+    case "matrix_html":
+      return `<code>${command}</code>`;
+
+    default:
+      return assertNever(channelFormatting.markup);
+  }
 }
 
 function wrapMarkdownCode(text: string): string {
@@ -156,6 +164,10 @@ function wrapMarkdownCode(text: string): string {
   const needsPadding = text.startsWith("`") || text.endsWith("`");
   const paddedText = needsPadding ? ` ${text} ` : text;
   return `${fence}${paddedText}${fence}`;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unexpected channel markup: ${String(value)}`);
 }
 
 export const mcpAdminMessages = {

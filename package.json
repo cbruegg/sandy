@@ -30,7 +30,7 @@
     "@openai/codex-sdk": "^0.136.0",
     "grammy": "^1.43.0",
     "jsonwebtoken": "^9.0.3",
-    "marked": "^17.0.1",
+    "marked": "18.0.5",
     "matrix-bot-sdk": "0.8.0",
     "zod": "^4.4.3"
   },
