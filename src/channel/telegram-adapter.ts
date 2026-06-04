@@ -4,7 +4,6 @@ import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
 import { renderTelegramMarkdownChunks } from "./telegram-html.js";
-import { runWithTelegramChunkRetry, runWithTelegramSendRetry, type TelegramSleep } from "./telegram-send-retry.js";
 import {
   buildPrivilegeControls,
   buildReportControls,
@@ -67,7 +66,6 @@ type TelegramAdapterOptions = {
   botFactory?: TelegramBotFactory;
   transcriptionProvider?: TranscriptionProvider;
   fileDownloader?: (api: TelegramFileApiLike, token: string, fileId: string) => Promise<ArrayBuffer>;
-  sleep?: TelegramSleep;
 };
 
 const telegramFormatting: ChannelFormatting = {
@@ -88,7 +86,6 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
   private readonly token: string;
   private readonly transcriptionProvider: TranscriptionProvider | null;
   private readonly fileDownloader: (api: TelegramFileApiLike, token: string, fileId: string) => Promise<ArrayBuffer>;
-  private readonly sleep: TelegramSleep;
   private startPromise: Promise<void> | null = null;
 
   constructor(options: TelegramAdapterOptions) {
@@ -98,7 +95,6 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     this.pollTimeoutSeconds = options.pollTimeoutSeconds ?? 30;
     this.transcriptionProvider = options.transcriptionProvider ?? null;
     this.fileDownloader = options.fileDownloader ?? downloadTelegramFile;
-    this.sleep = options.sleep ?? sleepMs;
   }
 
   getFormatting(): ChannelFormatting {
@@ -276,25 +272,13 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
   ): Promise<void> {
     const chunks = renderTelegramMarkdownChunks(text);
 
-    // Single-chunk messages rely on the outer createRetryingChannelAdapter
-    // wrapper for generic retries. Multi-chunk messages retry per-chunk
-    // comprehensively here so the outer wrapper cannot duplicate already-sent
-    // chunks by restarting the whole operation.
-    const retryChunk = chunks.length === 1
-      ? (operation: () => Promise<unknown>) =>
-          runWithTelegramSendRetry("telegram.sendMessage", operation, this.sleep)
-      : (operation: () => Promise<unknown>) =>
-          runWithTelegramChunkRetry("telegram.sendMessage", operation, this.sleep);
-
     for (let i = 0; i < chunks.length; i += 1) {
       const isLastChunk = i === chunks.length - 1;
       const payloadOther = isLastChunk ? other : undefined;
-      await retryChunk(() =>
-        this.bot.api.sendMessage(chatId, chunks[i]!, {
-          parse_mode: "HTML",
-          ...payloadOther,
-        }),
-      );
+      await this.bot.api.sendMessage(chatId, chunks[i]!, {
+        parse_mode: "HTML",
+        ...payloadOther,
+      });
     }
   }
 
@@ -322,10 +306,6 @@ function controlSurfaceToTelegramKeyboard(controls: ControlSurface): Array<Array
 
 function previewText(text: string): string {
   return text.length <= 120 ? text : `${text.slice(0, 117)}...`;
-}
-
-async function sleepMs(delayMs: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, delayMs));
 }
 
 export { normalizeTelegramUpdate } from "./telegram-normalization.js";
