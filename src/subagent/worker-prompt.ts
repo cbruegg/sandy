@@ -98,7 +98,6 @@ export function buildInitialTaskInputWithCapabilities(
   if (channelFormatting) {
     lines.push(
       `User-visible output must follow this channel formatting contract: ${channelFormatting.instructions}`,
-      `Allowed formatting tags: ${channelFormatting.allowedTags.map((tag) => `<${tag}>`).join(", ")}`,
     );
   }
 

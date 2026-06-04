@@ -19,9 +19,9 @@ import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
-  markup: "telegram_html",
-  allowedTags: ["b", "i", "code", "pre"],
-  instructions: "Use simple Telegram HTML.",
+  markup: "telegram_markdown",
+  allowedTags: [],
+  instructions: "Use simple Markdown.",
 };
 
 function createAppServerSessionStarter(session: {
@@ -37,9 +37,9 @@ function createAppServerSessionStarter(session: {
 test("buildInitialTaskInput tells the sub-agent where the shared workspace is", () => {
   const formatting: ChannelFormatting = {
     channelId: "telegram",
-    markup: "telegram_html",
-    allowedTags: ["b", "i", "code", "pre"],
-    instructions: "Use simple Telegram HTML.",
+    markup: "telegram_markdown",
+    allowedTags: [],
+    instructions: "Use simple Markdown.",
   };
   const input = buildInitialTaskInput(
     "Inspect the repository and leave a summary file.",
@@ -55,8 +55,7 @@ test("buildInitialTaskInput tells the sub-agent where the shared workspace is", 
   assert.match(inputText, /send the user-visible text first and then call the tool separately/i);
   assert.match(inputText, /MCP server "sandy" exposes additional host-integration tools/i);
   assert.match(inputText, /Use MCP tool discovery to list its tools/i);
-  assert.match(inputText, /Telegram HTML/);
-  assert.match(inputText, /<code>/);
+  assert.match(inputText, /simple Markdown/i);
   assert.match(inputText, /Use English for user-visible replies unless the host provides a later instruction that overrides it\./);
   assert.match(inputText, /Configured HTTP tokens available to this task:/);
   assert.match(inputText, /vid2text: Token for the video transcription API\./);
@@ -126,9 +125,9 @@ test("buildTaskSummaryInput requests a host-facing handoff summary", () => {
 test("buildInitialTaskInput includes current date and time", () => {
   const formatting: ChannelFormatting = {
     channelId: "telegram",
-    markup: "telegram_html",
-    allowedTags: ["b", "i", "code", "pre"],
-    instructions: "Use simple Telegram HTML.",
+    markup: "telegram_markdown",
+    allowedTags: [],
+    instructions: "Use simple Markdown.",
   };
   const input = buildInitialTaskInput(
     "Inspect the repository and leave a summary file.",
@@ -375,6 +374,10 @@ test("commandProgress formats command execution updates", () => {
   assert.equal(
     messages.commandProgress("completed", "npm test", null),
     "Command completed: npm test",
+  );
+  assert.equal(
+    messages.commandProgress("completed", "npm test", testFormatting),
+    "Command completed: `npm test`",
   );
 });
 

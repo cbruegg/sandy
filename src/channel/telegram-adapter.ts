@@ -3,7 +3,7 @@ import { Bot, InputFile, type Context, type PollingOptions } from "grammy";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
-import { sanitizeTelegramHtml, telegramHtmlAllowedTags } from "./telegram-html.js";
+import { renderTelegramMarkdownChunks } from "./telegram-html.js";
 import {
   buildPrivilegeControls,
   buildReportControls,
@@ -70,9 +70,9 @@ type TelegramAdapterOptions = {
 
 const telegramFormatting: ChannelFormatting = {
   channelId: "telegram",
-  markup: "telegram_html",
-  allowedTags: telegramHtmlAllowedTags,
-  instructions: "Format user-visible output as simple Telegram HTML using only <b>, <i>, <code>, and <pre>. Do not emit Markdown. Escape raw <, >, and & unless they are part of those exact tags. For line-breaks, use standard linebreaks (`\n`) instead of <br/> br tags.",
+  markup: "telegram_markdown",
+  allowedTags: [],
+  instructions: "Format user-visible output as simple Markdown. Supported formatting: **bold**, *italic* or _italic_, `inline code`, fenced code blocks using triple backticks, blockquotes using `> `, and normal paragraphs or line breaks. Use plain `- ` bullets when helpful. Do not emit raw HTML.",
 };
 
 function defaultBotFactory(token: string): TelegramBotLike {
@@ -270,10 +270,16 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     text: string,
     other?: Record<string, unknown>,
   ): Promise<void> {
-    await this.bot.api.sendMessage(chatId, sanitizeTelegramHtml(text), {
-      parse_mode: "HTML",
-      ...other,
-    });
+    const chunks = renderTelegramMarkdownChunks(text);
+
+    for (let i = 0; i < chunks.length; i += 1) {
+      const isLastChunk = i === chunks.length - 1;
+      const payloadOther = isLastChunk ? other : undefined;
+      await this.bot.api.sendMessage(chatId, chunks[i]!, {
+        parse_mode: "HTML",
+        ...payloadOther,
+      });
+    }
   }
 
   private isAuthorizedEvent(event: TelegramNormalizedChatEvent | TelegramUpdateMetadata): boolean {

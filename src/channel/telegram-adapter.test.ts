@@ -1,5 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { GrammyError } from "grammy";
 import type { Update } from "grammy/types";
 import { sanitizeTelegramHtml } from "./telegram-html.js";
 import { TelegramBotApiAdapter, normalizeTelegramUpdate } from "./telegram-adapter.js";
@@ -607,8 +608,8 @@ test("TelegramBotApiAdapter ignores messages when username does not match", asyn
 
 test("sanitizeTelegramHtml preserves only the supported Telegram tags", () => {
   assert.equal(
-    sanitizeTelegramHtml("Use <b>bold</b> and <script>alert(1)</script> plus <code>x < y</code>."),
-    "Use <b>bold</b> and &lt;script&gt;alert(1)&lt;/script&gt; plus <code>x &lt; y</code>.",
+    sanitizeTelegramHtml("Use <b>bold</b>, <blockquote>quote</blockquote>, and <script>alert(1)</script> plus <code>x < y</code>."),
+    "Use <b>bold</b>, <blockquote>quote</blockquote>, and &lt;script&gt;alert(1)&lt;/script&gt; plus <code>x &lt; y</code>.",
   );
 });
 
@@ -627,7 +628,7 @@ test("TelegramBotApiAdapter sends sanitized HTML with parse_mode", async () => {
     botFactory: () => fakeBot,
   });
 
-  await adapter.sendText("7", "Use <b>bold</b> and <u>underline</u>.");
+  await adapter.sendText("7", "Use **bold** and <u>underline</u>.");
 
   assert.deepEqual(fakeBot.sentMessages[0], {
     chatId: "7",
@@ -754,16 +755,91 @@ test("TelegramBotApiAdapter sends local files as Telegram documents", async () =
   assert.equal(fakeBot.sentDocuments[0]?.other?.["caption"], "Generated result");
 });
 
+test("TelegramBotApiAdapter splits long messages into multiple sendMessage calls", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
+    token: "test-token",
+    botFactory: () => fakeBot,
+  });
+
+  const longText = "a".repeat(5000);
+  await adapter.sendText("7", longText);
+
+  assert.ok(fakeBot.sentMessages.length > 1);
+  for (const msg of fakeBot.sentMessages) {
+    assert.ok(msg.text.length < 4096);
+  }
+  assert.equal(fakeBot.sentMessages.map((m) => m.text).join(""), longText);
+});
+
+test("TelegramBotApiAdapter attaches reply_markup only to the final chunk", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
+    token: "test-token",
+    botFactory: () => fakeBot,
+  });
+
+  const longText = "b".repeat(5000);
+  await adapter.sendTaskUpdate("7", longText);
+
+  assert.ok(fakeBot.sentMessages.length > 1);
+  for (let i = 0; i < fakeBot.sentMessages.length - 1; i += 1) {
+    assert.equal(fakeBot.sentMessages[i]!.other?.["reply_markup"], undefined);
+  }
+  assert.ok(fakeBot.sentMessages.at(-1)!.other?.["reply_markup"]);
+});
+
+test("TelegramBotApiAdapter does not retry non-429 errors for single-chunk messages", async () => {
+  const fakeBot = new FakeTelegramBot();
+  fakeBot.sendMessageFailures = [
+    createFakeGrammyError(400, {}),
+  ];
+
+  const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
+    token: "test-token",
+    botFactory: () => fakeBot,
+  });
+
+  await assert.rejects(() => adapter.sendText("7", "short"), /message is too long/);
+  assert.equal(fakeBot.sentMessages.length, 0);
+});
+
+function createFakeGrammyError(errorCode: number, parameters: Record<string, unknown>): GrammyError {
+  return new GrammyError(
+    "Call to 'sendMessage' failed!",
+    {
+      ok: false,
+      error_code: errorCode,
+      description: errorCode === 429 ? "Too Many Requests" : "Bad Request: message is too long",
+      parameters,
+    },
+    "sendMessage",
+    {},
+  );
+}
+
 class FakeTelegramBot {
   public readonly sentMessages: Array<{ chatId: string | number; text: string; other?: Record<string, unknown> }> = [];
   public readonly sentDocuments: Array<{ chatId: string | number; document: unknown; other?: Record<string, unknown> }> = [];
   public acknowledgedCallbackQueries = 0;
+  public sendMessageFailures: Error[] = [];
+  private sendMessageCallCount = 0;
   private readonly handlers = new Map<string, Array<(ctx: FakeTelegramContext) => Promise<void>>>();
   private stopResolve: (() => void) | null = null;
 
   public readonly api = {
     getFile: async () => ({ file_path: "documents/test.txt" }),
     sendMessage: async (chatId: string | number, text: string, other?: Record<string, unknown>) => {
+      if (this.sendMessageCallCount < this.sendMessageFailures.length) {
+        const error = this.sendMessageFailures[this.sendMessageCallCount];
+        this.sendMessageCallCount += 1;
+        if (error) {
+          throw error;
+        }
+      }
       this.sentMessages.push({ chatId, text, other });
       return true;
     },

@@ -15,9 +15,9 @@ import type { ChannelFormatting, HostCommand, SubAgentEvent, WorkerStartConfig }
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
-  markup: "telegram_html",
-  allowedTags: ["b", "i", "code", "pre"],
-  instructions: "Use simple Telegram HTML.",
+  markup: "telegram_markdown",
+  allowedTags: [],
+  instructions: "Use simple Markdown.",
 };
 
 const defaultWorkerStartConfig: WorkerStartConfig = {

@@ -31,9 +31,9 @@ import { SkillService } from "../skills.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
-  markup: "telegram_html",
-  allowedTags: ["b", "i", "code", "pre"],
-  instructions: "Use simple Telegram HTML.",
+  markup: "telegram_markdown",
+  allowedTags: [],
+  instructions: "Use simple Markdown.",
 };
 
 export function expectDefined<T>(value: T | null | undefined, message: string): NonNullable<T> {

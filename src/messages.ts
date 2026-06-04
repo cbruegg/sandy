@@ -22,7 +22,7 @@ export const messages = {
     `A Sandy update is ready. Restarting now to install ${revision}.`,
   nextPlannedStep: (step: string): string => `Next planned step: ${step}`,
   commandProgress: (status: string, command: string, channelFormatting: ChannelFormatting | null): string => {
-    const formattedCommand = channelFormatting && channelFormatting.markup !== "plain_text" ? `<code>${command}</code>` : command;
+    const formattedCommand = formatCommandForChannel(command, channelFormatting);
     return `Command ${status}: ${formattedCommand}`;
   },
   taskSummaryReady: (taskName: string, summary: string): string =>
@@ -136,6 +136,39 @@ export const messages = {
   skillMutationFailed: (operation: string, skillId: string, error: string): string =>
     `Failed to ${operation} skill "${skillId}": ${error}`,
 } as const;
+
+function formatCommandForChannel(command: string, channelFormatting: ChannelFormatting | null): string {
+  if (!channelFormatting) {
+    return command;
+  }
+
+  switch (channelFormatting.markup) {
+    case "plain_text":
+      return command;
+
+    case "telegram_markdown":
+      return wrapMarkdownCode(command);
+
+    case "matrix_html":
+      return `<code>${command}</code>`;
+
+    default:
+      return assertNever(channelFormatting.markup);
+  }
+}
+
+function wrapMarkdownCode(text: string): string {
+  const backtickRuns = text.match(/`+/g) ?? [];
+  const longestRun = backtickRuns.reduce((max, run) => Math.max(max, run.length), 0);
+  const fence = "`".repeat(longestRun + 1);
+  const needsPadding = text.startsWith("`") || text.endsWith("`");
+  const paddedText = needsPadding ? ` ${text} ` : text;
+  return `${fence}${paddedText}${fence}`;
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unexpected channel markup: ${String(value)}`);
+}
 
 export const mcpAdminMessages = {
   oauthLoginUnsupported: (serverId: string): string =>
