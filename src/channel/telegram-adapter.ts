@@ -3,7 +3,7 @@ import { Bot, InputFile, type Context, type PollingOptions } from "grammy";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
-import { sanitizeTelegramHtml, splitTelegramHtml, telegramHtmlAllowedTags } from "./telegram-html.js";
+import { renderTelegramMarkdownChunks } from "./telegram-html.js";
 import { runWithTelegramChunkRetry, runWithTelegramSendRetry, type TelegramSleep } from "./telegram-send-retry.js";
 import {
   buildPrivilegeControls,
@@ -72,9 +72,9 @@ type TelegramAdapterOptions = {
 
 const telegramFormatting: ChannelFormatting = {
   channelId: "telegram",
-  markup: "telegram_html",
-  allowedTags: telegramHtmlAllowedTags,
-  instructions: "Format user-visible output as simple Telegram HTML using only <b>, <i>, <code>, and <pre>. Do not emit Markdown. Escape raw <, >, and & unless they are part of those exact tags. For line-breaks, use standard linebreaks (`\n`) instead of <br/> br tags.",
+  markup: "telegram_markdown",
+  allowedTags: [],
+  instructions: "Format user-visible output as simple Markdown. Supported formatting: **bold**, *italic* or _italic_, `inline code`, fenced code blocks using triple backticks, and normal paragraphs or line breaks. Use plain `- ` bullets when helpful. Do not emit raw HTML.",
 };
 
 function defaultBotFactory(token: string): TelegramBotLike {
@@ -274,8 +274,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     text: string,
     other?: Record<string, unknown>,
   ): Promise<void> {
-    const sanitized = sanitizeTelegramHtml(text);
-    const chunks = splitTelegramHtml(sanitized);
+    const chunks = renderTelegramMarkdownChunks(text);
 
     // Single-chunk messages rely on the outer createRetryingChannelAdapter
     // wrapper for generic retries. Multi-chunk messages retry per-chunk

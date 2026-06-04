@@ -628,7 +628,7 @@ test("TelegramBotApiAdapter sends sanitized HTML with parse_mode", async () => {
     botFactory: () => fakeBot,
   });
 
-  await adapter.sendText("7", "Use <b>bold</b> and <u>underline</u>.");
+  await adapter.sendText("7", "Use **bold** and <u>underline</u>.");
 
   assert.deepEqual(fakeBot.sentMessages[0], {
     chatId: "7",
