@@ -81,6 +81,13 @@ test("renderTelegramMarkdownChunks renders list items as plain bullets", () => {
   assert.deepEqual(renderTelegramMarkdownChunks("- first\n- **second**", 100), ["- first\n- <b>second</b>"]);
 });
 
+test("renderTelegramMarkdownChunks renders blockquotes with Telegram HTML", () => {
+  assert.deepEqual(
+    renderTelegramMarkdownChunks("> quoted\n> **bold**", 100),
+    ["<blockquote>quoted\n<b>bold</b></blockquote>"],
+  );
+});
+
 test("renderTelegramMarkdownChunks default maxLength stays under Telegram limit", () => {
   const text = "z".repeat(TELEGRAM_MAX_MESSAGE_LENGTH + 100);
   const chunks = renderTelegramMarkdownChunks(text);

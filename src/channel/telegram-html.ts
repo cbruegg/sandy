@@ -1,6 +1,6 @@
 import { marked } from "marked";
 
-const allowedTagNames = ["b", "i", "code", "pre"] as const;
+const allowedTagNames = ["b", "i", "code", "pre", "blockquote"] as const;
 
 const allowedTagPattern = new RegExp(`</?(?:${allowedTagNames.join("|")})>`, "g");
 
@@ -145,7 +145,8 @@ function renderTokenToBlocks(token: MarkdownToken, maxLength: number): string[] 
 function renderSimpleBlock(token: MarkdownToken, maxLength: number): string {
   if (token.type === "blockquote") {
     const inner = renderNestedBlocks(token.tokens ?? [], maxLength, "\n");
-    return prefixMultiline(inner.length > 0 ? inner : escapeHtml(token.text ?? token.raw ?? ""), "> ", "> ");
+    const text = inner.length > 0 ? inner : escapeHtml(token.text ?? token.raw ?? "");
+    return wrapTag("blockquote", text);
   }
 
   if (token.type === "hr") {

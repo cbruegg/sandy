@@ -608,8 +608,8 @@ test("TelegramBotApiAdapter ignores messages when username does not match", asyn
 
 test("sanitizeTelegramHtml preserves only the supported Telegram tags", () => {
   assert.equal(
-    sanitizeTelegramHtml("Use <b>bold</b> and <script>alert(1)</script> plus <code>x < y</code>."),
-    "Use <b>bold</b> and &lt;script&gt;alert(1)&lt;/script&gt; plus <code>x &lt; y</code>.",
+    sanitizeTelegramHtml("Use <b>bold</b>, <blockquote>quote</blockquote>, and <script>alert(1)</script> plus <code>x < y</code>."),
+    "Use <b>bold</b>, <blockquote>quote</blockquote>, and &lt;script&gt;alert(1)&lt;/script&gt; plus <code>x &lt; y</code>.",
   );
 });
 

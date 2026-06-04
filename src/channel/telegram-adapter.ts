@@ -72,7 +72,7 @@ const telegramFormatting: ChannelFormatting = {
   channelId: "telegram",
   markup: "telegram_markdown",
   allowedTags: [],
-  instructions: "Format user-visible output as simple Markdown. Supported formatting: **bold**, *italic* or _italic_, `inline code`, fenced code blocks using triple backticks, and normal paragraphs or line breaks. Use plain `- ` bullets when helpful. Do not emit raw HTML.",
+  instructions: "Format user-visible output as simple Markdown. Supported formatting: **bold**, *italic* or _italic_, `inline code`, fenced code blocks using triple backticks, blockquotes using `> `, and normal paragraphs or line breaks. Use plain `- ` bullets when helpful. Do not emit raw HTML.",
 };
 
 function defaultBotFactory(token: string): TelegramBotLike {
