@@ -34,7 +34,6 @@ test("HttpTokenAuthorizer prefers worker_session grants over once grants", async
   session.activeTask = {
     taskId,
     taskName: "test",
-    taskBrief: "test brief",
     status: "running",
     startedAt: new Date().toISOString(),
     lastActivityAt: new Date().toISOString(),
@@ -81,7 +80,6 @@ test("HttpTokenAuthorizer consumes once grants without affecting session grants"
   session.activeTask = {
     taskId,
     taskName: "test",
-    taskBrief: "test brief",
     status: "running",
     startedAt: new Date().toISOString(),
     lastActivityAt: new Date().toISOString(),
@@ -142,7 +140,6 @@ test("HttpTokenAuthorizer applies persistent approvals only when task policy ena
   session.activeTask = {
     taskId,
     taskName: "test",
-    taskBrief: "test brief",
     status: "running",
     startedAt: new Date().toISOString(),
     lastActivityAt: new Date().toISOString(),

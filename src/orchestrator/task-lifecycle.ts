@@ -126,6 +126,7 @@ export class OrchestratorTaskLifecycle {
         const taskId = randomUUID();
         const now = new Date().toISOString();
         let launchSucceeded = false;
+        let resolvedTaskBrief = decision.taskBrief;
         try {
           logger.info("task.launching", {
             chatId: event.chatId,
@@ -133,7 +134,22 @@ export class OrchestratorTaskLifecycle {
             taskName: decision.taskName,
           });
           const taskPolicy = normalizeTaskPolicy(decision.taskPolicy);
-          let taskBrief = decision.taskBrief;
+          session.activeTask = {
+            taskId,
+            taskName: decision.taskName,
+            status: "running",
+            startedAt: now,
+            lastActivityAt: now,
+            pendingPrivilegeRequest: null,
+            taskPolicy,
+            approvedMcpTools: [],
+            approvedMcpResourceReads: [],
+            approvedHttpTokenSessionGrants: [],
+            approvedHttpTokenOnceGrants: [],
+            approvedHostDirectories: [],
+            workerConnected: false,
+            taskSummary: null,
+          };
 
           const handle = await this.deps.sandboxRunner.launchTask(
             {
@@ -145,26 +161,10 @@ export class OrchestratorTaskLifecycle {
               workerStartConfig: await this.deps.buildWorkerStartConfig(),
               prepareStartInput: async (taskSharePath) => {
                 const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskSharePath);
-                taskBrief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
+                const brief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
                 const initialInput = buildTaskInputPayload(stagedAttachments);
-                session.activeTask = {
-                  taskId,
-                  taskName: decision.taskName,
-                  taskBrief,
-                  status: "running",
-                  startedAt: now,
-                  lastActivityAt: now,
-                  pendingPrivilegeRequest: null,
-                  taskPolicy,
-                  approvedMcpTools: [],
-                  approvedMcpResourceReads: [],
-                  approvedHttpTokenSessionGrants: [],
-                  approvedHttpTokenOnceGrants: [],
-                  approvedHostDirectories: [],
-                  workerConnected: false,
-                  taskSummary: null,
-                };
-                return { taskBrief, initialInput };
+                resolvedTaskBrief = brief;
+                return { taskBrief: brief, initialInput };
               },
             },
             async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
@@ -180,7 +180,7 @@ export class OrchestratorTaskLifecycle {
           logger.debug("task.task_brief", {
             chatId: event.chatId,
             taskId,
-            taskBrief,
+            taskBrief: resolvedTaskBrief,
           });
 
           await this.deps.channel.sendText(event.chatId, messages.taskStarted(decision.taskName));
@@ -359,7 +359,7 @@ export class OrchestratorTaskLifecycle {
 
   private buildCompletedTaskFallbackSummary(task: NonNullable<SessionState["activeTask"]>): string {
     return [
-      `The task ended without a worker-provided handoff summary. Task name: ${task.taskName}. Brief: ${task.taskBrief}`,
+      `The task ended without a worker-provided handoff summary. Task name: ${task.taskName}.`,
       "Open questions: Review the visible task updates above if more detail is needed.",
     ].join("\n");
   }
