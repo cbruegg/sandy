@@ -55,20 +55,6 @@ export class DockerSandboxRunner implements SandboxRunner {
     this.pool.start();
   }
 
-  async getTaskSharePath(taskId: string): Promise<string> {
-    const existingRecord = this.taskBundles.get(taskId);
-    if (existingRecord) {
-      return existingRecord.bundle.shareHostPath;
-    }
-    if (this.shutdownRequested) {
-      throw new Error("Sandbox runner is shutting down and cannot create task shares.");
-    }
-
-    const bundle = await this.pool.acquire(taskId);
-    this.taskBundles.set(taskId, { bundle, retired: false });
-    return bundle.shareHostPath;
-  }
-
   async launchTask(
     request: LaunchTaskRequest,
     onEvent: (event: SubAgentEvent) => Promise<void>,
@@ -79,14 +65,12 @@ export class DockerSandboxRunner implements SandboxRunner {
 
     let taskBundleRecord: TaskBundleRecord | null;
     try {
-      taskBundleRecord = this.taskBundles.get(request.taskId) ?? null;
-      if (!taskBundleRecord) {
-        const bundle = await this.pool.acquire(request.taskId);
-        taskBundleRecord = { bundle, retired: false };
-        this.taskBundles.set(request.taskId, taskBundleRecord);
-      }
+      const bundle = await this.pool.acquire(request.taskId);
+      taskBundleRecord = { bundle, retired: false };
+      this.taskBundles.set(request.taskId, taskBundleRecord);
       const reservedBundle = taskBundleRecord.bundle;
       const activeTaskBundleRecord = taskBundleRecord;
+      const startInput = await request.prepareStartInput(reservedBundle.shareHostPath);
 
       const builtWorkerConfig = this.options.workerCodexConfigBuilder(request.taskId);
       const httpProxyUrl = this.options.httpProxyUrlFactory?.(request.taskId) ?? null;
@@ -166,8 +150,8 @@ export class DockerSandboxRunner implements SandboxRunner {
             await this.sendToWorker(child, {
               type: "start_task",
               taskId: request.taskId,
-              taskBrief: request.taskBrief,
-              input: request.initialInput,
+              taskBrief: startInput.taskBrief,
+              input: startInput.initialInput,
               taskLanguage: request.taskLanguage,
               config: request.workerStartConfig,
               environment: builtWorkerConfig.environment,
@@ -331,6 +315,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       });
 
       return {
+        getTaskSharePath: () => reservedBundle.shareHostPath,
         sendUserMessage: async (input: TaskInputPayload) => {
           logger.debugContent("sandbox.user_message", {
             taskId: request.taskId,

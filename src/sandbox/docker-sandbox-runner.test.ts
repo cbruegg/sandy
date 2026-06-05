@@ -8,11 +8,12 @@ import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { DockerSandboxRunner } from "./docker-sandbox-runner.js";
+import type { LaunchTaskRequest } from "./sandbox-runner.js";
 import { TaskBundleLauncherImpl, type TaskBundleLauncherOptions } from "./task-bundle-launcher.js";
 import { TaskBundlePoolImpl } from "./task-bundle-pool.js";
 import type { ReservedTaskBundle } from "./task-bundle-types.js";
 import { SANDY_MANAGED_CONTAINER_LABEL } from "./container-label.js";
-import type { ChannelFormatting, HostCommand, SubAgentEvent, WorkerStartConfig } from "../types.js";
+import type { ChannelFormatting, HostCommand, SubAgentEvent, TaskInputPayload, WorkerStartConfig } from "../types.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
@@ -155,6 +156,28 @@ function trackTestTaskBundle(runner: DockerSandboxRunner, taskId: string, shareH
   }).taskBundles.set(taskId, { bundle, retired: true });
 }
 
+function buildTestLaunchTaskRequest(options?: {
+  taskId?: string;
+  taskBrief?: string;
+  initialInput?: TaskInputPayload;
+  workerStartConfig?: Partial<WorkerStartConfig>;
+}): LaunchTaskRequest {
+  const taskBrief = options?.taskBrief ?? "Inspect the environment.";
+  const initialInput = options?.initialInput ?? { text: "Inspect the environment.", images: [] };
+  return {
+    chatId: "chat-1",
+    taskId: options?.taskId ?? "task-1",
+    taskName: "test-task",
+    taskLanguage: "English",
+    channelFormatting: testFormatting,
+    workerStartConfig: {
+      ...defaultWorkerStartConfig,
+      ...options?.workerStartConfig,
+    },
+    prepareStartInput: () => Promise.resolve({ taskBrief, initialInput }),
+  };
+}
+
 async function launchRunnerWithChild(
   taskChild: FakeChildProcess,
   onEvent: (event: SubAgentEvent) => Promise<void>,
@@ -216,19 +239,7 @@ async function launchRunnerWithChild(
   const runner = createRunner(runnerOptions, launcherOptions);
 
   const handle = await runner.launchTask(
-    {
-      chatId: "chat-1",
-      taskId: "task-1",
-      taskName: "test-task",
-      taskLanguage: "English",
-      taskBrief: "Inspect the environment.",
-      channelFormatting: testFormatting,
-      initialInput: { text: "Inspect the environment.", images: [] },
-      workerStartConfig: {
-        ...defaultWorkerStartConfig,
-        ...options?.workerStartConfig,
-      },
-    },
+    buildTestLaunchTaskRequest({ workerStartConfig: options?.workerStartConfig }),
     onEvent,
   );
 
@@ -330,19 +341,9 @@ test("DockerSandboxRunner passes the configured Codex model in the start_task pa
     spawnImpl,
   }, launcherOptions);
 
-  await runner.launchTask({
-    chatId: "chat-1",
-    taskId: "task-1",
-    taskName: "test-task",
-    taskLanguage: "English",
-    taskBrief: "Inspect the environment.",
-    channelFormatting: testFormatting,
-    initialInput: { text: "Inspect the environment.", images: [] },
-    workerStartConfig: {
-      ...defaultWorkerStartConfig,
-      codexModel: "gpt-5.4-mini",
-    },
-  }, async () => {});
+  await runner.launchTask(buildTestLaunchTaskRequest({
+    workerStartConfig: { codexModel: "gpt-5.4-mini" },
+  }), async () => {});
 
   taskChild.stdout.write('{"type":"worker_connected"}\n');
   await flushEvents();
@@ -602,27 +603,13 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
     spawnImpl,
   }, launcherOptions);
 
-  await runner.launchTask({
-    chatId: "chat-1",
-    taskId: "task-1",
-    taskName: "test-task",
-    taskLanguage: "English",
-    taskBrief: "Inspect the environment.",
-    channelFormatting: testFormatting,
-    initialInput: { text: "Inspect the environment.", images: [] },
-    workerStartConfig: defaultWorkerStartConfig,
-  }, async () => {});
+  await runner.launchTask(buildTestLaunchTaskRequest(), async () => {});
 
-  await runner.launchTask({
-    chatId: "chat-1",
+  await runner.launchTask(buildTestLaunchTaskRequest({
     taskId: "task-2",
-    taskName: "test-task-2",
-    taskLanguage: "English",
     taskBrief: "Inspect the environment again.",
-    channelFormatting: testFormatting,
     initialInput: { text: "Inspect the environment again.", images: [] },
-    workerStartConfig: defaultWorkerStartConfig,
-  }, async () => {});
+  }), async () => {});
 
   await runner.shutdown();
   await flushEvents();
@@ -752,12 +739,12 @@ test("DockerSandboxRunner sends codex config TOML in start_task instead of mount
   const shareRoot = mkdtempSync(join(tmpdir(), "sandy-share-config-"));
   const taskChild = new FakeChildProcess();
 
-  const { runner, invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
+  const { handle, invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
     shareRoot,
     builtWorkerCodexConfigToml: "model = \"gpt-5\"\n",
   });
 
-  const taskShare = await runner.getTaskSharePath("task-1");
+  const taskShare = handle.getTaskSharePath();
   assert.ok(taskShare.includes("bundle-"));
   assert.deepEqual(await readdir(taskShare), []);
 
@@ -888,16 +875,7 @@ test("DockerSandboxRunner launches a network guard and shares its network namesp
     spawnImpl,
   }, launcherOptions);
 
-  await runner.launchTask({
-    chatId: "chat-1",
-    taskId: "task-1",
-    taskName: "test-task",
-    taskLanguage: "English",
-    taskBrief: "Inspect the environment.",
-    channelFormatting: testFormatting,
-    initialInput: { text: "Inspect the environment.", images: [] },
-    workerStartConfig: defaultWorkerStartConfig,
-  }, async () => {});
+  await runner.launchTask(buildTestLaunchTaskRequest(), async () => {});
 
   const guardRunInvocation = invocations.find((invocation) =>
     invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-network-guard:latest");
@@ -986,16 +964,7 @@ test("DockerSandboxRunner reports a disconnect when the network guard exits mid-
     spawnImpl,
   }, launcherOptions);
 
-  await runner.launchTask({
-    chatId: "chat-1",
-    taskId: "task-1",
-    taskName: "test-task",
-    taskLanguage: "English",
-    taskBrief: "Inspect the environment.",
-    channelFormatting: testFormatting,
-    initialInput: { text: "Inspect the environment.", images: [] },
-    workerStartConfig: defaultWorkerStartConfig,
-  }, async (event) => {
+  await runner.launchTask(buildTestLaunchTaskRequest(), async (event) => {
     events.push(event);
   });
 
@@ -1163,20 +1132,12 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
     spawnImpl,
   }, launcherOptions);
 
-  await runner.launchTask({
-    chatId: "chat-1",
-    taskId: "task-1",
-    taskName: "test-task",
-    taskLanguage: "English",
-    taskBrief: "Inspect the environment.",
-    channelFormatting: testFormatting,
-    initialInput: { text: "Inspect the environment.", images: [] },
+  await runner.launchTask(buildTestLaunchTaskRequest({
     workerStartConfig: {
-      ...defaultWorkerStartConfig,
       httpTokens: [{ tokenId: "vid2text", description: "Token for the video transcription API." }],
       httpProxyWrapper: "/usr/local/bin/sandy-http-proxy-exec",
     },
-  }, async () => {});
+  }), async () => {});
 
   const guardRunInvocation = invocations.find((invocation) =>
     invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-network-guard:latest");
@@ -1289,20 +1250,12 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
     spawnImpl,
   }, launcherOptions);
 
-  await runner.launchTask({
-    chatId: "chat-1",
-    taskId: "task-1",
-    taskName: "test-task",
-    taskLanguage: "English",
-    taskBrief: "Inspect the environment.",
-    channelFormatting: testFormatting,
-    initialInput: { text: "Inspect the environment.", images: [] },
+  await runner.launchTask(buildTestLaunchTaskRequest({
     workerStartConfig: {
-      ...defaultWorkerStartConfig,
       httpTokens: [{ tokenId: "vid2text", description: "Token for the video transcription API." }],
       httpProxyWrapper: "/usr/local/bin/sandy-http-proxy-exec",
     },
-  }, async () => {});
+  }), async () => {});
 
   const guardRunInvocation = invocations.find((invocation) =>
     invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-network-guard:latest");
@@ -1392,20 +1345,12 @@ test("DockerSandboxRunner adds managed label to worker, guard and proxy containe
     spawnImpl,
   }, launcherOptions);
 
-  await runner.launchTask({
-    chatId: "chat-1",
-    taskId: "task-1",
-    taskName: "test-task",
-    taskLanguage: "English",
-    taskBrief: "Inspect the environment.",
-    channelFormatting: testFormatting,
-    initialInput: { text: "Inspect the environment.", images: [] },
+  await runner.launchTask(buildTestLaunchTaskRequest({
     workerStartConfig: {
-      ...defaultWorkerStartConfig,
       httpTokens: [],
       httpProxyWrapper: "/usr/local/bin/sandy-http-proxy-exec",
     },
-  }, async () => {});
+  }), async () => {});
 
   const guardRunInvocation = invocations.find((invocation) =>
     invocation.args[0] === "run" && invocation.args.at(-1) === "sandy-network-guard:latest");

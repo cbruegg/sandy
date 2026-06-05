@@ -1,29 +1,26 @@
 import { join } from "node:path";
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
-import type { SandboxRunner } from "../sandbox/sandbox-runner.js";
 import type { MessageAttachment, SavedAttachment, SharedAttachment } from "../types.js";
 import { toSharedWorkspacePath } from "../shared-workspace.js";
 
 export async function stageSharedAttachments(input: {
   channel: ChannelAdapter;
-  sandboxRunner: SandboxRunner;
   chatId: string;
   messageId: string;
   attachments: MessageAttachment[];
-  taskId: string;
+  taskSharePath: string;
 }): Promise<SharedAttachment[]> {
   if (input.attachments.length === 0) {
     return [];
   }
 
-  const taskSharePath = await input.sandboxRunner.getTaskSharePath(input.taskId);
   const targetDirectory = join(
-    taskSharePath,
+    input.taskSharePath,
     "inbox",
     sanitizePathSegment(input.messageId),
   );
   const savedAttachments = await input.channel.saveAttachments(input.chatId, input.attachments, targetDirectory);
-  return buildSharedAttachments(taskSharePath, savedAttachments);
+  return buildSharedAttachments(input.taskSharePath, savedAttachments);
 }
 
 function buildSharedAttachments(taskSharePath: string, attachments: SavedAttachment[]): SharedAttachment[] {

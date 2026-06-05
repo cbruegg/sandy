@@ -153,9 +153,17 @@ function createTestWorkerStartConfig(): WorkerStartConfig {
 class FakeSandboxHandle implements SandboxHandle {
   public readonly userMessages: TaskInputPayload[] = [];
   public readonly privilegeResults: PrivilegeResolutionResult[] = [];
+  public taskSharePath = "";
   public markFinishedCalls = 0;
   public closeCalls = 0;
   public readonly cancellations: string[] = [];
+
+  getTaskSharePath(): string {
+    if (!this.taskSharePath) {
+      throw new Error("No task share path is registered.");
+    }
+    return this.taskSharePath;
+  }
 
   sendUserMessage(input: TaskInputPayload): Promise<void> {
     this.userMessages.push(input);
@@ -183,31 +191,38 @@ class FakeSandboxHandle implements SandboxHandle {
   }
 }
 
+type RecordedLaunch = Omit<LaunchTaskRequest, "prepareStartInput"> & {
+  taskBrief: string;
+  initialInput: TaskInputPayload;
+};
+
 class FakeSandboxRunner implements SandboxRunner {
-  public readonly launches: LaunchTaskRequest[] = [];
+  public readonly launches: RecordedLaunch[] = [];
   public readonly handle = new FakeSandboxHandle();
   public onEvent: ((event: SubAgentEvent) => Promise<void>) | null = null;
   public readonly deletedTaskShares: string[] = [];
-  public readonly ensuredTaskShares: string[] = [];
+  public readonly launchedTaskShares: string[] = [];
   public shareInspections = new Map<string, { isEmpty: boolean; summary: string | null }>();
   private readonly taskSharePaths = new Map<string, string>();
 
-  getTaskSharePath(taskId: string): Promise<string> {
-    const existing = this.taskSharePaths.get(taskId);
-    if (existing) {
-      return Promise.resolve(existing);
-    }
-    const sharePath = `/tmp/${taskId}`;
-    this.ensuredTaskShares.push(taskId);
-    this.taskSharePaths.set(taskId, sharePath);
-    return Promise.resolve(sharePath);
-  }
-
-  launchTask(request: LaunchTaskRequest, onEvent: (event: SubAgentEvent) => Promise<void>): Promise<SandboxHandle> {
-    this.launches.push(request);
+  async launchTask(request: LaunchTaskRequest, onEvent: (event: SubAgentEvent) => Promise<void>): Promise<SandboxHandle> {
+    const taskSharePath = `/tmp/${request.taskId}`;
+    const startInput = await request.prepareStartInput(taskSharePath);
+    this.launches.push({
+      chatId: request.chatId,
+      taskId: request.taskId,
+      taskName: request.taskName,
+      taskLanguage: request.taskLanguage,
+      channelFormatting: request.channelFormatting,
+      workerStartConfig: request.workerStartConfig,
+      taskBrief: startInput.taskBrief,
+      initialInput: startInput.initialInput,
+    });
     this.onEvent = onEvent;
-    this.taskSharePaths.set(request.taskId, `/tmp/${request.taskId}`);
-    return Promise.resolve(this.handle);
+    this.launchedTaskShares.push(request.taskId);
+    this.taskSharePaths.set(request.taskId, taskSharePath);
+    this.handle.taskSharePath = taskSharePath;
+    return this.handle;
   }
 
   async emit(event: SubAgentEvent): Promise<void> {

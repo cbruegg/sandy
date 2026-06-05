@@ -11,11 +11,15 @@ export type LaunchTaskRequest = {
   chatId: string;
   taskId: string;
   taskName: string;
-  taskBrief: string;
   taskLanguage: string;
   channelFormatting: ChannelFormatting;
-  initialInput: TaskInputPayload;
   workerStartConfig: WorkerStartConfig;
+  prepareStartInput: (taskSharePath: string) => Promise<TaskStartInput>;
+};
+
+type TaskStartInput = {
+  taskBrief: string;
+  initialInput: TaskInputPayload;
 };
 
 export type ShareInspection = {
@@ -24,6 +28,7 @@ export type ShareInspection = {
 };
 
 export interface SandboxHandle {
+  getTaskSharePath(): string;
   sendUserMessage(input: TaskInputPayload): Promise<void>;
   resolvePrivilege(result: PrivilegeResolutionResult): Promise<void>;
   markFinished(): Promise<void>;
@@ -37,6 +42,5 @@ export interface SandboxRunner {
   launchTask(request: LaunchTaskRequest, onEvent: (event: SubAgentEvent) => Promise<void>): Promise<SandboxHandle>;
   inspectTaskShare(taskId: string): Promise<ShareInspection>;
   deleteTaskShare(taskId: string): Promise<void>;
-  getTaskSharePath(taskId: string): Promise<string>;
   shutdown?(): Promise<void>;
 }

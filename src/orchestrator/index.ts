@@ -203,18 +203,20 @@ export class SandyOrchestrator {
         }
         await this.privileges.resolvePendingPrivilegeRequest(session, activeTask.pendingPrivilegeRequest, event.decision);
         return;
-      case "user_message":
+      case "user_message": {
         if (activeTask.pendingPrivilegeRequest) {
           await this.deps.channel.sendText(event.chatId, messages.privilegeRequestStillPending());
           return;
         }
-        await this.runtimeState.requireHandle(activeTask.taskId).sendUserMessage(
+        const handle = this.runtimeState.requireHandle(activeTask.taskId);
+        await handle.sendUserMessage(
           buildWorkerFollowUpInput(
             event.text,
-            await this.taskLifecycle.stageAttachments(event.chatId, event.messageId, event.attachments, activeTask.taskId),
+            await this.taskLifecycle.stageAttachments(event.chatId, event.messageId, event.attachments, handle.getTaskSharePath()),
           ),
         );
         return;
+      }
     }
   }
 }

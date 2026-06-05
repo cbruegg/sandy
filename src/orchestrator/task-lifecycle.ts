@@ -125,51 +125,47 @@ export class OrchestratorTaskLifecycle {
       case "launch_task": {
         const taskId = randomUUID();
         const now = new Date().toISOString();
-        let shareEnsured = false;
         let launchSucceeded = false;
         try {
-          if (event.attachments.length > 0) {
-            await this.deps.sandboxRunner.getTaskSharePath(taskId);
-            shareEnsured = true;
-          }
-          const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskId);
-          const taskBrief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
-          const initialInput = buildTaskInputPayload(stagedAttachments);
-
           logger.info("task.launching", {
             chatId: event.chatId,
             taskId,
             taskName: decision.taskName,
           });
           const taskPolicy = normalizeTaskPolicy(decision.taskPolicy);
-          session.activeTask = {
-            taskId,
-            taskName: decision.taskName,
-            taskBrief,
-            status: "running",
-            startedAt: now,
-            lastActivityAt: now,
-            pendingPrivilegeRequest: null,
-            taskPolicy,
-            approvedMcpTools: [],
-            approvedMcpResourceReads: [],
-            approvedHttpTokenSessionGrants: [],
-            approvedHttpTokenOnceGrants: [],
-            approvedHostDirectories: [],
-            workerConnected: false,
-            taskSummary: null,
-          };
+          let taskBrief = decision.taskBrief;
 
           const handle = await this.deps.sandboxRunner.launchTask(
             {
               chatId: event.chatId,
               taskId,
               taskName: decision.taskName,
-              taskBrief,
               taskLanguage: decision.taskLanguage,
               channelFormatting: this.channelFormatting,
-              initialInput,
               workerStartConfig: await this.deps.buildWorkerStartConfig(),
+              prepareStartInput: async (taskSharePath) => {
+                const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskSharePath);
+                taskBrief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
+                const initialInput = buildTaskInputPayload(stagedAttachments);
+                session.activeTask = {
+                  taskId,
+                  taskName: decision.taskName,
+                  taskBrief,
+                  status: "running",
+                  startedAt: now,
+                  lastActivityAt: now,
+                  pendingPrivilegeRequest: null,
+                  taskPolicy,
+                  approvedMcpTools: [],
+                  approvedMcpResourceReads: [],
+                  approvedHttpTokenSessionGrants: [],
+                  approvedHttpTokenOnceGrants: [],
+                  approvedHostDirectories: [],
+                  workerConnected: false,
+                  taskSummary: null,
+                };
+                return { taskBrief, initialInput };
+              },
             },
             async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
           );
@@ -192,9 +188,6 @@ export class OrchestratorTaskLifecycle {
         } catch (error) {
           if (!launchSucceeded && session.activeTask?.taskId === taskId) {
             session.activeTask = null;
-          }
-          if (shareEnsured && !launchSucceeded) {
-            await this.deps.sandboxRunner.deleteTaskShare(taskId);
           }
           throw error;
         }
@@ -303,15 +296,14 @@ export class OrchestratorTaskLifecycle {
     chatId: string,
     messageId: string,
     attachments: Extract<NormalizedChatEvent, { kind: "user_message" }>["attachments"],
-    taskId: string,
+    taskSharePath: string,
   ) {
     return stageSharedAttachments({
       channel: this.deps.channel,
-      sandboxRunner: this.deps.sandboxRunner,
       chatId,
       messageId,
       attachments,
-      taskId,
+      taskSharePath,
     });
   }
 
