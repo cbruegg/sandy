@@ -39,7 +39,6 @@ type TaskStatus =
 export type ActiveTaskState = {
   taskId: string;
   taskName: string;
-  taskBrief: string;
   status: TaskStatus;
   startedAt: string;
   lastActivityAt: string;

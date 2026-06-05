@@ -148,6 +148,19 @@ test("buildInitialTaskInput always returns a user-input sequence", () => {
   assert.match(inputText, /Inspect the repository\./);
 });
 
+test("buildInitialTaskInput uses the SDK local_image variant for images", () => {
+  const input = buildInitialTaskInput(
+    "Inspect the repository.",
+    "English",
+    testFormatting,
+    [],
+    null,
+    [{ sharePath: "/workspace/share/cover.png", fileName: "cover.png" }],
+  );
+
+  assert.deepEqual(input.at(-1), { type: "local_image", path: "/workspace/share/cover.png" });
+});
+
 test("worker processes follow-up commands after start_task initialization finishes", async () => {
   const { promise: sessionReady, resolve: resolveSession } = Promise.withResolvers<void>();
   const sentEvents: SubAgentEvent[] = [];
@@ -356,6 +369,7 @@ test("worker passes image attachments through app-server user_message turns", as
   const initialInputJson = JSON.stringify(turnInputs[0]);
   assert.match(initialInputJson, /"type":"text"/);
   assert.match(initialInputJson, /Initial request/);
+  assert.match(initialInputJson, /"type":"local_image"/);
   assert.match(initialInputJson, /"path":"\/workspace\/share\/cover\.png"/);
   assert.deepEqual(turnInputs[1], [
     { type: "text", text: "Look at this image too" },

@@ -125,62 +125,69 @@ export class OrchestratorTaskLifecycle {
       case "launch_task": {
         const taskId = randomUUID();
         const now = new Date().toISOString();
-        const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskId);
-        const taskBrief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
-        const initialInput = buildTaskInputPayload(stagedAttachments);
-
-        logger.info("task.launching", {
-          chatId: event.chatId,
-          taskId,
-          taskName: decision.taskName,
-        });
-        const taskPolicy = normalizeTaskPolicy(decision.taskPolicy);
-        session.activeTask = {
-          taskId,
-          taskName: decision.taskName,
-          taskBrief,
-          status: "running",
-          startedAt: now,
-          lastActivityAt: now,
-          pendingPrivilegeRequest: null,
-          taskPolicy,
-          approvedMcpTools: [],
-          approvedMcpResourceReads: [],
-          approvedHttpTokenSessionGrants: [],
-          approvedHttpTokenOnceGrants: [],
-          approvedHostDirectories: [],
-          workerConnected: false,
-          taskSummary: null,
-        };
-
-        const handle = await this.deps.sandboxRunner.launchTask(
-          {
+        let launchSucceeded = false;
+        try {
+          logger.info("task.launching", {
             chatId: event.chatId,
             taskId,
             taskName: decision.taskName,
-            taskBrief,
-            taskLanguage: decision.taskLanguage,
-            channelFormatting: this.channelFormatting,
-            initialInput,
-            workerStartConfig: await this.deps.buildWorkerStartConfig(),
-          },
-          async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
-        );
+          });
+          const taskPolicy = normalizeTaskPolicy(decision.taskPolicy);
+          session.activeTask = {
+            taskId,
+            taskName: decision.taskName,
+            status: "running",
+            startedAt: now,
+            lastActivityAt: now,
+            pendingPrivilegeRequest: null,
+            taskPolicy,
+            approvedMcpTools: [],
+            approvedMcpResourceReads: [],
+            approvedHttpTokenSessionGrants: [],
+            approvedHttpTokenOnceGrants: [],
+            approvedHostDirectories: [],
+            workerConnected: false,
+            taskSummary: null,
+          };
 
-        this.runtimeState.registerHandle(taskId, handle);
-        logger.info("task.started", {
-          chatId: event.chatId,
-          taskId,
-          taskName: decision.taskName,
-        });
-        logger.debug("task.task_brief", {
-          chatId: event.chatId,
-          taskId,
-          taskBrief,
-        });
+          const handle = await this.deps.sandboxRunner.launchTask(
+            {
+              chatId: event.chatId,
+              taskId,
+              taskName: decision.taskName,
+              taskLanguage: decision.taskLanguage,
+              channelFormatting: this.channelFormatting,
+              workerStartConfig: await this.deps.buildWorkerStartConfig(),
+              prepareStartInput: async (taskSharePath) => {
+                const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskSharePath);
+                const brief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
+                logger.debug("task.task_brief", {
+                  chatId: event.chatId,
+                  taskId,
+                  taskBrief: brief,
+                });
+                const initialInput = buildTaskInputPayload(stagedAttachments);
+                return { taskBrief: brief, initialInput };
+              },
+            },
+            async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
+          );
 
-        await this.deps.channel.sendText(event.chatId, messages.taskStarted(decision.taskName));
-        return;
+          this.runtimeState.registerHandle(taskId, handle);
+          launchSucceeded = true;
+          logger.info("task.started", {
+            chatId: event.chatId,
+            taskId,
+            taskName: decision.taskName,
+          });
+          await this.deps.channel.sendText(event.chatId, messages.taskStarted(decision.taskName));
+          return;
+        } catch (error) {
+          if (!launchSucceeded && session.activeTask?.taskId === taskId) {
+            session.activeTask = null;
+          }
+          throw error;
+        }
       }
       default:
         assertNever(decision);
@@ -286,15 +293,14 @@ export class OrchestratorTaskLifecycle {
     chatId: string,
     messageId: string,
     attachments: Extract<NormalizedChatEvent, { kind: "user_message" }>["attachments"],
-    taskId: string,
+    taskSharePath: string,
   ) {
     return stageSharedAttachments({
       channel: this.deps.channel,
-      sandboxRunner: this.deps.sandboxRunner,
       chatId,
       messageId,
       attachments,
-      taskId,
+      taskSharePath,
     });
   }
 
@@ -350,7 +356,7 @@ export class OrchestratorTaskLifecycle {
 
   private buildCompletedTaskFallbackSummary(task: NonNullable<SessionState["activeTask"]>): string {
     return [
-      `The task ended without a worker-provided handoff summary. Task name: ${task.taskName}. Brief: ${task.taskBrief}`,
+      `The task ended without a worker-provided handoff summary. Task name: ${task.taskName}.`,
       "Open questions: Review the visible task updates above if more detail is needed.",
     ].join("\n");
   }

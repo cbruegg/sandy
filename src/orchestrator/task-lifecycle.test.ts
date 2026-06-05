@@ -34,6 +34,7 @@ test("orchestrator stages attached files into the task share before launching th
   });
 
   assert.equal(channel.savedAttachments.length, 1);
+  assert.equal(runner.launchedTaskShares.length, 1);
   assert.match(expectDefined(channel.savedAttachments[0], "Expected saved attachment batch.").targetDirectory, /inbox\/message_1$/);
   const launch = expectDefined(runner.launches[0], "Expected launch.");
   assert.match(launch.taskBrief, /Files attached by the user are already available/);
@@ -226,7 +227,7 @@ test("orchestrator uses the task name in task_done completion messages", async (
     messages.taskSummaryReady(
       "env-inspection",
       [
-        "The task ended without a worker-provided handoff summary. Task name: env-inspection. Brief: Inspect the environment.",
+        "The task ended without a worker-provided handoff summary. Task name: env-inspection.",
         "Open questions: Review the visible task updates above if more detail is needed.",
       ].join("\n"),
     ),

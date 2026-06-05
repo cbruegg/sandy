@@ -213,6 +213,52 @@ test("CodexAppServerClient answers auth refresh requests during turns", async ()
   ]);
 });
 
+test("CodexAppServerClient converts SDK local_image inputs to app-server localImage inputs", async () => {
+  const child = new FakeChildProcess();
+  const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
+  const tokens: ChatGPTExternalTokens = {
+    accessToken: "access-token",
+    chatgptAccountId: "acct-123",
+    chatgptPlanType: "plus",
+  };
+  const client = await createExternalTokensClient(spawnImpl, child, tokens);
+
+  const startThreadPromise = client.startThread(TEST_WORKER_PROFILE);
+  await Promise.resolve();
+  respond(child, 3, { thread: { id: "thread-1" } });
+  const threadId = await startThreadPromise;
+
+  const streamPromise = (async () => {
+    const events: Array<{ method: string; params?: unknown }> = [];
+    for await (const event of client.streamTurn(
+      threadId,
+      [
+        { type: "text", text: "hello" },
+        { type: "local_image", path: "/workspace/share/photo.jpg" },
+      ],
+      async () => tokens,
+    )) {
+      events.push(event);
+    }
+    return events;
+  })();
+
+  await Promise.resolve();
+  const messages = parseWrittenJsonLines(child);
+  assert.equal(messages[4]?.["method"], "turn/start");
+  assert.deepEqual(messages[4]?.["params"], {
+    threadId: "thread-1",
+    input: [
+      { type: "text", text: "hello" },
+      { type: "localImage", path: "/workspace/share/photo.jpg" },
+    ],
+  });
+
+  respond(child, 4, {});
+  child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method: "turn/completed", params: {} })}\n`);
+  assert.deepEqual(await streamPromise, [{ method: "turn/completed", params: {} }]);
+});
+
 test("CodexAppServerClient handles auth refresh before turn-start RPC response", async () => {
   const child = new FakeChildProcess();
   const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;

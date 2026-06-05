@@ -11,7 +11,11 @@ import type {ReservedTaskBundle, TaskBundlePool} from "./task-bundle-types.js";
 
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 300_000;
 type TaskId = string;
-type ShareHostPath = string;
+
+type TaskBundleRecord = {
+  bundle: ReservedTaskBundle;
+  retired: boolean;
+};
 
 export type DockerSandboxRunnerOptions = {
   workerImage: string;
@@ -33,7 +37,7 @@ export class DockerSandboxRunner implements SandboxRunner {
   private readonly spawnImpl: typeof spawn;
   private readonly setTimeoutImpl: typeof setTimeout;
   private readonly clearTimeoutImpl: typeof clearTimeout;
-  private readonly taskSharePaths = new Map<TaskId, ShareHostPath>();
+  private readonly taskBundles = new Map<TaskId, TaskBundleRecord>();
   private shutdownPromise: Promise<void> | null = null;
   private shutdownRequested = false;
 
@@ -59,11 +63,14 @@ export class DockerSandboxRunner implements SandboxRunner {
       throw new Error("Sandbox runner is shutting down and cannot launch new tasks.");
     }
 
-    let bundle: ReservedTaskBundle | null = null;
+    let taskBundleRecord: TaskBundleRecord | null;
     try {
-      bundle = await this.pool.acquire(request.taskId);
-      const reservedBundle = bundle;
-      this.taskSharePaths.set(request.taskId, reservedBundle.shareHostPath);
+      const bundle = await this.pool.acquire(request.taskId);
+      taskBundleRecord = { bundle, retired: false };
+      this.taskBundles.set(request.taskId, taskBundleRecord);
+      const reservedBundle = taskBundleRecord.bundle;
+      const activeTaskBundleRecord = taskBundleRecord;
+      const startInput = await request.prepareStartInput(reservedBundle.shareHostPath);
 
       const builtWorkerConfig = this.options.workerCodexConfigBuilder(request.taskId);
       const httpProxyUrl = this.options.httpProxyUrlFactory?.(request.taskId) ?? null;
@@ -89,12 +96,16 @@ export class DockerSandboxRunner implements SandboxRunner {
         if (retirePromise) {
           return retirePromise;
         }
-        retirePromise = this.pool.retireBundle(reservedBundle).catch((error) => {
-          logger.error("sandbox.retire_bundle_failed", error, String(error), {
-            taskId: reservedBundle.taskId,
-            bundleId: reservedBundle.bundleId,
+        retirePromise = this.pool.retireBundle(reservedBundle)
+          .then(() => {
+            activeTaskBundleRecord.retired = true;
+          })
+          .catch((error) => {
+            logger.error("sandbox.retire_bundle_failed", error, String(error), {
+              taskId: reservedBundle.taskId,
+              bundleId: reservedBundle.bundleId,
+            });
           });
-        });
         return retirePromise;
       };
 
@@ -139,8 +150,8 @@ export class DockerSandboxRunner implements SandboxRunner {
             await this.sendToWorker(child, {
               type: "start_task",
               taskId: request.taskId,
-              taskBrief: request.taskBrief,
-              input: request.initialInput,
+              taskBrief: startInput.taskBrief,
+              input: startInput.initialInput,
               taskLanguage: request.taskLanguage,
               config: request.workerStartConfig,
               environment: builtWorkerConfig.environment,
@@ -304,6 +315,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       });
 
       return {
+        getTaskSharePath: () => reservedBundle.shareHostPath,
         sendUserMessage: async (input: TaskInputPayload) => {
           logger.debugContent("sandbox.user_message", {
             taskId: request.taskId,
@@ -395,24 +407,15 @@ export class DockerSandboxRunner implements SandboxRunner {
         },
       };
     } catch (error) {
-      if (bundle) {
+      const cleanupRecord = this.taskBundles.get(request.taskId);
+      if (cleanupRecord) {
         try {
-          await this.pool.retireBundle(bundle);
-        } catch (retireError) {
-          logger.error("sandbox.retire_bundle_failed", retireError, String(retireError), {
-            taskId: bundle.taskId,
-            bundleId: bundle.bundleId,
+          await this.deleteTaskShare(request.taskId);
+        } catch (cleanupError) {
+          logger.error("sandbox.share_cleanup_failed", cleanupError, String(cleanupError), {
+            taskId: request.taskId,
+            sharePath: cleanupRecord.bundle.shareHostPath,
           });
-        }
-        if (this.taskSharePaths.has(request.taskId)) {
-          try {
-            await this.deleteTaskShare(request.taskId);
-          } catch (cleanupError) {
-            logger.error("sandbox.share_cleanup_failed", cleanupError, String(cleanupError), {
-              taskId: request.taskId,
-              sharePath: this.taskSharePaths.get(request.taskId) ?? null,
-            });
-          }
         }
       }
       throw error;
@@ -435,7 +438,7 @@ export class DockerSandboxRunner implements SandboxRunner {
   }
 
   async inspectTaskShare(taskId: string): Promise<ShareInspection> {
-    const sharePath = this.getTaskSharePath(taskId);
+    const sharePath = this.requireTaskBundleRecord(taskId).bundle.shareHostPath;
     let entries;
     try {
       entries = await readdir(sharePath, {withFileTypes: true});
@@ -464,7 +467,12 @@ export class DockerSandboxRunner implements SandboxRunner {
   }
 
   async deleteTaskShare(taskId: string): Promise<void> {
-    const sharePath = this.getTaskSharePath(taskId);
+    const taskBundleRecord = this.requireTaskBundleRecord(taskId);
+    const sharePath = taskBundleRecord.bundle.shareHostPath;
+    if (!taskBundleRecord.retired) {
+      await this.pool.retireBundle(taskBundleRecord.bundle);
+      taskBundleRecord.retired = true;
+    }
     try {
       await rm(sharePath, {recursive: true, force: true});
     } catch (error) {
@@ -490,7 +498,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       taskId,
       sharePath,
     });
-    this.taskSharePaths.delete(taskId);
+    this.taskBundles.delete(taskId);
   }
 
   private async deleteTaskShareWithDocker(taskId: string, sharePath: string): Promise<void> {
@@ -540,12 +548,12 @@ export class DockerSandboxRunner implements SandboxRunner {
     });
   }
 
-  getTaskSharePath(taskId: string): string {
-    const trackedPath = this.taskSharePaths.get(taskId);
-    if (!trackedPath) {
+  private requireTaskBundleRecord(taskId: string): TaskBundleRecord {
+    const record = this.taskBundles.get(taskId);
+    if (!record) {
       throw new Error(`No tracked share path is registered for task ${taskId}.`);
     }
-    return trackedPath;
+    return record;
   }
 
   private attachStdoutParser(child: ChildProcessWithoutNullStreams, onEvent: (event: SubAgentEvent) => void): void {
