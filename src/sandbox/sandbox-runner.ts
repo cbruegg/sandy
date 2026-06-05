@@ -34,6 +34,7 @@ export interface SandboxHandle {
 
 export interface SandboxRunner {
   start?(): void;
+  prepareTaskShare(taskId: string): Promise<string>;
   launchTask(request: LaunchTaskRequest, onEvent: (event: SubAgentEvent) => Promise<void>): Promise<SandboxHandle>;
   inspectTaskShare(taskId: string): Promise<ShareInspection>;
   deleteTaskShare(taskId: string): Promise<void>;

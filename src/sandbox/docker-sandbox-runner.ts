@@ -34,6 +34,7 @@ export class DockerSandboxRunner implements SandboxRunner {
   private readonly setTimeoutImpl: typeof setTimeout;
   private readonly clearTimeoutImpl: typeof clearTimeout;
   private readonly taskSharePaths = new Map<TaskId, ShareHostPath>();
+  private readonly preparedBundles = new Map<TaskId, ReservedTaskBundle>();
   private shutdownPromise: Promise<void> | null = null;
   private shutdownRequested = false;
 
@@ -51,6 +52,31 @@ export class DockerSandboxRunner implements SandboxRunner {
     this.pool.start();
   }
 
+  async prepareTaskShare(taskId: string): Promise<string> {
+    const existingSharePath = this.taskSharePaths.get(taskId);
+    if (existingSharePath) {
+      return existingSharePath;
+    }
+    if (this.shutdownRequested) {
+      throw new Error("Sandbox runner is shutting down and cannot prepare task shares.");
+    }
+
+    let bundle: ReservedTaskBundle | null = null;
+    try {
+      bundle = await this.pool.acquire(taskId);
+      this.preparedBundles.set(taskId, bundle);
+      this.taskSharePaths.set(taskId, bundle.shareHostPath);
+      return bundle.shareHostPath;
+    } catch (error) {
+      if (bundle) {
+        await this.pool.retireBundle(bundle);
+      }
+      this.preparedBundles.delete(taskId);
+      this.taskSharePaths.delete(taskId);
+      throw error;
+    }
+  }
+
   async launchTask(
     request: LaunchTaskRequest,
     onEvent: (event: SubAgentEvent) => Promise<void>,
@@ -61,7 +87,13 @@ export class DockerSandboxRunner implements SandboxRunner {
 
     let bundle: ReservedTaskBundle | null = null;
     try {
-      bundle = await this.pool.acquire(request.taskId);
+      bundle = this.preparedBundles.get(request.taskId) ?? null;
+      if (bundle) {
+        this.preparedBundles.delete(request.taskId);
+      } else {
+        bundle = await this.pool.acquire(request.taskId);
+        this.taskSharePaths.set(request.taskId, bundle.shareHostPath);
+      }
       const reservedBundle = bundle;
       this.taskSharePaths.set(request.taskId, reservedBundle.shareHostPath);
 
@@ -465,6 +497,11 @@ export class DockerSandboxRunner implements SandboxRunner {
 
   async deleteTaskShare(taskId: string): Promise<void> {
     const sharePath = this.getTaskSharePath(taskId);
+    const preparedBundle = this.preparedBundles.get(taskId);
+    if (preparedBundle) {
+      this.preparedBundles.delete(taskId);
+      await this.pool.retireBundle(preparedBundle);
+    }
     try {
       await rm(sharePath, {recursive: true, force: true});
     } catch (error) {

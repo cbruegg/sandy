@@ -15,6 +15,11 @@ import type { TurnStartResponse } from "./generated/v2/TurnStartResponse.js";
 import type { TurnInterruptParams } from "./generated/v2/TurnInterruptParams.js";
 import type { ChatgptAuthTokensRefreshResponse } from "./generated/v2/ChatgptAuthTokensRefreshResponse.js";
 
+type AppServerInput = Array<
+  | { type: "text"; text: string }
+  | { type: "localImage"; path: string }
+>;
+
 type PendingRequest<T = unknown> = {
   resolve: (result: T) => void;
   reject: (error: Error) => void;
@@ -147,7 +152,7 @@ class AppServerTypedRpc {
    * callers already produce `Input` objects (which are compatible
    * at runtime).
    */
-  async turnStart(params: Omit<TurnStartParams, "input"> & { input: Input }): Promise<TurnStartResponse> {
+  async turnStart(params: Omit<TurnStartParams, "input"> & { input: AppServerInput }): Promise<TurnStartResponse> {
     return await this.host.requestRaw<TurnStartResponse>("turn/start", params);
   }
 
@@ -162,6 +167,21 @@ class AppServerTypedRpc {
   respondMethodNotFound(message: JsonRpcErrorResponse): void {
     this.host.writeJsonRpcMessage(message);
   }
+}
+
+function normalizeInputForAppServer(input: Input): AppServerInput {
+  if (typeof input === "string") {
+    return input.trim() ? [{ type: "text", text: input }] : [];
+  }
+
+  return input.map((item) => {
+    switch (item.type) {
+      case "text":
+        return { type: "text", text: item.text };
+      case "local_image":
+        return { type: "localImage", path: item.path };
+    }
+  });
 }
 
 function buildAppServerThreadStartParams(
@@ -469,7 +489,7 @@ export class CodexAppServerClient implements AgentClient {
 
     this.activeServerRequestHandler = onServerRequest ?? null;
 
-    const turnStartResponse = await this.rpc.turnStart({ threadId, input });
+    const turnStartResponse = await this.rpc.turnStart({ threadId, input: normalizeInputForAppServer(input) });
 
     try {
       let done = false;

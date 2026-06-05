@@ -188,11 +188,25 @@ class FakeSandboxRunner implements SandboxRunner {
   public readonly handle = new FakeSandboxHandle();
   public onEvent: ((event: SubAgentEvent) => Promise<void>) | null = null;
   public readonly deletedTaskShares: string[] = [];
+   public readonly preparedTaskShares: string[] = [];
   public shareInspections = new Map<string, { isEmpty: boolean; summary: string | null }>();
+  private readonly taskSharePaths = new Map<string, string>();
+
+  prepareTaskShare(taskId: string): Promise<string> {
+    const existing = this.taskSharePaths.get(taskId);
+    if (existing) {
+      return Promise.resolve(existing);
+    }
+    const sharePath = `/tmp/${taskId}`;
+    this.preparedTaskShares.push(taskId);
+    this.taskSharePaths.set(taskId, sharePath);
+    return Promise.resolve(sharePath);
+  }
 
   launchTask(request: LaunchTaskRequest, onEvent: (event: SubAgentEvent) => Promise<void>): Promise<SandboxHandle> {
     this.launches.push(request);
     this.onEvent = onEvent;
+    this.taskSharePaths.set(request.taskId, `/tmp/${request.taskId}`);
     return Promise.resolve(this.handle);
   }
 
@@ -209,11 +223,16 @@ class FakeSandboxRunner implements SandboxRunner {
 
   deleteTaskShare(taskId: string): Promise<void> {
     this.deletedTaskShares.push(taskId);
+    this.taskSharePaths.delete(taskId);
     return Promise.resolve();
   }
 
   getTaskSharePath(taskId: string): string {
-    return `/tmp/${taskId}`;
+    const sharePath = this.taskSharePaths.get(taskId);
+    if (!sharePath) {
+      throw new Error(`No tracked share path is registered for task ${taskId}.`);
+    }
+    return sharePath;
   }
 }
 

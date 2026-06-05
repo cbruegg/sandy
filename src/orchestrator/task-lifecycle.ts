@@ -125,62 +125,72 @@ export class OrchestratorTaskLifecycle {
       case "launch_task": {
         const taskId = randomUUID();
         const now = new Date().toISOString();
-        const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskId);
-        const taskBrief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
-        const initialInput = buildTaskInputPayload(stagedAttachments);
+        let sharePrepared = false;
+        try {
+          await this.deps.sandboxRunner.prepareTaskShare(taskId);
+          sharePrepared = true;
+          const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskId);
+          const taskBrief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
+          const initialInput = buildTaskInputPayload(stagedAttachments);
 
-        logger.info("task.launching", {
-          chatId: event.chatId,
-          taskId,
-          taskName: decision.taskName,
-        });
-        const taskPolicy = normalizeTaskPolicy(decision.taskPolicy);
-        session.activeTask = {
-          taskId,
-          taskName: decision.taskName,
-          taskBrief,
-          status: "running",
-          startedAt: now,
-          lastActivityAt: now,
-          pendingPrivilegeRequest: null,
-          taskPolicy,
-          approvedMcpTools: [],
-          approvedMcpResourceReads: [],
-          approvedHttpTokenSessionGrants: [],
-          approvedHttpTokenOnceGrants: [],
-          approvedHostDirectories: [],
-          workerConnected: false,
-          taskSummary: null,
-        };
-
-        const handle = await this.deps.sandboxRunner.launchTask(
-          {
+          logger.info("task.launching", {
             chatId: event.chatId,
             taskId,
             taskName: decision.taskName,
+          });
+          const taskPolicy = normalizeTaskPolicy(decision.taskPolicy);
+          session.activeTask = {
+            taskId,
+            taskName: decision.taskName,
             taskBrief,
-            taskLanguage: decision.taskLanguage,
-            channelFormatting: this.channelFormatting,
-            initialInput,
-            workerStartConfig: await this.deps.buildWorkerStartConfig(),
-          },
-          async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
-        );
+            status: "running",
+            startedAt: now,
+            lastActivityAt: now,
+            pendingPrivilegeRequest: null,
+            taskPolicy,
+            approvedMcpTools: [],
+            approvedMcpResourceReads: [],
+            approvedHttpTokenSessionGrants: [],
+            approvedHttpTokenOnceGrants: [],
+            approvedHostDirectories: [],
+            workerConnected: false,
+            taskSummary: null,
+          };
 
-        this.runtimeState.registerHandle(taskId, handle);
-        logger.info("task.started", {
-          chatId: event.chatId,
-          taskId,
-          taskName: decision.taskName,
-        });
-        logger.debug("task.task_brief", {
-          chatId: event.chatId,
-          taskId,
-          taskBrief,
-        });
+          const handle = await this.deps.sandboxRunner.launchTask(
+            {
+              chatId: event.chatId,
+              taskId,
+              taskName: decision.taskName,
+              taskBrief,
+              taskLanguage: decision.taskLanguage,
+              channelFormatting: this.channelFormatting,
+              initialInput,
+              workerStartConfig: await this.deps.buildWorkerStartConfig(),
+            },
+            async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
+          );
 
-        await this.deps.channel.sendText(event.chatId, messages.taskStarted(decision.taskName));
-        return;
+          this.runtimeState.registerHandle(taskId, handle);
+          logger.info("task.started", {
+            chatId: event.chatId,
+            taskId,
+            taskName: decision.taskName,
+          });
+          logger.debug("task.task_brief", {
+            chatId: event.chatId,
+            taskId,
+            taskBrief,
+          });
+
+          await this.deps.channel.sendText(event.chatId, messages.taskStarted(decision.taskName));
+          return;
+        } catch (error) {
+          if (sharePrepared) {
+            await this.deps.sandboxRunner.deleteTaskShare(taskId);
+          }
+          throw error;
+        }
       }
       default:
         assertNever(decision);
