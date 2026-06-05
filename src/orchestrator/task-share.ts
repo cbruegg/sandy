@@ -16,7 +16,7 @@ export async function stageSharedAttachments(input: {
     return [];
   }
 
-  const taskSharePath = input.sandboxRunner.getTaskSharePath(input.taskId);
+  const taskSharePath = await input.sandboxRunner.getTaskSharePath(input.taskId);
   const targetDirectory = join(
     taskSharePath,
     "inbox",

@@ -34,7 +34,7 @@ test("orchestrator stages attached files into the task share before launching th
   });
 
   assert.equal(channel.savedAttachments.length, 1);
-  assert.equal(runner.preparedTaskShares.length, 1);
+  assert.equal(runner.ensuredTaskShares.length, 1);
   assert.match(expectDefined(channel.savedAttachments[0], "Expected saved attachment batch.").targetDirectory, /inbox\/message_1$/);
   const launch = expectDefined(runner.launches[0], "Expected launch.");
   assert.match(launch.taskBrief, /Files attached by the user are already available/);

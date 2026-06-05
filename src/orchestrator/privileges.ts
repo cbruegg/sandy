@@ -117,7 +117,7 @@ export class OrchestratorPrivileges {
     } else {
       const operation = await this.deps.privilegeBroker.apply(request.payload, {
         taskId: activeTask.taskId,
-        taskSharePath: this.deps.sandboxRunner.getTaskSharePath(activeTask.taskId),
+        taskSharePath: await this.deps.sandboxRunner.getTaskSharePath(activeTask.taskId),
       });
       result = {
         requestId: request.requestId,
@@ -261,7 +261,7 @@ export class OrchestratorPrivileges {
 
     await this.deps.channel.sendFile(
       chatId,
-      resolveTaskShareHostPath(this.deps.sandboxRunner.getTaskSharePath(activeTask.taskId), sharePath, "send_file_to_channel path"),
+      resolveTaskShareHostPath(await this.deps.sandboxRunner.getTaskSharePath(activeTask.taskId), sharePath, "send_file_to_channel path"),
       caption,
     );
   }

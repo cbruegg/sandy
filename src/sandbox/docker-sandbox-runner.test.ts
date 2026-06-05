@@ -737,7 +737,7 @@ test("DockerSandboxRunner sends codex config TOML in start_task instead of mount
     builtWorkerCodexConfigToml: "model = \"gpt-5\"\n",
   });
 
-  const taskShare = runner.getTaskSharePath("task-1");
+  const taskShare = await runner.getTaskSharePath("task-1");
   assert.ok(taskShare.includes("bundle-"));
   assert.deepEqual(await readdir(taskShare), []);
 

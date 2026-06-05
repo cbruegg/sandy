@@ -188,17 +188,17 @@ class FakeSandboxRunner implements SandboxRunner {
   public readonly handle = new FakeSandboxHandle();
   public onEvent: ((event: SubAgentEvent) => Promise<void>) | null = null;
   public readonly deletedTaskShares: string[] = [];
-   public readonly preparedTaskShares: string[] = [];
+  public readonly ensuredTaskShares: string[] = [];
   public shareInspections = new Map<string, { isEmpty: boolean; summary: string | null }>();
   private readonly taskSharePaths = new Map<string, string>();
 
-  prepareTaskShare(taskId: string): Promise<string> {
+  getTaskSharePath(taskId: string): Promise<string> {
     const existing = this.taskSharePaths.get(taskId);
     if (existing) {
       return Promise.resolve(existing);
     }
     const sharePath = `/tmp/${taskId}`;
-    this.preparedTaskShares.push(taskId);
+    this.ensuredTaskShares.push(taskId);
     this.taskSharePaths.set(taskId, sharePath);
     return Promise.resolve(sharePath);
   }
@@ -227,13 +227,6 @@ class FakeSandboxRunner implements SandboxRunner {
     return Promise.resolve();
   }
 
-  getTaskSharePath(taskId: string): string {
-    const sharePath = this.taskSharePaths.get(taskId);
-    if (!sharePath) {
-      throw new Error(`No tracked share path is registered for task ${taskId}.`);
-    }
-    return sharePath;
-  }
 }
 
 export class FakePrivilegeBroker implements PrivilegeBroker {

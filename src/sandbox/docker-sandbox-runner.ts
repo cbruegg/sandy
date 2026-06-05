@@ -52,13 +52,13 @@ export class DockerSandboxRunner implements SandboxRunner {
     this.pool.start();
   }
 
-  async prepareTaskShare(taskId: string): Promise<string> {
+  async getTaskSharePath(taskId: string): Promise<string> {
     const existingSharePath = this.taskSharePaths.get(taskId);
     if (existingSharePath) {
       return existingSharePath;
     }
     if (this.shutdownRequested) {
-      throw new Error("Sandbox runner is shutting down and cannot prepare task shares.");
+      throw new Error("Sandbox runner is shutting down and cannot create task shares.");
     }
 
     let bundle: ReservedTaskBundle | null = null;
@@ -467,7 +467,7 @@ export class DockerSandboxRunner implements SandboxRunner {
   }
 
   async inspectTaskShare(taskId: string): Promise<ShareInspection> {
-    const sharePath = this.getTaskSharePath(taskId);
+    const sharePath = this.requireTrackedTaskSharePath(taskId);
     let entries;
     try {
       entries = await readdir(sharePath, {withFileTypes: true});
@@ -496,7 +496,7 @@ export class DockerSandboxRunner implements SandboxRunner {
   }
 
   async deleteTaskShare(taskId: string): Promise<void> {
-    const sharePath = this.getTaskSharePath(taskId);
+    const sharePath = this.requireTrackedTaskSharePath(taskId);
     const preparedBundle = this.preparedBundles.get(taskId);
     if (preparedBundle) {
       this.preparedBundles.delete(taskId);
@@ -577,7 +577,7 @@ export class DockerSandboxRunner implements SandboxRunner {
     });
   }
 
-  getTaskSharePath(taskId: string): string {
+  private requireTrackedTaskSharePath(taskId: string): string {
     const trackedPath = this.taskSharePaths.get(taskId);
     if (!trackedPath) {
       throw new Error(`No tracked share path is registered for task ${taskId}.`);

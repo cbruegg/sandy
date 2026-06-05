@@ -125,10 +125,13 @@ export class OrchestratorTaskLifecycle {
       case "launch_task": {
         const taskId = randomUUID();
         const now = new Date().toISOString();
-        let sharePrepared = false;
+        let shareEnsured = false;
+        let launchSucceeded = false;
         try {
-          await this.deps.sandboxRunner.prepareTaskShare(taskId);
-          sharePrepared = true;
+          if (event.attachments.length > 0) {
+            await this.deps.sandboxRunner.getTaskSharePath(taskId);
+            shareEnsured = true;
+          }
           const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskId);
           const taskBrief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
           const initialInput = buildTaskInputPayload(stagedAttachments);
@@ -172,6 +175,7 @@ export class OrchestratorTaskLifecycle {
           );
 
           this.runtimeState.registerHandle(taskId, handle);
+          launchSucceeded = true;
           logger.info("task.started", {
             chatId: event.chatId,
             taskId,
@@ -186,7 +190,10 @@ export class OrchestratorTaskLifecycle {
           await this.deps.channel.sendText(event.chatId, messages.taskStarted(decision.taskName));
           return;
         } catch (error) {
-          if (sharePrepared) {
+          if (!launchSucceeded && session.activeTask?.taskId === taskId) {
+            session.activeTask = null;
+          }
+          if (shareEnsured && !launchSucceeded) {
             await this.deps.sandboxRunner.deleteTaskShare(taskId);
           }
           throw error;
