@@ -126,7 +126,6 @@ export class OrchestratorTaskLifecycle {
         const taskId = randomUUID();
         const now = new Date().toISOString();
         let launchSucceeded = false;
-        let resolvedTaskBrief = decision.taskBrief;
         try {
           logger.info("task.launching", {
             chatId: event.chatId,
@@ -162,8 +161,12 @@ export class OrchestratorTaskLifecycle {
               prepareStartInput: async (taskSharePath) => {
                 const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskSharePath);
                 const brief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
+                logger.debug("task.task_brief", {
+                  chatId: event.chatId,
+                  taskId,
+                  taskBrief: brief,
+                });
                 const initialInput = buildTaskInputPayload(stagedAttachments);
-                resolvedTaskBrief = brief;
                 return { taskBrief: brief, initialInput };
               },
             },
@@ -177,12 +180,6 @@ export class OrchestratorTaskLifecycle {
             taskId,
             taskName: decision.taskName,
           });
-          logger.debug("task.task_brief", {
-            chatId: event.chatId,
-            taskId,
-            taskBrief: resolvedTaskBrief,
-          });
-
           await this.deps.channel.sendText(event.chatId, messages.taskStarted(decision.taskName));
           return;
         } catch (error) {
