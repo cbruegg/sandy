@@ -10,6 +10,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { DockerSandboxRunner } from "./docker-sandbox-runner.js";
 import { TaskBundleLauncherImpl, type TaskBundleLauncherOptions } from "./task-bundle-launcher.js";
 import { TaskBundlePoolImpl } from "./task-bundle-pool.js";
+import type { ReservedTaskBundle } from "./task-bundle-types.js";
 import { SANDY_MANAGED_CONTAINER_LABEL } from "./container-label.js";
 import type { ChannelFormatting, HostCommand, SubAgentEvent, WorkerStartConfig } from "../types.js";
 
@@ -134,6 +135,25 @@ function createRunner(
 }
 
 const defaultWorkerCodexBinaryPath = "/tmp/sandy-codex/linux/codex";
+
+function trackTestTaskBundle(runner: DockerSandboxRunner, taskId: string, shareHostPath: string): void {
+  const bundle: ReservedTaskBundle = {
+    taskId,
+    bundleId: `${taskId}-bundle`,
+    containerName: `${taskId}-container`,
+    child: new FakeChildProcess() as unknown as ChildProcessWithoutNullStreams,
+    guardChild: null,
+    guardContainerName: null,
+    proxyChild: null,
+    proxyContainerName: null,
+    shareHostPath,
+    hostfsVolumeName: null,
+    cleanupWorkerCodexConfig: () => Promise.resolve(),
+  };
+  (runner as unknown as {
+    taskBundles: Map<string, { bundle: ReservedTaskBundle; retired: boolean }>;
+  }).taskBundles.set(taskId, { bundle, retired: true });
+}
 
 async function launchRunnerWithChild(
   taskChild: FakeChildProcess,
@@ -644,7 +664,7 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
   }, launcherOptions);
 
   const taskShare = join(shareRoot, "task-1");
-  (runner as unknown as { taskSharePaths: Map<string, string> }).taskSharePaths.set("task-1", taskShare);
+  trackTestTaskBundle(runner, "task-1", taskShare);
   await mkdir(join(taskShare, "logs"), { recursive: true });
   await writeFile(join(taskShare, "report.txt"), "ok\n");
   await writeFile(join(taskShare, "logs", "latest.log"), "done\n");
@@ -709,7 +729,7 @@ test("DockerSandboxRunner falls back to a root Docker container when host rm fai
     spawnImpl,
   }, launcherOptions);
 
-  (runner as unknown as { taskSharePaths: Map<string, string> }).taskSharePaths.set("task-1", taskShare);
+  trackTestTaskBundle(runner, "task-1", taskShare);
 
   try {
     await runner.deleteTaskShare("task-1");
