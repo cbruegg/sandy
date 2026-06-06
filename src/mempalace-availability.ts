@@ -9,6 +9,11 @@ let palaceInitAttempted = false;
 
 const PALACE_INIT_TIMEOUT = 30000;
 
+// Pin to v3.3.5 because later versions (3.4.0+) introduce a top-level anyOf
+// in mempalace_diary_write's inputSchema that Codex/Anthropic reject.
+// See: https://github.com/MemPalace/mempalace/issues/1711
+const MEMPALACE_VERSION = "mempalace==3.3.5";
+
 function ensurePalaceInitialized(palacePath: string): boolean {
   if (existsSync(join(palacePath, "chroma.sqlite3"))) {
     return true;
@@ -26,7 +31,7 @@ function ensurePalaceInitialized(palacePath: string): boolean {
     // The `--yes` flag skips entity detection prompts but NOT the
     // "Mine this directory now?" prompt. Pipe "y\n" to auto-confirm it.
     const result = spawnSync("uv", [
-      "run", "--with", "mempalace", "mempalace", "--palace", palacePath, "init", tempDir, "--auto-mine", "--yes", "--no-llm"
+      "run", "--with", MEMPALACE_VERSION, "mempalace", "--palace", palacePath, "init", tempDir, "--auto-mine", "--yes", "--no-llm"
     ], {
       input: "y\n",
       encoding: "utf-8",
@@ -93,6 +98,6 @@ export function buildMempalaceMcpServerConfig(configDirectory: string, enabled: 
 
   return {
     command: "uv",
-    args: ["run", "--with", "mempalace", "python3", "-m", "mempalace.mcp_server", "--palace", palacePath],
+    args: ["run", "--with", MEMPALACE_VERSION, "python3", "-m", "mempalace.mcp_server", "--palace", palacePath],
   }
 }
