@@ -12,6 +12,11 @@ type CliIo = {
   stderr: NodeJS.WriteStream;
 };
 
+type LocalTestCliRuntime = {
+  listManagedContainers: () => Promise<ContainerInfo[]>;
+  sleep: (delayMs: number) => Promise<void>;
+};
+
 type LocalTestCliCommand =
   | "send"
   | "attach"
@@ -26,10 +31,21 @@ type LocalTestCliCommand =
   | "list-events"
   | "status";
 
-export async function runLocalTestCli(args: string[], io: CliIo = {
+const defaultCliIo: CliIo = {
   stdout: process.stdout,
   stderr: process.stderr,
-}): Promise<void> {
+};
+
+const defaultRuntime: LocalTestCliRuntime = {
+  listManagedContainers,
+  sleep,
+};
+
+export async function runLocalTestCli(
+  args: string[],
+  io: CliIo = defaultCliIo,
+  runtime: LocalTestCliRuntime = defaultRuntime,
+): Promise<void> {
   const command = parseCommand(args[0]);
   if (!command) {
     throw new Error("Missing local-test command.");
@@ -111,10 +127,10 @@ export async function runLocalTestCli(args: string[], io: CliIo = {
       await waitForEvent(spoolRoot, options, io.stdout);
       return;
     case "status":
-      await printStatus(spoolRoot, options, io.stdout);
+      await printStatus(spoolRoot, options, io.stdout, runtime.listManagedContainers);
       return;
     case "cancel-all":
-      await cancelAll(spoolRoot, options, io);
+      await cancelAll(spoolRoot, options, io, runtime);
       return;
   }
 }
@@ -320,8 +336,9 @@ async function printStatus(
   spoolRoot: string,
   _options: Record<string, string | string[]>,
   stdout: NodeJS.WriteStream,
+  listContainers: () => Promise<ContainerInfo[]>,
 ): Promise<void> {
-  const containers = await listManagedContainers();
+  const containers = await listContainers();
 
   const lines: string[] = [];
   lines.push(`=== Sandy Container Status ===`);
@@ -346,15 +363,16 @@ async function cancelAll(
   spoolRoot: string,
   options: Record<string, string | string[]>,
   io: CliIo,
+  runtime: LocalTestCliRuntime,
 ): Promise<void> {
   io.stdout.write("Sending cancel_request for active task...\n");
   await writeSimpleEvent(spoolRoot, "cancel_request", options);
 
   // Give Sandy a moment to process the cancel and emit task_update.
-  await sleep(500);
+  await runtime.sleep(500);
 
   io.stdout.write("\nDocker containers remaining:\n");
-  const remaining = await listManagedContainers();
+  const remaining = await runtime.listManagedContainers();
   if (remaining.length === 0) {
     io.stdout.write("  (none)\n");
   } else {
@@ -392,4 +410,3 @@ async function listManagedContainers(): Promise<ContainerInfo[]> {
     });
   });
 }
-
