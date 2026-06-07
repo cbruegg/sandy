@@ -52,7 +52,7 @@ test("JobStore validates cron expressions during upsert", async () => {
       enabled: true,
       schedule: { kind: "cron", expression: "not cron" },
       skillId: "cleanup",
-    }), /Cron expressions/);
+    }), /Invalid cron schedule/);
   } finally {
     await rm(configDirectory, { recursive: true, force: true });
   }

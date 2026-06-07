@@ -380,7 +380,7 @@ export async function startApp(): Promise<void> {
 
   shutdown = async () => {
     logger.info("app.shutdown_started");
-    jobService.stop();
+    jobScheduler.stop();
     updateCoordinator.stop();
     await stopWithLogging("channel.stop", () => channel.stop());
     await stopWithLogging("sidecarManager.stop", sidecarManager?.stop.bind(sidecarManager));
@@ -437,7 +437,7 @@ export async function startApp(): Promise<void> {
     prepareForRestart: shutdown,
   });
   updateCoordinator.start();
-  await jobService.start();
+  await jobScheduler.start();
 
   process.once("SIGINT", () => {
     shutdownRequested = true;

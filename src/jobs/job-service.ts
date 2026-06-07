@@ -3,8 +3,6 @@ import type { JobScheduler } from "./job-scheduler.js";
 import type { JobStore } from "./job-store.js";
 
 export interface JobService {
-  start(): Promise<void>;
-  stop(): void;
   listJobs(): Promise<JobDefinition[]>;
   getJob(jobId: string): Promise<JobDefinition | null>;
   applyMutation(mutation: JobMutationRequest): Promise<string>;
@@ -15,14 +13,6 @@ export class ScheduledJobService implements JobService {
     private readonly store: JobStore,
     private readonly scheduler: JobScheduler,
   ) {}
-
-  async start(): Promise<void> {
-    await this.scheduler.start();
-  }
-
-  stop(): void {
-    this.scheduler.stop();
-  }
 
   async listJobs(): Promise<JobDefinition[]> {
     return await this.store.listDefinitions();
