@@ -571,7 +571,7 @@ function buildJobTaskBrief(job: JobDefinition, workspacePath: string | null): st
     workspacePath ? `This recurring job has a persistent workspace directory on the host: ${workspacePath}` : null,
     workspacePath ? "The workspace is for durable notes, generated files, helper scripts, caches, and job state." : null,
     workspacePath ? "If you need to access that directory from the worker, request host directory access for it; Sandy has pre-approved read/write access for this job execution." : null,
-    "If you can complete the job without user interaction, finish silently. If you send user-visible output or need approval, follow Sandy's normal review and safety flow.",
+    "If you can complete the job without user interaction, finish silently.",
   ].filter((line): line is string => line !== null).join("\n\n");
 }
 
