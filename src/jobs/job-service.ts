@@ -3,7 +3,7 @@ import type { JobDefinition, JobMutationRequest } from "./job-types.js";
 import { JobScheduler } from "./job-scheduler.js";
 import type { JobStore } from "./job-store.js";
 
-export type JobTaskLauncher = (job: JobDefinition, chatId: string, workspacePath: string) => Promise<string>;
+export type JobTaskLauncher = (job: JobDefinition, chatId: string, workspacePath: string | null) => Promise<string>;
 
 export interface JobService {
   start(): Promise<void>;

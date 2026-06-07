@@ -6,7 +6,7 @@ import { JobStore } from "./job-store.js";
 
 type Timer = ReturnType<typeof setTimeout>;
 
-export type JobSchedulerLauncher = (job: JobDefinition, workspacePath: string) => Promise<string>;
+export type JobSchedulerLauncher = (job: JobDefinition, workspacePath: string | null) => Promise<string>;
 
 export class JobScheduler {
   private readonly timers = new Map<string, Timer>();
@@ -72,8 +72,8 @@ export class JobScheduler {
     }
     this.launching.add(definition.id);
     try {
-      const workspacePath = this.store.workspacePath(definition.id);
-      await mkdir(workspacePath, { recursive: true });
+      const workspacePath = definition.schedule.kind === "cron" ? this.store.workspacePath(definition.id) : null;
+      if (workspacePath) await mkdir(workspacePath, { recursive: true });
       const taskId = await this.launcher(definition, workspacePath);
       await this.store.recordLaunch(definition.id, taskId, new Date().toISOString());
       return taskId;

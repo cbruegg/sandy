@@ -199,7 +199,7 @@ export class OrchestratorTaskLifecycle {
     }
   }
 
-  async launchJobTask(job: JobDefinition, chatId: string, workspacePath: string): Promise<string> {
+  async launchJobTask(job: JobDefinition, chatId: string, workspacePath: string | null): Promise<string> {
     const session = this.deps.sessionStore.getOrCreate(chatId);
     if (session.activeTask) {
       throw new Error(`Cannot launch scheduled job ${job.id} while another user-visible task is active.`);
@@ -220,7 +220,7 @@ export class OrchestratorTaskLifecycle {
       approvedMcpResourceReads: [],
       approvedHttpTokenSessionGrants: [],
       approvedHttpTokenOnceGrants: [],
-      approvedHostDirectories: [{ path: workspacePath, level: "read_write" }],
+      approvedHostDirectories: workspacePath ? [{ path: workspacePath, level: "read_write" }] : [],
       workerConnected: false,
       taskSummary: null,
       origin: { kind: "launchedByJob", jobId: job.id },
@@ -501,13 +501,13 @@ function uniqueStrings(entries: string[]): string[] {
   return result;
 }
 
-function buildJobTaskBrief(job: JobDefinition, workspacePath: string): string {
+function buildJobTaskBrief(job: JobDefinition, workspacePath: string | null): string {
   return [
     `Run scheduled Sandy job "${job.name}" (${job.id}).`,
     `Use Sandy skill: ${job.skillId}.`,
-    `This job has a persistent workspace directory on the host: ${workspacePath}`,
-    "The workspace is for durable notes, generated files, helper scripts, caches, and job state.",
-    "If you need to access that directory from the worker, request host directory access for it; Sandy has pre-approved read/write access for this job execution.",
+    workspacePath ? `This recurring job has a persistent workspace directory on the host: ${workspacePath}` : null,
+    workspacePath ? "The workspace is for durable notes, generated files, helper scripts, caches, and job state." : null,
+    workspacePath ? "If you need to access that directory from the worker, request host directory access for it; Sandy has pre-approved read/write access for this job execution." : null,
     job.prompt ? `Job prompt:\n${job.prompt}` : null,
     "If you can complete the job without user interaction, finish silently. If you send user-visible output or need approval, follow Sandy's normal review and safety flow.",
   ].filter((line): line is string => line !== null).join("\n\n");
