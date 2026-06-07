@@ -18,33 +18,8 @@ const jobApprovalsFileSchema = z.object({
   approvals: z.array(jobApprovalStateSchema),
 }).strict();
 
-const legacyJobApprovalStateSchema = z.object({
-  jobId: z.string().min(1),
-  mcpTools: z.array(z.object({
-    serverId: z.string().min(1),
-    toolName: z.string().min(1),
-  }).strict()),
-  mcpResources: z.array(z.object({
-    serverId: z.string().min(1),
-    uri: z.string().min(1),
-  }).strict()),
-  httpTokens: z.array(z.object({
-    tokenId: z.string().min(1),
-    host: z.string().min(1),
-  }).strict()),
-  hostDirectories: z.array(z.object({
-    path: z.string().min(1),
-    level: z.enum(["read_only", "read_write"]),
-  }).strict()),
-}).strict();
-
-const legacyJobApprovalsFileSchema = z.object({
-  approvals: z.array(legacyJobApprovalStateSchema),
-}).strict();
-
 type JobApprovalState = z.infer<typeof jobApprovalStateSchema>;
 type JobApprovalsFile = z.infer<typeof jobApprovalsFileSchema>;
-type LegacyJobApprovalState = z.infer<typeof legacyJobApprovalStateSchema>;
 
 export interface JobApprovalStoreApi {
   getTaskPolicy(jobId: string): Promise<MainAgentTaskPolicy>;
@@ -91,15 +66,7 @@ export class JobApprovalStore implements JobApprovalStoreApi {
     try {
       const raw = await readFile(this.filePath, "utf8");
       const parsed: unknown = JSON.parse(raw);
-      const current = jobApprovalsFileSchema.safeParse(parsed);
-      if (current.success) {
-        return current.data;
-      }
-
-      const legacy = legacyJobApprovalsFileSchema.parse(parsed);
-      return {
-        approvals: legacy.approvals.map((entry) => normalizeLegacyEntry(entry)),
-      };
+      return jobApprovalsFileSchema.parse(parsed);
     } catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
         return { approvals: [] };
@@ -118,16 +85,6 @@ function emptyJobApprovalState(jobId: string): JobApprovalState {
   return {
     jobId,
     taskPolicy: emptyTaskPolicy(),
-  };
-}
-
-function normalizeLegacyEntry(entry: LegacyJobApprovalState): JobApprovalState {
-  return {
-    jobId: entry.jobId,
-    taskPolicy: {
-      autoApproveMcpServers: uniqueSortedStrings(entry.mcpTools.map((tool) => tool.serverId)),
-      autoApproveHttpTokens: uniqueSortedStrings(entry.httpTokens.map((token) => token.tokenId)),
-    },
   };
 }
 
