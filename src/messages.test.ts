@@ -81,6 +81,20 @@ test("privilegeRequestPrompt shows skill update name, description, and body only
   assert.match(prompt, /Approve or deny this request\./);
 });
 
+test("privilegeRequestPrompt renders empty skill body explicitly when body is an empty string", () => {
+  const prompt = messages.privilegeRequestPrompt({
+    kind: "skill_mutation",
+    requestId: "req-2b",
+    operation: "update",
+    skillId: "my-skill",
+    body: "",
+  });
+
+  assert.match(prompt, /Skill mutation: update/);
+  assert.match(prompt, /Skill ID: my-skill/);
+  assert.match(prompt, /Skill content:\n---\n\n---/);
+});
+
 test("privilegeRequestPrompt shows skill delete with only operation and skillId", () => {
   const prompt = messages.privilegeRequestPrompt({
     kind: "skill_mutation",

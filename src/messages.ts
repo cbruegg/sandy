@@ -318,7 +318,7 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
     if (request.description) {
       lines.push(`Description: ${request.description}`);
     }
-    if (request.body) {
+    if (request.body !== undefined) {
       lines.push(`Skill content:\n---\n${request.body}\n---`);
     }
     return lines.join("\n");
