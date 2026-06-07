@@ -1,6 +1,6 @@
 import type { ChannelDestinationStore } from "../channel/channel-destination-store.js";
 import type { JobDefinition, JobMutationRequest } from "./job-types.js";
-import { JobScheduler } from "./job-scheduler.js";
+import type { JobScheduler } from "./job-scheduler.js";
 import type { JobStore } from "./job-store.js";
 
 export type JobTaskLauncher = (job: JobDefinition, chatId: string, workspacePath: string | null) => Promise<string>;
@@ -16,21 +16,11 @@ export interface JobService {
 }
 
 export class ScheduledJobService implements JobService {
-  private readonly scheduler: JobScheduler;
-
   constructor(
     private readonly store: JobStore,
     private readonly destinationStore: ChannelDestinationStore,
-    launchTask: JobTaskLauncher,
-  ) {
-    this.scheduler = new JobScheduler(store, async (job, workspacePath) => {
-      const chatId = await destinationStore.getDefaultChatId();
-      if (!chatId) {
-        throw new Error(`Cannot launch scheduled job ${job.id}: no default chat destination is known yet.`);
-      }
-      return await launchTask(job, chatId, workspacePath);
-    });
-  }
+    private readonly scheduler: JobScheduler,
+  ) {}
 
   async start(): Promise<void> {
     await this.scheduler.start();

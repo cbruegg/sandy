@@ -33,6 +33,7 @@ import {initializeHostfs, type HostfsServices} from "./hostfs/index.js";
 import { ChatGPTTokenBroker } from "./auth/chatgpt-token-broker.js";
 import { SkillService } from "./skills.js";
 import { JobStore } from "./jobs/job-store.js";
+import { JobScheduler } from "./jobs/job-scheduler.js";
 import { ScheduledJobService } from "./jobs/job-service.js";
 import { randomUUID } from "node:crypto";
 import { createControlDir, removeControlDir, startHeartbeat } from "./sandbox/heartbeat.js";
@@ -356,7 +357,16 @@ export async function startApp(): Promise<void> {
     hostfsBroker: hostfsServices?.broker ?? createNoopHostfsBroker(),
     taskBundleAssignmentRegistry,
     skillService,
-    createJobService: (launcher) => new ScheduledJobService(jobStore, channel.destinationStore, launcher),
+    createJobService: (launcher) => {
+      const scheduler = new JobScheduler(jobStore, async (job, workspacePath) => {
+        const chatId = await channel.destinationStore.getDefaultChatId();
+        if (!chatId) {
+          throw new Error(`Cannot launch scheduled job ${job.id}: no default chat destination is known yet.`);
+        }
+        return await launcher(job, chatId, workspacePath);
+      });
+      return new ScheduledJobService(jobStore, channel.destinationStore, scheduler);
+    },
   });
 
   const sidecarManager = new McpSidecarManager({
