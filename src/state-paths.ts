@@ -16,6 +16,10 @@ export function jobsFile(configDirectory: string): string {
   return join(jobsRoot(configDirectory), "jobs.json");
 }
 
+export function jobApprovalsFile(configDirectory: string): string {
+  return join(jobsRoot(configDirectory), "job-approvals.json");
+}
+
 export function jobWorkspaceRoot(configDirectory: string): string {
   return join(jobsRoot(configDirectory), "workspaces");
 }

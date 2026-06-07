@@ -337,5 +337,9 @@ Run `bun run build` and `bun run test` after TypeScript/runtime changes.
 - Channel default destination state is persisted in `state/channel.json` for non-local-test channels.
 - Job definitions and runtime state are persisted in `state/jobs/jobs.json`; recurring job workspaces live under `state/jobs/workspaces/<job-id>`.
 - The scheduler supports one-shot jobs and recurring jobs through the `cron` npm package, with duplicate launch protection, refresh after mutations, and shutdown cleanup.
+- Task coordination now allows silent job tasks to coexist with a user-visible task. Job tasks move through `silent`, `waitingToInteract`, and `interacting`, and user messages route to an interacting job task.
+- A background interaction gate now queues user-visible job-task operations behind the current user-visible flow and flushes them in order once the blocker clears. Permission prompts, files, task updates, and review summaries all go through that gate.
+- Waiting reminders now fire after 5 minutes of no progress on the blocking user task, back off exponentially up to 1 hour, and reset whenever the blocking task makes progress.
 - Worker job management tools were added. Read-only tools do not require approval; mutation tools require explicit approval through `job_mutation` privilege requests with no persistent approval option.
-- Job-launched tasks reuse the existing sandbox/task-bundle launch path and are marked with `origin: launchedByJob` plus a silent/interacting state. Silent job tasks can complete without summary review.
+- Job-launched tasks reuse the existing sandbox/task-bundle launch path and are marked with `origin: launchedByJob` plus a silent/waiting/interacting state. Silent job tasks can complete without summary review.
+- Job-scoped persistent approvals are now stored separately under `state/jobs/job-approvals.json` and apply only to future executions of the same job.

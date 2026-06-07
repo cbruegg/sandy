@@ -25,6 +25,7 @@ import { OrchestratorPrivilegesImpl } from "./orchestrator/privileges.js";
 import { ActiveTaskRuntimeRegistry } from "./orchestrator/active-task-runtime-registry.js";
 import type { OrchestratorCoreDependencies } from "./orchestrator/shared.js";
 import { OrchestratorTaskLifecycleImpl } from "./orchestrator/task-lifecycle.js";
+import { TaskCoordinator } from "./orchestrator/task-coordinator.js";
 import { TomlPersistentApprovalStore } from "./privilege/persistent-approval-store.js";
 import { PrivilegeBrokerImpl } from "./privilege/privilege-broker.js";
 import {DockerSandboxRunner, type DockerSandboxRunnerOptions} from "./sandbox/docker-sandbox-runner.js";
@@ -42,6 +43,7 @@ import {initializeHostfs, type HostfsServices} from "./hostfs/index.js";
 import { ChatGPTTokenBroker } from "./auth/chatgpt-token-broker.js";
 import { SkillService } from "./skills.js";
 import { WorkerToolsHandler } from "./orchestrator/worker-tools-handler.js";
+import { JobApprovalStore } from "./jobs/job-approval-store.js";
 import { JobStore } from "./jobs/job-store.js";
 import { JobScheduler } from "./jobs/job-scheduler.js";
 import { ScheduledJobService } from "./jobs/job-service.js";
@@ -188,6 +190,7 @@ export async function startApp(): Promise<void> {
     config.persistentMcpResourceApprovals,
     config.persistentHostDirectoryApprovals,
   );
+  const jobApprovalStore = new JobApprovalStore(config.configDirectory);
 
   // Docker Desktop (macOS, Windows) runs containers inside a VM. The VM cannot
   // reach the host via 127.0.0.1, so we must bind the WebDAV server to 0.0.0.0
@@ -217,6 +220,7 @@ export async function startApp(): Promise<void> {
   const httpTokenAuthorizer = new HttpTokenAuthorizer(
     sessionStore,
     persistentApprovalStore,
+    jobApprovalStore,
   );
 
   // The mitmproxy-based HTTP proxy container asks the host orchestrator for per-request
@@ -331,8 +335,10 @@ export async function startApp(): Promise<void> {
     sessionStore,
     privilegeBroker: new PrivilegeBrokerImpl(),
     persistentApprovalStore,
+    jobApprovalStore,
     hostfsBroker: hostfsServices?.broker ?? createNoopHostfsBroker(),
     skillService,
+    taskCoordinator: new TaskCoordinator(sessionStore, channel),
   };
   const activeTaskRuntimes = new ActiveTaskRuntimeRegistry();
   const taskLifecycle = new OrchestratorTaskLifecycleImpl(orchestratorCoreDeps, activeTaskRuntimes, channelFormatting);
@@ -405,6 +411,7 @@ export async function startApp(): Promise<void> {
       const sessions = sessionStore.listSessions();
       const blockingSessions = sessions.filter((session) =>
         session.activeTask !== null
+        || session.backgroundJobTasks.length > 0
         || session.pendingShareDeletion !== null);
       if (blockingSessions.length > 0) {
         logger.debug("update.blocked_by_sessions", {
@@ -413,6 +420,7 @@ export async function startApp(): Promise<void> {
           blockingSessions: blockingSessions.map((session) => ({
             chatId: session.chatId,
             hasActiveTask: session.activeTask !== null,
+            backgroundJobTaskCount: session.backgroundJobTasks.length,
             hasPendingTaskSummary: session.pendingTaskSummary !== null,
             hasPendingShareDeletion: session.pendingShareDeletion !== null,
           })),

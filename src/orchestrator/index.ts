@@ -165,6 +165,7 @@ export class SandyOrchestrator {
 
     switch (event.kind) {
       case "cancel_request":
+        this.deps.taskCoordinator.recordTaskActivity(session, activeTask.taskId);
         await this.deps.taskLifecycle.cancelActiveTask(session, "Cancelled at the user's request.");
         await this.deps.channel.sendText(event.chatId, messages.taskCancelled(activeTask.taskName));
         return;
@@ -173,6 +174,7 @@ export class SandyOrchestrator {
           await this.deps.channel.sendText(event.chatId, messages.privilegeRequestStillPending());
           return;
         }
+        this.deps.taskCoordinator.recordTaskActivity(session, activeTask.taskId);
         await this.deps.taskLifecycle.markActiveTaskFinished(activeTask.taskId);
         return;
       case "danger_report":
@@ -191,6 +193,7 @@ export class SandyOrchestrator {
           await this.deps.channel.sendText(event.chatId, messages.stalePrivilegeRequest());
           return;
         }
+        this.deps.taskCoordinator.recordTaskActivity(session, activeTask.taskId);
         await this.deps.privileges.resolvePendingPrivilegeRequest(session, activeTask.pendingPrivilegeRequest, event.decision);
         return;
       case "user_message": {
@@ -198,6 +201,7 @@ export class SandyOrchestrator {
           await this.deps.channel.sendText(event.chatId, messages.privilegeRequestStillPending());
           return;
         }
+        this.deps.taskCoordinator.recordTaskActivity(session, activeTask.taskId);
         const handle = this.deps.taskLifecycle.requireActiveTaskHandle(activeTask.taskId);
         await handle.sendUserMessage(
           buildWorkerFollowUpInput(

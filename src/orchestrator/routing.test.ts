@@ -6,6 +6,7 @@ import {
   StubMainAgent,
 } from "./test-helpers.js";
 import type { MainAgentDecision } from "../types.js";
+import type { JobDefinition } from "../jobs/job-types.js";
 
 test("orchestrator accepts active-task output without storing host-side history", async () => {
   const mainAgent = new StubMainAgent({
@@ -71,4 +72,61 @@ test("orchestrator reports top-level chat event failures back to the user", asyn
     messages.handlerFailed("You've hit your usage limit."),
   );
   assert.equal(store.getOrCreate("chat-top-level-error").activeTask, null);
+});
+
+test("user messages route to an interacting scheduled job after waiting behind a user task", async () => {
+  const { orchestrator, runner, store, taskLifecycle, channel } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Handle the user's request.",
+      taskName: "user-task",
+      taskLanguage: "English",
+    }),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-job-routing",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Do the first thing",
+    rawText: "Do the first thing",
+    attachments: [],
+  });
+
+  const job: JobDefinition = {
+    id: "daily-cleanup",
+    name: "Daily cleanup",
+    enabled: true,
+    schedule: { kind: "cron", expression: "0 9 * * *" },
+    skillId: "cleanup-skill",
+  };
+  const jobTaskId = await taskLifecycle.launchJobTask(job, "chat-job-routing", null);
+
+  const blockedProgress = runner.emit({ type: "assistant_output", text: "Waiting on the user task." }, jobTaskId);
+  await Promise.resolve();
+
+  assert.equal(channel.taskUpdates.length, 0);
+  assert.equal(store.getOrCreate("chat-job-routing").backgroundJobTasks[0]?.interactionState, "waitingToInteract");
+
+  const userTaskId = runner.launches[0]?.taskId;
+  assert.ok(userTaskId);
+  await runner.emit({ type: "task_done" }, userTaskId);
+  await blockedProgress;
+
+  assert.equal(channel.taskUpdates.at(-1)?.text, "Waiting on the user task.");
+  assert.equal(store.getOrCreate("chat-job-routing").activeTask?.taskId, jobTaskId);
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-job-routing",
+    messageId: "2",
+    timestamp: "2026-04-01T00:01:00.000Z",
+    text: "Continue the scheduled job",
+    rawText: "Continue the scheduled job",
+    attachments: [],
+  });
+
+  const jobHandle = runner.handles.get(jobTaskId);
+  assert.match(jobHandle?.userMessages[0]?.text ?? "", /Continue the scheduled job/);
 });

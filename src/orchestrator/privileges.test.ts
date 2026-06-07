@@ -1,8 +1,12 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import type { HostDirectoryAccessLevel } from "../hostfs/path-policy.js";
 import { HttpTokenAuthorizer } from "../http/token-authorizer.js";
+import { JobApprovalStore } from "../jobs/job-approval-store.js";
 import { messages } from "../messages.js";
 import {
   createTestOrchestrator,
@@ -14,6 +18,17 @@ import {
 import { hostGrantsPrefix } from "../paths.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
+import type { JobDefinition } from "../jobs/job-types.js";
+
+async function waitFor(check: () => boolean, attempts = 20): Promise<void> {
+  for (let index = 0; index < attempts; index += 1) {
+    if (check()) {
+      return;
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error("Timed out waiting for test condition.");
+}
 
 test("orchestrator applies supported privilege requests deterministically and outside the main agent path", async () => {
   const privilegeBroker = new FakePrivilegeBroker();
@@ -391,6 +406,7 @@ test("orchestrator confirms persisted http token suitability and enables later p
     },
   });
 
+  await waitFor(() => channel.privilegeRequests.length === 1);
   assert.equal(channel.privilegeRequests.length, 1);
   const request = channel.privilegeRequests[0]?.request;
   assert.equal(request?.kind, "http_token_use");
@@ -413,7 +429,11 @@ test("orchestrator confirms persisted http token suitability and enables later p
   const session = store.getOrCreate("chat-http-confirm");
   assert.deepEqual(session.activeTask?.taskPolicy.autoApproveHttpTokens, ["vid2text"]);
 
-  const authorizer = new HttpTokenAuthorizer(store, persistentApprovalStore);
+  const authorizer = new HttpTokenAuthorizer(
+    store,
+    persistentApprovalStore,
+    new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
+  );
   const proxyResult = await authorizer.authorizeHttpTokenUse({
     taskId,
     tokenId: "vid2text",
@@ -553,4 +573,89 @@ test("orchestrator sends mcp resource read privilege request to user when not pr
 
   const session = store.getOrCreate("chat-resource-pending");
   assert.ok(session.activeTask?.approvedMcpResourceReads.some((entry) => entry.serverId === "todoist" && entry.uri === "test://resource"));
+});
+
+test("job-scoped persistent approvals apply only to later executions of the same job", async () => {
+  const persistentApprovalStore: PersistentApprovalStore = {
+    isAlwaysAllowed: () => false,
+    allowTool: async () => {
+      throw new Error("Global approvals should not be used for job-scoped persistence.");
+    },
+    isResourceReadAlwaysAllowed: () => false,
+    allowResourceRead: async () => {},
+    isHttpTokenAlwaysAllowed: () => false,
+    allowHttpToken: async () => {},
+    isHostDirectoryAlwaysAllowed: () => false,
+    allowHostDirectory: async () => {},
+  };
+  const { orchestrator, channel, taskLifecycle, runner } = createTestOrchestrator({
+    persistentApprovalStore,
+    mainAgent: new StubMainAgent({
+      action: "reply",
+      replyText: "idle",
+    }),
+  });
+
+  const job: JobDefinition = {
+    id: "daily-cleanup",
+    name: "Daily cleanup",
+    enabled: true,
+    schedule: { kind: "cron", expression: "0 9 * * *" },
+    skillId: "cleanup-skill",
+  };
+
+  const firstTaskId = await taskLifecycle.launchJobTask(job, "chat-job-approval", null);
+  const firstApproval = orchestrator.authorizeMcpToolCall({
+    taskId: firstTaskId,
+    serverId: "todoist",
+    toolName: "list_projects",
+    arguments: {},
+  });
+  await waitFor(() => channel.privilegeRequests.length === 1);
+
+  const firstRequestId = channel.privilegeRequests[0]?.request.requestId;
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-job-approval",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    decision: "approve_always",
+    requestId: firstRequestId,
+  });
+  assert.equal((await firstApproval).scope, "always");
+
+  await runner.emit({ type: "task_done" }, firstTaskId);
+
+  const secondTaskId = await taskLifecycle.launchJobTask(job, "chat-job-approval", null);
+  const secondApproval = await orchestrator.authorizeMcpToolCall({
+    taskId: secondTaskId,
+    serverId: "todoist",
+    toolName: "list_projects",
+    arguments: {},
+  });
+  assert.equal(secondApproval.scope, "always");
+  assert.equal(channel.privilegeRequests.length, 1);
+
+  await runner.emit({ type: "task_done" }, secondTaskId);
+
+  const thirdTaskId = await taskLifecycle.launchJobTask({ ...job, id: "weekly-cleanup", name: "Weekly cleanup" }, "chat-job-approval", null);
+  const thirdApproval = orchestrator.authorizeMcpToolCall({
+    taskId: thirdTaskId,
+    serverId: "todoist",
+    toolName: "list_projects",
+    arguments: {},
+  });
+  await waitFor(() => channel.privilegeRequests.length === 2);
+
+  assert.equal(channel.privilegeRequests.length, 2);
+  const secondRequestId = channel.privilegeRequests[1]?.request.requestId;
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-job-approval",
+    messageId: "3",
+    timestamp: "2026-04-01T00:00:20.000Z",
+    decision: "deny",
+    requestId: secondRequestId,
+  });
+  assert.equal((await thirdApproval).outcome, "denied");
 });

@@ -4,6 +4,7 @@ import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 import type { SandboxRunner } from "../sandbox/sandbox-runner.js";
 import type { SessionStore } from "../session/in-memory-session-store.js";
+import type { JobApprovalStore } from "../jobs/job-approval-store.js";
 import type {
   ChatGPTExternalTokens,
   ChannelFormatting,
@@ -15,6 +16,7 @@ import type { PrivilegeBroker } from "../privilege/privilege-broker.js";
 import type { SkillService } from "../skills.js";
 import type { OrchestratorTaskLifecycle } from "./task-lifecycle.js";
 import type { OrchestratorPrivileges } from "./privileges.js";
+import type { TaskCoordinator } from "./task-coordinator.js";
 
 export type SupportedChatEvent = Exclude<NormalizedChatEvent, { kind: "unsupported_input" }>;
 export type UserMessageEvent = Extract<NormalizedChatEvent, { kind: "user_message" }>;
@@ -29,8 +31,10 @@ export type OrchestratorCoreDependencies = {
   sessionStore: SessionStore;
   privilegeBroker: PrivilegeBroker;
   persistentApprovalStore: PersistentApprovalStore;
+  jobApprovalStore: JobApprovalStore;
   hostfsBroker: HostfsBroker;
   skillService: SkillService;
+  taskCoordinator: TaskCoordinator;
 };
 
 export type SandyOrchestratorDependencies = OrchestratorCoreDependencies & {

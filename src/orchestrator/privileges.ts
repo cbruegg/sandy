@@ -48,7 +48,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     toolName: string;
     arguments: unknown;
   }): Promise<{ isError: boolean; message: string }> {
-    const session = this.deps.sessionStore.getByActiveTaskId(input.taskId);
+    const session = this.deps.sessionStore.getByTaskId(input.taskId);
     if (!session) {
       return {
         isError: true,
@@ -57,8 +57,8 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     }
 
     const chatId = session.chatId;
-    const activeTask = session.activeTask;
-    if (!activeTask || activeTask.taskId !== input.taskId) {
+    const activeTask = this.deps.taskCoordinator.findTask(session, input.taskId);
+    if (!activeTask) {
       return {
         isError: true,
         message: messages.taskNotActive(input.taskId),
@@ -82,7 +82,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     }
 
     try {
-      const result = await this.executeWorkerToolCall(chatId, session, call);
+      const result = await this.executeWorkerToolCall(chatId, session, input.taskId, call);
       logger.info("task.native_tool_call_executed", {
         chatId,
         taskId: input.taskId,
@@ -119,6 +119,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     }
 
     let result: PrivilegeResolutionResult;
+    this.deps.taskCoordinator.recordTaskActivity(session, activeTask.taskId);
     if (request.kind === "mcp_tool_call") {
       result = await this.resolvePendingMcpPrivilegeRequest(session, request, decision);
     } else if (request.kind === "mcp_resource_read") {
@@ -172,7 +173,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     return this.authorizeMcpRequest(input.taskId, {
       serverId: input.serverId,
       isTaskGrantAllowed: (task) => this.isTaskToolGrantAllowed(task, input.serverId, input.toolName),
-      isPersistentAllowed: () => this.deps.persistentApprovalStore.isAlwaysAllowed(input.serverId, input.toolName),
+      isPersistentAllowed: async (task) => await this.isToolAlwaysAllowed(task, input.serverId, input.toolName),
       sessionMessage: messages.mcpToolAllowedForWorkerSession(input.serverId, input.toolName),
       persistentMessage: messages.mcpToolAllowedFromPersistentConfig(input.serverId, input.toolName),
       buildRequest: (requestId) => ({
@@ -193,7 +194,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     return this.authorizeMcpRequest(input.taskId, {
       serverId: input.serverId,
       isTaskGrantAllowed: (task) => this.isTaskResourceReadGrantAllowed(task, input.serverId, input.uri),
-      isPersistentAllowed: () => this.deps.persistentApprovalStore.isResourceReadAlwaysAllowed(input.serverId, input.uri),
+      isPersistentAllowed: async (task) => await this.isResourceReadAlwaysAllowed(task, input.serverId, input.uri),
       sessionMessage: messages.mcpResourceReadAllowedForWorkerSession(input.serverId, input.uri),
       persistentMessage: messages.mcpResourceReadAllowedFromPersistentConfig(input.serverId, input.uri),
       buildRequest: (requestId) => ({
@@ -208,11 +209,12 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   private async executeWorkerToolCall(
     chatId: string,
     session: SessionState,
+    taskId: string,
     call: WorkerToolPayload,
   ): Promise<PrivilegeResolutionResult> {
     switch (call.type) {
       case "send_file_to_channel":
-        await this.sendSharedFileToUser(chatId, session, call.path, call.caption);
+        await this.sendSharedFileToUser(chatId, session, taskId, call.path, call.caption);
         return {
           requestId: randomUUID(),
           outcome: "approved",
@@ -220,29 +222,29 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
         };
       case "copy_into_share":
       case "copy_out_of_share":
-        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "host_operation",
           requestId: randomUUID(),
           payload: call,
         });
       case "request_http_token":
-        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "http_token_use",
           requestId: randomUUID(),
           tokenId: call.tokenId,
           host: call.host,
           reason: call.reason,
-          confirmsAutoApprovalForTask: this.shouldConfirmHttpTokenAutoApprovalForTask(session, call.tokenId, call.host),
+          confirmsAutoApprovalForTask: await this.shouldConfirmHttpTokenAutoApprovalForTask(session, taskId, call.tokenId, call.host),
         });
       case "request_host_directory_access":
-        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "host_directory_access",
           requestId: randomUUID(),
           path: call.path,
           level: call.level,
         });
       case "create_skill":
-        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "skill_mutation",
           requestId: randomUUID(),
           operation: "create",
@@ -252,7 +254,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
           body: call.body,
         });
       case "update_skill":
-        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "skill_mutation",
           requestId: randomUUID(),
           operation: "update",
@@ -262,7 +264,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
           body: call.body,
         });
       case "delete_skill":
-        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "skill_mutation",
           requestId: randomUUID(),
           operation: "delete",
@@ -273,37 +275,37 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       case "get_job":
         return await this.workerToolsHandler.getJob(call.jobId);
       case "create_job":
-        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "job_mutation",
           requestId: randomUUID(),
           mutation: { operation: "create", jobId: call.definition.id, definition: call.definition },
         });
       case "update_job":
-        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "job_mutation",
           requestId: randomUUID(),
           mutation: { operation: "update", jobId: call.definition.id, definition: call.definition },
         });
       case "delete_job":
-        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "job_mutation",
           requestId: randomUUID(),
           mutation: { operation: "delete", jobId: call.jobId },
         });
       case "enable_job":
-        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "job_mutation",
           requestId: randomUUID(),
           mutation: { operation: "enable", jobId: call.jobId },
         });
       case "disable_job":
-        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "job_mutation",
           requestId: randomUUID(),
           mutation: { operation: "disable", jobId: call.jobId },
         });
       case "run_job_now":
-        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "job_mutation",
           requestId: randomUUID(),
           mutation: { operation: "run_now", jobId: call.jobId },
@@ -316,27 +318,31 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   private async sendSharedFileToUser(
     chatId: string,
     session: SessionState,
+    taskId: string,
     sharePath: string,
     caption?: string,
   ): Promise<void> {
-    const activeTask = session.activeTask;
+    const activeTask = this.deps.taskCoordinator.findTask(session, taskId);
     if (!activeTask) {
       return;
     }
 
-    await this.deps.channel.sendFile(
-      chatId,
-      resolveTaskShareHostPath(this.activeTasks.requireHandle(activeTask.taskId).getTaskSharePath(), sharePath, "send_file_to_channel path"),
-      caption,
-    );
+    await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, activeTask.taskName, async () => {
+      await this.deps.channel.sendFile(
+        chatId,
+        resolveTaskShareHostPath(this.activeTasks.requireHandle(activeTask.taskId).getTaskSharePath(), sharePath, "send_file_to_channel path"),
+        caption,
+      );
+    });
   }
 
   private async awaitNativeToolPrivilegeResolution(
     chatId: string,
     session: SessionState,
+    taskId: string,
     request: Extract<PrivilegeRequest, { kind: "host_operation" | "http_token_use" | "host_directory_access" | "skill_mutation" | "job_mutation" }>,
   ): Promise<PrivilegeResolutionResult> {
-    const activeTask = session.activeTask;
+    const activeTask = this.deps.taskCoordinator.findTask(session, taskId);
     if (!activeTask) {
       return {
         requestId: request.requestId,
@@ -350,14 +356,14 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     }
 
     if (request.kind === "http_token_use") {
-      const immediateTokenResult = this.tryAuthorizeNativeHttpTokenUse(session, request);
+      const immediateTokenResult = await this.tryAuthorizeNativeHttpTokenUse(activeTask, request);
       if (immediateTokenResult) {
         return immediateTokenResult;
       }
     }
 
     if (request.kind === "host_directory_access") {
-      const immediateHostDirectoryResult = await this.tryAuthorizeHostDirectoryAccess(session, request);
+      const immediateHostDirectoryResult = await this.tryAuthorizeHostDirectoryAccess(activeTask, request);
       if (immediateHostDirectoryResult) {
         return immediateHostDirectoryResult;
       }
@@ -373,11 +379,14 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
 
     activeTask.pendingPrivilegeRequest = request;
     activeTask.status = "awaiting_privilege_decision";
-    await this.deps.channel.sendPrivilegeRequest(chatId, request);
-
-    return await new Promise<PrivilegeResolutionResult>((resolve) => {
+    const resultPromise = new Promise<PrivilegeResolutionResult>((resolve) => {
       this.activeTasks.setPendingNativeToolResolver(request.requestId, resolve);
     });
+    await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, activeTask.taskName, async () => {
+      await this.deps.channel.sendPrivilegeRequest(chatId, request);
+    });
+
+    return await resultPromise;
   }
 
   private async grantHostDirectoryAccess(
@@ -446,7 +455,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
           "worker_session",
         );
       case "approve_always":
-        await this.deps.persistentApprovalStore.allowHostDirectory(request.path, request.level);
+        await this.allowHostDirectory(activeTask, request.path, request.level);
         this.grantTaskHostDirectoryAccess(activeTask, request.path, request.level);
         return this.withHostDirectoryGrantMessage(
           await this.grantHostDirectoryAccess(activeTask, request),
@@ -459,18 +468,9 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   }
 
   private async tryAuthorizeHostDirectoryAccess(
-    session: SessionState,
+    activeTask: NonNullable<SessionState["activeTask"]>,
     request: Extract<PrivilegeRequest, { kind: "host_directory_access" }>,
   ): Promise<PrivilegeResolutionResult | null> {
-    const activeTask = session.activeTask;
-    if (!activeTask) {
-      return {
-        requestId: request.requestId,
-        outcome: "failed",
-        message: messages.taskNoLongerActive(session.chatId),
-      };
-    }
-
     if (this.isTaskHostDirectoryAccessAllowed(activeTask, request.path, request.level)) {
       return this.withHostDirectoryGrantMessage(
         await this.grantHostDirectoryAccess(activeTask, request),
@@ -479,10 +479,10 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       );
     }
 
-    if (this.deps.persistentApprovalStore.isHostDirectoryAlwaysAllowed(request.path, request.level)) {
+    if (await this.isHostDirectoryAlwaysAllowed(activeTask, request.path, request.level)) {
       return this.withHostDirectoryGrantMessage(
         await this.grantHostDirectoryAccess(activeTask, request),
-        messages.hostDirectoryAccessAllowedFromPersistentConfig(request.path, request.level),
+        this.buildPersistentHostDirectoryMessage(activeTask, request.path, request.level),
         "always",
       );
     }
@@ -594,13 +594,13 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     options: {
       serverId: string;
       isTaskGrantAllowed: (task: NonNullable<SessionState["activeTask"]>) => boolean;
-      isPersistentAllowed: () => boolean;
+      isPersistentAllowed: (task: NonNullable<SessionState["activeTask"]>) => Promise<boolean>;
       sessionMessage: string;
       persistentMessage: string;
       buildRequest: (requestId: string) => Extract<PrivilegeRequest, { kind: "mcp_tool_call" | "mcp_resource_read" }>;
     },
   ): Promise<PrivilegeResolutionResult> {
-    const session = this.deps.sessionStore.getByActiveTaskId(taskId);
+    const session = this.deps.sessionStore.getByTaskId(taskId);
     if (!session) {
       return {
         requestId: randomUUID(),
@@ -610,8 +610,8 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     }
 
     const chatId = session.chatId;
-    const activeTask = session.activeTask;
-    if (!activeTask || activeTask.taskId !== taskId) {
+    const activeTask = this.deps.taskCoordinator.findTask(session, taskId);
+    if (!activeTask) {
       return {
         requestId: randomUUID(),
         outcome: "failed",
@@ -628,8 +628,8 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       };
     }
 
-    const hasConfiguredAutoApproval = options.isPersistentAllowed();
-    if (isMcpAutoApprovalAllowed(activeTask, options.serverId) && hasConfiguredAutoApproval) {
+    const hasConfiguredAutoApproval = await options.isPersistentAllowed(activeTask);
+    if (this.isTaskPersistentMcpApprovalAllowed(activeTask, options.serverId, hasConfiguredAutoApproval)) {
       return {
         requestId: randomUUID(),
         outcome: "approved",
@@ -652,11 +652,14 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     };
     activeTask.pendingPrivilegeRequest = request;
     activeTask.status = "awaiting_privilege_decision";
-    await this.deps.channel.sendPrivilegeRequest(chatId, request);
-
-    return await new Promise<PrivilegeResolutionResult>((resolve) => {
+    const resultPromise = new Promise<PrivilegeResolutionResult>((resolve) => {
       this.activeTasks.setPendingMcpPrivilegeResolver(request.requestId, resolve);
     });
+    await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, activeTask.taskName, async () => {
+      await this.deps.channel.sendPrivilegeRequest(chatId, request);
+    });
+
+    return await resultPromise;
   }
 
   private async resolvePendingMcpPrivilegeRequest(
@@ -672,7 +675,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       persistentMessage: messages.mcpToolAllowedFromPersistentConfig(request.serverId, request.toolName),
       grantAutoApprovalForTask: (task) => grantMcpAutoApprovalForTask(task, request.serverId),
       grantAccess: (task) => this.grantTaskToolAccess(task, request.serverId, request.toolName),
-      persist: () => this.deps.persistentApprovalStore.allowTool(request.serverId, request.toolName),
+      persist: async (task) => await this.allowTool(task, request.serverId, request.toolName),
     });
   }
 
@@ -689,7 +692,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       persistentMessage: messages.mcpResourceReadAllowedFromPersistentConfig(request.serverId, request.uri),
       grantAutoApprovalForTask: (task) => grantMcpAutoApprovalForTask(task, request.serverId),
       grantAccess: (task) => this.grantTaskResourceReadAccess(task, request.serverId, request.uri),
-      persist: () => this.deps.persistentApprovalStore.allowResourceRead(request.serverId, request.uri),
+      persist: async (task) => await this.allowResourceRead(task, request.serverId, request.uri),
     });
   }
 
@@ -705,7 +708,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       persistentMessage: string;
       grantAutoApprovalForTask: (task: NonNullable<SessionState["activeTask"]>) => void;
       grantAccess: (task: NonNullable<SessionState["activeTask"]>) => void;
-      persist: () => Promise<void>;
+      persist: (task: NonNullable<SessionState["activeTask"]>) => Promise<void>;
     },
   ): Promise<PrivilegeResolutionResult> {
     const activeTask = session.activeTask;
@@ -759,7 +762,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
           scope: "worker_session",
         };
       case "approve_always":
-        await options.persist();
+        await options.persist(activeTask);
         options.grantAutoApprovalForTask(activeTask);
         return {
           requestId: request.requestId,
@@ -867,7 +870,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
           scope: "worker_session",
         };
       case "approve_always":
-        await this.deps.persistentApprovalStore.allowHttpToken(request.tokenId, request.host);
+        await this.allowHttpToken(activeTask, request.tokenId, request.host);
         grantHttpTokenAutoApprovalForTask(activeTask, request.tokenId);
         return {
           requestId: request.requestId,
@@ -904,18 +907,10 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     );
   }
 
-  private tryAuthorizeNativeHttpTokenUse(
-    session: SessionState,
+  private async tryAuthorizeNativeHttpTokenUse(
+    activeTask: NonNullable<SessionState["activeTask"]>,
     request: Extract<PrivilegeRequest, { kind: "http_token_use" }>,
-  ): PrivilegeResolutionResult | null {
-    const activeTask = session.activeTask;
-    if (!activeTask) {
-      return {
-        requestId: request.requestId,
-        outcome: "failed",
-        message: messages.taskNoLongerActive(session.chatId),
-      };
-    }
+  ): Promise<PrivilegeResolutionResult | null> {
 
     if (activeTask.approvedHttpTokenSessionGrants.some((entry) => entry.tokenId === request.tokenId && entry.host === request.host)) {
       return {
@@ -927,8 +922,8 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     }
 
     if (
-      isHttpTokenAutoApprovalAllowed(activeTask, request.tokenId)
-      && this.deps.persistentApprovalStore.isHttpTokenAlwaysAllowed(request.tokenId, request.host)
+      this.isTaskPersistentHttpTokenApprovalAllowed(activeTask, request.tokenId)
+      && await this.isHttpTokenAlwaysAllowed(activeTask, request.tokenId, request.host)
     ) {
       return {
         requestId: request.requestId,
@@ -954,15 +949,16 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     };
   }
 
-  private shouldConfirmHttpTokenAutoApprovalForTask(
+  private async shouldConfirmHttpTokenAutoApprovalForTask(
     session: SessionState,
+    taskId: string,
     tokenId: string,
     host: string,
-  ): boolean {
-    const activeTask = session.activeTask;
+  ): Promise<boolean> {
+    const activeTask = this.deps.taskCoordinator.findTask(session, taskId);
     return activeTask !== null
-      && !isHttpTokenAutoApprovalAllowed(activeTask, tokenId)
-      && this.deps.persistentApprovalStore.isHttpTokenAlwaysAllowed(tokenId, host);
+      && !this.isTaskPersistentHttpTokenApprovalAllowed(activeTask, tokenId)
+      && await this.isHttpTokenAlwaysAllowed(activeTask, tokenId, host);
   }
 
   private grantHttpTokenOnce(
@@ -982,6 +978,124 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       return;
     }
     task.approvedHttpTokenSessionGrants.push({ tokenId, host });
+  }
+
+  private isTaskPersistentMcpApprovalAllowed(
+    task: NonNullable<SessionState["activeTask"]>,
+    serverId: string,
+    isPersisted: boolean,
+  ): boolean {
+    return isPersisted && (task.origin?.kind === "launchedByJob" || isMcpAutoApprovalAllowed(task, serverId));
+  }
+
+  private isTaskPersistentHttpTokenApprovalAllowed(
+    task: NonNullable<SessionState["activeTask"]>,
+    tokenId: string,
+  ): boolean {
+    return task.origin?.kind === "launchedByJob" || isHttpTokenAutoApprovalAllowed(task, tokenId);
+  }
+
+  private async isToolAlwaysAllowed(
+    task: NonNullable<SessionState["activeTask"]>,
+    serverId: string,
+    toolName: string,
+  ): Promise<boolean> {
+    if (task.origin?.kind === "launchedByJob") {
+      return await this.deps.jobApprovalStore.isToolAlwaysAllowed(task.origin.jobId, serverId, toolName);
+    }
+    return this.deps.persistentApprovalStore.isAlwaysAllowed(serverId, toolName);
+  }
+
+  private async allowTool(
+    task: NonNullable<SessionState["activeTask"]>,
+    serverId: string,
+    toolName: string,
+  ): Promise<void> {
+    if (task.origin?.kind === "launchedByJob") {
+      await this.deps.jobApprovalStore.allowTool(task.origin.jobId, serverId, toolName);
+      return;
+    }
+    await this.deps.persistentApprovalStore.allowTool(serverId, toolName);
+  }
+
+  private async isResourceReadAlwaysAllowed(
+    task: NonNullable<SessionState["activeTask"]>,
+    serverId: string,
+    uri: string,
+  ): Promise<boolean> {
+    if (task.origin?.kind === "launchedByJob") {
+      return await this.deps.jobApprovalStore.isResourceReadAlwaysAllowed(task.origin.jobId, serverId, uri);
+    }
+    return this.deps.persistentApprovalStore.isResourceReadAlwaysAllowed(serverId, uri);
+  }
+
+  private async allowResourceRead(
+    task: NonNullable<SessionState["activeTask"]>,
+    serverId: string,
+    uri: string,
+  ): Promise<void> {
+    if (task.origin?.kind === "launchedByJob") {
+      await this.deps.jobApprovalStore.allowResourceRead(task.origin.jobId, serverId, uri);
+      return;
+    }
+    await this.deps.persistentApprovalStore.allowResourceRead(serverId, uri);
+  }
+
+  private async isHttpTokenAlwaysAllowed(
+    task: NonNullable<SessionState["activeTask"]>,
+    tokenId: string,
+    host: string,
+  ): Promise<boolean> {
+    if (task.origin?.kind === "launchedByJob") {
+      return await this.deps.jobApprovalStore.isHttpTokenAlwaysAllowed(task.origin.jobId, tokenId, host);
+    }
+    return this.deps.persistentApprovalStore.isHttpTokenAlwaysAllowed(tokenId, host);
+  }
+
+  private async allowHttpToken(
+    task: NonNullable<SessionState["activeTask"]>,
+    tokenId: string,
+    host: string,
+  ): Promise<void> {
+    if (task.origin?.kind === "launchedByJob") {
+      await this.deps.jobApprovalStore.allowHttpToken(task.origin.jobId, tokenId, host);
+      return;
+    }
+    await this.deps.persistentApprovalStore.allowHttpToken(tokenId, host);
+  }
+
+  private async isHostDirectoryAlwaysAllowed(
+    task: NonNullable<SessionState["activeTask"]>,
+    path: string,
+    level: "read_only" | "read_write",
+  ): Promise<boolean> {
+    if (task.origin?.kind === "launchedByJob") {
+      return await this.deps.jobApprovalStore.isHostDirectoryAlwaysAllowed(task.origin.jobId, path, level);
+    }
+    return this.deps.persistentApprovalStore.isHostDirectoryAlwaysAllowed(path, level);
+  }
+
+  private async allowHostDirectory(
+    task: NonNullable<SessionState["activeTask"]>,
+    path: string,
+    level: "read_only" | "read_write",
+  ): Promise<void> {
+    if (task.origin?.kind === "launchedByJob") {
+      await this.deps.jobApprovalStore.allowHostDirectory(task.origin.jobId, path, level);
+      return;
+    }
+    await this.deps.persistentApprovalStore.allowHostDirectory(path, level);
+  }
+
+  private buildPersistentHostDirectoryMessage(
+    task: NonNullable<SessionState["activeTask"]>,
+    path: string,
+    level: "read_only" | "read_write",
+  ): string {
+    if (task.origin?.kind === "launchedByJob") {
+      return messages.hostDirectoryAccessAllowedAndPersisted(path, level);
+    }
+    return messages.hostDirectoryAccessAllowedFromPersistentConfig(path, level);
   }
 }
 

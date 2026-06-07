@@ -71,6 +71,7 @@ type PendingShareDeletion = {
 export type SessionState = {
   chatId: string;
   activeTask: ActiveTaskState | null;
+  backgroundJobTasks: ActiveTaskState[];
   pendingTaskSummary: {
     taskName: string;
     summary: string;

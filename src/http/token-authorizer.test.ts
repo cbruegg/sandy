@@ -1,6 +1,10 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { HttpTokenAuthorizer } from "./token-authorizer.js";
+import { JobApprovalStore } from "../jobs/job-approval-store.js";
 import { InMemorySessionStore } from "../session/in-memory-session-store.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 
@@ -25,6 +29,7 @@ test("HttpTokenAuthorizer prefers worker_session grants over once grants", async
   const authorizer = new HttpTokenAuthorizer(
     sessionStore,
     createFakePersistentApprovalStore(),
+    new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
   );
 
   const chatId = "chat-1";
@@ -46,6 +51,8 @@ test("HttpTokenAuthorizer prefers worker_session grants over once grants", async
     approvedHostDirectories: [],
     workerConnected: false,
     taskSummary: null,
+    origin: { kind: "launchedByUser", chatId },
+    interactionState: "interacting",
   };
 
   const first = await authorizer.authorizeHttpTokenUse({
@@ -71,6 +78,7 @@ test("HttpTokenAuthorizer consumes once grants without affecting session grants"
   const authorizer = new HttpTokenAuthorizer(
     sessionStore,
     createFakePersistentApprovalStore(),
+    new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
   );
 
   const chatId = "chat-1";
@@ -92,6 +100,8 @@ test("HttpTokenAuthorizer consumes once grants without affecting session grants"
     approvedHostDirectories: [],
     workerConnected: false,
     taskSummary: null,
+    origin: { kind: "launchedByUser", chatId },
+    interactionState: "interacting",
   };
 
   const first = await authorizer.authorizeHttpTokenUse({
@@ -115,6 +125,7 @@ test("HttpTokenAuthorizer returns failed when task is not registered", async () 
   const authorizer = new HttpTokenAuthorizer(
     new InMemorySessionStore(),
     createFakePersistentApprovalStore(),
+    new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
   );
 
   const result = await authorizer.authorizeHttpTokenUse({
@@ -131,6 +142,7 @@ test("HttpTokenAuthorizer applies persistent approvals only when task policy ena
   const authorizer = new HttpTokenAuthorizer(
     sessionStore,
     createFakePersistentApprovalStore([{ tokenId: "api-token", host: "api.example.com" }]),
+    new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
   );
 
   const chatId = "chat-1";
@@ -152,6 +164,8 @@ test("HttpTokenAuthorizer applies persistent approvals only when task policy ena
     approvedHostDirectories: [],
     workerConnected: false,
     taskSummary: null,
+    origin: { kind: "launchedByUser", chatId },
+    interactionState: "interacting",
   };
 
   const beforeAccess = await authorizer.authorizeHttpTokenUse({

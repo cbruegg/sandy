@@ -18,6 +18,7 @@ import { OrchestratorPrivilegesImpl } from "./privileges.js";
 import { ActiveTaskRuntimeRegistry } from "./active-task-runtime-registry.js";
 import type { OrchestratorCoreDependencies } from "./shared.js";
 import { OrchestratorTaskLifecycleImpl } from "./task-lifecycle.js";
+import { TaskCoordinator } from "./task-coordinator.js";
 import type {
   ChannelFormatting,
   DecideContext,
@@ -32,6 +33,7 @@ import type {
 } from "../types.js";
 import { SkillService } from "../skills.js";
 import { WorkerToolsHandler } from "./worker-tools-handler.js";
+import { JobApprovalStore } from "../jobs/job-approval-store.js";
 import type { JobService } from "../jobs/job-service.js";
 import type { JobDefinition, JobMutationRequest } from "../jobs/job-types.js";
 
@@ -210,14 +212,16 @@ type RecordedLaunch = Omit<LaunchTaskRequest, "prepareStartInput"> & {
 
 class FakeSandboxRunner implements SandboxRunner {
   public readonly launches: RecordedLaunch[] = [];
-  public readonly handle = new FakeSandboxHandle();
-  public onEvent: ((event: SubAgentEvent) => Promise<void>) | null = null;
+  public handle = new FakeSandboxHandle();
+  public readonly handles = new Map<string, FakeSandboxHandle>();
+  public readonly onEvents = new Map<string, (event: SubAgentEvent) => Promise<void>>();
   public readonly deletedTaskShares: string[] = [];
   public readonly launchedTaskShares: string[] = [];
   public shareInspections = new Map<string, { isEmpty: boolean; summary: string | null }>();
   private readonly taskSharePaths = new Map<string, string>();
 
   async launchTask(request: LaunchTaskRequest, onEvent: (event: SubAgentEvent) => Promise<void>): Promise<SandboxHandle> {
+    const handle = new FakeSandboxHandle();
     const taskSharePath = `/tmp/${request.taskId}`;
     const startInput = await request.prepareStartInput(taskSharePath);
     this.launches.push({
@@ -230,18 +234,25 @@ class FakeSandboxRunner implements SandboxRunner {
       taskBrief: startInput.taskBrief,
       initialInput: startInput.initialInput,
     });
-    this.onEvent = onEvent;
+    this.onEvents.set(request.taskId, onEvent);
     this.launchedTaskShares.push(request.taskId);
     this.taskSharePaths.set(request.taskId, taskSharePath);
-    this.handle.taskSharePath = taskSharePath;
-    return this.handle;
+    handle.taskSharePath = taskSharePath;
+    this.handles.set(request.taskId, handle);
+    this.handle = handle;
+    return handle;
   }
 
-  async emit(event: SubAgentEvent): Promise<void> {
-    if (!this.onEvent) {
+  async emit(event: SubAgentEvent, taskId?: string): Promise<void> {
+    const resolvedTaskId = taskId ?? this.launches.at(-1)?.taskId;
+    if (!resolvedTaskId) {
       throw new Error("No task is active.");
     }
-    await this.onEvent(event);
+    const onEvent = this.onEvents.get(resolvedTaskId);
+    if (!onEvent) {
+      throw new Error(`Task ${resolvedTaskId} is not active.`);
+    }
+    await onEvent(event);
   }
 
   inspectTaskShare(taskId: string): Promise<{ isEmpty: boolean; summary: string | null }> {
@@ -328,12 +339,14 @@ export function createTestOrchestrator(options: {
   persistentApprovalStore?: PersistentApprovalStore;
   hostfsBroker?: HostfsBroker;
   skillService?: SkillService;
+  taskCoordinator?: TaskCoordinator;
 }) {
   const channel = options.channel ?? new RecordingChannel();
   const runner = options.sandboxRunner ?? new FakeSandboxRunner();
   const store = options.sessionStore ?? new InMemorySessionStore();
   const privilegeBroker = options.privilegeBroker ?? new FakePrivilegeBroker();
   const skillService = options.skillService ?? new SkillService(mkdtempSync(join(tmpdir(), "sandy-test-config-")));
+  const taskCoordinator = options.taskCoordinator ?? new TaskCoordinator(store, channel);
   const coreDeps: OrchestratorCoreDependencies = {
     channel,
     mainAgent: options.mainAgent,
@@ -342,8 +355,10 @@ export function createTestOrchestrator(options: {
     sessionStore: store,
     privilegeBroker,
     persistentApprovalStore: options.persistentApprovalStore ?? createNoopPersistentApprovalStore(),
+    jobApprovalStore: new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
     hostfsBroker: options.hostfsBroker ?? createNoopHostfsBroker(),
     skillService,
+    taskCoordinator,
   };
   const activeTaskRuntimes = new ActiveTaskRuntimeRegistry();
   const taskLifecycle = new OrchestratorTaskLifecycleImpl(coreDeps, activeTaskRuntimes, channel.getFormatting());
@@ -365,5 +380,8 @@ export function createTestOrchestrator(options: {
     privilegeBroker,
     activeTaskRuntimes,
     skillService,
+    taskCoordinator,
+    taskLifecycle,
+    privileges,
   };
 }

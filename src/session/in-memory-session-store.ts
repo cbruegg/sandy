@@ -2,7 +2,7 @@ import type { SessionState } from "../types.js";
 
 export interface SessionStore {
   getOrCreate(chatId: string): SessionState;
-  getByActiveTaskId(taskId: string): SessionState | undefined;
+  getByTaskId(taskId: string): SessionState | undefined;
   listSessions(): SessionState[];
 }
 
@@ -17,6 +17,7 @@ export class InMemorySessionStore implements SessionStore {
     const session: SessionState = {
       chatId,
       activeTask: null,
+      backgroundJobTasks: [],
       pendingTaskSummary: null,
       pendingShareDeletion: null,
     };
@@ -24,9 +25,9 @@ export class InMemorySessionStore implements SessionStore {
     return session;
   }
 
-  getByActiveTaskId(taskId: string): SessionState | undefined {
+  getByTaskId(taskId: string): SessionState | undefined {
     for (const session of this.sessions.values()) {
-      if (session.activeTask?.taskId === taskId) {
+      if (session.activeTask?.taskId === taskId || session.backgroundJobTasks.some((task) => task.taskId === taskId)) {
         return session;
       }
     }
