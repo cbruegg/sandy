@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { SessionStore } from "../session/in-memory-session-store.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
-import type { JobApprovalStore } from "../jobs/job-approval-store.js";
 import type { PrivilegeResolutionResult } from "../types.js";
 import { messages } from "../messages.js";
 import type { SessionState } from "../types/task-state.js";
@@ -17,7 +16,6 @@ export class HttpTokenAuthorizer {
   constructor(
     private readonly sessionStore: SessionStore,
     private readonly persistentApprovalStore: PersistentApprovalStore,
-    private readonly jobApprovalStore: JobApprovalStore,
   ) {}
 
   async authorizeHttpTokenUse(input: AuthorizeHttpTokenUseInput): Promise<PrivilegeResolutionResult> {
@@ -48,8 +46,8 @@ export class HttpTokenAuthorizer {
       };
     }
 
-    if ((activeTask.origin?.kind === "launchedByJob" || isHttpTokenAutoApprovalAllowed(activeTask, input.tokenId))
-      && await this.isHttpTokenAlwaysAllowed(activeTask, input.tokenId, input.host)) {
+    if (isHttpTokenAutoApprovalAllowed(activeTask, input.tokenId)
+      && await this.isHttpTokenAlwaysAllowed(input.tokenId, input.host)) {
       return {
         requestId: randomUUID(),
         outcome: "approved",
@@ -78,15 +76,8 @@ export class HttpTokenAuthorizer {
     };
   }
 
-  private async isHttpTokenAlwaysAllowed(
-    task: NonNullable<SessionState["activeTask"]>,
-    tokenId: string,
-    host: string,
-  ): Promise<boolean> {
-    if (task.origin?.kind === "launchedByJob") {
-      return await this.jobApprovalStore.isHttpTokenAlwaysAllowed(task.origin.jobId, tokenId, host);
-    }
-    return this.persistentApprovalStore.isHttpTokenAlwaysAllowed(tokenId, host);
+  private isHttpTokenAlwaysAllowed(tokenId: string, host: string): Promise<boolean> {
+    return Promise.resolve(this.persistentApprovalStore.isHttpTokenAlwaysAllowed(tokenId, host));
   }
 }
 

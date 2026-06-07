@@ -33,7 +33,7 @@ import type {
 } from "../types.js";
 import { SkillService } from "../skills.js";
 import { WorkerToolsHandler } from "./worker-tools-handler.js";
-import { JobApprovalStore } from "../jobs/job-approval-store.js";
+import { JobApprovalStore, type JobApprovalStoreApi } from "../jobs/job-approval-store.js";
 import type { JobService } from "../jobs/job-service.js";
 import type { JobDefinition, JobMutationRequest } from "../jobs/job-types.js";
 
@@ -267,6 +267,27 @@ class FakeSandboxRunner implements SandboxRunner {
 
 }
 
+/** In-memory JobApprovalStore for tests that need predictable job-scoped persistence without file I/O. */
+export class InMemoryJobApprovalStore implements JobApprovalStoreApi {
+  private readonly taskPolicies = new Map<string, { autoApproveMcpServers: string[]; autoApproveHttpTokens: string[] }>();
+
+  getTaskPolicy(jobId: string): Promise<{ autoApproveMcpServers: string[]; autoApproveHttpTokens: string[] }> {
+    const taskPolicy = this.taskPolicies.get(jobId);
+    return Promise.resolve({
+      autoApproveMcpServers: [...(taskPolicy?.autoApproveMcpServers ?? [])],
+      autoApproveHttpTokens: [...(taskPolicy?.autoApproveHttpTokens ?? [])],
+    });
+  }
+
+  saveTaskPolicy(jobId: string, taskPolicy: { autoApproveMcpServers: string[]; autoApproveHttpTokens: string[] }): Promise<void> {
+    this.taskPolicies.set(jobId, {
+      autoApproveMcpServers: Array.from(new Set(taskPolicy.autoApproveMcpServers)).sort(),
+      autoApproveHttpTokens: Array.from(new Set(taskPolicy.autoApproveHttpTokens)).sort(),
+    });
+    return Promise.resolve();
+  }
+}
+
 export class FakePrivilegeBroker implements PrivilegeBroker {
   public readonly appliedRequests: Array<{ request: SupportedPrivilegeRequest; taskId: string; taskSharePath: string }> = [];
 
@@ -340,6 +361,7 @@ export function createTestOrchestrator(options: {
   hostfsBroker?: HostfsBroker;
   skillService?: SkillService;
   taskCoordinator?: TaskCoordinator;
+  jobApprovalStore?: JobApprovalStoreApi;
 }) {
   const channel = options.channel ?? new RecordingChannel();
   const runner = options.sandboxRunner ?? new FakeSandboxRunner();
@@ -355,7 +377,7 @@ export function createTestOrchestrator(options: {
     sessionStore: store,
     privilegeBroker,
     persistentApprovalStore: options.persistentApprovalStore ?? createNoopPersistentApprovalStore(),
-    jobApprovalStore: new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
+    jobApprovalStore: options.jobApprovalStore ?? new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
     hostfsBroker: options.hostfsBroker ?? createNoopHostfsBroker(),
     skillService,
     taskCoordinator,

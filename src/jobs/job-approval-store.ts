@@ -2,109 +2,71 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
 import { jobApprovalsFile } from "../state-paths.js";
+import type { MainAgentTaskPolicy } from "../types/main-agent.js";
 
-const hostDirectoryLevelSchema = z.enum(["read_only", "read_write"]);
-
-const mcpToolApprovalSchema = z.object({
-  serverId: z.string().min(1),
-  toolName: z.string().min(1),
-}).strict();
-
-const mcpResourceApprovalSchema = z.object({
-  serverId: z.string().min(1),
-  uri: z.string().min(1),
-}).strict();
-
-const httpTokenApprovalSchema = z.object({
-  tokenId: z.string().min(1),
-  host: z.string().min(1),
-}).strict();
-
-const hostDirectoryApprovalSchema = z.object({
-  path: z.string().min(1),
-  level: hostDirectoryLevelSchema,
+const taskPolicySchema = z.object({
+  autoApproveMcpServers: z.array(z.string().min(1)),
+  autoApproveHttpTokens: z.array(z.string().min(1)),
 }).strict();
 
 const jobApprovalStateSchema = z.object({
   jobId: z.string().min(1),
-  mcpTools: z.array(mcpToolApprovalSchema),
-  mcpResources: z.array(mcpResourceApprovalSchema),
-  httpTokens: z.array(httpTokenApprovalSchema),
-  hostDirectories: z.array(hostDirectoryApprovalSchema),
+  taskPolicy: taskPolicySchema,
 }).strict();
 
 const jobApprovalsFileSchema = z.object({
   approvals: z.array(jobApprovalStateSchema),
 }).strict();
 
-type HostDirectoryApproval = z.infer<typeof hostDirectoryApprovalSchema>;
+const legacyJobApprovalStateSchema = z.object({
+  jobId: z.string().min(1),
+  mcpTools: z.array(z.object({
+    serverId: z.string().min(1),
+    toolName: z.string().min(1),
+  }).strict()),
+  mcpResources: z.array(z.object({
+    serverId: z.string().min(1),
+    uri: z.string().min(1),
+  }).strict()),
+  httpTokens: z.array(z.object({
+    tokenId: z.string().min(1),
+    host: z.string().min(1),
+  }).strict()),
+  hostDirectories: z.array(z.object({
+    path: z.string().min(1),
+    level: z.enum(["read_only", "read_write"]),
+  }).strict()),
+}).strict();
+
+const legacyJobApprovalsFileSchema = z.object({
+  approvals: z.array(legacyJobApprovalStateSchema),
+}).strict();
 
 type JobApprovalState = z.infer<typeof jobApprovalStateSchema>;
-
 type JobApprovalsFile = z.infer<typeof jobApprovalsFileSchema>;
+type LegacyJobApprovalState = z.infer<typeof legacyJobApprovalStateSchema>;
 
-export class JobApprovalStore {
+export interface JobApprovalStoreApi {
+  getTaskPolicy(jobId: string): Promise<MainAgentTaskPolicy>;
+  saveTaskPolicy(jobId: string, taskPolicy: MainAgentTaskPolicy): Promise<void>;
+}
+
+export class JobApprovalStore implements JobApprovalStoreApi {
   private readonly filePath: string;
 
   constructor(configDirectory: string) {
     this.filePath = jobApprovalsFile(configDirectory);
   }
 
-  async isToolAlwaysAllowed(jobId: string, serverId: string, toolName: string): Promise<boolean> {
+  async getTaskPolicy(jobId: string): Promise<MainAgentTaskPolicy> {
     const state = await this.getJobState(jobId);
-    return state.mcpTools.some((entry) => entry.serverId === serverId && entry.toolName === toolName);
+    return cloneTaskPolicy(state.taskPolicy);
   }
 
-  async allowTool(jobId: string, serverId: string, toolName: string): Promise<void> {
+  async saveTaskPolicy(jobId: string, taskPolicy: MainAgentTaskPolicy): Promise<void> {
+    const normalizedTaskPolicy = normalizeTaskPolicy(taskPolicy);
     await this.updateJobState(jobId, (state) => {
-      if (!state.mcpTools.some((entry) => entry.serverId === serverId && entry.toolName === toolName)) {
-        state.mcpTools.push({ serverId, toolName });
-      }
-    });
-  }
-
-  async isResourceReadAlwaysAllowed(jobId: string, serverId: string, uri: string): Promise<boolean> {
-    const state = await this.getJobState(jobId);
-    return state.mcpResources.some((entry) => entry.serverId === serverId && entry.uri === uri);
-  }
-
-  async allowResourceRead(jobId: string, serverId: string, uri: string): Promise<void> {
-    await this.updateJobState(jobId, (state) => {
-      if (!state.mcpResources.some((entry) => entry.serverId === serverId && entry.uri === uri)) {
-        state.mcpResources.push({ serverId, uri });
-      }
-    });
-  }
-
-  async isHttpTokenAlwaysAllowed(jobId: string, tokenId: string, host: string): Promise<boolean> {
-    const state = await this.getJobState(jobId);
-    return state.httpTokens.some((entry) => entry.tokenId === tokenId && entry.host === host);
-  }
-
-  async allowHttpToken(jobId: string, tokenId: string, host: string): Promise<void> {
-    await this.updateJobState(jobId, (state) => {
-      if (!state.httpTokens.some((entry) => entry.tokenId === tokenId && entry.host === host)) {
-        state.httpTokens.push({ tokenId, host });
-      }
-    });
-  }
-
-  async isHostDirectoryAlwaysAllowed(jobId: string, path: string, level: "read_only" | "read_write"): Promise<boolean> {
-    const state = await this.getJobState(jobId);
-    return isHostDirectoryAllowed(state.hostDirectories, path, level);
-  }
-
-  async allowHostDirectory(jobId: string, path: string, level: "read_only" | "read_write"): Promise<void> {
-    await this.updateJobState(jobId, (state) => {
-      const existing = state.hostDirectories.find((entry) => entry.path === path);
-      if (!existing) {
-        state.hostDirectories.push({ path, level });
-        return;
-      }
-      if (existing.level === "read_write" || level === "read_only") {
-        return;
-      }
-      existing.level = level;
+      state.taskPolicy = normalizedTaskPolicy;
     });
   }
 
@@ -121,13 +83,23 @@ export class JobApprovalStore {
       data.approvals.push(state);
     }
     update(state);
+    state.taskPolicy = normalizeTaskPolicy(state.taskPolicy);
     await this.save(data);
   }
 
   private async load(): Promise<JobApprovalsFile> {
     try {
       const raw = await readFile(this.filePath, "utf8");
-      return jobApprovalsFileSchema.parse(JSON.parse(raw));
+      const parsed: unknown = JSON.parse(raw);
+      const current = jobApprovalsFileSchema.safeParse(parsed);
+      if (current.success) {
+        return current.data;
+      }
+
+      const legacy = legacyJobApprovalsFileSchema.parse(parsed);
+      return {
+        approvals: legacy.approvals.map((entry) => normalizeLegacyEntry(entry)),
+      };
     } catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
         return { approvals: [] };
@@ -145,13 +117,41 @@ export class JobApprovalStore {
 function emptyJobApprovalState(jobId: string): JobApprovalState {
   return {
     jobId,
-    mcpTools: [],
-    mcpResources: [],
-    httpTokens: [],
-    hostDirectories: [],
+    taskPolicy: emptyTaskPolicy(),
   };
 }
 
-function isHostDirectoryAllowed(entries: HostDirectoryApproval[], path: string, level: "read_only" | "read_write"): boolean {
-  return entries.some((entry) => entry.path === path && (entry.level === "read_write" || level === "read_only"));
+function normalizeLegacyEntry(entry: LegacyJobApprovalState): JobApprovalState {
+  return {
+    jobId: entry.jobId,
+    taskPolicy: {
+      autoApproveMcpServers: uniqueSortedStrings(entry.mcpTools.map((tool) => tool.serverId)),
+      autoApproveHttpTokens: uniqueSortedStrings(entry.httpTokens.map((token) => token.tokenId)),
+    },
+  };
+}
+
+function normalizeTaskPolicy(taskPolicy: MainAgentTaskPolicy): MainAgentTaskPolicy {
+  return {
+    autoApproveMcpServers: uniqueSortedStrings(taskPolicy.autoApproveMcpServers),
+    autoApproveHttpTokens: uniqueSortedStrings(taskPolicy.autoApproveHttpTokens),
+  };
+}
+
+function cloneTaskPolicy(taskPolicy: MainAgentTaskPolicy): MainAgentTaskPolicy {
+  return {
+    autoApproveMcpServers: [...taskPolicy.autoApproveMcpServers],
+    autoApproveHttpTokens: [...taskPolicy.autoApproveHttpTokens],
+  };
+}
+
+function emptyTaskPolicy(): MainAgentTaskPolicy {
+  return {
+    autoApproveMcpServers: [],
+    autoApproveHttpTokens: [],
+  };
+}
+
+function uniqueSortedStrings(values: string[]): string[] {
+  return Array.from(new Set(values)).sort();
 }

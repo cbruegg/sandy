@@ -342,4 +342,4 @@ Run `bun run build` and `bun run test` after TypeScript/runtime changes.
 - Waiting reminders now fire after 5 minutes of no progress on the blocking user task, back off exponentially up to 1 hour, and reset whenever the blocking task makes progress.
 - Worker job management tools were added. Read-only tools do not require approval; mutation tools require explicit approval through `job_mutation` privilege requests with no persistent approval option.
 - Job-launched tasks reuse the existing sandbox/task-bundle launch path and are marked with `origin: launchedByJob` plus a silent/waiting/interacting state. Silent job tasks can complete without summary review.
-- Job-scoped persistent approvals are now stored separately under `state/jobs/job-approvals.json` and apply only to future executions of the same job.
+- Job-scoped approval persistence is now reduced to per-job task policy under `state/jobs/job-approvals.json`: the file remembers which globally persisted MCP servers and HTTP tokens should auto-apply to future executions of that job.

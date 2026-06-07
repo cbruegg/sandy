@@ -4,7 +4,7 @@ import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 import type { SandboxRunner } from "../sandbox/sandbox-runner.js";
 import type { SessionStore } from "../session/in-memory-session-store.js";
-import type { JobApprovalStore } from "../jobs/job-approval-store.js";
+import type { JobApprovalStoreApi } from "../jobs/job-approval-store.js";
 import type {
   ChatGPTExternalTokens,
   ChannelFormatting,
@@ -31,7 +31,7 @@ export type OrchestratorCoreDependencies = {
   sessionStore: SessionStore;
   privilegeBroker: PrivilegeBroker;
   persistentApprovalStore: PersistentApprovalStore;
-  jobApprovalStore: JobApprovalStore;
+  jobApprovalStore: JobApprovalStoreApi;
   hostfsBroker: HostfsBroker;
   skillService: SkillService;
   taskCoordinator: TaskCoordinator;

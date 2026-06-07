@@ -1,10 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { HttpTokenAuthorizer } from "./token-authorizer.js";
-import { JobApprovalStore } from "../jobs/job-approval-store.js";
 import { InMemorySessionStore } from "../session/in-memory-session-store.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 
@@ -26,11 +22,7 @@ function createFakePersistentApprovalStore(
 
 test("HttpTokenAuthorizer prefers worker_session grants over once grants", async () => {
   const sessionStore = new InMemorySessionStore();
-  const authorizer = new HttpTokenAuthorizer(
-    sessionStore,
-    createFakePersistentApprovalStore(),
-    new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
-  );
+  const authorizer = new HttpTokenAuthorizer(sessionStore, createFakePersistentApprovalStore());
 
   const chatId = "chat-1";
   const taskId = "task-1";
@@ -75,11 +67,7 @@ test("HttpTokenAuthorizer prefers worker_session grants over once grants", async
 
 test("HttpTokenAuthorizer consumes once grants without affecting session grants", async () => {
   const sessionStore = new InMemorySessionStore();
-  const authorizer = new HttpTokenAuthorizer(
-    sessionStore,
-    createFakePersistentApprovalStore(),
-    new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
-  );
+  const authorizer = new HttpTokenAuthorizer(sessionStore, createFakePersistentApprovalStore());
 
   const chatId = "chat-1";
   const taskId = "task-1";
@@ -122,11 +110,7 @@ test("HttpTokenAuthorizer consumes once grants without affecting session grants"
 });
 
 test("HttpTokenAuthorizer returns failed when task is not registered", async () => {
-  const authorizer = new HttpTokenAuthorizer(
-    new InMemorySessionStore(),
-    createFakePersistentApprovalStore(),
-    new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
-  );
+  const authorizer = new HttpTokenAuthorizer(new InMemorySessionStore(), createFakePersistentApprovalStore());
 
   const result = await authorizer.authorizeHttpTokenUse({
     taskId: "missing-task",
@@ -142,7 +126,6 @@ test("HttpTokenAuthorizer applies persistent approvals only when task policy ena
   const authorizer = new HttpTokenAuthorizer(
     sessionStore,
     createFakePersistentApprovalStore([{ tokenId: "api-token", host: "api.example.com" }]),
-    new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
   );
 
   const chatId = "chat-1";
@@ -176,6 +159,50 @@ test("HttpTokenAuthorizer applies persistent approvals only when task policy ena
   session.activeTask.taskPolicy.autoApproveHttpTokens.push("api-token");
   const afterAccess = await authorizer.authorizeHttpTokenUse({
     taskId,
+    tokenId: "api-token",
+    host: "api.example.com",
+  });
+
+  assert.equal(beforeAccess.outcome, "denied");
+  assert.equal(afterAccess.outcome, "approved");
+  assert.equal(afterAccess.scope, "always");
+});
+
+test("HttpTokenAuthorizer applies global persistent approvals to job tasks only when task policy enables them", async () => {
+  const sessionStore = new InMemorySessionStore();
+  const authorizer = new HttpTokenAuthorizer(
+    sessionStore,
+    createFakePersistentApprovalStore([{ tokenId: "api-token", host: "api.example.com" }]),
+  );
+
+  const session = sessionStore.getOrCreate("chat-1");
+  session.activeTask = {
+    taskId: "task-1",
+    taskName: "test",
+    status: "running",
+    startedAt: new Date().toISOString(),
+    lastActivityAt: new Date().toISOString(),
+    pendingPrivilegeRequest: null,
+    taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
+    approvedMcpTools: [],
+    approvedMcpResourceReads: [],
+    approvedHttpTokenSessionGrants: [],
+    approvedHttpTokenOnceGrants: [],
+    approvedHostDirectories: [],
+    workerConnected: false,
+    taskSummary: null,
+    origin: { kind: "launchedByJob", jobId: "job-1" },
+    interactionState: "silent",
+  };
+
+  const beforeAccess = await authorizer.authorizeHttpTokenUse({
+    taskId: "task-1",
+    tokenId: "api-token",
+    host: "api.example.com",
+  });
+  session.activeTask.taskPolicy.autoApproveHttpTokens.push("api-token");
+  const afterAccess = await authorizer.authorizeHttpTokenUse({
+    taskId: "task-1",
     tokenId: "api-token",
     host: "api.example.com",
   });

@@ -1,17 +1,14 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import type { HostDirectoryAccessLevel } from "../hostfs/path-policy.js";
 import { HttpTokenAuthorizer } from "../http/token-authorizer.js";
-import { JobApprovalStore } from "../jobs/job-approval-store.js";
 import { messages } from "../messages.js";
 import {
   createTestOrchestrator,
   expectDefined,
   FakePrivilegeBroker,
+  InMemoryJobApprovalStore,
   RecordingChannel,
   StubMainAgent,
 } from "./test-helpers.js";
@@ -429,11 +426,7 @@ test("orchestrator confirms persisted http token suitability and enables later p
   const session = store.getOrCreate("chat-http-confirm");
   assert.deepEqual(session.activeTask?.taskPolicy.autoApproveHttpTokens, ["vid2text"]);
 
-  const authorizer = new HttpTokenAuthorizer(
-    store,
-    persistentApprovalStore,
-    new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
-  );
+  const authorizer = new HttpTokenAuthorizer(store, persistentApprovalStore);
   const proxyResult = await authorizer.authorizeHttpTokenUse({
     taskId,
     tokenId: "vid2text",
@@ -576,10 +569,13 @@ test("orchestrator sends mcp resource read privilege request to user when not pr
 });
 
 test("job-scoped persistent approvals apply only to later executions of the same job", async () => {
+  const allowedServers = new Map<string, Set<string>>();
   const persistentApprovalStore: PersistentApprovalStore = {
-    isAlwaysAllowed: () => false,
-    allowTool: async () => {
-      throw new Error("Global approvals should not be used for job-scoped persistence.");
+    isAlwaysAllowed: (serverId, toolName) => allowedServers.get(serverId)?.has(toolName) ?? false,
+    allowTool: async (serverId, toolName) => {
+      const tools = allowedServers.get(serverId) ?? new Set<string>();
+      tools.add(toolName);
+      allowedServers.set(serverId, tools);
     },
     isResourceReadAlwaysAllowed: () => false,
     allowResourceRead: async () => {},
@@ -590,6 +586,7 @@ test("job-scoped persistent approvals apply only to later executions of the same
   };
   const { orchestrator, channel, taskLifecycle, runner } = createTestOrchestrator({
     persistentApprovalStore,
+    jobApprovalStore: new InMemoryJobApprovalStore(),
     mainAgent: new StubMainAgent({
       action: "reply",
       replyText: "idle",
@@ -627,13 +624,13 @@ test("job-scoped persistent approvals apply only to later executions of the same
   await runner.emit({ type: "task_done" }, firstTaskId);
 
   const secondTaskId = await taskLifecycle.launchJobTask(job, "chat-job-approval", null);
-  const secondApproval = await orchestrator.authorizeMcpToolCall({
+  const secondApproval = orchestrator.authorizeMcpToolCall({
     taskId: secondTaskId,
     serverId: "todoist",
     toolName: "list_projects",
     arguments: {},
   });
-  assert.equal(secondApproval.scope, "always");
+  assert.equal((await secondApproval).scope, "always");
   assert.equal(channel.privilegeRequests.length, 1);
 
   await runner.emit({ type: "task_done" }, secondTaskId);
@@ -645,17 +642,19 @@ test("job-scoped persistent approvals apply only to later executions of the same
     toolName: "list_projects",
     arguments: {},
   });
-  await waitFor(() => channel.privilegeRequests.length === 2);
+  await waitFor(() => channel.privilegeRequests.length >= 2);
 
   assert.equal(channel.privilegeRequests.length, 2);
-  const secondRequestId = channel.privilegeRequests[1]?.request.requestId;
+  const thirdRequest = channel.privilegeRequests[1]?.request;
+  assert.equal(thirdRequest?.kind, "mcp_tool_call");
+  assert.equal(thirdRequest?.confirmsAutoApprovalForTask, true);
   await orchestrator.handleChatEvent({
     kind: "approval_response",
     chatId: "chat-job-approval",
     messageId: "3",
-    timestamp: "2026-04-01T00:00:20.000Z",
+    timestamp: "2026-04-01T00:00:30.000Z",
     decision: "deny",
-    requestId: secondRequestId,
+    requestId: thirdRequest?.requestId,
   });
   assert.equal((await thirdApproval).outcome, "denied");
 });

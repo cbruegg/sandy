@@ -220,7 +220,6 @@ export async function startApp(): Promise<void> {
   const httpTokenAuthorizer = new HttpTokenAuthorizer(
     sessionStore,
     persistentApprovalStore,
-    jobApprovalStore,
   );
 
   // The mitmproxy-based HTTP proxy container asks the host orchestrator for per-request

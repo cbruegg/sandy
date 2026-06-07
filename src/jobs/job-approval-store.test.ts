@@ -1,34 +1,48 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JobApprovalStore } from "./job-approval-store.js";
+import { jobApprovalsFile } from "../state-paths.js";
 
-test("JobApprovalStore persists approvals per job only", async () => {
+test("JobApprovalStore persists task policy per job only", async () => {
   const configDirectory = mkdtempSync(join(tmpdir(), "sandy-job-approval-store-"));
   const store = new JobApprovalStore(configDirectory);
 
-  await store.allowTool("job-a", "todoist", "list_projects");
-  await store.allowResourceRead("job-a", "todoist", "todoist://projects");
-  await store.allowHttpToken("job-a", "news-api", "api.example.com");
-  await store.allowHostDirectory("job-a", "/tmp/reports", "read_only");
+  await store.saveTaskPolicy("job-a", {
+    autoApproveMcpServers: ["todoist", "todoist"],
+    autoApproveHttpTokens: ["news-api"],
+  });
 
-  assert.equal(await store.isToolAlwaysAllowed("job-a", "todoist", "list_projects"), true);
-  assert.equal(await store.isToolAlwaysAllowed("job-b", "todoist", "list_projects"), false);
-  assert.equal(await store.isResourceReadAlwaysAllowed("job-a", "todoist", "todoist://projects"), true);
-  assert.equal(await store.isHttpTokenAlwaysAllowed("job-a", "news-api", "api.example.com"), true);
-  assert.equal(await store.isHostDirectoryAlwaysAllowed("job-a", "/tmp/reports", "read_only"), true);
-  assert.equal(await store.isHostDirectoryAlwaysAllowed("job-a", "/tmp/reports", "read_write"), false);
+  assert.deepEqual(await store.getTaskPolicy("job-a"), {
+    autoApproveMcpServers: ["todoist"],
+    autoApproveHttpTokens: ["news-api"],
+  });
+  assert.deepEqual(await store.getTaskPolicy("job-b"), {
+    autoApproveMcpServers: [],
+    autoApproveHttpTokens: [],
+  });
 });
 
-test("JobApprovalStore upgrades host directory approvals", async () => {
+test("JobApprovalStore reads legacy approval files as task policy", async () => {
   const configDirectory = mkdtempSync(join(tmpdir(), "sandy-job-approval-store-"));
+  const filePath = jobApprovalsFile(configDirectory);
+  mkdirSync(join(configDirectory, "state", "jobs"), { recursive: true });
+  writeFileSync(filePath, `${JSON.stringify({
+    approvals: [{
+      jobId: "job-a",
+      mcpTools: [{ serverId: "todoist", toolName: "list_projects" }],
+      mcpResources: [{ serverId: "todoist", uri: "todoist://projects" }],
+      httpTokens: [{ tokenId: "news-api", host: "api.example.com" }],
+      hostDirectories: [{ path: "/tmp/reports", level: "read_only" }],
+    }],
+  }, null, 2)}\n`, "utf8");
+
   const store = new JobApprovalStore(configDirectory);
 
-  await store.allowHostDirectory("job-a", "/tmp/reports", "read_only");
-  await store.allowHostDirectory("job-a", "/tmp/reports", "read_write");
-
-  assert.equal(await store.isHostDirectoryAlwaysAllowed("job-a", "/tmp/reports", "read_only"), true);
-  assert.equal(await store.isHostDirectoryAlwaysAllowed("job-a", "/tmp/reports", "read_write"), true);
+  assert.deepEqual(await store.getTaskPolicy("job-a"), {
+    autoApproveMcpServers: ["todoist"],
+    autoApproveHttpTokens: ["news-api"],
+  });
 });

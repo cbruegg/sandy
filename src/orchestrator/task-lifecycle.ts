@@ -237,6 +237,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     const taskId = randomUUID();
     const now = new Date().toISOString();
     const taskName = `Scheduled job: ${job.name}`;
+    const taskPolicy = await this.deps.jobApprovalStore.getTaskPolicy(job.id);
     const taskState: ActiveTaskState = {
       taskId,
       taskName,
@@ -244,7 +245,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
       startedAt: now,
       lastActivityAt: now,
       pendingPrivilegeRequest: null,
-      taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
+      taskPolicy,
       approvedMcpTools: [],
       approvedMcpResourceReads: [],
       approvedHttpTokenSessionGrants: [],
