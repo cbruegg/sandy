@@ -15,7 +15,7 @@ import {
 import { hostGrantsPrefix } from "../paths.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
-import type { JobDefinition } from "../jobs/job-types.js";
+import type { JobDefinition } from "../jobs/job-validation.js";
 
 async function waitFor(check: () => boolean, attempts = 20): Promise<void> {
   for (let index = 0; index < attempts; index += 1) {

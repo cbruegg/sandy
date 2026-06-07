@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { CronJob } from "cron";
 import { logger } from "../logger.js";
 import { validateSchedule } from "./job-validation.js";
-import type { JobDefinition } from "./job-types.js";
+import type { JobDefinition } from "./job-validation.js";
 import { JobStore } from "./job-store.js";
 
 export type JobSchedulerLauncher = (job: JobDefinition, workspacePath: string | null) => Promise<string>;
@@ -90,7 +90,7 @@ export class JobScheduler {
       const workspacePath = definition.schedule.kind === "cron" ? this.store.workspacePath(definition.id) : null;
       if (workspacePath) await mkdir(workspacePath, { recursive: true });
       const taskId = await this.launcher(definition, workspacePath);
-      await this.store.recordLaunch(definition.id, taskId, new Date().toISOString());
+      await this.store.recordLaunch(definition.id, new Date().toISOString());
       return taskId;
     } finally {
       this.launching.delete(definition.id);

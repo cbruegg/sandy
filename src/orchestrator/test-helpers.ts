@@ -35,7 +35,8 @@ import { SkillService } from "../skills.js";
 import { WorkerToolsHandler } from "./worker-tools-handler.js";
 import { JobApprovalStore, type JobApprovalStoreApi } from "../jobs/job-approval-store.js";
 import type { JobService } from "../jobs/job-service.js";
-import type { JobDefinition, JobMutationRequest } from "../jobs/job-types.js";
+import type { JobDefinition } from "../jobs/job-validation.js";
+import type { JobMutationRequest } from "../jobs/job-types.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",

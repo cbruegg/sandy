@@ -37,7 +37,7 @@ type TaskStatus =
     | "failed";
 
 type TaskOrigin =
-  | { kind: "launchedByUser"; chatId: string }
+  | { kind: "launchedByUser" }
   | { kind: "launchedByJob"; jobId: string };
 
 type JobTaskInteractionState = "silent" | "waitingToInteract" | "interacting";

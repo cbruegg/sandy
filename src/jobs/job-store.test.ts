@@ -26,15 +26,13 @@ test("JobStore separates definitions from runtime state", async () => {
     assert.deepEqual(await store.getRuntimeState("daily-cleanup"), {
       jobId: "daily-cleanup",
       lastRunAt: null,
-      lastTaskId: null,
     });
 
-    await store.recordLaunch("daily-cleanup", "task-1", "2026-06-07T10:00:00.000Z");
+    await store.recordLaunch("daily-cleanup", "2026-06-07T10:00:00.000Z");
     assert.equal((await store.getDefinition("daily-cleanup"))?.name, "Daily cleanup");
     assert.deepEqual(await store.getRuntimeState("daily-cleanup"), {
       jobId: "daily-cleanup",
       lastRunAt: "2026-06-07T10:00:00.000Z",
-      lastTaskId: "task-1",
     });
   } finally {
     await rm(configDirectory, { recursive: true, force: true });

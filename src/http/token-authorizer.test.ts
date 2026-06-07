@@ -43,7 +43,7 @@ test("HttpTokenAuthorizer prefers worker_session grants over once grants", async
     approvedHostDirectories: [],
     workerConnected: false,
     taskSummary: null,
-    origin: { kind: "launchedByUser", chatId },
+    origin: { kind: "launchedByUser" },
     interactionState: "interacting",
   };
 
@@ -88,7 +88,7 @@ test("HttpTokenAuthorizer consumes once grants without affecting session grants"
     approvedHostDirectories: [],
     workerConnected: false,
     taskSummary: null,
-    origin: { kind: "launchedByUser", chatId },
+    origin: { kind: "launchedByUser" },
     interactionState: "interacting",
   };
 
@@ -147,7 +147,7 @@ test("HttpTokenAuthorizer applies persistent approvals only when task policy ena
     approvedHostDirectories: [],
     workerConnected: false,
     taskSummary: null,
-    origin: { kind: "launchedByUser", chatId },
+    origin: { kind: "launchedByUser" },
     interactionState: "interacting",
   };
 

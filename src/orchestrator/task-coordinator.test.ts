@@ -70,7 +70,7 @@ test("TaskCoordinator reminds and resets reminder timing on user-task activity",
   });
 
   const session = store.getOrCreate("chat-reminder");
-  const userTask = createTask("user-task", "User task", { kind: "launchedByUser", chatId: "chat-reminder" });
+  const userTask = createTask("user-task", "User task", { kind: "launchedByUser" });
   const jobTask = createTask("job-task", "Scheduled job: Daily cleanup", { kind: "launchedByJob", jobId: "daily-cleanup" });
   session.activeTask = userTask;
   session.backgroundJobTasks.push(jobTask);

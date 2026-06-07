@@ -6,7 +6,7 @@ import {
   StubMainAgent,
 } from "./test-helpers.js";
 import type { MainAgentDecision } from "../types.js";
-import type { JobDefinition } from "../jobs/job-types.js";
+import type { JobDefinition } from "../jobs/job-validation.js";
 
 test("orchestrator accepts active-task output without storing host-side history", async () => {
   const mainAgent = new StubMainAgent({

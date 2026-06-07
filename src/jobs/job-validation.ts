@@ -1,21 +1,35 @@
 import { z } from "zod";
 import { CronTime } from "cron";
-import type { JobDefinition, JobSchedule } from "./job-types.js";
 
 const jobIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/);
 
-const jobScheduleSchema: z.ZodType<JobSchedule> = z.discriminatedUnion("kind", [
+const jobScheduleSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("one_shot"), runAt: z.string().datetime({ offset: true }) }).strict(),
   z.object({ kind: z.literal("cron"), expression: z.string().min(1), timezone: z.string().min(1).optional() }).strict(),
 ]);
 
-export const jobDefinitionSchema: z.ZodType<JobDefinition> = z.object({
+const jobDefinitionSchema = z.object({
   id: jobIdSchema,
   name: z.string().trim().min(1),
   enabled: z.boolean(),
   schedule: jobScheduleSchema,
   skillId: z.string().trim().min(1),
 }).strict();
+
+const jobRuntimeStateSchema = z.object({
+  jobId: z.string().min(1),
+  lastRunAt: z.string().nullable(),
+}).strict();
+
+export const jobsFileSchema = z.object({
+  definitions: z.array(jobDefinitionSchema),
+  runtimeState: z.array(jobRuntimeStateSchema),
+}).strict();
+
+export type JobSchedule = z.infer<typeof jobScheduleSchema>;
+export type JobDefinition = z.infer<typeof jobDefinitionSchema>;
+export type JobRuntimeState = z.infer<typeof jobRuntimeStateSchema>;
+export type JobsFile = z.infer<typeof jobsFileSchema>;
 
 export function validateJobDefinition(definition: JobDefinition): JobDefinition {
   const parsed = jobDefinitionSchema.parse(definition);

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { JobStore } from "./job-store.js";
 import { JobScheduler } from "./job-scheduler.js";
-import type { JobDefinition } from "./job-types.js";
+import type { JobDefinition } from "./job-validation.js";
 
 function createJob(overrides?: Partial<JobDefinition>): JobDefinition {
   return {
@@ -35,7 +35,6 @@ test("JobScheduler runNow records launches", async () => {
   assert.equal(taskId, "task-1");
   assert.equal(launches.length, 1);
   assert.match(launches[0]?.workspacePath ?? "", /daily-cleanup$/);
-  assert.equal(runtimeState.lastTaskId, "task-1");
   assert.notEqual(runtimeState.lastRunAt, null);
 });
 
@@ -86,7 +85,7 @@ test("JobScheduler launches past one-shot jobs once at startup", async () => {
 
   const runtimeState = await store.getRuntimeState("one-shot");
   assert.deepEqual(launches, ["one-shot"]);
-  assert.equal(runtimeState.lastTaskId, "task-one-shot");
+  assert.notEqual(runtimeState.lastRunAt, null);
 
   scheduler.stop();
 });

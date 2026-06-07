@@ -26,7 +26,7 @@ import type {
   SubAgentEvent,
   TranscriptEntry,
 } from "../types.js";
-import type { JobDefinition } from "../jobs/job-types.js";
+import type { JobDefinition } from "../jobs/job-validation.js";
 import type { SandboxHandle } from "../sandbox/sandbox-runner.js";
 import type {TaskFailureHandler} from "./privileges.ts";
 
@@ -183,7 +183,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
             approvedHostDirectories: [],
             workerConnected: false,
             taskSummary: null,
-            origin: { kind: "launchedByUser", chatId: event.chatId },
+            origin: { kind: "launchedByUser" },
             interactionState: "interacting",
           };
 

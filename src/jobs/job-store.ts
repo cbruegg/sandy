@@ -1,20 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { z } from "zod";
 import { jobWorkspace, jobsFile } from "../state-paths.js";
-import { jobDefinitionSchema, validateJobDefinition } from "./job-validation.js";
-import type { JobDefinition, JobRuntimeState, JobsFile } from "./job-types.js";
-
-const jobRuntimeStateSchema: z.ZodType<JobRuntimeState> = z.object({
-  jobId: z.string().min(1),
-  lastRunAt: z.string().nullable(),
-  lastTaskId: z.string().nullable(),
-}).strict();
-
-const jobsFileSchema: z.ZodType<JobsFile> = z.object({
-  definitions: z.array(jobDefinitionSchema),
-  runtimeState: z.array(jobRuntimeStateSchema),
-}).strict();
+import { jobsFileSchema, validateJobDefinition } from "./job-validation.js";
+import type { JobDefinition, JobRuntimeState, JobsFile } from "./job-validation.js";
 
 export class JobStore {
   private readonly filePath: string;
@@ -38,7 +26,7 @@ export class JobStore {
     if (index === -1) data.definitions.push(validDefinition);
     else data.definitions[index] = validDefinition;
     if (!data.runtimeState.some((state) => state.jobId === validDefinition.id)) {
-      data.runtimeState.push({ jobId: validDefinition.id, lastRunAt: null, lastTaskId: null });
+      data.runtimeState.push({ jobId: validDefinition.id, lastRunAt: null });
     }
     await this.save(data);
   }
@@ -62,22 +50,21 @@ export class JobStore {
     const data = await this.load();
     let state = data.runtimeState.find((candidate) => candidate.jobId === jobId);
     if (!state) {
-      state = { jobId, lastRunAt: null, lastTaskId: null };
+      state = { jobId, lastRunAt: null };
       data.runtimeState.push(state);
       await this.save(data);
     }
     return state;
   }
 
-  async recordLaunch(jobId: string, taskId: string, runAt: string): Promise<void> {
+  async recordLaunch(jobId: string, runAt: string): Promise<void> {
     const data = await this.load();
     let state = data.runtimeState.find((candidate) => candidate.jobId === jobId);
     if (!state) {
-      state = { jobId, lastRunAt: runAt, lastTaskId: taskId };
+      state = { jobId, lastRunAt: runAt };
       data.runtimeState.push(state);
     } else {
       state.lastRunAt = runAt;
-      state.lastTaskId = taskId;
     }
     await this.save(data);
   }
