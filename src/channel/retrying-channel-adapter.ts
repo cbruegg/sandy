@@ -58,6 +58,7 @@ export function createRetryingChannelAdapter(
   };
 
   return {
+    destinationStore: adapter.destinationStore,
     getFormatting: () => adapter.getFormatting(),
     start: (handler) => failFast("channel.start", () => adapter.start(handler)),
     stop: () => failFast("channel.stop", () => adapter.stop()),

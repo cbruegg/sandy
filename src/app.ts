@@ -32,7 +32,6 @@ import {createNoopHostfsBroker} from "./hostfs/hostfs-broker.js";
 import {initializeHostfs, type HostfsServices} from "./hostfs/index.js";
 import { ChatGPTTokenBroker } from "./auth/chatgpt-token-broker.js";
 import { SkillService } from "./skills.js";
-import { ChannelDestinationStore } from "./channel/channel-destination-store.js";
 import { JobScheduler } from "./jobs/job-scheduler.js";
 import { JobStore } from "./jobs/job-store.js";
 import { randomUUID } from "node:crypto";
@@ -147,7 +146,6 @@ export async function startApp(): Promise<void> {
   };
 
   const skillService = new SkillService(config.configDirectory);
-  const channelDestinationStore = new ChannelDestinationStore(config.configDirectory);
   const jobStore = new JobStore(config.configDirectory);
 
   const mainAgentConfig = buildMainAgentConfig(config.configDirectory, config.memory.enabled);
@@ -369,13 +367,8 @@ export async function startApp(): Promise<void> {
     jobStore,
     refreshJobScheduler: async () => await requireJobScheduler().refresh(),
     runJobNow: async (jobId) => await requireJobScheduler().runNow(jobId),
-    getDefaultChatId: async () => {
-      if (config.channel.kind === "local_test") return "local_test";
-      return await channelDestinationStore.getDefaultChatId();
-    },
-    persistDefaultChatId: async (chatId) => {
-      if (config.channel.kind !== "local_test") await channelDestinationStore.setDefaultChatId(chatId);
-    },
+    getDefaultChatId: async () => await channel.destinationStore.getDefaultChatId(),
+    persistDefaultChatId: async (chatId) => await channel.destinationStore.setDefaultChatId(chatId),
   });
 
   const jobScheduler = new JobScheduler(jobStore, async (job, workspacePath) => await orchestrator.launchJobTask(job, workspacePath));

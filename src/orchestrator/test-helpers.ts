@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MainAgentController } from "../agent/main-agent-controller.js";
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
+import { ImplicitChannelDestinationStore } from "../channel/channel-destination-store.js";
 import { createNoopHostfsBroker } from "../hostfs/hostfs-broker.js";
 import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import { SandyOrchestrator } from "./index.js";
@@ -43,6 +44,7 @@ export function expectDefined<T>(value: T | null | undefined, message: string): 
 }
 
 export class RecordingChannel implements ChannelAdapter {
+  readonly destinationStore = new ImplicitChannelDestinationStore("test-chat");
   public readonly sentTexts: Array<{ chatId: string; text: string }> = [];
   public readonly taskUpdates: Array<{ chatId: string; text: string }> = [];
   public readonly sentFiles: Array<{ chatId: string; filePath: string; caption?: string }> = [];

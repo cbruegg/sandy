@@ -4,24 +4,31 @@ import { z } from "zod";
 import { channelStateFile } from "../state-paths.js";
 
 const channelDestinationStateSchema = z.object({
-  defaultChatId: z.string().min(1).nullable(),
+  defaultChatIds: z.record(z.string(), z.string().min(1)).default({}),
 }).strict();
 
 export type ChannelDestinationState = z.infer<typeof channelDestinationStateSchema>;
 
-export class ChannelDestinationStore {
+export interface ChannelDestinationStore {
+  getDefaultChatId(): Promise<string | null>;
+  setDefaultChatId(chatId: string): Promise<void>;
+}
+
+export class PersistentChannelDestinationStore implements ChannelDestinationStore {
   private readonly filePath: string;
 
-  constructor(configDirectory: string) {
+  constructor(configDirectory: string, private readonly channelId: string) {
     this.filePath = channelStateFile(configDirectory);
   }
 
   async getDefaultChatId(): Promise<string | null> {
-    return (await this.load()).defaultChatId;
+    return (await this.load()).defaultChatIds[this.channelId] ?? null;
   }
 
   async setDefaultChatId(chatId: string): Promise<void> {
-    await this.save({ defaultChatId: chatId });
+    const state = await this.load();
+    state.defaultChatIds[this.channelId] = chatId;
+    await this.save(state);
   }
 
   private async load(): Promise<ChannelDestinationState> {
@@ -30,7 +37,7 @@ export class ChannelDestinationStore {
       return channelDestinationStateSchema.parse(JSON.parse(raw));
     } catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-        return { defaultChatId: null };
+        return { defaultChatIds: {} };
       }
       throw error;
     }
@@ -39,5 +46,17 @@ export class ChannelDestinationStore {
   private async save(state: ChannelDestinationState): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, `${JSON.stringify(state, null, 2)}\n`, "utf8");
+  }
+}
+
+export class ImplicitChannelDestinationStore implements ChannelDestinationStore {
+  constructor(private readonly chatId: string) {}
+
+  getDefaultChatId(): Promise<string | null> {
+    return Promise.resolve(this.chatId);
+  }
+
+  setDefaultChatId(_chatId: string): Promise<void> {
+    return Promise.resolve();
   }
 }

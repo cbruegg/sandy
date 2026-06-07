@@ -5,10 +5,12 @@ import type {
   PrivilegeRequest,
   SavedAttachment,
 } from "../types.js";
+import type { ChannelDestinationStore } from "./channel-destination-store.js";
 
 export type MessageHandler = (event: NormalizedChatEvent) => Promise<void>;
 
 export interface ChannelAdapter {
+  readonly destinationStore: ChannelDestinationStore;
   getFormatting(): ChannelFormatting;
   start(handler: MessageHandler): Promise<void>;
   stop(): Promise<void>;

@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
+import { ImplicitChannelDestinationStore, type ChannelDestinationStore } from "./channel-destination-store.js";
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
 import { matrixHtmlAllowedTags, sanitizeMatrixHtml } from "./matrix-html.js";
@@ -96,6 +97,7 @@ type MatrixAdapterOptions = {
   accessToken: string;
   allowedUserId: string;
   stateRoot: string;
+  destinationStore?: ChannelDestinationStore;
   clientFactory?: MatrixClientFactory;
   transcriptionProvider?: TranscriptionProvider;
   sleep?: MatrixSleep;
@@ -161,6 +163,7 @@ async function defaultMatrixClientFactory(options: {
 }
 
 export class MatrixChannelAdapter implements ChannelAdapter {
+  readonly destinationStore: ChannelDestinationStore;
   private readonly homeserverUrl: string;
   private readonly accessToken: string;
   private readonly allowedUserId: string;
@@ -177,6 +180,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   private readonly qualifiedRooms = new Set<string>();
 
   constructor(options: MatrixAdapterOptions) {
+    this.destinationStore = options.destinationStore ?? new ImplicitChannelDestinationStore("matrix_test");
     this.homeserverUrl = options.homeserverUrl;
     this.accessToken = options.accessToken;
     this.allowedUserId = options.allowedUserId;

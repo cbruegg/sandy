@@ -1,6 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import type { ChannelAdapter } from "./channel-adapter.js";
+import { ImplicitChannelDestinationStore } from "./channel-destination-store.js";
 import { createRetryingChannelAdapter } from "./retrying-channel-adapter.js";
 import type {
   ChannelFormatting,
@@ -18,6 +19,7 @@ const testFormatting: ChannelFormatting = {
 };
 
 class RetryTestChannelAdapter implements ChannelAdapter {
+  readonly destinationStore = new ImplicitChannelDestinationStore("test");
   public sendTextCalls = 0;
   public sendTextFailuresRemaining = 0;
 
