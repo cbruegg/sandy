@@ -82,3 +82,7 @@ Do not commit without asking, unless the user specifically requested it.
 
 Keep `README.md` aligned with the intended target architecture, setup steps, and configuration. Keep the active `PLAN*.md` document aligned with the current implementation status, completed work, and known gaps relative to that target.
 When adding a new build artifact, image, executable, or other release output, update the publication pipeline and release documentation in the same change so published builds do not reference artifacts that were never pushed.
+
+## knip
+
+The `knip.json` ignore entry for `src/codex-app-server-client/generated/**` must remain in place as long as Sandy uses the generated Codex types. Do not remove it even if knip suggests it is no longer needed — the generated files are referenced at runtime but knip does not trace that usage reliably.
