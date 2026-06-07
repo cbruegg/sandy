@@ -215,10 +215,9 @@ Local test channel behavior:
 Scheduled jobs:
 
 - Sandy can persist one-shot and recurring scheduled jobs under `state/jobs/jobs.json` in the config directory.
-- Jobs reference a Sandy skill by `skillId`; worker executions are still normal Sandy sub-agent tasks and use the same sandbox and approval flow.
+- Jobs reference a Sandy skill by `skillId`; worker executions are still normal Sandy sub-agent tasks and use the same sandbox and approval flow, but may have to wait for active user-invoked tasks to complete.
 - Recurring jobs have a persistent workspace directory for durable notes, caches, generated files, and job state.
 - Workers manage jobs through Sandy worker tools: `list_jobs`, `get_job`, `create_job`, `update_job`, `delete_job`, `enable_job`, `disable_job`, and `run_job_now`.
-- `list_jobs` and `get_job` are read-only. Mutating job tools always require explicit user approval and do not offer persistent auto-approval.
 
 Codex auth behavior:
 
