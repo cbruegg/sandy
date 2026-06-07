@@ -223,7 +223,7 @@ class FakeSandboxRunner implements SandboxRunner {
 
   async launchTask(request: LaunchTaskRequest, onEvent: (event: SubAgentEvent) => Promise<void>): Promise<SandboxHandle> {
     const handle = new FakeSandboxHandle();
-    const taskSharePath = `/tmp/${request.taskId}`;
+    const taskSharePath = resolve(import.meta.dirname, "../../tmp", request.taskId);
     const startInput = await request.prepareStartInput(taskSharePath);
     this.launches.push({
       chatId: request.chatId,
