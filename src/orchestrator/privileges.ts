@@ -8,11 +8,13 @@ import type { SandyOrchestratorDependencies } from "./shared.js";
 import { parseWorkerToolPayload } from "../subagent/worker-tools.js";
 import type { WorkerToolPayload } from "../subagent/worker-tools.js";
 import type { NormalizedChatEvent, PrivilegeRequest, PrivilegeResolutionResult, SessionState } from "../types.js";
+import type { JobService } from "../jobs/job-service.js";
 
 export class OrchestratorPrivileges {
   constructor(
     private readonly deps: SandyOrchestratorDependencies,
     private readonly runtimeState: OrchestratorRuntimeState,
+    private readonly jobService: JobService | null,
     private readonly failActiveTaskFromEventHandling: (
       session: SessionState,
       taskId: string,
@@ -249,10 +251,10 @@ export class OrchestratorPrivileges {
         return {
           requestId: randomUUID(),
           outcome: "approved",
-          message: JSON.stringify(await this.requireJobStore().listDefinitions(), null, 2),
+          message: JSON.stringify(await this.requireJobService().listJobs(), null, 2),
         };
       case "get_job": {
-        const job = await this.requireJobStore().getDefinition(call.jobId);
+        const job = await this.requireJobService().getJob(call.jobId);
         return {
           requestId: randomUUID(),
           outcome: job ? "approved" : "failed",
@@ -939,54 +941,23 @@ export class OrchestratorPrivileges {
       return { requestId: request.requestId, outcome: "failed", message: messages.taskNoLongerActive(session.chatId) };
     }
 
-    const { operation, jobId, definition } = request.mutation;
+    const { operation, jobId } = request.mutation;
     if (decision !== "approve") {
       return { requestId: request.requestId, outcome: "denied", message: messages.jobMutationDenied(operation, jobId) };
     }
 
     try {
-      const jobStore = this.requireJobStore();
-      switch (operation) {
-        case "create":
-        case "update":
-          if (!definition) throw new Error("Job definition is required.");
-          await jobStore.upsertDefinition(definition);
-          await this.deps.refreshJobScheduler?.();
-          break;
-        case "delete":
-          await jobStore.deleteDefinition(jobId);
-          await this.deps.refreshJobScheduler?.();
-          break;
-        case "enable":
-          await jobStore.setEnabled(jobId, true);
-          await this.deps.refreshJobScheduler?.();
-          break;
-        case "disable":
-          await jobStore.setEnabled(jobId, false);
-          await this.deps.refreshJobScheduler?.();
-          break;
-        case "run_now": {
-          const taskId = await this.requireRunJobNow()(jobId);
-          return { requestId: request.requestId, outcome: "approved", message: `${messages.jobMutationApproved(operation, jobId)} Launched task ${taskId}.` };
-        }
-        default:
-          assertNever(operation);
-      }
-      return { requestId: request.requestId, outcome: "approved", message: messages.jobMutationApproved(operation, jobId) };
+      const detail = await this.requireJobService().applyMutation(request.mutation);
+      return { requestId: request.requestId, outcome: "approved", message: `${messages.jobMutationApproved(operation, jobId)} ${detail}` };
     } catch (error) {
       const detail = error instanceof Error ? error.message : "Unknown job mutation failure.";
       return { requestId: request.requestId, outcome: "failed", message: messages.jobMutationFailed(operation, jobId, detail) };
     }
   }
 
-  private requireJobStore() {
-    if (!this.deps.jobStore) throw new Error("Scheduled jobs are not available in this Sandy runtime.");
-    return this.deps.jobStore;
-  }
-
-  private requireRunJobNow() {
-    if (!this.deps.runJobNow) throw new Error("Scheduled jobs are not available in this Sandy runtime.");
-    return this.deps.runJobNow;
+  private requireJobService(): JobService {
+    if (!this.jobService) throw new Error("Scheduled jobs are not available in this Sandy runtime.");
+    return this.jobService;
   }
 
   private tryAuthorizeNativeHttpTokenUse(

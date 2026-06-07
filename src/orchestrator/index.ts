@@ -11,20 +11,24 @@ import type {
   NormalizedChatEvent,
   SessionState,
 } from "../types.js";
-import type { JobDefinition } from "../jobs/job-types.js";
+import type { JobService } from "../jobs/job-service.js";
 
 export class SandyOrchestrator {
   private readonly channelFormatting: ChannelFormatting;
   private readonly runtimeState = new OrchestratorRuntimeState();
   private readonly taskLifecycle: OrchestratorTaskLifecycle;
   private readonly privileges: OrchestratorPrivileges;
+  private readonly jobService: JobService | null;
 
   constructor(private readonly deps: SandyOrchestratorDependencies) {
     this.channelFormatting = deps.channel.getFormatting();
     this.taskLifecycle = new OrchestratorTaskLifecycle(deps, this.runtimeState, this.channelFormatting);
+    this.jobService = deps.createJobService?.(async (job, chatId, workspacePath) =>
+      await this.taskLifecycle.launchJobTask(job, chatId, workspacePath)) ?? null;
     this.privileges = new OrchestratorPrivileges(
       deps,
       this.runtimeState,
+      this.jobService,
       this.taskLifecycle.failActiveTaskFromEventHandling.bind(this.taskLifecycle),
     );
   }
@@ -37,7 +41,7 @@ export class SandyOrchestrator {
         kind: event.kind,
         hasActiveTask: session.activeTask !== null,
       });
-      await this.deps.persistDefaultChatId?.(event.chatId);
+      await this.jobService?.persistDefaultChatId(event.chatId);
       if (event.kind === "user_message") {
         logger.debugContent("chat.user_message", {
           chatId: event.chatId,
@@ -94,12 +98,12 @@ export class SandyOrchestrator {
     return await this.privileges.executeNativeWorkerToolCall(input);
   }
 
-  async launchJobTask(job: JobDefinition, workspacePath: string): Promise<string> {
-    const chatId = await this.deps.getDefaultChatId?.();
-    if (!chatId) {
-      throw new Error(`Cannot launch scheduled job ${job.id}: no default chat destination is known yet.`);
-    }
-    return await this.taskLifecycle.launchJobTask(job, chatId, workspacePath);
+  async startJobs(): Promise<void> {
+    await this.jobService?.start();
+  }
+
+  stopJobs(): void {
+    this.jobService?.stop();
   }
 
   async authorizeMcpToolCall(input: {

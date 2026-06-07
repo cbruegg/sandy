@@ -32,8 +32,8 @@ import {createNoopHostfsBroker} from "./hostfs/hostfs-broker.js";
 import {initializeHostfs, type HostfsServices} from "./hostfs/index.js";
 import { ChatGPTTokenBroker } from "./auth/chatgpt-token-broker.js";
 import { SkillService } from "./skills.js";
-import { JobScheduler } from "./jobs/job-scheduler.js";
 import { JobStore } from "./jobs/job-store.js";
+import { ScheduledJobService } from "./jobs/job-service.js";
 import { randomUUID } from "node:crypto";
 import { createControlDir, removeControlDir, startHeartbeat } from "./sandbox/heartbeat.js";
 import { CodexAppServerClient } from "./codex-app-server-client/app-server-client.js";
@@ -208,14 +208,6 @@ export async function startApp(): Promise<void> {
     persistentApprovalStore,
   );
 
-  const jobSchedulerRef: { current: JobScheduler | null } = { current: null };
-  const requireJobScheduler = (): JobScheduler => {
-    if (!jobSchedulerRef.current) {
-      throw new Error("Job scheduler has not been initialized yet.");
-    }
-    return jobSchedulerRef.current;
-  };
-
   // The mitmproxy-based HTTP proxy container asks the host orchestrator for per-request
   // token approvals and header resolution over the proxy container stdio bridge.
   const proxyAuthService = httpTokensEnabled
@@ -364,15 +356,8 @@ export async function startApp(): Promise<void> {
     hostfsBroker: hostfsServices?.broker ?? createNoopHostfsBroker(),
     taskBundleAssignmentRegistry,
     skillService,
-    jobStore,
-    refreshJobScheduler: async () => await requireJobScheduler().refresh(),
-    runJobNow: async (jobId) => await requireJobScheduler().runNow(jobId),
-    getDefaultChatId: async () => await channel.destinationStore.getDefaultChatId(),
-    persistDefaultChatId: async (chatId) => await channel.destinationStore.setDefaultChatId(chatId),
+    createJobService: (launcher) => new ScheduledJobService(jobStore, channel.destinationStore, launcher),
   });
-
-  const jobScheduler = new JobScheduler(jobStore, async (job, workspacePath) => await orchestrator.launchJobTask(job, workspacePath));
-  jobSchedulerRef.current = jobScheduler;
 
   const sidecarManager = new McpSidecarManager({
     configDirectory: config.configDirectory,
@@ -401,7 +386,7 @@ export async function startApp(): Promise<void> {
 
   shutdown = async () => {
     logger.info("app.shutdown_started");
-    jobScheduler.stop();
+    orchestrator.stopJobs();
     updateCoordinator.stop();
     await stopWithLogging("channel.stop", () => channel.stop());
     await stopWithLogging("sidecarManager.stop", sidecarManager?.stop.bind(sidecarManager));
@@ -458,7 +443,7 @@ export async function startApp(): Promise<void> {
     prepareForRestart: shutdown,
   });
   updateCoordinator.start();
-  await jobScheduler.start();
+  await orchestrator.startJobs();
 
   process.once("SIGINT", () => {
     shutdownRequested = true;
