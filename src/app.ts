@@ -41,6 +41,7 @@ import {createNoopHostfsBroker} from "./hostfs/hostfs-broker.js";
 import {initializeHostfs, type HostfsServices} from "./hostfs/index.js";
 import { ChatGPTTokenBroker } from "./auth/chatgpt-token-broker.js";
 import { SkillService } from "./skills.js";
+import { WorkerToolsHandler } from "./orchestrator/worker-tools-handler.js";
 import { JobStore } from "./jobs/job-store.js";
 import { JobScheduler } from "./jobs/job-scheduler.js";
 import { ScheduledJobService } from "./jobs/job-service.js";
@@ -343,7 +344,8 @@ export async function startApp(): Promise<void> {
     return await taskLifecycle.launchJobTask(job, chatId, workspacePath);
   });
   const jobService = new ScheduledJobService(jobStore, jobScheduler);
-  const privileges = new OrchestratorPrivilegesImpl(orchestratorCoreDeps, activeTaskRuntimes, jobService, taskLifecycle);
+  const workerToolsHandler = new WorkerToolsHandler(skillService, jobService);
+  const privileges = new OrchestratorPrivilegesImpl(orchestratorCoreDeps, activeTaskRuntimes, workerToolsHandler, taskLifecycle);
   const orchestrator = new SandyOrchestrator({
     ...orchestratorCoreDeps,
     channelFormatting,

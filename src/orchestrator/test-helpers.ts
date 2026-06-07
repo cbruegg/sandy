@@ -31,6 +31,7 @@ import type {
   WorkerStartConfig,
 } from "../types.js";
 import { SkillService } from "../skills.js";
+import { WorkerToolsHandler } from "./worker-tools-handler.js";
 import type { JobService } from "../jobs/job-service.js";
 import type { JobDefinition, JobMutationRequest } from "../jobs/job-types.js";
 
@@ -347,7 +348,8 @@ export function createTestOrchestrator(options: {
   const activeTaskRuntimes = new ActiveTaskRuntimeRegistry();
   const taskLifecycle = new OrchestratorTaskLifecycleImpl(coreDeps, activeTaskRuntimes, channel.getFormatting());
   const jobService = new FakeJobService();
-  const privileges = new OrchestratorPrivilegesImpl(coreDeps, activeTaskRuntimes, jobService, taskLifecycle);
+  const workerToolsHandler = new WorkerToolsHandler(skillService, jobService);
+  const privileges = new OrchestratorPrivilegesImpl(coreDeps, activeTaskRuntimes, workerToolsHandler, taskLifecycle);
   const orchestrator = new SandyOrchestrator({
     ...coreDeps,
     channelFormatting: channel.getFormatting(),

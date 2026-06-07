@@ -8,8 +8,7 @@ import type {OrchestratorCoreDependencies} from "./shared.js";
 import { parseWorkerToolPayload } from "../subagent/worker-tools.js";
 import type { WorkerToolPayload } from "../subagent/worker-tools.js";
 import type { NormalizedChatEvent, PrivilegeRequest, PrivilegeResolutionResult, SessionState } from "../types.js";
-import type { JobService } from "../jobs/job-service.js";
-import { WorkerToolsHandler } from "./worker-tools-handler.js";
+import type { WorkerToolsHandler } from "./worker-tools-handler.js";
 
 export interface OrchestratorPrivileges {
   executeNativeWorkerToolCall(input: {
@@ -36,16 +35,13 @@ export interface OrchestratorPrivileges {
 }
 
 export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
-  private readonly workerToolsHandler: WorkerToolsHandler;
 
   constructor(
     private readonly deps: OrchestratorCoreDependencies,
     private readonly activeTasks: ActiveTaskRuntimeRegistry,
-    jobService: JobService,
+    private readonly workerToolsHandler: WorkerToolsHandler,
     private readonly taskFailureHandler: TaskFailureHandler,
-  ) {
-    this.workerToolsHandler = new WorkerToolsHandler(deps.skillService, jobService);
-  }
+  ) {}
 
   async executeNativeWorkerToolCall(input: {
     taskId: string;
