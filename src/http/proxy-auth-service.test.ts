@@ -3,15 +3,15 @@ import assert from "node:assert/strict";
 import { ProxyAccess } from "../proxy-access.js";
 import { ProxyAuthService } from "./proxy-auth-service.js";
 
-test("ProxyAuthService resolves headers for approved requests", async () => {
+test("ProxyAuthService resolves headers for approved requests", () => {
   const access = new ProxyAccess("test-secret");
   const service = new ProxyAuthService({
     access,
     httpTokens: { token_1: { description: "Test API token.", value: "real-secret" } },
-    authorizeHttpTokenUse: async () => ({ outcome: "approved", message: "ok" }),
+    authorizeHttpTokenUse: () => ({ outcome: "approved", message: "ok" }),
   });
 
-  const result = await service.resolveProxyRequest({
+  const result = service.resolveProxyRequest({
     type: "auth_request",
     requestId: "request-1",
     proxyAuthUsername: "Bearer",
@@ -33,15 +33,15 @@ test("ProxyAuthService resolves headers for approved requests", async () => {
   });
 });
 
-test("ProxyAuthService denies rejected token approvals", async () => {
+test("ProxyAuthService denies rejected token approvals", () => {
   const access = new ProxyAccess("test-secret");
   const service = new ProxyAuthService({
     access,
     httpTokens: { token_1: { description: "Test API token.", value: "real-secret" } },
-    authorizeHttpTokenUse: async () => ({ outcome: "denied", message: "not allowed" }),
+    authorizeHttpTokenUse: () => ({ outcome: "denied", message: "not allowed" }),
   });
 
-  const result = await service.resolveProxyRequest({
+  const result = service.resolveProxyRequest({
     type: "auth_request",
     requestId: "request-1",
     proxyAuthUsername: "Bearer",
@@ -58,17 +58,17 @@ test("ProxyAuthService denies rejected token approvals", async () => {
   });
 });
 
-test("ProxyAuthService handles authorization errors gracefully", async () => {
+test("ProxyAuthService handles authorization errors gracefully", () => {
   const access = new ProxyAccess("test-secret");
   const service = new ProxyAuthService({
     access,
     httpTokens: { token_1: { description: "Test API token.", value: "real-secret" } },
-    authorizeHttpTokenUse: async () => {
+    authorizeHttpTokenUse: () => {
       throw new Error("database down");
     },
   });
 
-  await assert.rejects(() => service.resolveProxyRequest({
+  assert.throws(() => service.resolveProxyRequest({
     type: "auth_request",
     requestId: "request-1",
     proxyAuthUsername: "Bearer",
@@ -78,14 +78,14 @@ test("ProxyAuthService handles authorization errors gracefully", async () => {
   }), /database down/);
 });
 
-test("ProxyAuthService denies invalid proxy auth usernames", async () => {
+test("ProxyAuthService denies invalid proxy auth usernames", () => {
   const service = new ProxyAuthService({
     access: new ProxyAccess("test-secret"),
     httpTokens: { token_1: { description: "Test API token.", value: "real-secret" } },
-    authorizeHttpTokenUse: async () => ({ outcome: "approved", message: "ok" }),
+    authorizeHttpTokenUse: () => ({ outcome: "approved", message: "ok" }),
   });
 
-  const result = await service.resolveProxyRequest({
+  const result = service.resolveProxyRequest({
     type: "auth_request",
     requestId: "request-1",
     proxyAuthUsername: "Basic",
@@ -102,14 +102,14 @@ test("ProxyAuthService denies invalid proxy auth usernames", async () => {
   });
 });
 
-test("ProxyAuthService denies invalid worker grants", async () => {
+test("ProxyAuthService denies invalid worker grants", () => {
   const service = new ProxyAuthService({
     access: new ProxyAccess("test-secret"),
     httpTokens: { token_1: { description: "Test API token.", value: "real-secret" } },
-    authorizeHttpTokenUse: async () => ({ outcome: "approved", message: "ok" }),
+    authorizeHttpTokenUse: () => ({ outcome: "approved", message: "ok" }),
   });
 
-  const result = await service.resolveProxyRequest({
+  const result = service.resolveProxyRequest({
     type: "auth_request",
     requestId: "request-1",
     proxyAuthUsername: "Bearer",

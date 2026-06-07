@@ -18,23 +18,23 @@ export class HttpTokenAuthorizer {
     private readonly persistentApprovalStore: PersistentApprovalStore,
   ) {}
 
-  async authorizeHttpTokenUse(input: AuthorizeHttpTokenUseInput): Promise<PrivilegeResolutionResult> {
+  authorizeHttpTokenUse(input: AuthorizeHttpTokenUseInput): PrivilegeResolutionResult {
     const session = this.sessionStore.getByTaskId(input.taskId);
     if (!session) {
-      return Promise.resolve({
+      return {
         requestId: randomUUID(),
         outcome: "failed",
         message: messages.taskNotActive(input.taskId),
-      });
+      };
     }
 
     const activeTask = findSessionTask(session, input.taskId)?.task;
     if (!activeTask) {
-      return Promise.resolve({
+      return {
         requestId: randomUUID(),
         outcome: "failed",
         message: messages.taskNotActive(input.taskId),
-      });
+      };
     }
 
     if (isHttpTokenSessionGrantAllowed(activeTask, input.tokenId, input.host)) {
@@ -47,7 +47,7 @@ export class HttpTokenAuthorizer {
     }
 
     if (isHttpTokenAutoApprovalAllowed(activeTask, input.tokenId)
-      && await this.isHttpTokenAlwaysAllowed(input.tokenId, input.host)) {
+      && this.isHttpTokenAlwaysAllowed(input.tokenId, input.host)) {
       return {
         requestId: randomUUID(),
         outcome: "approved",
@@ -76,8 +76,8 @@ export class HttpTokenAuthorizer {
     };
   }
 
-  private isHttpTokenAlwaysAllowed(tokenId: string, host: string): Promise<boolean> {
-    return Promise.resolve(this.persistentApprovalStore.isHttpTokenAlwaysAllowed(tokenId, host));
+  private isHttpTokenAlwaysAllowed(tokenId: string, host: string): boolean {
+    return this.persistentApprovalStore.isHttpTokenAlwaysAllowed(tokenId, host);
   }
 }
 

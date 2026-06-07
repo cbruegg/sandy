@@ -427,7 +427,7 @@ test("orchestrator confirms persisted http token suitability and enables later p
   assert.deepEqual(session.activeTask?.taskPolicy.autoApproveHttpTokens, ["vid2text"]);
 
   const authorizer = new HttpTokenAuthorizer(store, persistentApprovalStore);
-  const proxyResult = await authorizer.authorizeHttpTokenUse({
+  const proxyResult = authorizer.authorizeHttpTokenUse({
     taskId,
     tokenId: "vid2text",
     host: "api.example.com",

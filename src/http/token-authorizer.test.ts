@@ -47,12 +47,12 @@ test("HttpTokenAuthorizer prefers worker_session grants over once grants", async
     interactionState: "interacting",
   };
 
-  const first = await authorizer.authorizeHttpTokenUse({
+  const first = authorizer.authorizeHttpTokenUse({
     taskId,
     tokenId: "api-token",
     host: "api.example.com",
   });
-  const second = await authorizer.authorizeHttpTokenUse({
+  const second = authorizer.authorizeHttpTokenUse({
     taskId,
     tokenId: "api-token",
     host: "api.example.com",
@@ -92,12 +92,12 @@ test("HttpTokenAuthorizer consumes once grants without affecting session grants"
     interactionState: "interacting",
   };
 
-  const first = await authorizer.authorizeHttpTokenUse({
+  const first = authorizer.authorizeHttpTokenUse({
     taskId,
     tokenId: "api-token",
     host: "api.example.com",
   });
-  const second = await authorizer.authorizeHttpTokenUse({
+  const second = authorizer.authorizeHttpTokenUse({
     taskId,
     tokenId: "api-token",
     host: "api.example.com",
@@ -112,7 +112,7 @@ test("HttpTokenAuthorizer consumes once grants without affecting session grants"
 test("HttpTokenAuthorizer returns failed when task is not registered", async () => {
   const authorizer = new HttpTokenAuthorizer(new InMemorySessionStore(), createFakePersistentApprovalStore());
 
-  const result = await authorizer.authorizeHttpTokenUse({
+  const result = authorizer.authorizeHttpTokenUse({
     taskId: "missing-task",
     tokenId: "api-token",
     host: "api.example.com",
@@ -151,13 +151,13 @@ test("HttpTokenAuthorizer applies persistent approvals only when task policy ena
     interactionState: "interacting",
   };
 
-  const beforeAccess = await authorizer.authorizeHttpTokenUse({
+  const beforeAccess = authorizer.authorizeHttpTokenUse({
     taskId,
     tokenId: "api-token",
     host: "api.example.com",
   });
   session.activeTask.taskPolicy.autoApproveHttpTokens.push("api-token");
-  const afterAccess = await authorizer.authorizeHttpTokenUse({
+  const afterAccess = authorizer.authorizeHttpTokenUse({
     taskId,
     tokenId: "api-token",
     host: "api.example.com",
@@ -195,13 +195,13 @@ test("HttpTokenAuthorizer applies global persistent approvals to job tasks only 
     interactionState: "silent",
   };
 
-  const beforeAccess = await authorizer.authorizeHttpTokenUse({
+  const beforeAccess = authorizer.authorizeHttpTokenUse({
     taskId: "task-1",
     tokenId: "api-token",
     host: "api.example.com",
   });
   session.activeTask.taskPolicy.autoApproveHttpTokens.push("api-token");
-  const afterAccess = await authorizer.authorizeHttpTokenUse({
+  const afterAccess = authorizer.authorizeHttpTokenUse({
     taskId: "task-1",
     tokenId: "api-token",
     host: "api.example.com",

@@ -228,7 +228,7 @@ export async function startApp(): Promise<void> {
     ? new ProxyAuthService({
         access: workerAccess,
         httpTokens: config.httpTokens,
-        authorizeHttpTokenUse: async (input) => await httpTokenAuthorizer.authorizeHttpTokenUse(input),
+        authorizeHttpTokenUse: (input) => httpTokenAuthorizer.authorizeHttpTokenUse(input),
       })
     : null;
 
@@ -282,7 +282,7 @@ export async function startApp(): Promise<void> {
     httpProxyConfDirPath: certificateAuthority?.confDirPath ?? null,
     httpProxyImage: httpTokensEnabled ? config.httpProxyImage : null,
     resolveHttpProxyRequest: proxyAuthService
-        ? async (request) => await proxyAuthService.resolveProxyRequest(request)
+        ? (request) => proxyAuthService.resolveProxyRequest(request)
         : undefined,
     logLevel: config.logLevel,
     createHostfsVolume,

@@ -1110,7 +1110,7 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
     httpProxyImage: "sandy-http-proxy:latest",
     httpProxyCaCertPath: "/tmp/sandy-ca.pem",
     httpProxyConfDirPath: "/tmp/sandy-mitmproxy-conf",
-    resolveHttpProxyRequest: async (request) => ({
+    resolveHttpProxyRequest: (request) => ({
       type: "auth_response",
       requestId: request.requestId,
       outcome: "approved",
@@ -1228,7 +1228,7 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
     httpProxyImage: "sandy-http-proxy:latest",
     httpProxyCaCertPath: "/tmp/sandy-ca.pem",
     httpProxyConfDirPath: "/tmp/sandy-mitmproxy-conf",
-    resolveHttpProxyRequest: async (request) => ({
+    resolveHttpProxyRequest: (request) => ({
       type: "auth_response",
       requestId: request.requestId,
       outcome: "approved",
@@ -1323,7 +1323,7 @@ test("DockerSandboxRunner adds managed label to worker, guard and proxy containe
     httpProxyImage: "sandy-http-proxy:latest",
     httpProxyCaCertPath: "/tmp/sandy-ca.pem",
     httpProxyConfDirPath: "/tmp/sandy-mitmproxy-conf",
-    resolveHttpProxyRequest: async (request) => ({
+    resolveHttpProxyRequest: (request) => ({
       type: "auth_response",
       requestId: request.requestId,
       outcome: "approved",
