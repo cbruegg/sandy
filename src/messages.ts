@@ -308,12 +308,20 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
   }
 
   if (request.kind === "skill_mutation") {
-    return [
+    const lines = [
       `Skill mutation: ${request.operation}`,
       `Skill ID: ${request.skillId}`,
-      ...(request.name ? [`Name: ${request.name}`] : []),
-      ...(request.description ? [`Description: ${request.description}`] : []),
-    ].join("\n");
+    ];
+    if (request.name) {
+      lines.push(`Name: ${request.name}`);
+    }
+    if (request.description) {
+      lines.push(`Description: ${request.description}`);
+    }
+    if (request.body) {
+      lines.push(`Skill content:\n---\n${request.body}\n---`);
+    }
+    return lines.join("\n");
   }
 
   switch (request.payload.type) {

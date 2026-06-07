@@ -279,6 +279,10 @@ Worker network behavior:
 - The main agent receives only that metadata and is instructed to delegate requests that require one of those skills to a sub-agent.
 - Skills can be updated while Sandy is running.
 
+You can ask Sandy to create, edit, or delete skills in natural language — for example
+*"create a skill for posting to my blog"*. Sandy will show you the proposed skill and
+ask for approval before applying any change.
+
 ### Build and run
 
 Install dependencies:
