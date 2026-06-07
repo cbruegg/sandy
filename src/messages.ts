@@ -135,6 +135,14 @@ export const messages = {
     `Approved ${operation} skill "${skillId}".`,
   skillMutationFailed: (operation: string, skillId: string, error: string): string =>
     `Failed to ${operation} skill "${skillId}": ${error}`,
+  jobMutationDenied: (operation: string, jobId: string): string =>
+    `Denied ${operation} job "${jobId}".`,
+  jobMutationApproved: (operation: string, jobId: string): string =>
+    `Approved ${operation} job "${jobId}".`,
+  jobMutationFailed: (operation: string, jobId: string, error: string): string =>
+    `Failed to ${operation} job "${jobId}": ${error}`,
+  scheduledJobBlocked: (jobName: string, taskName: string): string =>
+    `A scheduled job (${jobName}) is waiting to interact, but task "${taskName}" is still active.`,
 } as const;
 
 function formatCommandForChannel(command: string, channelFormatting: ChannelFormatting | null): string {
@@ -320,6 +328,17 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
     }
     if (request.body !== undefined) {
       lines.push(`Skill content:\n---\n${request.body}\n---`);
+    }
+    return lines.join("\n");
+  }
+
+  if (request.kind === "job_mutation") {
+    const lines = [
+      `Job mutation: ${request.mutation.operation}`,
+      `Job ID: ${request.mutation.jobId}`,
+    ];
+    if (request.mutation.definition) {
+      lines.push(`Definition:\n${JSON.stringify(request.mutation.definition, null, 2)}`);
     }
     return lines.join("\n");
   }

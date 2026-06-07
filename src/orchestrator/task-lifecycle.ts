@@ -19,6 +19,7 @@ import type {
   SubAgentEvent,
   TranscriptEntry,
 } from "../types.js";
+import type { JobDefinition } from "../jobs/job-types.js";
 
 export class OrchestratorTaskLifecycle {
   constructor(
@@ -58,10 +59,12 @@ export class OrchestratorTaskLifecycle {
           if (!message) {
             break;
           }
+          this.markTaskInteracting(session);
           await this.deps.channel.sendTaskUpdate(chatId, message);
           break;
         }
         case "assistant_output":
+          this.markTaskInteracting(session);
           await this.deps.channel.sendTaskUpdate(chatId, event.text);
           break;
         case "task_summary":
@@ -70,7 +73,7 @@ export class OrchestratorTaskLifecycle {
         case "task_done":
           // Workers usually emit task_summary first, then task_done to publish that stored summary for review.
           if (session.activeTask.status !== "completed") {
-            await this.sendTaskSummaryForReview(chatId, session);
+            if (!this.isSilentJobTask(session)) await this.sendTaskSummaryForReview(chatId, session);
             await this.finishActiveTask(session, "completed");
           }
           break;
@@ -80,7 +83,7 @@ export class OrchestratorTaskLifecycle {
             "Artifacts: none",
             "Open questions: none",
           ].join("\n"));
-          await this.sendTaskSummaryForReview(chatId, session);
+          if (!this.isSilentJobTask(session)) await this.sendTaskSummaryForReview(chatId, session);
           await this.finishActiveTask(session, "completed");
           break;
         case "task_error":
@@ -148,6 +151,8 @@ export class OrchestratorTaskLifecycle {
             approvedHostDirectories: [],
             workerConnected: false,
             taskSummary: null,
+            origin: { kind: "launchedByUser", chatId: event.chatId },
+            interactionState: "interacting",
           };
 
           const handle = await this.deps.sandboxRunner.launchTask(
@@ -191,6 +196,58 @@ export class OrchestratorTaskLifecycle {
       }
       default:
         assertNever(decision);
+    }
+  }
+
+  async launchJobTask(job: JobDefinition, chatId: string, workspacePath: string): Promise<string> {
+    const session = this.deps.sessionStore.getOrCreate(chatId);
+    if (session.activeTask) {
+      throw new Error(`Cannot launch scheduled job ${job.id} while another user-visible task is active.`);
+    }
+
+    const taskId = randomUUID();
+    const now = new Date().toISOString();
+    const taskName = `Scheduled job: ${job.name}`;
+    session.activeTask = {
+      taskId,
+      taskName,
+      status: "running",
+      startedAt: now,
+      lastActivityAt: now,
+      pendingPrivilegeRequest: null,
+      taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
+      approvedMcpTools: [],
+      approvedMcpResourceReads: [],
+      approvedHttpTokenSessionGrants: [],
+      approvedHttpTokenOnceGrants: [],
+      approvedHostDirectories: [{ path: workspacePath, level: "read_write" }],
+      workerConnected: false,
+      taskSummary: null,
+      origin: { kind: "launchedByJob", jobId: job.id },
+      interactionState: "silent",
+    };
+
+    try {
+      const handle = await this.deps.sandboxRunner.launchTask(
+        {
+          chatId,
+          taskId,
+          taskName,
+          taskLanguage: "en",
+          channelFormatting: this.channelFormatting,
+          workerStartConfig: await this.deps.buildWorkerStartConfig(),
+          prepareStartInput: () => Promise.resolve({
+            taskBrief: buildJobTaskBrief(job, workspacePath),
+            initialInput: { text: job.prompt ?? "Run the scheduled job now.", images: [] },
+          }),
+        },
+        async (subAgentEvent) => this.routeSubAgentEvent(chatId, taskId, subAgentEvent),
+      );
+      this.runtimeState.registerHandle(taskId, handle);
+      return taskId;
+    } catch (error) {
+      if (session.activeTask?.taskId === taskId) session.activeTask = null;
+      throw error;
     }
   }
 
@@ -340,7 +397,21 @@ export class OrchestratorTaskLifecycle {
     this.failPendingPrivilegeRequestOnTaskClose(task);
     this.runtimeState.deleteHandle(task.taskId);
     session.activeTask = null;
-    await this.promptForShareDeletionIfNeeded(session, task.taskId, task.taskName);
+    if (task.origin?.kind !== "launchedByJob" || task.interactionState !== "silent") {
+      await this.promptForShareDeletionIfNeeded(session, task.taskId, task.taskName);
+    }
+  }
+
+  private isSilentJobTask(session: SessionState): boolean {
+    const task = session.activeTask;
+    return !!task && task.origin?.kind === "launchedByJob" && task.interactionState === "silent";
+  }
+
+  private markTaskInteracting(session: SessionState): void {
+    const task = session.activeTask;
+    if (task && task.origin?.kind === "launchedByJob") {
+      task.interactionState = "interacting";
+    }
   }
 
   private async failTaskAfterWorkerDisconnect(session: SessionState, message: string): Promise<void> {
@@ -381,6 +452,7 @@ export class OrchestratorTaskLifecycle {
       task.pendingPrivilegeRequest.kind === "host_operation"
       || task.pendingPrivilegeRequest.kind === "http_token_use"
       || task.pendingPrivilegeRequest.kind === "host_directory_access"
+      || task.pendingPrivilegeRequest.kind === "job_mutation"
     ) {
       this.runtimeState.resolvePendingNativeTool(task.pendingPrivilegeRequest.requestId, failedResult);
     }
@@ -427,6 +499,18 @@ function uniqueStrings(entries: string[]): string[] {
     result.push(entry);
   }
   return result;
+}
+
+function buildJobTaskBrief(job: JobDefinition, workspacePath: string): string {
+  return [
+    `Run scheduled Sandy job "${job.name}" (${job.id}).`,
+    `Use Sandy skill: ${job.skillId}.`,
+    `This job has a persistent workspace directory on the host: ${workspacePath}`,
+    "The workspace is for durable notes, generated files, helper scripts, caches, and job state.",
+    "If you need to access that directory from the worker, request host directory access for it; Sandy has pre-approved read/write access for this job execution.",
+    job.prompt ? `Job prompt:\n${job.prompt}` : null,
+    "If you can complete the job without user interaction, finish silently. If you send user-visible output or need approval, follow Sandy's normal review and safety flow.",
+  ].filter((line): line is string => line !== null).join("\n\n");
 }
 
 function assertNever(value: never): never {

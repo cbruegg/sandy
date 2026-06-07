@@ -106,6 +106,8 @@ export class OrchestratorPrivileges {
       result = await this.resolvePendingHostDirectoryRequest(session, request, decision);
     } else if (request.kind === "skill_mutation") {
       result = await this.resolvePendingSkillMutationRequest(session, request, decision);
+    } else if (request.kind === "job_mutation") {
+      result = await this.resolvePendingJobMutationRequest(session, request, decision);
     } else if (decision === "deny") {
       result = {
         requestId: request.requestId,
@@ -125,7 +127,7 @@ export class OrchestratorPrivileges {
       };
     }
 
-    if (request.kind === "host_operation" || request.kind === "http_token_use" || request.kind === "host_directory_access" || request.kind === "skill_mutation") {
+    if (request.kind === "host_operation" || request.kind === "http_token_use" || request.kind === "host_directory_access" || request.kind === "skill_mutation" || request.kind === "job_mutation") {
       if (!this.runtimeState.resolvePendingNativeTool(request.requestId, result)) {
         await this.runtimeState.requireHandle(activeTask.taskId).resolvePrivilege(result);
       }
@@ -243,6 +245,56 @@ export class OrchestratorPrivileges {
           operation: "delete",
           skillId: call.skillId,
         });
+      case "list_jobs":
+        return {
+          requestId: randomUUID(),
+          outcome: "approved",
+          message: JSON.stringify(await this.requireJobStore().listDefinitions(), null, 2),
+        };
+      case "get_job": {
+        const job = await this.requireJobStore().getDefinition(call.jobId);
+        return {
+          requestId: randomUUID(),
+          outcome: job ? "approved" : "failed",
+          message: job ? JSON.stringify(job, null, 2) : `Job ${call.jobId} does not exist.`,
+        };
+      }
+      case "create_job":
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+          kind: "job_mutation",
+          requestId: randomUUID(),
+          mutation: { operation: "create", jobId: call.definition.id, definition: call.definition },
+        });
+      case "update_job":
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+          kind: "job_mutation",
+          requestId: randomUUID(),
+          mutation: { operation: "update", jobId: call.definition.id, definition: call.definition },
+        });
+      case "delete_job":
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+          kind: "job_mutation",
+          requestId: randomUUID(),
+          mutation: { operation: "delete", jobId: call.jobId },
+        });
+      case "enable_job":
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+          kind: "job_mutation",
+          requestId: randomUUID(),
+          mutation: { operation: "enable", jobId: call.jobId },
+        });
+      case "disable_job":
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+          kind: "job_mutation",
+          requestId: randomUUID(),
+          mutation: { operation: "disable", jobId: call.jobId },
+        });
+      case "run_job_now":
+        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+          kind: "job_mutation",
+          requestId: randomUUID(),
+          mutation: { operation: "run_now", jobId: call.jobId },
+        });
     }
 
     assertNever(call);
@@ -269,7 +321,7 @@ export class OrchestratorPrivileges {
   private async awaitNativeToolPrivilegeResolution(
     chatId: string,
     session: SessionState,
-    request: Extract<PrivilegeRequest, { kind: "host_operation" | "http_token_use" | "host_directory_access" | "skill_mutation" }>,
+    request: Extract<PrivilegeRequest, { kind: "host_operation" | "http_token_use" | "host_directory_access" | "skill_mutation" | "job_mutation" }>,
   ): Promise<PrivilegeResolutionResult> {
     const activeTask = session.activeTask;
     if (!activeTask) {
@@ -876,6 +928,65 @@ export class OrchestratorPrivileges {
         message: messages.skillMutationFailed(request.operation, request.skillId, detail),
       };
     }
+  }
+
+  private async resolvePendingJobMutationRequest(
+    session: SessionState,
+    request: Extract<PrivilegeRequest, { kind: "job_mutation" }>,
+    decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
+  ): Promise<PrivilegeResolutionResult> {
+    if (!session.activeTask) {
+      return { requestId: request.requestId, outcome: "failed", message: messages.taskNoLongerActive(session.chatId) };
+    }
+
+    const { operation, jobId, definition } = request.mutation;
+    if (decision !== "approve") {
+      return { requestId: request.requestId, outcome: "denied", message: messages.jobMutationDenied(operation, jobId) };
+    }
+
+    try {
+      const jobStore = this.requireJobStore();
+      switch (operation) {
+        case "create":
+        case "update":
+          if (!definition) throw new Error("Job definition is required.");
+          await jobStore.upsertDefinition(definition);
+          await this.deps.refreshJobScheduler?.();
+          break;
+        case "delete":
+          await jobStore.deleteDefinition(jobId);
+          await this.deps.refreshJobScheduler?.();
+          break;
+        case "enable":
+          await jobStore.setEnabled(jobId, true);
+          await this.deps.refreshJobScheduler?.();
+          break;
+        case "disable":
+          await jobStore.setEnabled(jobId, false);
+          await this.deps.refreshJobScheduler?.();
+          break;
+        case "run_now": {
+          const taskId = await this.requireRunJobNow()(jobId);
+          return { requestId: request.requestId, outcome: "approved", message: `${messages.jobMutationApproved(operation, jobId)} Launched task ${taskId}.` };
+        }
+        default:
+          assertNever(operation);
+      }
+      return { requestId: request.requestId, outcome: "approved", message: messages.jobMutationApproved(operation, jobId) };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Unknown job mutation failure.";
+      return { requestId: request.requestId, outcome: "failed", message: messages.jobMutationFailed(operation, jobId, detail) };
+    }
+  }
+
+  private requireJobStore() {
+    if (!this.deps.jobStore) throw new Error("Scheduled jobs are not available in this Sandy runtime.");
+    return this.deps.jobStore;
+  }
+
+  private requireRunJobNow() {
+    if (!this.deps.runJobNow) throw new Error("Scheduled jobs are not available in this Sandy runtime.");
+    return this.deps.runJobNow;
   }
 
   private tryAuthorizeNativeHttpTokenUse(

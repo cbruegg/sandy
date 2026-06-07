@@ -8,6 +8,5 @@
   "project": [
     "src/**/*.ts"
   ],
-  "ignoreBinaries": ["codex"],
-  "ignore": ["src/codex-app-server-client/generated/**"]
+  "ignoreBinaries": ["codex"]
 }

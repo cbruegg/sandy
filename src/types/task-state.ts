@@ -34,7 +34,13 @@ type TaskStatus =
   | "awaiting_privilege_decision"
   | "completed"
   | "cancelled"
-  | "failed";
+    | "failed";
+
+type TaskOrigin =
+  | { kind: "launchedByUser"; chatId: string }
+  | { kind: "launchedByJob"; jobId: string };
+
+type JobTaskInteractionState = "silent" | "waitingToInteract" | "interacting";
 
 export type ActiveTaskState = {
   taskId: string;
@@ -51,6 +57,8 @@ export type ActiveTaskState = {
   approvedHostDirectories: HostDirectoryGrant[];
   workerConnected: boolean;
   taskSummary: string | null;
+  origin?: TaskOrigin;
+  interactionState?: JobTaskInteractionState;
 };
 
 type PendingShareDeletion = {

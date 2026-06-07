@@ -330,3 +330,13 @@ Add unit and integration coverage for:
 - Job-scoped persistent approvals apply only to future executions of the same job.
 
 Run `bun run build` and `bun run test` after TypeScript/runtime changes.
+
+## Current Implementation Notes
+
+- Centralized state path helpers were added in `src/state-paths.ts`, and Matrix state path construction now uses those helpers.
+- Channel default destination state is persisted in `state/channel.json` for non-local-test channels.
+- Job definitions and runtime state are persisted in `state/jobs/jobs.json`; job workspaces live under `state/jobs/workspaces/<job-id>`.
+- The scheduler supports one-shot jobs and common 5- or 6-field cron expressions with timers, duplicate launch protection, refresh after mutations, and shutdown cleanup.
+- Worker job management tools were added. Read-only tools do not require approval; mutation tools require explicit approval through `job_mutation` privilege requests with no persistent approval option.
+- Job-launched tasks reuse the existing sandbox/task-bundle launch path and are marked with `origin: launchedByJob` plus a silent/interacting state. Silent job tasks can complete without summary review.
+- First-version limitations still to address: full background interaction queuing behind active user-launched tasks, exponential waiting reminders, library-grade timezone cron behavior, and fully job-scoped persistent permission approvals.

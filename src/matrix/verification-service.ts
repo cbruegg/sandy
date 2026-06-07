@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { matrixStateRoot } from "../state-paths.js";
 import {
   DeviceId,
   KeysClaimRequest,
@@ -240,7 +241,7 @@ async function createMachine(
   return await OlmMachine.initialize(
     new UserId(botUserId),
     new DeviceId(deviceId),
-    join(configDirectory, "state", "matrix", "crypto"),
+    join(matrixStateRoot(configDirectory), "crypto"),
     "",
     0,
   );

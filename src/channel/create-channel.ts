@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { matrixStateRoot } from "../state-paths.js";
 import { LocalTestChannelAdapter } from "./local-test-adapter.js";
 import { MatrixChannelAdapter } from "./matrix-adapter.js";
 import { TelegramBotApiAdapter } from "./telegram-adapter.js";
@@ -23,7 +23,7 @@ export function createChannelAdapter(
         homeserverUrl: config.channel.matrix.homeserverUrl,
         accessToken: matrixAccessToken,
         allowedUserId: config.channel.matrix.allowedUserId,
-        stateRoot: join(config.configDirectory, "state", "matrix"),
+        stateRoot: matrixStateRoot(config.configDirectory),
         transcriptionProvider: transcriptionProvider ?? undefined,
       });
     }

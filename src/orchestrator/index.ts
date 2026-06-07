@@ -11,6 +11,7 @@ import type {
   NormalizedChatEvent,
   SessionState,
 } from "../types.js";
+import type { JobDefinition } from "../jobs/job-types.js";
 
 export class SandyOrchestrator {
   private readonly channelFormatting: ChannelFormatting;
@@ -36,6 +37,7 @@ export class SandyOrchestrator {
         kind: event.kind,
         hasActiveTask: session.activeTask !== null,
       });
+      await this.deps.persistDefaultChatId?.(event.chatId);
       if (event.kind === "user_message") {
         logger.debugContent("chat.user_message", {
           chatId: event.chatId,
@@ -90,6 +92,14 @@ export class SandyOrchestrator {
     arguments: unknown;
   }): Promise<{ isError: boolean; message: string }> {
     return await this.privileges.executeNativeWorkerToolCall(input);
+  }
+
+  async launchJobTask(job: JobDefinition, workspacePath: string): Promise<string> {
+    const chatId = await this.deps.getDefaultChatId?.();
+    if (!chatId) {
+      throw new Error(`Cannot launch scheduled job ${job.id}: no default chat destination is known yet.`);
+    }
+    return await this.taskLifecycle.launchJobTask(job, chatId, workspacePath);
   }
 
   async authorizeMcpToolCall(input: {

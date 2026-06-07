@@ -212,6 +212,16 @@ Local test channel behavior:
 - The poll interval is fixed in code and is not configurable.
 - The recommended way to interact with this channel is `./scripts/run-local-test-cli.sh ...`, not direct file editing.
 
+Scheduled jobs:
+
+- Sandy can persist one-shot and recurring scheduled jobs under `state/jobs/jobs.json` in the config directory.
+- Jobs reference a Sandy skill by `skillId`; worker executions are still normal Sandy sub-agent tasks and use the same sandbox and approval flow.
+- Each job has a persistent workspace directory under `state/jobs/workspaces/<job-id>` for durable notes, caches, generated files, and job state.
+- Workers manage jobs through Sandy worker tools: `list_jobs`, `get_job`, `create_job`, `update_job`, `delete_job`, `enable_job`, `disable_job`, and `run_job_now`.
+- `list_jobs` and `get_job` are read-only. Mutating job tools always require explicit user approval and do not offer persistent auto-approval.
+- Scheduled jobs use the last authenticated chat as Sandy's default destination. Telegram and Matrix persist that destination in `state/channel.json`; the local-test channel keeps its implicit chat.
+- Cron jobs use common 5- or 6-field cron syntax. One-shot jobs run once when their `runAt` time arrives; if Sandy starts after an unrun one-shot's `runAt`, it launches the job once after startup.
+
 Codex auth behavior:
 
 - Sandy supports two Codex auth modes:
