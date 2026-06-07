@@ -9,19 +9,19 @@ type ApprovalDecision = Extract<NormalizedChatEvent, { kind: "approval_response"
 export class WorkerToolsHandler {
   constructor(
     private readonly skillService: SkillService,
-    private readonly jobService: JobService | null,
+    private readonly jobService: JobService,
   ) {}
 
   async listJobs(): Promise<PrivilegeResolutionResult> {
     return {
       requestId: randomUUID(),
       outcome: "approved",
-      message: JSON.stringify(await this.requireJobService().listJobs(), null, 2),
+      message: JSON.stringify(await this.jobService.listJobs(), null, 2),
     };
   }
 
   async getJob(jobId: string): Promise<PrivilegeResolutionResult> {
-    const job = await this.requireJobService().getJob(jobId);
+    const job = await this.jobService.getJob(jobId);
     return {
       requestId: randomUUID(),
       outcome: job ? "approved" : "failed",
@@ -94,16 +94,11 @@ export class WorkerToolsHandler {
     }
 
     try {
-      const detail = await this.requireJobService().applyMutation(request.mutation);
+      const detail = await this.jobService.applyMutation(request.mutation);
       return { requestId: request.requestId, outcome: "approved", message: `${messages.jobMutationApproved(operation, jobId)} ${detail}` };
     } catch (error) {
       const detail = error instanceof Error ? error.message : "Unknown job mutation failure.";
       return { requestId: request.requestId, outcome: "failed", message: messages.jobMutationFailed(operation, jobId, detail) };
     }
-  }
-
-  private requireJobService(): JobService {
-    if (!this.jobService) throw new Error("Scheduled jobs are not available in this Sandy runtime.");
-    return this.jobService;
   }
 }

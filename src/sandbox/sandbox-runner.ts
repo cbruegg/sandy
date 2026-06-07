@@ -27,8 +27,14 @@ export type ShareInspection = {
   summary: string | null;
 };
 
+export type SandboxTaskBundle = {
+  bundleId: string;
+  hostfsVolumeName: string | null;
+};
+
 export interface SandboxHandle {
   getTaskSharePath(): string;
+  getTaskBundle(): SandboxTaskBundle;
   sendUserMessage(input: TaskInputPayload): Promise<void>;
   resolvePrivilege(result: PrivilegeResolutionResult): Promise<void>;
   markFinished(): Promise<void>;

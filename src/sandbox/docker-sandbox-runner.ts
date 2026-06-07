@@ -316,6 +316,10 @@ export class DockerSandboxRunner implements SandboxRunner {
 
       return {
         getTaskSharePath: () => reservedBundle.shareHostPath,
+        getTaskBundle: () => ({
+          bundleId: reservedBundle.bundleId,
+          hostfsVolumeName: reservedBundle.hostfsVolumeName,
+        }),
         sendUserMessage: async (input: TaskInputPayload) => {
           logger.debugContent("sandbox.user_message", {
             taskId: request.taskId,

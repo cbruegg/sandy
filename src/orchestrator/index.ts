@@ -1,9 +1,7 @@
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
-import { OrchestratorPrivileges } from "./privileges.js";
-import { OrchestratorRuntimeState } from "./runtime-state.js";
 import type { SandyOrchestratorDependencies, SupportedChatEvent } from "./shared.js";
-import { OrchestratorTaskLifecycle, describeUserMessageForMainAgent } from "./task-lifecycle.js";
+import { describeUserMessageForMainAgent } from "./task-lifecycle.js";
 import { buildWorkerFollowUpInput } from "./worker-input.js";
 import type {
   ChannelFormatting,
@@ -11,26 +9,12 @@ import type {
   NormalizedChatEvent,
   SessionState,
 } from "../types.js";
-import type { JobService } from "../jobs/job-service.js";
 
 export class SandyOrchestrator {
   private readonly channelFormatting: ChannelFormatting;
-  private readonly runtimeState = new OrchestratorRuntimeState();
-  private readonly taskLifecycle: OrchestratorTaskLifecycle;
-  private readonly privileges: OrchestratorPrivileges;
-  private readonly jobService: JobService | null;
 
   constructor(private readonly deps: SandyOrchestratorDependencies) {
-    this.channelFormatting = deps.channel.getFormatting();
-    this.taskLifecycle = new OrchestratorTaskLifecycle(deps, this.runtimeState, this.channelFormatting);
-    this.jobService = deps.createJobService?.(async (job, chatId, workspacePath) =>
-      await this.taskLifecycle.launchJobTask(job, chatId, workspacePath)) ?? null;
-    this.privileges = new OrchestratorPrivileges(
-      deps,
-      this.runtimeState,
-      this.jobService,
-      this.taskLifecycle.failActiveTaskFromEventHandling.bind(this.taskLifecycle),
-    );
+    this.channelFormatting = deps.channelFormatting;
   }
 
   async handleChatEvent(event: NormalizedChatEvent): Promise<void> {
@@ -41,7 +25,7 @@ export class SandyOrchestrator {
         kind: event.kind,
         hasActiveTask: session.activeTask !== null,
       });
-      await this.jobService?.persistDefaultChatId(event.chatId);
+      await this.deps.channel.destinationStore.setDefaultChatId(event.chatId);
       if (event.kind === "user_message") {
         logger.debugContent("chat.user_message", {
           chatId: event.chatId,
@@ -95,15 +79,7 @@ export class SandyOrchestrator {
     toolName: string;
     arguments: unknown;
   }): Promise<{ isError: boolean; message: string }> {
-    return await this.privileges.executeNativeWorkerToolCall(input);
-  }
-
-  async startJobs(): Promise<void> {
-    await this.jobService?.start();
-  }
-
-  stopJobs(): void {
-    this.jobService?.stop();
+    return await this.deps.privileges.executeNativeWorkerToolCall(input);
   }
 
   async authorizeMcpToolCall(input: {
@@ -112,7 +88,7 @@ export class SandyOrchestrator {
     toolName: string;
     arguments: unknown;
   }) {
-    return await this.privileges.authorizeMcpToolCall(input);
+    return await this.deps.privileges.authorizeMcpToolCall(input);
   }
 
   async authorizeMcpResourceRead(input: {
@@ -120,7 +96,7 @@ export class SandyOrchestrator {
     serverId: string;
     uri: string;
   }) {
-    return await this.privileges.authorizeMcpResourceRead(input);
+    return await this.deps.privileges.authorizeMcpResourceRead(input);
   }
 
   private async routeIdleChatEvent(session: SessionState, event: SupportedChatEvent): Promise<void> {
@@ -137,7 +113,7 @@ export class SandyOrchestrator {
             await this.deps.channel.sendText(event.chatId, messages.staleShareDeletionRequest());
             return;
           }
-          await this.taskLifecycle.resolvePendingShareDeletion(session, event.decision === "deny" ? "deny" : "approve");
+          await this.deps.taskLifecycle.resolvePendingShareDeletion(session, event.decision === "deny" ? "deny" : "approve");
           return;
         }
         await this.deps.channel.sendText(event.chatId, messages.noPendingPrivilegeRequest());
@@ -156,7 +132,7 @@ export class SandyOrchestrator {
           return;
         }
 
-        const releasedEntries = this.taskLifecycle.releasePendingTaskSummaries(session);
+        const releasedEntries = this.deps.taskLifecycle.releasePendingTaskSummaries(session);
 
         const newVisibleEntries = [
           ...releasedEntries,
@@ -175,7 +151,7 @@ export class SandyOrchestrator {
           channelFormatting: this.channelFormatting,
         });
 
-        await this.taskLifecycle.executeMainAgentDecision(session, event, decision);
+        await this.deps.taskLifecycle.executeMainAgentDecision(session, event, decision);
         return;
       }
     }
@@ -189,7 +165,7 @@ export class SandyOrchestrator {
 
     switch (event.kind) {
       case "cancel_request":
-        await this.taskLifecycle.cancelActiveTask(session, "Cancelled at the user's request.");
+        await this.deps.taskLifecycle.cancelActiveTask(session, "Cancelled at the user's request.");
         await this.deps.channel.sendText(event.chatId, messages.taskCancelled(activeTask.taskName));
         return;
       case "mark_finished_request":
@@ -197,7 +173,7 @@ export class SandyOrchestrator {
           await this.deps.channel.sendText(event.chatId, messages.privilegeRequestStillPending());
           return;
         }
-        await this.runtimeState.requireHandle(activeTask.taskId).markFinished();
+        await this.deps.taskLifecycle.markActiveTaskFinished(activeTask.taskId);
         return;
       case "danger_report":
         logger.error("chat.unexpected_danger_report", null, undefined, {
@@ -215,18 +191,18 @@ export class SandyOrchestrator {
           await this.deps.channel.sendText(event.chatId, messages.stalePrivilegeRequest());
           return;
         }
-        await this.privileges.resolvePendingPrivilegeRequest(session, activeTask.pendingPrivilegeRequest, event.decision);
+        await this.deps.privileges.resolvePendingPrivilegeRequest(session, activeTask.pendingPrivilegeRequest, event.decision);
         return;
       case "user_message": {
         if (activeTask.pendingPrivilegeRequest) {
           await this.deps.channel.sendText(event.chatId, messages.privilegeRequestStillPending());
           return;
         }
-        const handle = this.runtimeState.requireHandle(activeTask.taskId);
+        const handle = this.deps.taskLifecycle.requireActiveTaskHandle(activeTask.taskId);
         await handle.sendUserMessage(
           buildWorkerFollowUpInput(
             event.text,
-            await this.taskLifecycle.stageAttachments(event.chatId, event.messageId, event.attachments, handle.getTaskSharePath()),
+            await this.deps.taskLifecycle.stageAttachments(event.chatId, event.messageId, event.attachments, handle.getTaskSharePath()),
           ),
         );
         return;

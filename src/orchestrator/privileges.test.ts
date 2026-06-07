@@ -426,7 +426,6 @@ test("orchestrator confirms persisted http token suitability and enables later p
 
 test("orchestrator creates a hostfs grant for worker-session host directory approval", async () => {
   const hostfsCalls: Array<{ bundleId: string; taskId: string; path: string; level: string }> = [];
-  let launchedTaskId: string | null = null;
   const { orchestrator, runner, channel } = createTestOrchestrator({
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -452,11 +451,6 @@ test("orchestrator creates a hostfs grant for worker-session host directory appr
         };
       },
     } as unknown as HostfsBroker,
-    taskBundleAssignmentRegistry: {
-      get: (taskId: string) => taskId === launchedTaskId
-        ? { bundleId: "bundle-1", hasHostfsVolume: true }
-        : null,
-    },
   });
 
   await orchestrator.handleChatEvent({
@@ -470,7 +464,7 @@ test("orchestrator creates a hostfs grant for worker-session host directory appr
   });
 
   const taskId = expectDefined(runner.launches[0], "Expected launch.").taskId;
-  launchedTaskId = taskId;
+  runner.handle.taskBundle = { bundleId: "bundle-1", hostfsVolumeName: "hostfs-volume-1" };
 
   const toolCallPromise = orchestrator.executeNativeWorkerToolCall({
     taskId,

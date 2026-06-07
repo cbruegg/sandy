@@ -7,8 +7,12 @@ import {
   describeUserMessageForMainAgent,
 } from "./worker-input.js";
 import { stageSharedAttachments } from "./task-share.js";
-import { OrchestratorRuntimeState } from "./runtime-state.js";
-import type { ActiveTaskStatus, SandyOrchestratorDependencies, UserMessageEvent } from "./shared.js";
+import { ActiveTaskRuntimeRegistry } from "./active-task-runtime-registry.js";
+import type {
+  ActiveTaskStatus,
+  OrchestratorCoreDependencies,
+  UserMessageEvent
+} from "./shared.js";
 import type {
   ChannelFormatting,
   MainAgentDecision,
@@ -16,15 +20,33 @@ import type {
   MainAgentTaskPolicyInput,
   NormalizedChatEvent,
   SessionState,
+  SharedAttachment,
   SubAgentEvent,
   TranscriptEntry,
 } from "../types.js";
 import type { JobDefinition } from "../jobs/job-types.js";
+import type { SandboxHandle } from "../sandbox/sandbox-runner.js";
+import type {TaskFailureHandler} from "./privileges.ts";
 
-export class OrchestratorTaskLifecycle {
+export interface OrchestratorTaskLifecycle {
+  resolvePendingShareDeletion(session: SessionState, decision: "approve" | "deny"): Promise<void>;
+  releasePendingTaskSummaries(session: SessionState): TranscriptEntry[];
+  executeMainAgentDecision(session: SessionState, event: UserMessageEvent, decision: MainAgentDecision): Promise<void>;
+  cancelActiveTask(session: SessionState, reason: string): Promise<void>;
+  markActiveTaskFinished(taskId: string): Promise<void>;
+  requireActiveTaskHandle(taskId: string): SandboxHandle;
+  stageAttachments(
+    chatId: string,
+    messageId: string,
+    attachments: UserMessageEvent["attachments"],
+    taskSharePath: string,
+  ): Promise<SharedAttachment[]>;
+}
+
+export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, OrchestratorTaskLifecycle {
   constructor(
-    private readonly deps: SandyOrchestratorDependencies,
-    private readonly runtimeState: OrchestratorRuntimeState,
+    private readonly deps: OrchestratorCoreDependencies,
+    private readonly activeTasks: ActiveTaskRuntimeRegistry,
     private readonly channelFormatting: ChannelFormatting,
   ) {}
 
@@ -178,7 +200,7 @@ export class OrchestratorTaskLifecycle {
             async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
           );
 
-          this.runtimeState.registerHandle(taskId, handle);
+          this.activeTasks.registerHandle(taskId, handle);
           launchSucceeded = true;
           logger.info("task.started", {
             chatId: event.chatId,
@@ -243,12 +265,20 @@ export class OrchestratorTaskLifecycle {
         },
         async (subAgentEvent) => this.routeSubAgentEvent(chatId, taskId, subAgentEvent),
       );
-      this.runtimeState.registerHandle(taskId, handle);
+      this.activeTasks.registerHandle(taskId, handle);
       return taskId;
     } catch (error) {
       if (session.activeTask?.taskId === taskId) session.activeTask = null;
       throw error;
     }
+  }
+
+  requireActiveTaskHandle(taskId: string): SandboxHandle {
+    return this.activeTasks.requireHandle(taskId);
+  }
+
+  async markActiveTaskFinished(taskId: string): Promise<void> {
+    await this.activeTasks.requireHandle(taskId).markFinished();
   }
 
   releasePendingTaskSummaries(session: SessionState): TranscriptEntry[] {
@@ -311,7 +341,7 @@ export class OrchestratorTaskLifecycle {
       taskId: activeTask.taskId,
       reason,
     });
-    await this.runtimeState.requireHandle(activeTask.taskId).cancel(reason);
+    await this.activeTasks.requireHandle(activeTask.taskId).cancel(reason);
     await this.finishActiveTask(session, "cancelled", { discardSummary: true });
   }
 
@@ -382,7 +412,7 @@ export class OrchestratorTaskLifecycle {
     if (!task) {
       return;
     }
-    const handle = this.runtimeState.getHandle(task.taskId);
+    const handle = this.activeTasks.getHandle(task.taskId);
     if (handle) {
       await handle.close();
     }
@@ -395,7 +425,7 @@ export class OrchestratorTaskLifecycle {
       status: task.status,
     });
     this.failPendingPrivilegeRequestOnTaskClose(task);
-    this.runtimeState.deleteHandle(task.taskId);
+    this.activeTasks.deleteHandle(task.taskId);
     session.activeTask = null;
     if (task.origin?.kind !== "launchedByJob" || task.interactionState !== "silent") {
       await this.promptForShareDeletionIfNeeded(session, task.taskId, task.taskName);
@@ -446,7 +476,7 @@ export class OrchestratorTaskLifecycle {
       ),
     };
     if (task.pendingPrivilegeRequest.kind === "mcp_tool_call" || task.pendingPrivilegeRequest.kind === "mcp_resource_read") {
-      this.runtimeState.resolvePendingMcpPrivilege(task.pendingPrivilegeRequest.requestId, failedResult);
+      this.activeTasks.resolvePendingMcpPrivilege(task.pendingPrivilegeRequest.requestId, failedResult);
     }
     if (
       task.pendingPrivilegeRequest.kind === "host_operation"
@@ -454,13 +484,13 @@ export class OrchestratorTaskLifecycle {
       || task.pendingPrivilegeRequest.kind === "host_directory_access"
       || task.pendingPrivilegeRequest.kind === "job_mutation"
     ) {
-      this.runtimeState.resolvePendingNativeTool(task.pendingPrivilegeRequest.requestId, failedResult);
+      this.activeTasks.resolvePendingNativeTool(task.pendingPrivilegeRequest.requestId, failedResult);
     }
   }
 
   private async handleAuthRefresh(taskId: string, previousAccountId: string | null): Promise<void> {
     const tokens = await this.deps.refreshChatGPTTokens?.(taskId, previousAccountId) ?? null;
-    await this.runtimeState.getHandle(taskId)?.resolveAuthRefresh?.(tokens);
+    await this.activeTasks.getHandle(taskId)?.resolveAuthRefresh?.(tokens);
   }
 
   private async promptForShareDeletionIfNeeded(session: SessionState, taskId: string, taskName: string): Promise<void> {

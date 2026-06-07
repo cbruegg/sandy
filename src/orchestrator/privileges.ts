@@ -3,26 +3,46 @@ import { isSupportedPrivilegeRequest } from "../privilege/privilege-broker.js";
 import { resolveTaskShareHostPath } from "../shared-workspace.js";
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
-import { OrchestratorRuntimeState } from "./runtime-state.js";
-import type { SandyOrchestratorDependencies } from "./shared.js";
+import { ActiveTaskRuntimeRegistry } from "./active-task-runtime-registry.js";
+import type {OrchestratorCoreDependencies} from "./shared.js";
 import { parseWorkerToolPayload } from "../subagent/worker-tools.js";
 import type { WorkerToolPayload } from "../subagent/worker-tools.js";
 import type { NormalizedChatEvent, PrivilegeRequest, PrivilegeResolutionResult, SessionState } from "../types.js";
 import type { JobService } from "../jobs/job-service.js";
 import { WorkerToolsHandler } from "./worker-tools-handler.js";
 
-export class OrchestratorPrivileges {
+export interface OrchestratorPrivileges {
+  executeNativeWorkerToolCall(input: {
+    taskId: string;
+    toolName: string;
+    arguments: unknown;
+  }): Promise<{ isError: boolean; message: string }>;
+  authorizeMcpToolCall(input: {
+    taskId: string;
+    serverId: string;
+    toolName: string;
+    arguments: unknown;
+  }): Promise<PrivilegeResolutionResult>;
+  authorizeMcpResourceRead(input: {
+    taskId: string;
+    serverId: string;
+    uri: string;
+  }): Promise<PrivilegeResolutionResult>;
+  resolvePendingPrivilegeRequest(
+    session: SessionState,
+    request: PrivilegeRequest,
+    decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
+  ): Promise<void>;
+}
+
+export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   private readonly workerToolsHandler: WorkerToolsHandler;
 
   constructor(
-    private readonly deps: SandyOrchestratorDependencies,
-    private readonly runtimeState: OrchestratorRuntimeState,
-    jobService: JobService | null,
-    private readonly failActiveTaskFromEventHandling: (
-      session: SessionState,
-      taskId: string,
-      message: string,
-    ) => Promise<void>,
+    private readonly deps: OrchestratorCoreDependencies,
+    private readonly activeTasks: ActiveTaskRuntimeRegistry,
+    jobService: JobService,
+    private readonly taskFailureHandler: TaskFailureHandler,
   ) {
     this.workerToolsHandler = new WorkerToolsHandler(deps.skillService, jobService);
   }
@@ -84,7 +104,7 @@ export class OrchestratorPrivileges {
         taskId: input.taskId,
         toolName: input.toolName,
       });
-      await this.failActiveTaskFromEventHandling(session, input.taskId, message);
+      await this.taskFailureHandler.failActiveTaskFromEventHandling(session, input.taskId, message);
       return {
         isError: true,
         message,
@@ -126,7 +146,7 @@ export class OrchestratorPrivileges {
     } else {
       const operation = await this.deps.privilegeBroker.apply(request.payload, {
         taskId: activeTask.taskId,
-        taskSharePath: this.runtimeState.requireHandle(activeTask.taskId).getTaskSharePath(),
+        taskSharePath: this.activeTasks.requireHandle(activeTask.taskId).getTaskSharePath(),
       });
       result = {
         requestId: request.requestId,
@@ -135,11 +155,11 @@ export class OrchestratorPrivileges {
     }
 
     if (request.kind === "host_operation" || request.kind === "http_token_use" || request.kind === "host_directory_access" || request.kind === "skill_mutation" || request.kind === "job_mutation") {
-      if (!this.runtimeState.resolvePendingNativeTool(request.requestId, result)) {
-        await this.runtimeState.requireHandle(activeTask.taskId).resolvePrivilege(result);
+      if (!this.activeTasks.resolvePendingNativeTool(request.requestId, result)) {
+        await this.activeTasks.requireHandle(activeTask.taskId).resolvePrivilege(result);
       }
     } else if (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read") {
-      this.runtimeState.resolvePendingMcpPrivilege(request.requestId, result);
+      this.activeTasks.resolvePendingMcpPrivilege(request.requestId, result);
     }
     await this.sendPrivilegeResolutionMessage(session.chatId, activeTask.taskId, result);
 
@@ -310,7 +330,7 @@ export class OrchestratorPrivileges {
 
     await this.deps.channel.sendFile(
       chatId,
-      resolveTaskShareHostPath(this.runtimeState.requireHandle(activeTask.taskId).getTaskSharePath(), sharePath, "send_file_to_channel path"),
+      resolveTaskShareHostPath(this.activeTasks.requireHandle(activeTask.taskId).getTaskSharePath(), sharePath, "send_file_to_channel path"),
       caption,
     );
   }
@@ -360,7 +380,7 @@ export class OrchestratorPrivileges {
     await this.deps.channel.sendPrivilegeRequest(chatId, request);
 
     return await new Promise<PrivilegeResolutionResult>((resolve) => {
-      this.runtimeState.setPendingNativeToolResolver(request.requestId, resolve);
+      this.activeTasks.setPendingNativeToolResolver(request.requestId, resolve);
     });
   }
 
@@ -368,16 +388,8 @@ export class OrchestratorPrivileges {
     activeTask: NonNullable<SessionState["activeTask"]>,
     request: Extract<PrivilegeRequest, { kind: "host_directory_access" }>,
   ): Promise<PrivilegeResolutionResult> {
-    const assignment = this.deps.taskBundleAssignmentRegistry.get(activeTask.taskId);
-    if (!assignment) {
-      return {
-        requestId: request.requestId,
-        outcome: "failed",
-        message: "No bundle is assigned to this task.",
-      };
-    }
-
-    if (!assignment.hasHostfsVolume) {
+    const taskBundle = this.activeTasks.requireHandle(activeTask.taskId).getTaskBundle();
+    if (!taskBundle.hostfsVolumeName) {
       return {
         requestId: request.requestId,
         outcome: "failed",
@@ -386,7 +398,7 @@ export class OrchestratorPrivileges {
     }
 
     const result = await this.deps.hostfsBroker.requestDirectoryAccess(
-      assignment.bundleId,
+      taskBundle.bundleId,
       activeTask.taskId,
       request.path,
       request.level,
@@ -647,7 +659,7 @@ export class OrchestratorPrivileges {
     await this.deps.channel.sendPrivilegeRequest(chatId, request);
 
     return await new Promise<PrivilegeResolutionResult>((resolve) => {
-      this.runtimeState.setPendingMcpPrivilegeResolver(request.requestId, resolve);
+      this.activeTasks.setPendingMcpPrivilegeResolver(request.requestId, resolve);
     });
   }
 
@@ -975,6 +987,10 @@ export class OrchestratorPrivileges {
     }
     task.approvedHttpTokenSessionGrants.push({ tokenId, host });
   }
+}
+
+export interface TaskFailureHandler {
+  failActiveTaskFromEventHandling(session: SessionState, taskId: string, message: string): Promise<void>;
 }
 
 function isMcpAutoApprovalAllowed(task: NonNullable<SessionState["activeTask"]>, serverId: string): boolean {

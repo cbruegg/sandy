@@ -1,9 +1,6 @@
-import type { ChannelDestinationStore } from "../channel/channel-destination-store.js";
 import type { JobDefinition, JobMutationRequest } from "./job-types.js";
 import type { JobScheduler } from "./job-scheduler.js";
 import type { JobStore } from "./job-store.js";
-
-export type JobTaskLauncher = (job: JobDefinition, chatId: string, workspacePath: string | null) => Promise<string>;
 
 export interface JobService {
   start(): Promise<void>;
@@ -11,14 +8,11 @@ export interface JobService {
   listJobs(): Promise<JobDefinition[]>;
   getJob(jobId: string): Promise<JobDefinition | null>;
   applyMutation(mutation: JobMutationRequest): Promise<string>;
-  getDefaultChatId(): Promise<string | null>;
-  persistDefaultChatId(chatId: string): Promise<void>;
 }
 
 export class ScheduledJobService implements JobService {
   constructor(
     private readonly store: JobStore,
-    private readonly destinationStore: ChannelDestinationStore,
     private readonly scheduler: JobScheduler,
   ) {}
 
@@ -67,13 +61,6 @@ export class ScheduledJobService implements JobService {
     }
   }
 
-  async getDefaultChatId(): Promise<string | null> {
-    return await this.destinationStore.getDefaultChatId();
-  }
-
-  async persistDefaultChatId(chatId: string): Promise<void> {
-    await this.destinationStore.setDefaultChatId(chatId);
-  }
 }
 
 function assertNever(value: never): never {
