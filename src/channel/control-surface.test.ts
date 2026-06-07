@@ -128,6 +128,32 @@ test("buildPrivilegeControls for host_directory_access returns session, always, 
   assert.equal(controls.rows[2]?.[1]?.actionId, "cancel");
 });
 
+test("buildPrivilegeControls for skill_mutation returns approve once, deny, report, cancel with no scoped approval", () => {
+  const controls = buildPrivilegeControls({
+    kind: "skill_mutation",
+    requestId: "req-1",
+    operation: "create",
+    skillId: "my-skill",
+    name: "My Skill",
+    description: "Description.",
+    body: "Body content.",
+  });
+  assert.equal(controls.rows.length, 2);
+  assert.equal(controls.rows[0]?.length, 2);
+  assert.equal(controls.rows[0]?.[0]?.actionId, "approve");
+  assert.deepEqual((controls.rows[0]?.[0]?.event as { kind: "approval_response"; decision: string }).decision, "approve");
+  assert.equal(controls.rows[0]?.[1]?.actionId, "deny");
+  assert.equal(controls.rows[1]?.length, 2);
+  assert.equal(controls.rows[1]?.[0]?.actionId, "report");
+  assert.equal(controls.rows[1]?.[1]?.actionId, "cancel");
+
+  // Verify no scoped approval buttons are present
+  const allActionIds = controls.rows.flat().map((action) => action.actionId);
+  assert.ok(!allActionIds.includes("approve_always"));
+  assert.ok(!allActionIds.includes("approve_worker_session"));
+  assert.ok(!allActionIds.includes("approve_once"));
+});
+
 test("formatPrivilegeRequestLogType formats each request kind", () => {
   assert.equal(
     formatPrivilegeRequestLogType({ kind: "host_operation", requestId: "r1", payload: { type: "copy_into_share", sourcePath: "/tmp", targetPath: "/share", reason: "test" } }),
@@ -148,5 +174,9 @@ test("formatPrivilegeRequestLogType formats each request kind", () => {
   assert.equal(
     formatPrivilegeRequestLogType({ kind: "host_directory_access", requestId: "r1", path: "/tmp", level: "read_write" }),
     "host_directory_access:/tmp:read_write",
+  );
+  assert.equal(
+    formatPrivilegeRequestLogType({ kind: "skill_mutation", requestId: "r1", operation: "create", skillId: "my-skill" }),
+    "skill_mutation:create:my-skill",
   );
 });

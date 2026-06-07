@@ -103,6 +103,18 @@ export function buildPrivilegeControls(request: PrivilegeRequest): ControlSurfac
     return { rows };
   }
 
+  if (request.kind === "skill_mutation") {
+    rows.push([
+      { actionId: "approve", label: buttonLabels.approve, event: { kind: "approval_response", decision: "approve", requestId: request.requestId } },
+      { actionId: "deny", label: buttonLabels.deny, event: { kind: "approval_response", decision: "deny", requestId: request.requestId } },
+    ]);
+    rows.push([
+      { actionId: "report", label: buttonLabels.reportDangerousOutput, event: { kind: "danger_report" } },
+      { actionId: "cancel", label: buttonLabels.abortTask, event: { kind: "cancel_request" } },
+    ]);
+    return { rows };
+  }
+
   rows.push([
     { actionId: "approve", label: buttonLabels.approve, event: { kind: "approval_response", decision: "approve", requestId: request.requestId } },
     { actionId: "deny", label: buttonLabels.deny, event: { kind: "approval_response", decision: "deny", requestId: request.requestId } },
