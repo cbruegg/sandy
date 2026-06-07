@@ -34,7 +34,7 @@ type TaskStatus =
   | "awaiting_privilege_decision"
   | "completed"
   | "cancelled"
-    | "failed";
+  | "failed";
 
 type TaskOrigin =
   | { kind: "launchedByUser" }
