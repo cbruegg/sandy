@@ -15,7 +15,6 @@ export const jobDefinitionSchema: z.ZodType<JobDefinition> = z.object({
   enabled: z.boolean(),
   schedule: jobScheduleSchema,
   skillId: z.string().trim().min(1),
-  prompt: z.string().optional(),
 }).strict();
 
 export function validateJobDefinition(definition: JobDefinition): JobDefinition {

@@ -20,7 +20,6 @@ test("JobStore separates definitions from runtime state", async () => {
       enabled: true,
       schedule: { kind: "cron", expression: "0 9 * * *" },
       skillId: "cleanup",
-      prompt: "Clean the shopping list.",
     });
 
     assert.equal((await store.listDefinitions()).length, 1);

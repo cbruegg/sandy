@@ -4,7 +4,6 @@ export type JobDefinition = {
   enabled: boolean;
   schedule: JobSchedule;
   skillId: string;
-  prompt?: string;
 };
 
 export type JobSchedule =

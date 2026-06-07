@@ -269,7 +269,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
           workerStartConfig: await this.deps.buildWorkerStartConfig(),
           prepareStartInput: () => Promise.resolve({
             taskBrief: buildJobTaskBrief(job, workspacePath),
-            initialInput: { text: job.prompt ?? "Run the scheduled job now.", images: [] },
+            initialInput: { text: `Execute skill ${job.skillId}.`, images: [] },
           }),
         },
         async (subAgentEvent) => this.routeSubAgentEvent(chatId, taskId, subAgentEvent),
@@ -571,7 +571,6 @@ function buildJobTaskBrief(job: JobDefinition, workspacePath: string | null): st
     workspacePath ? `This recurring job has a persistent workspace directory on the host: ${workspacePath}` : null,
     workspacePath ? "The workspace is for durable notes, generated files, helper scripts, caches, and job state." : null,
     workspacePath ? "If you need to access that directory from the worker, request host directory access for it; Sandy has pre-approved read/write access for this job execution." : null,
-    job.prompt ? `Job prompt:\n${job.prompt}` : null,
     "If you can complete the job without user interaction, finish silently. If you send user-visible output or need approval, follow Sandy's normal review and safety flow.",
   ].filter((line): line is string => line !== null).join("\n\n");
 }
