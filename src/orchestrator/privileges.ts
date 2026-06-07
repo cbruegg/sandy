@@ -9,18 +9,23 @@ import { parseWorkerToolPayload } from "../subagent/worker-tools.js";
 import type { WorkerToolPayload } from "../subagent/worker-tools.js";
 import type { NormalizedChatEvent, PrivilegeRequest, PrivilegeResolutionResult, SessionState } from "../types.js";
 import type { JobService } from "../jobs/job-service.js";
+import { WorkerToolsHandler } from "./worker-tools-handler.js";
 
 export class OrchestratorPrivileges {
+  private readonly workerToolsHandler: WorkerToolsHandler;
+
   constructor(
     private readonly deps: SandyOrchestratorDependencies,
     private readonly runtimeState: OrchestratorRuntimeState,
-    private readonly jobService: JobService | null,
+    jobService: JobService | null,
     private readonly failActiveTaskFromEventHandling: (
       session: SessionState,
       taskId: string,
       message: string,
     ) => Promise<void>,
-  ) {}
+  ) {
+    this.workerToolsHandler = new WorkerToolsHandler(deps.skillService, jobService);
+  }
 
   async executeNativeWorkerToolCall(input: {
     taskId: string;
@@ -248,19 +253,9 @@ export class OrchestratorPrivileges {
           skillId: call.skillId,
         });
       case "list_jobs":
-        return {
-          requestId: randomUUID(),
-          outcome: "approved",
-          message: JSON.stringify(await this.requireJobService().listJobs(), null, 2),
-        };
-      case "get_job": {
-        const job = await this.requireJobService().getJob(call.jobId);
-        return {
-          requestId: randomUUID(),
-          outcome: job ? "approved" : "failed",
-          message: job ? JSON.stringify(job, null, 2) : `Job ${call.jobId} does not exist.`,
-        };
-      }
+        return await this.workerToolsHandler.listJobs();
+      case "get_job":
+        return await this.workerToolsHandler.getJob(call.jobId);
       case "create_job":
         return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
           kind: "job_mutation",
@@ -882,54 +877,11 @@ export class OrchestratorPrivileges {
     request: Extract<PrivilegeRequest, { kind: "skill_mutation" }>,
     decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
   ): Promise<PrivilegeResolutionResult> {
-    const activeTask = session.activeTask;
-    if (!activeTask) {
-      return {
-        requestId: request.requestId,
-        outcome: "failed",
-        message: messages.taskNoLongerActive(session.chatId),
-      };
-    }
-
-    if (decision !== "approve") {
-      return {
-        requestId: request.requestId,
-        outcome: "denied",
-        message: messages.skillMutationDenied(request.operation, request.skillId),
-      };
-    }
-
-    try {
-      if (request.operation === "create") {
-        await this.deps.skillService.createSkill({
-          skillId: request.skillId,
-          name: request.name ?? "",
-          description: request.description ?? "",
-          body: request.body ?? "",
-        });
-      } else if (request.operation === "update") {
-        await this.deps.skillService.updateSkill({
-          skillId: request.skillId,
-          ...(request.name !== undefined ? { name: request.name } : {}),
-          ...(request.description !== undefined ? { description: request.description } : {}),
-          ...(request.body !== undefined ? { body: request.body } : {}),
-        });
-      } else if (request.operation === "delete") {
-        await this.deps.skillService.deleteSkill({ skillId: request.skillId });
-      }
-      return {
-        requestId: request.requestId,
-        outcome: "approved",
-        message: messages.skillMutationApproved(request.operation, request.skillId),
-      };
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : "Unknown skill mutation failure.";
-      return {
-        requestId: request.requestId,
-        outcome: "failed",
-        message: messages.skillMutationFailed(request.operation, request.skillId, detail),
-      };
-    }
+    return await this.workerToolsHandler.resolveSkillMutation(
+      request,
+      decision,
+      session.activeTask ? null : messages.taskNoLongerActive(session.chatId),
+    );
   }
 
   private async resolvePendingJobMutationRequest(
@@ -937,27 +889,11 @@ export class OrchestratorPrivileges {
     request: Extract<PrivilegeRequest, { kind: "job_mutation" }>,
     decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
   ): Promise<PrivilegeResolutionResult> {
-    if (!session.activeTask) {
-      return { requestId: request.requestId, outcome: "failed", message: messages.taskNoLongerActive(session.chatId) };
-    }
-
-    const { operation, jobId } = request.mutation;
-    if (decision !== "approve") {
-      return { requestId: request.requestId, outcome: "denied", message: messages.jobMutationDenied(operation, jobId) };
-    }
-
-    try {
-      const detail = await this.requireJobService().applyMutation(request.mutation);
-      return { requestId: request.requestId, outcome: "approved", message: `${messages.jobMutationApproved(operation, jobId)} ${detail}` };
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : "Unknown job mutation failure.";
-      return { requestId: request.requestId, outcome: "failed", message: messages.jobMutationFailed(operation, jobId, detail) };
-    }
-  }
-
-  private requireJobService(): JobService {
-    if (!this.jobService) throw new Error("Scheduled jobs are not available in this Sandy runtime.");
-    return this.jobService;
+    return await this.workerToolsHandler.resolveJobMutation(
+      request,
+      decision,
+      session.activeTask ? null : messages.taskNoLongerActive(session.chatId),
+    );
   }
 
   private tryAuthorizeNativeHttpTokenUse(
