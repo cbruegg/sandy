@@ -13,7 +13,6 @@ Sandy is a TypeScript project with the application code under `src/`.
 - `src/session/` contains session persistence, currently in-memory only.
 - `*.test.ts` files in `src/` are the test suite.
 - `Dockerfile` builds the worker image.
-- `PLAN_v1.md` tracks the current implementation plan and status.
 
 ## Build, Test, and Development Commands
 
