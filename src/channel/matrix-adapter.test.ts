@@ -12,6 +12,7 @@ import {
 import { resolveMatrixCryptoBinaryName } from "./matrix-crypto-targets.js";
 import { sanitizeMatrixHtml } from "./matrix-html.js";
 import type { NormalizedChatEvent } from "../types.js";
+import { ImplicitChannelDestinationStore } from "./channel-destination-store.js";
 import type { TranscriptionProvider } from "../transcription/transcription-provider.js";
 
 const BOT_ID = "@sandy:example.org";
@@ -253,6 +254,7 @@ test("MatrixChannelAdapter auto-joins allowed invites and rejects unencrypted ro
     accessToken: "token",
     allowedUserId: OWNER_ID,
     stateRoot: "/tmp/sandy-matrix-test",
+    destinationStore: new ImplicitChannelDestinationStore("matrix_test"),
     clientFactory: () => fakeClient,
   });
 
@@ -297,6 +299,7 @@ test("MatrixChannelAdapter ignores unauthorized senders and routes poll answers 
     accessToken: "token",
     allowedUserId: OWNER_ID,
     stateRoot: "/tmp/sandy-matrix-test",
+    destinationStore: new ImplicitChannelDestinationStore("matrix_test"),
     clientFactory: () => fakeClient,
   });
 
@@ -365,6 +368,7 @@ test("MatrixChannelAdapter catches handler failures and continues processing lat
     accessToken: "token",
     allowedUserId: OWNER_ID,
     stateRoot: "/tmp/sandy-matrix-test",
+    destinationStore: new ImplicitChannelDestinationStore("matrix_test"),
     clientFactory: () => fakeClient,
   });
 
@@ -426,6 +430,7 @@ test("MatrixChannelAdapter evicts stale room polls after task completion", async
     accessToken: "token",
     allowedUserId: OWNER_ID,
     stateRoot: "/tmp/sandy-matrix-test",
+    destinationStore: new ImplicitChannelDestinationStore("matrix_test"),
     clientFactory: () => fakeClient,
   });
 
@@ -539,6 +544,7 @@ test("MatrixChannelAdapter honors Matrix retry_after_ms before retrying a task u
     accessToken: "token",
     allowedUserId: OWNER_ID,
     stateRoot: "/tmp/sandy-matrix-test",
+    destinationStore: new ImplicitChannelDestinationStore("matrix_test"),
     clientFactory: () => fakeClient,
     sleep: async (delayMs) => {
       sleepCalls.push(delayMs);
@@ -572,6 +578,7 @@ test("MatrixChannelAdapter saves encrypted attachments and sends encrypted files
     accessToken: "token",
     allowedUserId: OWNER_ID,
     stateRoot: "/tmp/sandy-matrix-test",
+    destinationStore: new ImplicitChannelDestinationStore("matrix_test"),
     clientFactory: () => fakeClient,
   });
   const received: NormalizedChatEvent[] = [];

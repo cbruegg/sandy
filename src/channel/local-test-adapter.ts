@@ -1,7 +1,7 @@
 import { copyFile, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
-import { ImplicitChannelDestinationStore, type ChannelDestinationStore } from "./channel-destination-store.js";
+import { type ChannelDestinationStore } from "./channel-destination-store.js";
 import { logger } from "../logger.js";
 import type { ChannelFormatting, MessageAttachment, PrivilegeRequest, SavedAttachment } from "../types.js";
 import {
@@ -19,7 +19,7 @@ const localTestFormatting: ChannelFormatting = {
 
 type LocalTestChannelAdapterOptions = {
   spoolRoot: string;
-  destinationStore?: ChannelDestinationStore;
+  destinationStore: ChannelDestinationStore;
 };
 
 export class LocalTestChannelAdapter implements ChannelAdapter {
@@ -34,7 +34,7 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
   readonly destinationStore: ChannelDestinationStore;
 
   constructor(options: LocalTestChannelAdapterOptions) {
-    this.destinationStore = options.destinationStore ?? new ImplicitChannelDestinationStore("local_test");
+    this.destinationStore = options.destinationStore;
     this.spoolRoot = options.spoolRoot;
     this.inboxRoot = join(this.spoolRoot, "inbox");
     this.inboxProcessedRoot = join(this.spoolRoot, "inbox-processed");

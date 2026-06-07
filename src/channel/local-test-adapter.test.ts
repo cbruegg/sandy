@@ -4,6 +4,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { LocalTestChannelAdapter } from "./local-test-adapter.js";
+import { ImplicitChannelDestinationStore } from "./channel-destination-store.js";
 import type { NormalizedChatEvent, PrivilegeRequest } from "../types.js";
 import { parseLocalTestOutboundEvent } from "./local-test-protocol.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
@@ -24,6 +25,7 @@ test("LocalTestChannelAdapter forwards inbox events and writes outbound records"
   const root = await mkdtemp(join(tmpdir(), "sandy-local-test-"));
   const adapter = new LocalTestChannelAdapter({
     spoolRoot: root,
+    destinationStore: new ImplicitChannelDestinationStore("local_test"),
   });
   const received: NormalizedChatEvent[] = [];
 
@@ -65,6 +67,7 @@ test("LocalTestChannelAdapter copies declared attachment files into the target d
   const root = await mkdtemp(join(tmpdir(), "sandy-local-test-"));
   const adapter = new LocalTestChannelAdapter({
     spoolRoot: root,
+    destinationStore: new ImplicitChannelDestinationStore("local_test"),
   });
   const sourceFile = join(root, "fixture.txt");
   await writeFile(sourceFile, "fixture", "utf8");
@@ -104,6 +107,7 @@ test("LocalTestChannelAdapter writes privilege requests and file sends to the ou
   const root = await mkdtemp(join(tmpdir(), "sandy-local-test-"));
   const adapter = new LocalTestChannelAdapter({
     spoolRoot: root,
+    destinationStore: new ImplicitChannelDestinationStore("local_test"),
   });
 
   try {
@@ -140,6 +144,7 @@ test("LocalTestChannelAdapter quarantines failing inbox entries and continues pr
   const root = await mkdtemp(join(tmpdir(), "sandy-local-test-"));
   const adapter = new LocalTestChannelAdapter({
     spoolRoot: root,
+    destinationStore: new ImplicitChannelDestinationStore("local_test"),
   });
   const received: NormalizedChatEvent[] = [];
 
