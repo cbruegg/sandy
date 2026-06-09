@@ -1,5 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import type { HostDirectoryAccessLevel } from "../hostfs/path-policy.js";
 import { HttpTokenAuthorizer } from "../http/token-authorizer.js";
@@ -80,7 +81,7 @@ test("orchestrator applies supported privilege requests deterministically and ou
       reason: "Need a local fixture file.",
     },
     taskId,
-    taskSharePath: `/tmp/${taskId}`,
+    taskSharePath: resolve(import.meta.dirname, "../../tmp", taskId),
   }]);
   assert.deepEqual(await toolCallPromise, {
     isError: false,
@@ -120,7 +121,7 @@ test("orchestrator sends worker-requested shared files back through the channel"
 
   assert.deepEqual(channel.sentFiles, [{
     chatId: "chat-file-out",
-    filePath: `/tmp/${expectDefined(runner.launches[0], "Expected launch.").taskId}/results/output.txt`,
+    filePath: resolve(import.meta.dirname, "../../tmp", expectDefined(runner.launches[0], "Expected launch.").taskId, "results/output.txt"),
     caption: "Generated output",
   }]);
 });

@@ -446,9 +446,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     removeSessionTask(session, task.taskId);
     this.deps.taskCoordinator.removeTask(session.chatId, task.taskId);
     this.activeTasks.deleteHandle(task.taskId);
-    if (task.origin?.kind !== "launchedByJob" || task.interactionState !== "silent") {
-      await this.promptForShareDeletionIfNeeded(session, task.taskId, task.taskName);
-    }
+    await this.promptForShareDeletionIfNeeded(session, task.taskId, task.taskName, task.origin);
     await this.deps.taskCoordinator.onTaskVisibilityChanged(session.chatId);
   }
 
@@ -517,7 +515,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     await this.activeTasks.getHandle(taskId)?.resolveAuthRefresh?.(tokens);
   }
 
-  private async promptForShareDeletionIfNeeded(session: SessionState, taskId: string, taskName: string): Promise<void> {
+  private async promptForShareDeletionIfNeeded(session: SessionState, taskId: string, taskName: string, origin?: ActiveTaskState["origin"]): Promise<void> {
     const inspection = await this.deps.sandboxRunner.inspectTaskShare(taskId);
     if (inspection.isEmpty) {
       await this.deps.sandboxRunner.deleteTaskShare(taskId);
@@ -525,13 +523,25 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     }
 
     const requestId = randomUUID();
+    const summary = inspection.summary ?? "";
+
+    if (origin?.kind === "launchedByJob" && session.activeTask?.origin?.kind === "launchedByUser") {
+      this.deps.taskCoordinator.scheduleShareDeletionPrompt(session.chatId, {
+        requestId,
+        taskId,
+        taskName,
+        summary,
+      });
+      return;
+    }
+
     session.pendingShareDeletion = {
       requestId,
       taskId,
       taskName,
-      summary: inspection.summary ?? "",
+      summary,
     };
-    await this.deps.channel.sendShareDeletionRequest(session.chatId, requestId, taskName, inspection.summary ?? "");
+    await this.deps.channel.sendShareDeletionRequest(session.chatId, requestId, taskName, summary);
   }
 
   private async runTaskVisibleOperation(

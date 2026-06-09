@@ -107,3 +107,78 @@ test("TaskCoordinator reminds and resets reminder timing on user-task activity",
   assert.equal(released, true);
   assert.equal(store.getOrCreate("chat-reminder").activeTask?.taskId, "job-task");
 });
+
+test("TaskCoordinator defers share deletion prompt while a user task is active", async () => {
+  const timers = new FakeTimers();
+  const store = new InMemorySessionStore();
+  const channel = new RecordingChannel();
+  const coordinator = new TaskCoordinator(store, channel, {
+    now: () => timers.now,
+    setTimeoutImpl: timers.setTimeoutImpl,
+    clearTimeoutImpl: timers.clearTimeoutImpl,
+  });
+
+  const session = store.getOrCreate("chat-defer-share");
+  const userTask = createTask("user-task", "User task", { kind: "launchedByUser" });
+  session.activeTask = userTask;
+
+  coordinator.scheduleShareDeletionPrompt("chat-defer-share", {
+    requestId: "del-req-1",
+    taskId: "job-task",
+    taskName: "Scheduled job: Daily cleanup",
+    summary: "report.txt",
+  });
+
+    const pendingBefore = session.pendingShareDeletion;
+    assert.equal(pendingBefore, null);
+    assert.equal(channel.shareDeletionRequests.length, 0);
+
+    await timers.advanceBy(5 * 60 * 1000);
+    assert.equal(channel.sentTexts[0]?.text, messages.scheduledJobBlocked("Daily cleanup", "User task"));
+
+    session.activeTask = null;
+    await coordinator.onTaskVisibilityChanged("chat-defer-share");
+
+    assert.equal(session.pendingShareDeletion!.requestId, "del-req-1");
+    assert.equal(channel.shareDeletionRequests.length, 1);
+    assert.equal(channel.shareDeletionRequests[0]?.taskName, "Scheduled job: Daily cleanup");
+});
+
+test("TaskCoordinator queues multiple deferred share deletion prompts behind an active user task", async () => {
+  const store = new InMemorySessionStore();
+  const channel = new RecordingChannel();
+  const coordinator = new TaskCoordinator(store, channel);
+
+  const session = store.getOrCreate("chat-queue-shares");
+  const userTask = createTask("user-task", "User task", { kind: "launchedByUser" });
+  session.activeTask = userTask;
+
+  coordinator.scheduleShareDeletionPrompt("chat-queue-shares", {
+    requestId: "del-req-1",
+    taskId: "job-task-1",
+    taskName: "Scheduled job: Daily cleanup",
+    summary: "report.txt",
+  });
+  coordinator.scheduleShareDeletionPrompt("chat-queue-shares", {
+    requestId: "del-req-2",
+    taskId: "job-task-2",
+    taskName: "Scheduled job: Weekly report",
+    summary: "data.csv",
+  });
+
+  assert.equal(channel.shareDeletionRequests.length, 0);
+
+  session.activeTask = null;
+  await coordinator.onTaskVisibilityChanged("chat-queue-shares");
+
+    assert.equal(session.pendingShareDeletion!.requestId, "del-req-1");
+    assert.equal(channel.shareDeletionRequests.length, 1);
+    assert.equal(channel.shareDeletionRequests[0]?.taskName, "Scheduled job: Daily cleanup");
+
+    session.pendingShareDeletion = null;
+    await coordinator.onTaskVisibilityChanged("chat-queue-shares");
+
+    assert.equal(session.pendingShareDeletion!.requestId, "del-req-2");
+    assert.equal(channel.shareDeletionRequests.length, 2);
+    assert.equal(channel.shareDeletionRequests[1]?.taskName, "Scheduled job: Weekly report");
+});
