@@ -44,7 +44,6 @@ function createTask(taskId: string, taskName: string, origin: ActiveTaskState["o
     taskName,
     status: "running",
     startedAt: new Date(0).toISOString(),
-    lastActivityAt: new Date(0).toISOString(),
     pendingPrivilegeRequest: null,
     taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
     approvedMcpTools: [],
@@ -93,7 +92,8 @@ test("TaskCoordinator reminds and resets reminder timing on user-task activity",
   await timers.advanceBy(10 * 60 * 1000);
   assert.equal(channel.sentTexts[1]?.text, messages.scheduledJobBlocked("Daily cleanup", "User task"));
 
-  coordinator.recordTaskActivity(session, "user-task");
+  channel.recordUserInteraction("chat-reminder", new Date(timers.now).toISOString());
+  coordinator.onUserInteraction("chat-reminder");
   await timers.advanceBy(5 * 60 * 1000 - 1);
   assert.equal(channel.sentTexts.length, 2);
 

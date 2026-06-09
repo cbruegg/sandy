@@ -23,6 +23,10 @@ class RetryTestChannelAdapter implements ChannelAdapter {
   public sendTextCalls = 0;
   public sendTextFailuresRemaining = 0;
 
+  getLastUserInteractionTimestamp(_chatId: string): string | null {
+    return null;
+  }
+
   getFormatting(): ChannelFormatting {
     return testFormatting;
   }

@@ -53,6 +53,7 @@ export function expectDefined<T>(value: T | null | undefined, message: string): 
 
 export class RecordingChannel implements ChannelAdapter {
   readonly destinationStore = new ImplicitChannelDestinationStore("test-chat");
+  private readonly lastUserInteractionTimestamps = new Map<string, string>();
   public readonly sentTexts: Array<{ chatId: string; text: string }> = [];
   public readonly taskUpdates: Array<{ chatId: string; text: string }> = [];
   public readonly sentFiles: Array<{ chatId: string; filePath: string; caption?: string }> = [];
@@ -71,6 +72,14 @@ export class RecordingChannel implements ChannelAdapter {
 
   getFormatting(): ChannelFormatting {
     return testFormatting;
+  }
+
+  getLastUserInteractionTimestamp(chatId: string): string | null {
+    return this.lastUserInteractionTimestamps.get(chatId) ?? null;
+  }
+
+  recordUserInteraction(chatId: string, timestamp: string): void {
+    this.lastUserInteractionTimestamps.set(chatId, timestamp);
   }
 
   saveAttachments(chatId: string, attachments: MessageAttachment[], targetDirectory: string): Promise<SavedAttachment[]> {

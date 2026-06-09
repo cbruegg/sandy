@@ -29,6 +29,7 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
   private readonly inboxFailedRoot: string;
   private readonly outboxRoot: string;
   private readonly attachmentHostPaths = new Map<string, string>();
+  private readonly lastUserInteractionTimestamps = new Map<string, string>();
   private stopRequested = false;
   private loopPromise: Promise<void> | null = null;
   readonly destinationStore: ChannelDestinationStore;
@@ -44,6 +45,10 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
 
   getFormatting(): ChannelFormatting {
     return localTestFormatting;
+  }
+
+  getLastUserInteractionTimestamp(chatId: string): string | null {
+    return this.lastUserInteractionTimestamps.get(chatId) ?? null;
   }
 
   async start(handler: MessageHandler): Promise<void> {
@@ -190,6 +195,7 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
         for (const [attachmentId, hostPath] of attachmentsById.entries()) {
           this.attachmentHostPaths.set(attachmentId, hostPath);
         }
+        this.lastUserInteractionTimestamps.set(event.chatId, event.timestamp);
         await handler(event);
         await rename(sourcePath, processingPath);
       } catch (error) {

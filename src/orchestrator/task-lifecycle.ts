@@ -65,7 +65,6 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     }
 
     const task = taskRecord.task;
-    this.deps.taskCoordinator.recordTaskActivity(session, taskId);
     logger.info("task.event_received", {
       chatId,
       taskId,
@@ -168,14 +167,13 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
             taskName: decision.taskName,
           });
           const taskPolicy = normalizeTaskPolicy(decision.taskPolicy);
-          session.activeTask = {
-            taskId,
-            taskName: decision.taskName,
-            status: "running",
-            startedAt: now,
-            lastActivityAt: now,
-            pendingPrivilegeRequest: null,
-            taskPolicy,
+            session.activeTask = {
+              taskId,
+              taskName: decision.taskName,
+              status: "running",
+              startedAt: now,
+              pendingPrivilegeRequest: null,
+              taskPolicy,
             approvedMcpTools: [],
             approvedMcpResourceReads: [],
             approvedHttpTokenSessionGrants: [],
@@ -243,7 +241,6 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
       taskName,
       status: "running",
       startedAt: now,
-      lastActivityAt: now,
       pendingPrivilegeRequest: null,
       taskPolicy,
       approvedMcpTools: [],
@@ -353,7 +350,6 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
       taskId: activeTask.taskId,
       reason,
     });
-    this.deps.taskCoordinator.recordTaskActivity(session, activeTask.taskId);
     await this.activeTasks.requireHandle(activeTask.taskId).cancel(reason);
     await this.finishTask(session, activeTask.taskId, "cancelled", { discardSummary: true });
   }

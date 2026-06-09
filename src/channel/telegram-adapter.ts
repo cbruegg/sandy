@@ -89,6 +89,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
   private readonly token: string;
   private readonly transcriptionProvider: TranscriptionProvider | null;
   private readonly fileDownloader: (api: TelegramFileApiLike, token: string, fileId: string) => Promise<ArrayBuffer>;
+  private readonly lastUserInteractionTimestamps = new Map<string, string>();
   private startPromise: Promise<void> | null = null;
 
   constructor(options: TelegramAdapterOptions) {
@@ -103,6 +104,10 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
 
   getFormatting(): ChannelFormatting {
     return telegramFormatting;
+  }
+
+  getLastUserInteractionTimestamp(chatId: string): string | null {
+    return this.lastUserInteractionTimestamps.get(chatId) ?? null;
   }
 
   start(handler: MessageHandler): Promise<void> {
@@ -138,6 +143,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
         kind: event.kind,
         messageId: event.messageId,
       });
+      this.lastUserInteractionTimestamps.set(event.chatId, event.timestamp);
 
       try {
         await handler(event);

@@ -65,16 +65,16 @@ export class TaskCoordinator {
     return this.sessionStore.getByTaskId(taskId);
   }
 
-  recordTaskActivity(session: SessionState, taskId: string): void {
-    const task = this.findTask(session, taskId);
-    if (!task) {
+  onUserInteraction(chatId: string): void {
+    const session = this.sessionStore.getOrCreate(chatId);
+    const blocker = session.activeTask;
+    const queue = this.waitingInteractions.get(chatId) ?? [];
+    const shareDeletionQueue = this.pendingShareDeletionPrompts.get(chatId) ?? [];
+    if ((queue.length === 0 && shareDeletionQueue.length === 0) || blocker?.origin?.kind !== "launchedByUser") {
       return;
     }
 
-    task.lastActivityAt = new Date(this.now()).toISOString();
-    if (session.activeTask?.taskId === taskId && session.activeTask.origin?.kind === "launchedByUser") {
-      this.resetReminderBackoff(session);
-    }
+    this.resetReminderBackoff(session);
   }
 
   scheduleShareDeletionPrompt(chatId: string, prompt: PendingShareDeletionPrompt): void {
@@ -112,7 +112,6 @@ export class TaskCoordinator {
     if (!session.activeTask && !session.pendingShareDeletion) {
       const promotedTask = session.promoteBackgroundJobTask(taskId);
       promotedTask.interactionState = "interacting";
-      promotedTask.lastActivityAt = new Date(this.now()).toISOString();
       this.updateReminderState(session);
       await operation();
       await this.flushWaitingInteractionsForActiveTask(session, taskId);
@@ -202,7 +201,6 @@ export class TaskCoordinator {
         ? session.promoteBackgroundJobTask(next.taskId)
         : taskRecord.task;
       task.interactionState = "interacting";
-      task.lastActivityAt = new Date(this.now()).toISOString();
       queue.shift();
       if (queue.length === 0) {
         this.waitingInteractions.delete(session.chatId);
@@ -280,7 +278,8 @@ export class TaskCoordinator {
       return;
     }
 
-    const elapsedMs = Math.max(0, this.now() - Date.parse(blocker.lastActivityAt));
+    const baselineTimestamp = this.channel.getLastUserInteractionTimestamp(session.chatId) ?? blocker.startedAt;
+    const elapsedMs = Math.max(0, this.now() - Date.parse(baselineTimestamp));
     const timeoutDelayMs = Math.max(0, delayMs - elapsedMs);
     runtime.timeout = this.setTimeoutImpl(() => {
       void this.sendReminder(session.chatId);

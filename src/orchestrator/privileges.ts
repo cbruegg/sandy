@@ -119,7 +119,6 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     }
 
     let result: PrivilegeResolutionResult;
-    this.deps.taskCoordinator.recordTaskActivity(session, activeTask.taskId);
     if (request.kind === "mcp_tool_call") {
       result = await this.resolvePendingMcpPrivilegeRequest(session, request, decision);
     } else if (request.kind === "mcp_resource_read") {

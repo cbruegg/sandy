@@ -11,6 +11,7 @@ export type MessageHandler = (event: NormalizedChatEvent) => Promise<void>;
 
 export interface ChannelAdapter {
   readonly destinationStore: ChannelDestinationStore;
+  getLastUserInteractionTimestamp(chatId: string): string | null;
   getFormatting(): ChannelFormatting;
   start(handler: MessageHandler): Promise<void>;
   stop(): Promise<void>;

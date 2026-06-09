@@ -47,7 +47,6 @@ export type ActiveTaskState = {
   taskName: string;
   status: TaskStatus;
   startedAt: string;
-  lastActivityAt: string;
   pendingPrivilegeRequest: PrivilegeRequest | null;
   taskPolicy: MainAgentTaskPolicy;
   approvedMcpTools: McpToolGrant[];

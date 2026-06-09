@@ -210,17 +210,13 @@ Rules:
 1. Wait at least 5 minutes after the latest progress on the `launchedByUser` task.
 2. Then send a reminder that an unfinished user-launched task is blocking a scheduled job task.
 3. Use exponentially increasing reminder intervals, capped at a reasonable maximum such as 1 hour.
-4. Reset reminder timing whenever the `launchedByUser` task makes progress.
+4. Reset reminder timing whenever Sandy receives another user interaction through the channel.
 
-Progress includes:
+Progress means any interaction received from the user through the channel, such as:
 
-- Worker progress events.
-- Assistant output.
-- Messages sent to the user.
 - Messages received from the user.
-- Privilege requests.
 - Privilege responses.
-- Task lifecycle changes.
+- Other user-triggered control inputs such as cancel or mark-finished.
 
 All reminder strings must live in `messages.ts`.
 
@@ -339,7 +335,7 @@ Run `bun run build` and `bun run test` after TypeScript/runtime changes.
 - The scheduler supports one-shot jobs and recurring jobs through the `cron` npm package, with duplicate launch protection, refresh after mutations, and shutdown cleanup.
 - Task coordination now allows silent job tasks to coexist with a user-visible task. Job tasks move through `silent`, `waitingToInteract`, and `interacting`, and user messages route to an interacting job task.
 - A background interaction gate now queues user-visible job-task operations behind the current user-visible flow and flushes them in order once the blocker clears. Permission prompts, files, task updates, and review summaries all go through that gate.
-- Waiting reminders now fire after 5 minutes of no progress on the blocking user task, back off exponentially up to 1 hour, and reset whenever the blocking task makes progress.
+- Waiting reminders now fire after 5 minutes of no user interaction on the blocking user task, back off exponentially up to 1 hour, and reset whenever Sandy receives another user interaction through the channel.
 - Worker job management tools were added. Read-only tools do not require approval; mutation tools require explicit approval through `job_mutation` privilege requests with no persistent approval option.
 - Job-launched tasks reuse the existing sandbox/task-bundle launch path and are marked with `origin: launchedByJob` plus a silent/waiting/interacting state. Silent job tasks can complete without summary review.
 - Job-scoped approval persistence is now reduced to per-job task policy under `state/jobs/job-approvals.json`: the file remembers which globally persisted MCP servers and HTTP tokens should auto-apply to future executions of that job.

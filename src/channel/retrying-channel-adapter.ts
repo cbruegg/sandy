@@ -59,6 +59,7 @@ export function createRetryingChannelAdapter(
 
   return {
     destinationStore: adapter.destinationStore,
+    getLastUserInteractionTimestamp: (chatId) => adapter.getLastUserInteractionTimestamp(chatId),
     getFormatting: () => adapter.getFormatting(),
     start: (handler) => failFast("channel.start", () => adapter.start(handler)),
     stop: () => failFast("channel.stop", () => adapter.stop()),

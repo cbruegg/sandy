@@ -45,6 +45,7 @@ test("LocalTestChannelAdapter forwards inbox events and writes outbound records"
 
     await waitFor(async () => received.length, (count) => count === 1);
     assert.equal(received[0]?.kind, "user_message");
+    assert.equal(adapter.getLastUserInteractionTimestamp("local-test"), "2026-04-14T10:00:00.000Z");
 
     await adapter.sendTaskUpdate("local-test", "Working");
     const outbox = await waitFor(

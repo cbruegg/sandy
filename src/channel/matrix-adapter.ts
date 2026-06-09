@@ -175,6 +175,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   private startPromise: Promise<void> | null = null;
   private botUserId: string | null = null;
   private botDeviceId: string | null = null;
+  private readonly lastUserInteractionTimestamps = new Map<string, string>();
   private readonly activePolls = new Map<string, MatrixPollRecord>();
   private readonly attachmentRefs = new Map<string, MatrixAttachmentRef>();
   private readonly qualifiedRooms = new Set<string>();
@@ -192,6 +193,10 @@ export class MatrixChannelAdapter implements ChannelAdapter {
 
   getFormatting(): ChannelFormatting {
     return matrixFormatting;
+  }
+
+  getLastUserInteractionTimestamp(chatId: string): string | null {
+    return this.lastUserInteractionTimestamps.get(chatId) ?? null;
   }
 
   async start(handler: MessageHandler): Promise<void> {
@@ -432,6 +437,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       kind: normalized.kind,
       eventId: normalized.messageId,
     });
+    this.lastUserInteractionTimestamps.set(normalized.chatId, normalized.timestamp);
     try {
       await handler(normalized);
     } catch (error) {
@@ -463,6 +469,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       kind: normalized.kind,
       eventId: normalized.messageId,
     });
+    this.lastUserInteractionTimestamps.set(normalized.chatId, normalized.timestamp);
     try {
       await handler(normalized);
     } catch (error) {
