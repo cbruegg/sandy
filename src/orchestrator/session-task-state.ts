@@ -3,7 +3,6 @@ import type { ActiveTaskState, SessionState } from "../types.js";
 export type SessionTaskRecord = {
   task: ActiveTaskState;
   location: "active" | "background";
-  index: number;
 };
 
 export function findSessionTask(session: SessionState, taskId: string): SessionTaskRecord | null {
@@ -11,7 +10,6 @@ export function findSessionTask(session: SessionState, taskId: string): SessionT
     return {
       task: session.activeTask,
       location: "active",
-      index: -1,
     };
   }
 
@@ -28,7 +26,6 @@ export function findSessionTask(session: SessionState, taskId: string): SessionT
   return {
     task,
     location: "background",
-    index,
   };
 }
 
