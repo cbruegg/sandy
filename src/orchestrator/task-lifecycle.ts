@@ -8,7 +8,7 @@ import {
 } from "./worker-input.js";
 import { stageSharedAttachments } from "./task-share.js";
 import { ActiveTaskRuntimeRegistry } from "./active-task-runtime-registry.js";
-import { findSessionTask, removeSessionTask } from "./session-task-state.js";
+
 import type {
   ActiveTaskStatus,
   OrchestratorCoreDependencies,
@@ -54,7 +54,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
 
   async routeSubAgentEvent(chatId: string, taskId: string, event: SubAgentEvent): Promise<void> {
     const session = this.deps.sessionStore.getOrCreate(chatId);
-    const taskRecord = findSessionTask(session, taskId);
+    const taskRecord = session.findTask(taskId);
     if (!taskRecord) {
       logger.warn("task.event_ignored", {
         chatId,
@@ -277,7 +277,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
       this.activeTasks.registerHandle(taskId, handle);
       return taskId;
     } catch (error) {
-      removeSessionTask(session, taskId);
+      session.removeTask(taskId);
       this.deps.taskCoordinator.removeTask(chatId, taskId);
       throw error;
     }
@@ -443,7 +443,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
       status: task.status,
     });
     this.failPendingPrivilegeRequestOnTaskClose(task);
-    removeSessionTask(session, task.taskId);
+    session.removeTask(task.taskId);
     this.deps.taskCoordinator.removeTask(session.chatId, task.taskId);
     this.activeTasks.deleteHandle(task.taskId);
     await this.promptForShareDeletionIfNeeded(session, task.taskId, task.taskName, task.origin);

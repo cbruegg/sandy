@@ -1,4 +1,4 @@
-import type { SessionState } from "../types.js";
+import { SessionState } from "../types.js";
 
 export interface SessionStore {
   getOrCreate(chatId: string): SessionState;
@@ -14,13 +14,7 @@ export class InMemorySessionStore implements SessionStore {
     if (existing) {
       return existing;
     }
-    const session: SessionState = {
-      chatId,
-      activeTask: null,
-      backgroundJobTasks: [],
-      pendingTaskSummary: null,
-      pendingShareDeletion: null,
-    };
+    const session = new SessionState(chatId);
     this.sessions.set(chatId, session);
     return session;
   }

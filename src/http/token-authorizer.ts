@@ -4,7 +4,7 @@ import type { PersistentApprovalStore } from "../privilege/persistent-approval-s
 import type { PrivilegeResolutionResult } from "../types.js";
 import { messages } from "../messages.js";
 import type { SessionState } from "../types/task-state.js";
-import { findSessionTask } from "../orchestrator/session-task-state.js";
+
 
 type AuthorizeHttpTokenUseInput = {
   taskId: string;
@@ -28,7 +28,7 @@ export class HttpTokenAuthorizer {
       };
     }
 
-    const activeTask = findSessionTask(session, input.taskId)?.task;
+    const activeTask = session.findTask(input.taskId)?.task;
     if (!activeTask) {
       return {
         requestId: randomUUID(),

@@ -3,7 +3,7 @@ import { messages } from "../messages.js";
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
 import type { SessionStore } from "../session/in-memory-session-store.js";
 import type { ActiveTaskState, SessionState } from "../types.js";
-import { findSessionTask, promoteBackgroundJobTask } from "./session-task-state.js";
+
 
 type WaitingInteraction = {
   taskId: string;
@@ -58,7 +58,7 @@ export class TaskCoordinator {
   }
 
   findTask(session: SessionState, taskId: string): ActiveTaskState | null {
-    return findSessionTask(session, taskId)?.task ?? null;
+    return session.findTask(taskId)?.task ?? null;
   }
 
   findSessionByTaskId(taskId: string): SessionState | undefined {
@@ -92,7 +92,7 @@ export class TaskCoordinator {
     operation: () => Promise<void>,
   ): Promise<void> {
     const session = this.sessionStore.getOrCreate(chatId);
-    const taskRecord = findSessionTask(session, taskId);
+    const taskRecord = session.findTask(taskId);
     if (!taskRecord) {
       throw new Error(`Task ${taskId} is no longer active.`);
     }
@@ -110,7 +110,7 @@ export class TaskCoordinator {
     }
 
     if (!session.activeTask && !session.pendingShareDeletion) {
-      const promotedTask = promoteBackgroundJobTask(session, taskId);
+      const promotedTask = session.promoteBackgroundJobTask(taskId);
       promotedTask.interactionState = "interacting";
       promotedTask.lastActivityAt = new Date(this.now()).toISOString();
       this.updateReminderState(session);
@@ -191,7 +191,7 @@ export class TaskCoordinator {
         break;
       }
 
-      const taskRecord = next ? findSessionTask(session, next.taskId) : null;
+      const taskRecord = next ? session.findTask(next.taskId) : null;
       if (!taskRecord) {
         queue.shift();
         next.reject(new Error(`Task ${next.taskId} is no longer active.`));
@@ -199,7 +199,7 @@ export class TaskCoordinator {
       }
 
       const task = taskRecord.location === "background"
-        ? promoteBackgroundJobTask(session, next.taskId)
+        ? session.promoteBackgroundJobTask(next.taskId)
         : taskRecord.task;
       task.interactionState = "interacting";
       task.lastActivityAt = new Date(this.now()).toISOString();
