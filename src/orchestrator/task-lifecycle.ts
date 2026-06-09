@@ -102,6 +102,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
         case "task_done":
           // Workers usually emit task_summary first, then task_done to publish that stored summary for review.
           if (task.status !== "completed") {
+            // A launchedByJob task that never interacted with the user may finish silently without the usual review step.
             if (!this.isSilentJobTask(session, taskId)) await this.sendTaskSummaryForReview(chatId, session, taskId);
             await this.finishTask(session, taskId, "completed");
           }
@@ -112,6 +113,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
             "Artifacts: none",
             "Open questions: none",
           ].join("\n"));
+          // A launchedByJob task that never interacted with the user may finish silently without the usual review step.
           if (!this.isSilentJobTask(session, taskId)) await this.sendTaskSummaryForReview(chatId, session, taskId);
           await this.finishTask(session, taskId, "completed");
           break;
