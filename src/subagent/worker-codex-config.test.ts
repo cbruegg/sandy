@@ -46,6 +46,7 @@ test("applyWorkerCodexConfigPatch preserves seeded MCP config while adding shell
       todoist: {
         url: "http://sandy-mcp-proxy:8080/mcp/tasks/task-1/servers/todoist",
         bearer_token_env_var: "SANDY_MCP_PROXY_TOKEN",
+        tool_timeout_sec: 86400,
       },
     },
   }), "utf8");
@@ -57,7 +58,7 @@ test("applyWorkerCodexConfigPatch preserves seeded MCP config while adding shell
 
   const parsed = toml.parse(await readFile(configPath, "utf8")) as {
     model: string;
-    mcp_servers: Record<string, { url: string; bearer_token_env_var: string }>;
+    mcp_servers: Record<string, { url: string; bearer_token_env_var: string; tool_timeout_sec: number }>;
     shell_environment_policy: { set: { PATH: string } };
     features: { memories: boolean };
     memories: { generate_memories: boolean; use_memories: boolean };
@@ -68,6 +69,7 @@ test("applyWorkerCodexConfigPatch preserves seeded MCP config while adding shell
     todoist: {
       url: "http://sandy-mcp-proxy:8080/mcp/tasks/task-1/servers/todoist",
       bearer_token_env_var: "SANDY_MCP_PROXY_TOKEN",
+      tool_timeout_sec: 86400,
     },
   });
   assert.deepEqual(parsed.shell_environment_policy, {
