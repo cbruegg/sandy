@@ -27,6 +27,7 @@ import type {
   TranscriptEntry,
 } from "../types.js";
 import type { JobDefinition } from "../jobs/job-validation.js";
+import { buildJobTaskBrief } from "../jobs/job-task-brief.js";
 import type { SandboxHandle } from "../sandbox/sandbox-runner.js";
 import type {TaskFailureHandler} from "./privileges.ts";
 
@@ -570,17 +571,6 @@ function uniqueStrings(entries: string[]): string[] {
     result.push(entry);
   }
   return result;
-}
-
-function buildJobTaskBrief(job: JobDefinition, workspacePath: string | null): string {
-  return [
-    `Run scheduled Sandy job "${job.name}" (${job.id}).`,
-    `Use Sandy skill: ${job.skillId}.`,
-    workspacePath ? `This recurring job has a persistent workspace directory on the host: ${workspacePath}` : null,
-    workspacePath ? "The workspace is for durable notes, generated files, helper scripts, caches, and job state." : null,
-    workspacePath ? "If you need to access that directory from the worker, request host directory access for it; Sandy has pre-approved read/write access for this job execution." : null,
-    "If you can complete the job without user interaction, finish silently.",
-  ].filter((line): line is string => line !== null).join("\n\n");
 }
 
 function assertNever(value: never): never {
