@@ -85,14 +85,14 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
           if (!message) {
             break;
           }
-          await this.runTaskVisibleOperation(chatId, taskId, task.taskName, async () => {
+          await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async () => {
             this.markTaskInteracting(session, taskId);
             await this.deps.channel.sendTaskUpdate(chatId, message);
           });
           break;
         }
         case "assistant_output":
-          await this.runTaskVisibleOperation(chatId, taskId, task.taskName, async () => {
+          await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async () => {
             this.markTaskInteracting(session, taskId);
             await this.deps.channel.sendTaskUpdate(chatId, event.text);
           });
@@ -124,7 +124,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
             taskId,
             message: event.message,
           });
-          await this.runTaskVisibleOperation(chatId, taskId, task.taskName, async () => {
+          await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async () => {
             await this.deps.channel.sendText(chatId, messages.taskFailed(event.message));
           });
           await this.finishTask(session, taskId, "failed");
@@ -333,7 +333,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     }
 
     const summary = activeTask.taskSummary ?? this.buildCompletedTaskFallbackSummary(activeTask);
-    await this.runTaskVisibleOperation(chatId, taskId, activeTask.taskName, async () => {
+    await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, activeTask.taskName, async () => {
       session.pendingTaskSummary = {
         taskName: activeTask.taskName,
         summary,
@@ -380,7 +380,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
 
     task.status = "failed";
     try {
-      await this.runTaskVisibleOperation(session.chatId, taskId, task.taskName, async () => {
+      await this.deps.taskCoordinator.runJobUserVisibleOperation(session.chatId, taskId, task.taskName, async () => {
         await this.deps.channel.sendText(session.chatId, messages.taskFailed(message));
       });
     } catch (notifyError) {
@@ -469,7 +469,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
 
     task.workerConnected = false;
     task.status = "failed";
-    await this.runTaskVisibleOperation(session.chatId, taskId, task.taskName, async () => {
+    await this.deps.taskCoordinator.runJobUserVisibleOperation(session.chatId, taskId, task.taskName, async () => {
       await this.deps.channel.sendText(session.chatId, message);
     });
     await this.closeTask(session, taskId);
@@ -543,34 +543,13 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     await this.deps.channel.sendShareDeletionRequest(session.chatId, requestId, taskName, summary);
   }
 
-  private async runTaskVisibleOperation(
-    chatId: string,
-    taskId: string,
-    taskName: string,
-    operation: () => Promise<void>,
-  ): Promise<void> {
-    await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, operation);
-  }
 }
 
 function normalizeTaskPolicy(policy: MainAgentTaskPolicyInput | undefined): MainAgentTaskPolicy {
   return {
-    autoApproveMcpServers: uniqueStrings(policy?.autoApproveMcpServers ?? []),
-    autoApproveHttpTokens: uniqueStrings(policy?.autoApproveHttpTokens ?? []),
+    autoApproveMcpServers: [...new Set(policy?.autoApproveMcpServers ?? [])],
+    autoApproveHttpTokens: [...new Set(policy?.autoApproveHttpTokens ?? [])],
   };
-}
-
-function uniqueStrings(entries: string[]): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const entry of entries) {
-    if (seen.has(entry)) {
-      continue;
-    }
-    seen.add(entry);
-    result.push(entry);
-  }
-  return result;
 }
 
 function assertNever(value: never): never {
