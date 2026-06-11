@@ -73,13 +73,8 @@ export class TaskCoordinator {
     }
 
     const task = taskRecord.task;
-    if (task.origin?.kind === "launchedByUser") {
+    if (task.origin.kind === "launchedByUser") {
       // User-launched tasks are already the visible task for their chat, so they never wait here.
-      await operation();
-      return;
-    }
-
-    if (task.origin?.kind !== "launchedByJob") {
       await operation();
       return;
     }
@@ -255,7 +250,7 @@ export class TaskCoordinator {
   private getBlockedJobReminderContext(chatId: string): BlockedJobReminderContext | null {
     const session = this.sessionStore.getOrCreate(chatId);
     const blocker = session.activeTask;
-    if (!blocker || blocker.origin?.kind !== "launchedByUser") {
+    if (!blocker || blocker.origin.kind !== "launchedByUser") {
       return null;
     }
 

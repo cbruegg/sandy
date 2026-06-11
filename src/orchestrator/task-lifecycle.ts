@@ -24,6 +24,7 @@ import type {
   SessionState,
   SharedAttachment,
   SubAgentEvent,
+  TaskOrigin,
   TranscriptEntry,
 } from "../types.js";
 import type { JobDefinition } from "../jobs/job-validation.js";
@@ -451,12 +452,12 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
 
   private isSilentJobTask(session: SessionState, taskId: string): boolean {
     const task = this.deps.taskCoordinator.findTask(session, taskId);
-    return !!task && task.origin?.kind === "launchedByJob" && task.interactionState === "silent";
+    return !!task && task.origin.kind === "launchedByJob" && task.interactionState === "silent";
   }
 
   private markTaskInteracting(session: SessionState, taskId: string): void {
     const task = this.deps.taskCoordinator.findTask(session, taskId);
-    if (task && task.origin?.kind === "launchedByJob") {
+    if (task && task.origin.kind === "launchedByJob") {
       task.interactionState = "interacting";
     }
   }
@@ -514,7 +515,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     await this.activeTasks.getHandle(taskId)?.resolveAuthRefresh?.(tokens);
   }
 
-  private async promptForShareDeletionIfNeeded(session: SessionState, taskId: string, taskName: string, origin?: ActiveTaskState["origin"]): Promise<void> {
+  private async promptForShareDeletionIfNeeded(session: SessionState, taskId: string, taskName: string, origin: TaskOrigin): Promise<void> {
     const inspection = await this.deps.sandboxRunner.inspectTaskShare(taskId);
     if (inspection.isEmpty) {
       await this.deps.sandboxRunner.deleteTaskShare(taskId);
@@ -524,7 +525,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     const requestId = randomUUID();
     const summary = inspection.summary ?? "";
 
-    if (origin?.kind === "launchedByJob" && session.activeTask?.origin?.kind === "launchedByUser") {
+    if (origin.kind === "launchedByJob" && session.activeTask?.origin.kind === "launchedByUser") {
       this.deps.taskCoordinator.scheduleShareDeletionPrompt(session.chatId, {
         requestId,
         taskId,

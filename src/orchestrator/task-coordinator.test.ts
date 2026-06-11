@@ -54,7 +54,7 @@ function createTask(taskId: string, taskName: string, origin: ActiveTaskState["o
     workerConnected: true,
     taskSummary: null,
     origin,
-    interactionState: origin?.kind === "launchedByJob" ? "silent" : "interacting",
+    interactionState: origin.kind === "launchedByJob" ? "silent" : "interacting",
   };
 }
 

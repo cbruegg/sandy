@@ -1101,7 +1101,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     applyMutation: () => boolean,
   ): Promise<void> {
     const changed = applyMutation();
-    if (!changed || task.origin?.kind !== "launchedByJob") {
+    if (!changed || task.origin.kind !== "launchedByJob") {
       return;
     }
     await this.deps.jobApprovalStore.saveTaskPolicy(task.origin.jobId, task.taskPolicy);

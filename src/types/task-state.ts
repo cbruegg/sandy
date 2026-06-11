@@ -36,7 +36,7 @@ type TaskStatus =
   | "cancelled"
   | "failed";
 
-type TaskOrigin =
+export type TaskOrigin =
   | { kind: "launchedByUser" }
   | { kind: "launchedByJob"; jobId: string };
 
@@ -56,8 +56,8 @@ export type ActiveTaskState = {
   approvedHostDirectories: HostDirectoryGrant[];
   workerConnected: boolean;
   taskSummary: string | null;
-  origin?: TaskOrigin;
-  interactionState?: JobTaskInteractionState;
+  origin: TaskOrigin;
+  interactionState: JobTaskInteractionState;
 };
 
 type PendingShareDeletion = {
