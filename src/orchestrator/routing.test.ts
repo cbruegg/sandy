@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { messages } from "../messages.js";
 import {
   createTestOrchestrator,
+  expectDefined,
   StubMainAgent,
 } from "./test-helpers.js";
 import type { MainAgentDecision } from "../types.js";
@@ -103,18 +104,21 @@ test("user messages route to an interacting scheduled job after waiting behind a
   };
   const jobTaskId = await taskLifecycle.launchJobTask(job, "chat-job-routing", null);
 
-  const blockedProgress = runner.emit({ type: "assistant_output", text: "Waiting on the user task." }, jobTaskId);
+  const blockedInteraction = orchestrator.executeNativeWorkerToolCall({
+    taskId: jobTaskId,
+    toolName: "request_interaction",
+    arguments: { message: "Waiting on the user task." },
+  });
   await Promise.resolve();
 
   assert.equal(channel.taskUpdates.length, 0);
   assert.equal(store.getOrCreate("chat-job-routing").backgroundJobTasks[0]?.interactionState, "waitingToInteract");
 
-  const userTaskId = runner.launches[0]?.taskId;
-  assert.ok(userTaskId);
+  const userTaskId = expectDefined(runner.launches[0], "Expected launch.").taskId;
   await runner.emit({ type: "task_done" }, userTaskId);
-  await blockedProgress;
+  await blockedInteraction;
 
-  assert.equal(channel.taskUpdates.at(-1)?.text, "Waiting on the user task.");
+  assert.match(channel.taskUpdates.at(-1)?.text ?? "", /needs your attention.*Waiting on the user task/);
   assert.equal(store.getOrCreate("chat-job-routing").activeTask?.taskId, jobTaskId);
 
   await orchestrator.handleChatEvent({

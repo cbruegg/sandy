@@ -144,6 +144,14 @@ export const messages = {
     `Failed to ${operation} job "${jobId}": ${error}`,
   scheduledJobBlocked: (jobName: string, taskName: string): string =>
     `A scheduled job (${jobName}) is waiting to interact, but task "${taskName}" is still active.`,
+  jobRequestsInteraction: (taskName: string, message?: string): string =>
+    message
+      ? `Scheduled job "${taskName}" needs your attention: ${message}`
+      : `Scheduled job "${taskName}" needs your attention.`,
+  requestInteractionApproved: (): string =>
+    "The task has been promoted to interactive mode. The user can now see your output and respond.",
+  requestInteractionAlreadyInteractive: (): string =>
+    "This task is already in interactive mode. No promotion is needed.",
 } as const;
 
 function formatCommandForChannel(command: string, channelFormatting: ChannelFormatting | null): string {

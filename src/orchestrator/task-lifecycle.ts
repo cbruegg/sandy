@@ -86,6 +86,13 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
           await this.failTaskAfterWorkerDisconnect(session, taskId, event.message);
           break;
         case "progress": {
+          if (this.isSilentJobTask(session, taskId)) {
+            logger.debug("task.progress_ignored_silent_job", {
+              chatId,
+              taskId,
+            });
+            break;
+          }
           const message = event.message.trim();
           if (!message) {
             break;
@@ -97,6 +104,13 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
           break;
         }
         case "assistant_output":
+          if (this.isSilentJobTask(session, taskId)) {
+            logger.debug("task.assistant_output_ignored_silent_job", {
+              chatId,
+              taskId,
+            });
+            break;
+          }
           await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async (channel) => {
             this.markTaskInteracting(session, taskId);
             await channel.sendTaskUpdate(chatId, event.text);

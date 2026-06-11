@@ -678,3 +678,32 @@ test("orchestrator defers job share deletion prompt while a user task is active"
   assert.equal(channel.shareDeletionRequests.length, 1);
   assert.equal(channel.shareDeletionRequests[0]?.taskName, "Scheduled job: Daily cleanup");
 });
+
+test("silent job task progress updates are suppressed", async () => {
+  const { taskLifecycle, runner, store, channel } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
+  });
+
+  const job: JobDefinition = {
+    id: "job-silent-progress",
+    name: "Daily cleanup",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt: "2026-04-01T00:00:00.000Z" },
+    skillId: "cleanup",
+  };
+  const taskId = await taskLifecycle.launchJobTask(job, "chat-silent-progress", null);
+
+  await runner.emit({ type: "progress", message: "Cleaning up old files." }, taskId);
+  await runner.emit({ type: "assistant_output", text: "I'm working on the cleanup." }, taskId);
+
+  // Progress and assistant_output should be suppressed for a silent job task.
+  assert.equal(channel.taskUpdates.length, 0);
+  assert.equal(channel.sentTexts.length, 0);
+
+  const session = store.getOrCreate("chat-silent-progress");
+  const task = session.findTask(taskId)?.task;
+  assert.ok(task);
+  assert.equal(task.interactionState, "silent");
+});
+
+

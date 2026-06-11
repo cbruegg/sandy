@@ -46,6 +46,7 @@ const copyOutOfShareToolName = "copy_out_of_share";
 const sendFileToChannelToolName = "send_file_to_channel";
 const requestHttpTokenToolName = "request_http_token";
 const requestHostDirectoryAccessToolName = "request_host_directory_access";
+const requestInteractionToolName = "request_interaction";
 const createSkillToolName = "create_skill";
 const updateSkillToolName = "update_skill";
 const deleteSkillToolName = "delete_skill";
@@ -89,6 +90,11 @@ const requestHostDirectoryAccessSchema = z.object({
   type: z.literal(requestHostDirectoryAccessToolName),
   path: z.string(),
   level: z.enum(["read_only", "read_write"]),
+}).strict();
+
+const requestInteractionSchema = z.object({
+  type: z.literal(requestInteractionToolName),
+  message: z.string().optional(),
 }).strict();
 
 const createSkillSchema = z.object({
@@ -167,6 +173,12 @@ export const workerToolEntries = [
     requestHostDirectoryAccessSchema,
   ),
   defineWorkerTool(
+    requestInteractionToolName,
+    "Request interactive mode for a scheduled job task. Use this when a scheduled job needs the user's attention or input to continue. The host will promote the task so the user can see your output and respond. Provide an optional message explaining what you need from the user. This tool has no effect on user-launched tasks that are already interactive.",
+    false,
+    requestInteractionSchema,
+  ),
+  defineWorkerTool(
     createSkillToolName,
     "Ask the host to create a new Sandy skill. Provide the skillId, name, description, and body.",
     true,
@@ -202,6 +214,7 @@ export type WorkerToolPayload =
   | z.infer<typeof sendFileToChannelSchema>
   | z.infer<typeof requestHttpTokenSchema>
   | z.infer<typeof requestHostDirectoryAccessSchema>
+  | z.infer<typeof requestInteractionSchema>
   | z.infer<typeof createSkillSchema>
   | z.infer<typeof updateSkillSchema>
   | z.infer<typeof deleteSkillSchema>

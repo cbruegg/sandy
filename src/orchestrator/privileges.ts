@@ -219,6 +219,12 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
           sharePath: call.path,
           caption: call.caption,
         });
+      case "request_interaction":
+        return await this.workerToolsHandler.requestInteraction({
+          chatId,
+          task: activeTask,
+          message: call.message,
+        });
       case "copy_into_share":
       case "copy_out_of_share":
         return this.buildNativeWorkerToolResultFromPrivilegeResolution(await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {

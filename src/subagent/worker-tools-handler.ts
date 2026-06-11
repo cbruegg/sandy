@@ -42,6 +42,26 @@ export class WorkerToolsHandler {
     return { isError: false, message: messages.sharedFileSentToUser(input.sharePath) }
   }
 
+  async requestInteraction(input: {
+    chatId: string;
+    task: ActiveTaskState;
+    message?: string;
+  }): Promise<NativeWorkerToolCallResult> {
+    if (input.task.origin.kind !== "launchedByJob") {
+      return { isError: false, message: messages.requestInteractionAlreadyInteractive() };
+    }
+
+    await this.deps.runUserVisibleOperation({
+      chatId: input.chatId,
+      taskId: input.task.taskId,
+      taskName: input.task.taskName,
+      operation: async (channel) => {
+        await channel.sendTaskUpdate(input.chatId, messages.jobRequestsInteraction(input.task.taskName, input.message));
+      },
+    });
+    return { isError: false, message: messages.requestInteractionApproved() };
+  }
+
   async listJobs(): Promise<NativeWorkerToolCallResult> {
     const jobs = await this.deps.jobService.listJobs();
     return { isError: false, message: JSON.stringify(jobs) };

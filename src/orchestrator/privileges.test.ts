@@ -126,6 +126,75 @@ test("orchestrator sends worker-requested shared files back through the channel"
   }]);
 });
 
+test("request_interaction tool promotes a silent job task to interactive mode", async () => {
+  const { orchestrator, taskLifecycle, store, channel } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
+  });
+
+  const job: JobDefinition = {
+    id: "job-request-interaction-tool",
+    name: "Daily report",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt: "2026-04-01T00:00:00.000Z" },
+    skillId: "report",
+  };
+  const taskId = await taskLifecycle.launchJobTask(job, "chat-request-interaction-tool", null);
+
+  // Before request_interaction, the job task is silent.
+  const session = store.getOrCreate("chat-request-interaction-tool");
+  const task = session.findTask(taskId)?.task;
+  assert.ok(task);
+  assert.equal(task.interactionState, "silent");
+
+  const toolResult = await orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "request_interaction",
+    arguments: { message: "I need the user to confirm the report format." },
+  });
+
+  assert.equal(toolResult.isError, false);
+  assert.match(toolResult.message, /promoted to interactive mode/i);
+  assert.equal(channel.taskUpdates.length, 1);
+  assert.match(channel.taskUpdates[0]?.text ?? "", /needs your attention.*confirm the report format/);
+
+  const updatedTask = session.findTask(taskId)?.task;
+  assert.ok(updatedTask);
+  assert.equal(updatedTask.interactionState, "interacting");
+});
+
+test("request_interaction tool is a no-op for user-launched tasks", async () => {
+  const mainAgent = new StubMainAgent({
+    action: "launch_task",
+    taskBrief: "Test task.",
+    taskName: "user-task",
+    taskLanguage: "English",
+  });
+  const { orchestrator, runner, channel } = createTestOrchestrator({ mainAgent });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-user-interaction-tool",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Start a task",
+    rawText: "Start a task",
+    attachments: [],
+  });
+
+  const taskId = expectDefined(runner.launches[0], "Expected launch.").taskId;
+
+  const toolResult = await orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "request_interaction",
+    arguments: { message: "Should be a no-op." },
+  });
+
+  assert.equal(toolResult.isError, false);
+  assert.match(toolResult.message, /already in interactive mode/i);
+  // No task updates should be sent since the task is already interactive.
+  assert.equal(channel.taskUpdates.length, 0);
+});
+
 test("orchestrator fails the active task if channel file delivery fails", async () => {
   const channel = new RecordingChannel();
   channel.sendFileError = new Error("Telegram upload failed.");
