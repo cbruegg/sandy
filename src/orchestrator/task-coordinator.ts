@@ -1,11 +1,10 @@
-import { logger } from "../logger.js";
-import { messages } from "../messages.js";
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
 import type { SessionStore } from "../session/in-memory-session-store.js";
 import type { ActiveTaskState, SessionState } from "../types.js";
+import { BlockedJobReminderScheduler } from "./blocked-job-reminder-scheduler.js";
+import type { BlockedJobReminderContext, TimerControls } from "./blocked-job-reminder-scheduler.js";
 
-
-type WaitingInteraction = {
+type WaitingJobInteraction = {
   taskId: string;
   jobName: string;
   run: () => Promise<void>;
@@ -20,41 +19,26 @@ type PendingShareDeletionPrompt = {
   summary: string;
 };
 
-type ReminderRuntime = {
-  timeout: ReturnType<typeof setTimeout> | null;
-  nextDelayMs: number;
-};
-
-type TimerControls = {
-  now?: () => number;
-  setTimeoutImpl?: typeof setTimeout;
-  clearTimeoutImpl?: typeof clearTimeout;
-};
-
-const initialReminderDelayMs = 5 * 60 * 1000;
-const maximumReminderDelayMs = 60 * 60 * 1000;
-
 export class TaskCoordinator {
-  private readonly waitingInteractions = new Map<string, WaitingInteraction[]>();
+  private readonly waitingJobInteractions = new Map<string, WaitingJobInteraction[]>();
   private readonly pendingShareDeletionPrompts = new Map<string, PendingShareDeletionPrompt[]>();
-  private readonly reminderRuntimes = new Map<string, ReminderRuntime>();
-  private readonly now: () => number;
-  private readonly setTimeoutImpl: typeof setTimeout;
-  private readonly clearTimeoutImpl: typeof clearTimeout;
+  private readonly reminders: BlockedJobReminderScheduler;
 
   constructor(
     private readonly sessionStore: SessionStore,
     private readonly channel: ChannelAdapter,
     timerControls?: TimerControls,
   ) {
-    this.now = timerControls?.now ?? (() => Date.now());
-    this.setTimeoutImpl = timerControls?.setTimeoutImpl ?? setTimeout;
-    this.clearTimeoutImpl = timerControls?.clearTimeoutImpl ?? clearTimeout;
+    this.reminders = new BlockedJobReminderScheduler(
+      channel,
+      (chatId) => this.getBlockedJobReminderContext(chatId),
+      timerControls,
+    );
   }
 
   addBackgroundJobTask(session: SessionState, task: ActiveTaskState): void {
     session.backgroundJobTasks.push(task);
-    this.updateReminderState(session);
+    this.reminders.sync(session.chatId);
   }
 
   findTask(session: SessionState, taskId: string): ActiveTaskState | null {
@@ -66,23 +50,14 @@ export class TaskCoordinator {
   }
 
   onUserInteraction(chatId: string): void {
-    const session = this.sessionStore.getOrCreate(chatId);
-    const blocker = session.activeTask;
-    const queue = this.waitingInteractions.get(chatId) ?? [];
-    const shareDeletionQueue = this.pendingShareDeletionPrompts.get(chatId) ?? [];
-    if ((queue.length === 0 && shareDeletionQueue.length === 0) || blocker?.origin?.kind !== "launchedByUser") {
-      return;
-    }
-
-    this.resetReminderBackoff(session);
+    this.reminders.resetAfterUserInteraction(chatId);
   }
 
   scheduleShareDeletionPrompt(chatId: string, prompt: PendingShareDeletionPrompt): void {
     const queue = this.pendingShareDeletionPrompts.get(chatId) ?? [];
     queue.push(prompt);
     this.pendingShareDeletionPrompts.set(chatId, queue);
-    const session = this.sessionStore.getOrCreate(chatId);
-    this.updateReminderState(session);
+    this.reminders.sync(chatId);
   }
 
   async runJobUserVisibleOperation(
@@ -98,6 +73,12 @@ export class TaskCoordinator {
     }
 
     const task = taskRecord.task;
+    if (task.origin?.kind === "launchedByUser") {
+      // User-launched tasks are already the visible task for their chat, so they never wait here.
+      await operation();
+      return;
+    }
+
     if (task.origin?.kind !== "launchedByJob") {
       await operation();
       return;
@@ -109,90 +90,78 @@ export class TaskCoordinator {
       return;
     }
 
-    if (!session.activeTask && !session.pendingShareDeletion) {
+    if (this.isVisibleSlotAvailable(session)) {
       const promotedTask = session.promoteBackgroundJobTask(taskId);
       promotedTask.interactionState = "interacting";
-      this.updateReminderState(session);
+      this.reminders.sync(chatId);
       await operation();
-      await this.flushWaitingInteractionsForActiveTask(session, taskId);
+      await this.runQueuedOperationsForVisibleJob(session, taskId);
       return;
     }
 
     task.interactionState = "waitingToInteract";
     await new Promise<void>((resolve, reject) => {
-      const queue = this.waitingInteractions.get(chatId) ?? [];
+      const queue = this.waitingJobInteractions.get(chatId) ?? [];
       queue.push({ taskId, jobName, run: operation, resolve, reject });
-      this.waitingInteractions.set(chatId, queue);
-      this.updateReminderState(session);
+      this.waitingJobInteractions.set(chatId, queue);
+      this.reminders.sync(chatId);
     });
   }
 
-  async onTaskVisibilityChanged(chatId: string): Promise<void> {
+  /**
+   * A chat can show one user-visible blocker at a time: an active task or a share-deletion prompt.
+   * When that slot becomes free, start the next deferred job prompt/interaction that needs the user.
+   */
+  async onVisibleSlotAvailable(chatId: string): Promise<void> {
     const session = this.sessionStore.getOrCreate(chatId);
-    await this.flushNextWaitingInteraction(session);
+    if (!this.isVisibleSlotAvailable(session)) {
+      this.reminders.sync(chatId);
+      return;
+    }
+
+    if (await this.showNextDeferredShareDeletionPrompt(session)) {
+      return;
+    }
+
+    await this.startNextDeferredJobInteraction(session);
   }
 
   removeTask(chatId: string, taskId: string): void {
-    const queue = this.waitingInteractions.get(chatId);
-    if (queue) {
-      const remaining: WaitingInteraction[] = [];
-      for (const entry of queue) {
-        if (entry.taskId === taskId) {
-          entry.reject(new Error(`Task ${taskId} ended while waiting to interact.`));
-          continue;
-        }
-        remaining.push(entry);
-      }
-      if (remaining.length === 0) {
-        this.waitingInteractions.delete(chatId);
-      } else {
-        this.waitingInteractions.set(chatId, remaining);
-      }
-    }
-
-    this.updateReminderState(this.sessionStore.getOrCreate(chatId));
+    this.rejectWaitingInteractionsForTask(chatId, taskId);
+    this.reminders.sync(chatId);
   }
 
-  private async flushNextWaitingInteraction(session: SessionState): Promise<void> {
-    if (session.activeTask || session.pendingShareDeletion) {
-      this.updateReminderState(session);
-      return;
+  private isVisibleSlotAvailable(session: SessionState): boolean {
+    return !session.activeTask && !session.pendingShareDeletion;
+  }
+
+  private async showNextDeferredShareDeletionPrompt(session: SessionState): Promise<boolean> {
+    const next = this.shiftNextShareDeletionPrompt(session.chatId);
+    if (!next) {
+      return false;
     }
 
-    const shareDeletionQueue = this.pendingShareDeletionPrompts.get(session.chatId);
-    if (shareDeletionQueue && shareDeletionQueue.length > 0) {
-      const next = shareDeletionQueue.shift();
-      if (next) {
-        if (shareDeletionQueue.length === 0) {
-          this.pendingShareDeletionPrompts.delete(session.chatId);
-        }
-        session.pendingShareDeletion = {
-          requestId: next.requestId,
-          taskId: next.taskId,
-          taskName: next.taskName,
-          summary: next.summary,
-        };
-        await this.channel.sendShareDeletionRequest(session.chatId, next.requestId, next.taskName, next.summary);
-        this.updateReminderState(session);
+    session.pendingShareDeletion = {
+      requestId: next.requestId,
+      taskId: next.taskId,
+      taskName: next.taskName,
+      summary: next.summary,
+    };
+    await this.channel.sendShareDeletionRequest(session.chatId, next.requestId, next.taskName, next.summary);
+    this.reminders.sync(session.chatId);
+    return true;
+  }
+
+  private async startNextDeferredJobInteraction(session: SessionState): Promise<void> {
+    while (this.isVisibleSlotAvailable(session)) {
+      const next = this.shiftNextWaitingInteraction(session.chatId);
+      if (!next) {
+        this.reminders.sync(session.chatId);
         return;
       }
-    }
 
-    const queue = this.waitingInteractions.get(session.chatId);
-    if (!queue || queue.length === 0) {
-      this.updateReminderState(session);
-      return;
-    }
-
-    while (queue.length > 0) {
-      const next = queue[0];
-      if (!next) {
-        break;
-      }
-
-      const taskRecord = next ? session.findTask(next.taskId) : null;
+      const taskRecord = session.findTask(next.taskId);
       if (!taskRecord) {
-        queue.shift();
         next.reject(new Error(`Task ${next.taskId} is no longer active.`));
         continue;
       }
@@ -201,149 +170,108 @@ export class TaskCoordinator {
         ? session.promoteBackgroundJobTask(next.taskId)
         : taskRecord.task;
       task.interactionState = "interacting";
-      queue.shift();
-      if (queue.length === 0) {
-        this.waitingInteractions.delete(session.chatId);
-      }
-      this.updateReminderState(session);
+      this.reminders.sync(session.chatId);
 
-      try {
-        await next.run();
-        next.resolve();
-        await this.flushWaitingInteractionsForActiveTask(session, next.taskId);
-      } catch (error) {
-        next.reject(error);
+      if (await this.runDeferredJobInteraction(next)) {
+        await this.runQueuedOperationsForVisibleJob(session, next.taskId);
       }
       return;
     }
 
-    if (queue.length === 0) {
-      this.waitingInteractions.delete(session.chatId);
-    }
-    this.updateReminderState(session);
+    this.reminders.sync(session.chatId);
   }
 
-  private async flushWaitingInteractionsForActiveTask(session: SessionState, taskId: string): Promise<void> {
-    const queue = this.waitingInteractions.get(session.chatId);
-    if (!queue || queue.length === 0) {
-      return;
-    }
-
-    while (queue[0]?.taskId === taskId && session.activeTask?.taskId === taskId) {
-      const next = queue.shift();
-      if (!next) {
+  private async runQueuedOperationsForVisibleJob(session: SessionState, taskId: string): Promise<void> {
+    while (session.activeTask?.taskId === taskId) {
+      const next = this.waitingJobInteractions.get(session.chatId)?.[0];
+      if (next?.taskId !== taskId) {
         break;
       }
-      try {
-        await next.run();
-        next.resolve();
-      } catch (error) {
-        next.reject(error);
-        throw error;
+
+      const deferredInteraction = this.shiftNextWaitingInteraction(session.chatId);
+      if (!deferredInteraction) {
+        break;
+      }
+
+      if (!await this.runDeferredJobInteraction(deferredInteraction)) {
+        break;
       }
     }
 
-    if (queue.length === 0) {
-      this.waitingInteractions.delete(session.chatId);
+    this.reminders.sync(session.chatId);
+  }
+
+  private async runDeferredJobInteraction(interaction: WaitingJobInteraction): Promise<boolean> {
+    try {
+      await interaction.run();
+      interaction.resolve();
+      return true;
+    } catch (error) {
+      interaction.reject(error);
+      return false;
     }
   }
 
-  private resetReminderBackoff(session: SessionState): void {
-    const runtime = this.getReminderRuntime(session.chatId);
-    runtime.nextDelayMs = initialReminderDelayMs;
-    this.scheduleReminder(session, runtime, initialReminderDelayMs);
+  private shiftNextWaitingInteraction(chatId: string): WaitingJobInteraction | null {
+    const queue = this.waitingJobInteractions.get(chatId);
+    const next = queue?.shift() ?? null;
+    if (queue && queue.length === 0) {
+      this.waitingJobInteractions.delete(chatId);
+    }
+    return next;
   }
 
-  private updateReminderState(session: SessionState): void {
-    const blocker = session.activeTask;
-    const queue = this.waitingInteractions.get(session.chatId) ?? [];
-    const shareDeletionQueue = this.pendingShareDeletionPrompts.get(session.chatId) ?? [];
-    if ((queue.length === 0 && shareDeletionQueue.length === 0) || blocker?.origin?.kind !== "launchedByUser") {
-      this.clearReminder(session.chatId);
+  private shiftNextShareDeletionPrompt(chatId: string): PendingShareDeletionPrompt | null {
+    const queue = this.pendingShareDeletionPrompts.get(chatId);
+    const next = queue?.shift() ?? null;
+    if (queue && queue.length === 0) {
+      this.pendingShareDeletionPrompts.delete(chatId);
+    }
+    return next;
+  }
+
+  private rejectWaitingInteractionsForTask(chatId: string, taskId: string): void {
+    const queue = this.waitingJobInteractions.get(chatId);
+    if (!queue) {
       return;
     }
 
-    const runtime = this.getReminderRuntime(session.chatId);
-    this.scheduleReminder(session, runtime, runtime.nextDelayMs);
-  }
-
-  private scheduleReminder(session: SessionState, runtime: ReminderRuntime, delayMs: number): void {
-    if (runtime.timeout) {
-      this.clearTimeoutImpl(runtime.timeout);
+    const remaining: WaitingJobInteraction[] = [];
+    for (const entry of queue) {
+      if (entry.taskId === taskId) {
+        entry.reject(new Error(`Task ${taskId} ended while waiting to interact.`));
+      } else {
+        remaining.push(entry);
+      }
     }
 
-    const blocker = session.activeTask;
-    if (!blocker || blocker.origin?.kind !== "launchedByUser") {
-      runtime.timeout = null;
-      return;
+    if (remaining.length === 0) {
+      this.waitingJobInteractions.delete(chatId);
+    } else {
+      this.waitingJobInteractions.set(chatId, remaining);
     }
-
-    const baselineTimestamp = this.channel.getLastUserInteractionTimestamp(session.chatId) ?? blocker.startedAt;
-    const elapsedMs = Math.max(0, this.now() - Date.parse(baselineTimestamp));
-    const timeoutDelayMs = Math.max(0, delayMs - elapsedMs);
-    runtime.timeout = this.setTimeoutImpl(() => {
-      void this.sendReminder(session.chatId);
-    }, timeoutDelayMs);
   }
 
-  private async sendReminder(chatId: string): Promise<void> {
+  private getBlockedJobReminderContext(chatId: string): BlockedJobReminderContext | null {
     const session = this.sessionStore.getOrCreate(chatId);
     const blocker = session.activeTask;
-    const queue = this.waitingInteractions.get(chatId) ?? [];
-    const shareDeletionQueue = this.pendingShareDeletionPrompts.get(chatId) ?? [];
-    if ((queue.length === 0 && shareDeletionQueue.length === 0) || !blocker || blocker.origin?.kind !== "launchedByUser") {
-      this.clearReminder(chatId);
-      return;
+    if (!blocker || blocker.origin?.kind !== "launchedByUser") {
+      return null;
     }
 
-    const nextWaiting = queue[0];
-    const nextShareDeletion = shareDeletionQueue[0];
-    if (!nextWaiting && !nextShareDeletion) {
-      this.clearReminder(chatId);
-      return;
+    const waitingTaskName = this.waitingJobInteractions.get(chatId)?.[0]?.jobName
+      ?? this.pendingShareDeletionPrompts.get(chatId)?.[0]?.taskName;
+    if (!waitingTaskName) {
+      return null;
     }
 
-    const waitingName = nextWaiting
-      ? normalizeJobName(nextWaiting.jobName)
-      : normalizeJobName(nextShareDeletion!.taskName);
-
-    logger.info("task.waiting_job_reminder", {
+    return {
       chatId,
       blockerTaskId: blocker.taskId,
       blockerTaskName: blocker.taskName,
-      waitingTaskName: waitingName,
-    });
-    await this.channel.sendText(chatId, messages.scheduledJobBlocked(waitingName, blocker.taskName));
-
-    const runtime = this.getReminderRuntime(chatId);
-    runtime.nextDelayMs = Math.min(runtime.nextDelayMs * 2, maximumReminderDelayMs);
-    this.scheduleReminder(session, runtime, runtime.nextDelayMs);
-  }
-
-  private getReminderRuntime(chatId: string): ReminderRuntime {
-    const existing = this.reminderRuntimes.get(chatId);
-    if (existing) {
-      return existing;
-    }
-
-    const runtime: ReminderRuntime = {
-      timeout: null,
-      nextDelayMs: initialReminderDelayMs,
+      blockerStartedAt: blocker.startedAt,
+      waitingTaskName: normalizeJobName(waitingTaskName),
     };
-    this.reminderRuntimes.set(chatId, runtime);
-    return runtime;
-  }
-
-  private clearReminder(chatId: string): void {
-    const runtime = this.reminderRuntimes.get(chatId);
-    if (!runtime) {
-      return;
-    }
-    if (runtime.timeout) {
-      this.clearTimeoutImpl(runtime.timeout);
-    }
-    runtime.timeout = null;
-    runtime.nextDelayMs = initialReminderDelayMs;
   }
 }
 

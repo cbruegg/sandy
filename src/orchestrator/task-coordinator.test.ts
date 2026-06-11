@@ -101,11 +101,42 @@ test("TaskCoordinator reminds and resets reminder timing on user-task activity",
   assert.equal(channel.sentTexts[2]?.text, messages.scheduledJobBlocked("Daily cleanup", "User task"));
 
   session.activeTask = null;
-  await coordinator.onTaskVisibilityChanged("chat-reminder");
+  await coordinator.onVisibleSlotAvailable("chat-reminder");
   await blocked;
 
   assert.equal(released, true);
   assert.equal(store.getOrCreate("chat-reminder").activeTask?.taskId, "job-task");
+});
+
+test("TaskCoordinator runs deferred interactions for the promoted job in order", async () => {
+  const store = new InMemorySessionStore();
+  const channel = new RecordingChannel();
+  const coordinator = new TaskCoordinator(store, channel);
+
+  const session = store.getOrCreate("chat-job-queue");
+  const userTask = createTask("user-task", "User task", { kind: "launchedByUser" });
+  const jobTask = createTask("job-task", "Scheduled job: Daily cleanup", { kind: "launchedByJob", jobId: "daily-cleanup" });
+  session.activeTask = userTask;
+  session.backgroundJobTasks.push(jobTask);
+
+  const visibleOperations: string[] = [];
+  const firstBlockedOperation = coordinator.runJobUserVisibleOperation("chat-job-queue", "job-task", "Daily cleanup", async () => {
+    visibleOperations.push("first");
+  });
+  const secondBlockedOperation = coordinator.runJobUserVisibleOperation("chat-job-queue", "job-task", "Daily cleanup", async () => {
+    visibleOperations.push("second");
+  });
+  await Promise.resolve();
+
+  assert.deepEqual(visibleOperations, []);
+
+  session.activeTask = null;
+  await coordinator.onVisibleSlotAvailable("chat-job-queue");
+  await firstBlockedOperation;
+  await secondBlockedOperation;
+
+  assert.deepEqual(visibleOperations, ["first", "second"]);
+  assert.equal(store.getOrCreate("chat-job-queue").activeTask?.taskId, "job-task");
 });
 
 test("TaskCoordinator defers share deletion prompt while a user task is active", async () => {
@@ -137,7 +168,7 @@ test("TaskCoordinator defers share deletion prompt while a user task is active",
     assert.equal(channel.sentTexts[0]?.text, messages.scheduledJobBlocked("Daily cleanup", "User task"));
 
     session.activeTask = null;
-    await coordinator.onTaskVisibilityChanged("chat-defer-share");
+    await coordinator.onVisibleSlotAvailable("chat-defer-share");
 
     assert.equal(session.pendingShareDeletion!.requestId, "del-req-1");
     assert.equal(channel.shareDeletionRequests.length, 1);
@@ -169,14 +200,14 @@ test("TaskCoordinator queues multiple deferred share deletion prompts behind an 
   assert.equal(channel.shareDeletionRequests.length, 0);
 
   session.activeTask = null;
-  await coordinator.onTaskVisibilityChanged("chat-queue-shares");
+  await coordinator.onVisibleSlotAvailable("chat-queue-shares");
 
     assert.equal(session.pendingShareDeletion!.requestId, "del-req-1");
     assert.equal(channel.shareDeletionRequests.length, 1);
     assert.equal(channel.shareDeletionRequests[0]?.taskName, "Scheduled job: Daily cleanup");
 
     session.pendingShareDeletion = null;
-    await coordinator.onTaskVisibilityChanged("chat-queue-shares");
+    await coordinator.onVisibleSlotAvailable("chat-queue-shares");
 
     assert.equal(session.pendingShareDeletion!.requestId, "del-req-2");
     assert.equal(channel.shareDeletionRequests.length, 2);

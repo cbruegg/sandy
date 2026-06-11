@@ -421,7 +421,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     }
 
     session.pendingShareDeletion = null;
-    await this.deps.taskCoordinator.onTaskVisibilityChanged(session.chatId);
+    await this.deps.taskCoordinator.onVisibleSlotAvailable(session.chatId);
   }
 
   private async closeTask(session: SessionState, taskId: string, options?: { discardSummary?: boolean }): Promise<void> {
@@ -446,7 +446,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     this.deps.taskCoordinator.removeTask(session.chatId, task.taskId);
     this.activeTasks.deleteHandle(task.taskId);
     await this.promptForShareDeletionIfNeeded(session, task.taskId, task.taskName, task.origin);
-    await this.deps.taskCoordinator.onTaskVisibilityChanged(session.chatId);
+    await this.deps.taskCoordinator.onVisibleSlotAvailable(session.chatId);
   }
 
   private isSilentJobTask(session: SessionState, taskId: string): boolean {
