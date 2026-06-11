@@ -17,7 +17,7 @@ export type LaunchTaskRequest = {
   prepareStartInput: (taskSharePath: string) => Promise<TaskStartInput>;
 };
 
-type TaskStartInput = {
+export type TaskStartInput = {
   taskBrief: string;
   initialInput: TaskInputPayload;
 };

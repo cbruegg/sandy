@@ -29,7 +29,7 @@ import type {
 } from "../types.js";
 import type { JobDefinition } from "../jobs/job-validation.js";
 import { buildJobTaskBrief } from "../jobs/job-task-brief.js";
-import type { SandboxHandle } from "../sandbox/sandbox-runner.js";
+import type { SandboxHandle, TaskStartInput } from "../sandbox/sandbox-runner.js";
 import type {TaskFailureHandler} from "./privileges.ts";
 
 export interface OrchestratorTaskLifecycle {
@@ -171,48 +171,41 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
             taskName: decision.taskName,
           });
           const taskPolicy = normalizeTaskPolicy(decision.taskPolicy);
-            session.activeTask = {
+          session.activeTask = {
               taskId,
               taskName: decision.taskName,
               status: "running",
               startedAt: now,
               pendingPrivilegeRequest: null,
               taskPolicy,
-            approvedMcpTools: [],
-            approvedMcpResourceReads: [],
-            approvedHttpTokenSessionGrants: [],
-            approvedHttpTokenOnceGrants: [],
-            approvedHostDirectories: [],
-            workerConnected: false,
-            taskSummary: null,
-            origin: { kind: "launchedByUser" },
-            interactionState: "interacting",
+              approvedMcpTools: [],
+              approvedMcpResourceReads: [],
+              approvedHttpTokenSessionGrants: [],
+              approvedHttpTokenOnceGrants: [],
+              approvedHostDirectories: [],
+              workerConnected: false,
+              taskSummary: null,
+              origin: { kind: "launchedByUser" },
+              interactionState: "interacting",
           };
 
-          const handle = await this.deps.sandboxRunner.launchTask(
-            {
-              chatId: event.chatId,
-              taskId,
-              taskName: decision.taskName,
-              taskLanguage: decision.taskLanguage,
-              channelFormatting: this.channelFormatting,
-              workerStartConfig: await this.deps.buildWorkerStartConfig(),
-              prepareStartInput: async (taskSharePath) => {
-                const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskSharePath);
-                const brief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
-                logger.debug("task.task_brief", {
-                  chatId: event.chatId,
-                  taskId,
-                  taskBrief: brief,
-                });
-                const initialInput = buildTaskInputPayload(stagedAttachments);
-                return { taskBrief: brief, initialInput };
-              },
+          await this.launchTaskInSandbox(
+            event.chatId,
+            taskId,
+            decision.taskName,
+            decision.taskLanguage,
+            async (taskSharePath) => {
+              const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskSharePath);
+              const brief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
+              logger.debug("task.task_brief", {
+                chatId: event.chatId,
+                taskId,
+                taskBrief: brief,
+              });
+              const initialInput = buildTaskInputPayload(stagedAttachments);
+              return { taskBrief: brief, initialInput };
             },
-            async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
           );
-
-          this.activeTasks.registerHandle(taskId, handle);
           launchSucceeded = true;
           logger.info("task.started", {
             chatId: event.chatId,
@@ -260,28 +253,44 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     this.deps.taskCoordinator.addBackgroundJobTask(session, taskState);
 
     try {
-      const handle = await this.deps.sandboxRunner.launchTask(
-        {
-          chatId,
-          taskId,
-          taskName,
-          taskLanguage: "en",
-          channelFormatting: this.channelFormatting,
-          workerStartConfig: await this.deps.buildWorkerStartConfig(),
-          prepareStartInput: () => Promise.resolve({
-            taskBrief: buildJobTaskBrief(job, workspacePath),
-            initialInput: { text: `Execute skill ${job.skillId}.`, images: [] },
-          }),
-        },
-        async (subAgentEvent) => this.routeSubAgentEvent(chatId, taskId, subAgentEvent),
+      await this.launchTaskInSandbox(
+        chatId,
+        taskId,
+        taskName,
+        "en",
+        () => Promise.resolve({
+          taskBrief: buildJobTaskBrief(job, workspacePath),
+          initialInput: { text: `Execute skill ${job.skillId}.`, images: [] },
+        }),
       );
-      this.activeTasks.registerHandle(taskId, handle);
       return taskId;
     } catch (error) {
       session.removeTask(taskId);
       this.deps.taskCoordinator.removeTask(chatId, taskId);
       throw error;
     }
+  }
+
+  private async launchTaskInSandbox(
+    chatId: string,
+    taskId: string,
+    taskName: string,
+    taskLanguage: string,
+    prepareStartInput: (taskSharePath: string) => Promise<TaskStartInput>,
+  ): Promise<void> {
+    const handle = await this.deps.sandboxRunner.launchTask(
+      {
+        chatId,
+        taskId,
+        taskName,
+        taskLanguage,
+        channelFormatting: this.channelFormatting,
+        workerStartConfig: await this.deps.buildWorkerStartConfig(),
+        prepareStartInput,
+      },
+      async (subAgentEvent) => this.routeSubAgentEvent(chatId, taskId, subAgentEvent),
+    );
+    this.activeTasks.registerHandle(taskId, handle);
   }
 
   requireActiveTaskHandle(taskId: string): SandboxHandle {
