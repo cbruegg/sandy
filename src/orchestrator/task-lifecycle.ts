@@ -14,8 +14,10 @@ import type {
   OrchestratorCoreDependencies,
   UserMessageEvent
 } from "./shared.js";
+import {
+  createActiveTaskState,
+} from "../types.js";
 import type {
-  ActiveTaskState,
   ChannelFormatting,
   MainAgentDecision,
   MainAgentTaskPolicy,
@@ -171,23 +173,16 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
             taskName: decision.taskName,
           });
           const taskPolicy = normalizeTaskPolicy(decision.taskPolicy);
-          session.activeTask = {
+          session.activeTask = createActiveTaskState(
+            {
               taskId,
               taskName: decision.taskName,
-              status: "running",
               startedAt: now,
-              pendingPrivilegeRequest: null,
               taskPolicy,
-              approvedMcpTools: [],
-              approvedMcpResourceReads: [],
-              approvedHttpTokenSessionGrants: [],
-              approvedHttpTokenOnceGrants: [],
-              approvedHostDirectories: [],
-              workerConnected: false,
-              taskSummary: null,
               origin: { kind: "launchedByUser" },
               interactionState: "interacting",
-          };
+            },
+          );
 
           await this.launchTaskInSandbox(
             event.chatId,
@@ -233,23 +228,19 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     const now = new Date().toISOString();
     const taskName = `Scheduled job: ${job.name}`;
     const taskPolicy = await this.deps.jobApprovalStore.getTaskPolicy(job.id);
-    const taskState: ActiveTaskState = {
-      taskId,
-      taskName,
-      status: "running",
-      startedAt: now,
-      pendingPrivilegeRequest: null,
-      taskPolicy,
-      approvedMcpTools: [],
-      approvedMcpResourceReads: [],
-      approvedHttpTokenSessionGrants: [],
-      approvedHttpTokenOnceGrants: [],
-      approvedHostDirectories: workspacePath ? [{ path: workspacePath, level: "read_write" }] : [],
-      workerConnected: false,
-      taskSummary: null,
-      origin: { kind: "launchedByJob", jobId: job.id },
-      interactionState: "silent",
-    };
+    const taskState = createActiveTaskState(
+      {
+        taskId,
+        taskName,
+        startedAt: now,
+        taskPolicy,
+        origin: { kind: "launchedByJob", jobId: job.id },
+        interactionState: "silent",
+      },
+      {
+        approvedHostDirectories: workspacePath ? [{ path: workspacePath, level: "read_write" }] : [],
+      },
+    );
     this.deps.taskCoordinator.addBackgroundJobTask(session, taskState);
 
     try {

@@ -43,12 +43,12 @@ export type TaskOrigin =
 type JobTaskInteractionState = "silent" | "waitingToInteract" | "interacting";
 
 export type ActiveTaskState = {
-  taskId: string;
-  taskName: string;
+  readonly taskId: string;
+  readonly taskName: string;
   status: TaskStatus;
-  startedAt: string;
+  readonly startedAt: string;
   pendingPrivilegeRequest: PrivilegeRequest | null;
-  taskPolicy: MainAgentTaskPolicy;
+  readonly taskPolicy: MainAgentTaskPolicy;
   approvedMcpTools: McpToolGrant[];
   approvedMcpResourceReads: McpResourceReadGrant[];
   approvedHttpTokenSessionGrants: HttpTokenSessionGrant[];
@@ -56,9 +56,28 @@ export type ActiveTaskState = {
   approvedHostDirectories: HostDirectoryGrant[];
   workerConnected: boolean;
   taskSummary: string | null;
-  origin: TaskOrigin;
+  readonly origin: TaskOrigin;
   interactionState: JobTaskInteractionState;
 };
+
+export function createActiveTaskState(
+  required: Pick<ActiveTaskState, "taskId" | "taskName" | "startedAt" | "taskPolicy" | "origin" | "interactionState">,
+  overrides?: Partial<Omit<ActiveTaskState, "taskId" | "taskName" | "startedAt" | "taskPolicy" | "origin">>,
+): ActiveTaskState {
+  return {
+    status: "running",
+    pendingPrivilegeRequest: null,
+    approvedMcpTools: [],
+    approvedMcpResourceReads: [],
+    approvedHttpTokenSessionGrants: [],
+    approvedHttpTokenOnceGrants: [],
+    approvedHostDirectories: [],
+    workerConnected: false,
+    taskSummary: null,
+    ...required,
+    ...overrides,
+  };
+}
 
 type PendingShareDeletion = {
   requestId: string;
