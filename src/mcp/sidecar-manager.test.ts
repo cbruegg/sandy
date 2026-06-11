@@ -384,6 +384,7 @@ test("McpSidecarManager answers native Sandy tool calls over the control channel
   assert.match(stdinContent, /"type":"native_tool_call_result"/);
   assert.match(stdinContent, /"requestId":"request-1"/);
   assert.match(stdinContent, /"isError":false/);
+  assert.match(stdinContent, /"message":"native-ok"/);
   assert.match(stdinContent, /native-ok/);
 });
 
@@ -433,6 +434,7 @@ test("McpSidecarManager returns a failed native tool call result when native too
   assert.match(stdinContent, /"type":"native_tool_call_result"/);
   assert.match(stdinContent, /"requestId":"request-1"/);
   assert.match(stdinContent, /"isError":true/);
+  assert.match(stdinContent, /"message":"native tool failed"/);
   assert.match(stdinContent, /native tool failed/);
 });
 

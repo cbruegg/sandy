@@ -137,6 +137,7 @@ export const messages = {
     `Failed to ${operation} skill "${skillId}": ${error}`,
   jobMutationDenied: (operation: string, jobId: string): string =>
     `Denied ${operation} job "${jobId}".`,
+  jobDoesNotExist: (jobId: string): string => `Job ${jobId} does not exist.`,
   jobMutationApproved: (operation: string, jobId: string): string =>
     `Approved ${operation} job "${jobId}".`,
   jobMutationFailed: (operation: string, jobId: string, error: string): string =>

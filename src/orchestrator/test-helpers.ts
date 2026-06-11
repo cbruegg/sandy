@@ -32,7 +32,7 @@ import type {
   WorkerStartConfig,
 } from "../types.js";
 import { SkillService } from "../skills.js";
-import { WorkerToolsHandler } from "./worker-tools-handler.js";
+import { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
 import { JobApprovalStore, type JobApprovalStoreApi } from "../jobs/job-approval-store.js";
 import type { JobService } from "../jobs/job-service.js";
 import type { JobDefinition } from "../jobs/job-validation.js";
@@ -395,8 +395,15 @@ export function createTestOrchestrator(options: {
   const activeTaskRuntimes = new ActiveTaskRuntimeRegistry();
   const taskLifecycle = new OrchestratorTaskLifecycleImpl(coreDeps, activeTaskRuntimes, channel.getFormatting());
   const jobService = new FakeJobService();
-  const workerToolsHandler = new WorkerToolsHandler(skillService, jobService);
-  const privileges = new OrchestratorPrivilegesImpl(coreDeps, activeTaskRuntimes, workerToolsHandler, taskLifecycle);
+  const workerToolsHandler = new WorkerToolsHandler({
+    channel,
+    jobService,
+    getTaskSharePath: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskSharePath(),
+    runUserVisibleOperation: async ({ chatId, taskId, taskName, operation }) => {
+      await taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, operation);
+    },
+  });
+  const privileges = new OrchestratorPrivilegesImpl(coreDeps, activeTaskRuntimes, workerToolsHandler, jobService, taskLifecycle);
   const orchestrator = new SandyOrchestrator({
     ...coreDeps,
     channelFormatting: channel.getFormatting(),

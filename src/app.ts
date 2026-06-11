@@ -42,7 +42,7 @@ import {createNoopHostfsBroker} from "./hostfs/hostfs-broker.js";
 import {initializeHostfs, type HostfsServices} from "./hostfs/index.js";
 import { ChatGPTTokenBroker } from "./auth/chatgpt-token-broker.js";
 import { SkillService } from "./skills.js";
-import { WorkerToolsHandler } from "./orchestrator/worker-tools-handler.js";
+import { WorkerToolsHandler } from "./subagent/worker-tools-handler.js";
 import { JobApprovalStore } from "./jobs/job-approval-store.js";
 import { JobStore } from "./jobs/job-store.js";
 import { JobScheduler } from "./jobs/job-scheduler.js";
@@ -349,8 +349,15 @@ export async function startApp(): Promise<void> {
     return await taskLifecycle.launchJobTask(job, chatId, workspacePath);
   });
   const jobService = new ScheduledJobService(jobStore, jobScheduler);
-  const workerToolsHandler = new WorkerToolsHandler(skillService, jobService);
-  const privileges = new OrchestratorPrivilegesImpl(orchestratorCoreDeps, activeTaskRuntimes, workerToolsHandler, taskLifecycle);
+  const workerToolsHandler = new WorkerToolsHandler({
+    channel,
+    jobService,
+    getTaskSharePath: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskSharePath(),
+    runUserVisibleOperation: async ({ chatId, taskId, taskName, operation }) => {
+      await orchestratorCoreDeps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, operation);
+    },
+  });
+  const privileges = new OrchestratorPrivilegesImpl(orchestratorCoreDeps, activeTaskRuntimes, workerToolsHandler, jobService, taskLifecycle);
   const orchestrator = new SandyOrchestrator({
     ...orchestratorCoreDeps,
     channelFormatting,
