@@ -4,6 +4,11 @@ import { hostGrantsPrefix } from "../paths.js";
 
 export const sandyMcpServerId = "sandy";
 
+export type NativeWorkerToolCallResult = {
+  isError: boolean;
+  message: string;
+};
+
 // Infrastructure
 
 type WorkerToolDefinition = Tool & {

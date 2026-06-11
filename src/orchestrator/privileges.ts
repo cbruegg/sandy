@@ -5,16 +5,10 @@ import { messages } from "../messages.js";
 import { ActiveTaskRuntimeRegistry } from "./active-task-runtime-registry.js";
 import type {OrchestratorCoreDependencies} from "./shared.js";
 import { parseWorkerToolPayload } from "../subagent/worker-tools.js";
-import type { WorkerToolPayload } from "../subagent/worker-tools.js";
+import type { NativeWorkerToolCallResult, WorkerToolPayload } from "../subagent/worker-tools.js";
 import type { NormalizedChatEvent, PrivilegeRequest, PrivilegeResolutionResult, SessionState } from "../types.js";
 import type { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
 import type { JobService } from "../jobs/job-service.js";
-
-// TODO: This doesn't really belong here
-export type NativeWorkerToolCallResult = {
-  isError: boolean;
-  message: string;
-};
 
 export interface OrchestratorPrivileges {
   executeNativeWorkerToolCall(input: {

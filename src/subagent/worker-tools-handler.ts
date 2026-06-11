@@ -2,7 +2,7 @@ import type { ChannelAdapter } from "../channel/channel-adapter.js";
 import type { JobService } from "../jobs/job-service.js";
 import { resolveTaskShareHostPath } from "../shared-workspace.js";
 import type { ActiveTaskState } from "../types.js";
-import type {NativeWorkerToolCallResult} from "../orchestrator/privileges.ts";
+import type {NativeWorkerToolCallResult} from "../subagent/worker-tools.js";
 import {messages} from "../messages.ts";
 
 type UserVisibleOperationRunner = (input: {
