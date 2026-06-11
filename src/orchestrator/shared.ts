@@ -23,7 +23,6 @@ export type UserMessageEvent = Extract<NormalizedChatEvent, { kind: "user_messag
 export type ActiveTaskStatus = NonNullable<SessionState["activeTask"]>["status"];
 
 export type OrchestratorCoreDependencies = {
-  channel: ChannelAdapter;
   mainAgent: MainAgentController;
   sandboxRunner: SandboxRunner;
   buildWorkerStartConfig: () => Promise<WorkerStartConfig>;
@@ -38,6 +37,7 @@ export type OrchestratorCoreDependencies = {
 };
 
 export type SandyOrchestratorDependencies = OrchestratorCoreDependencies & {
+  channel: ChannelAdapter;
   channelFormatting: ChannelFormatting;
   taskLifecycle: OrchestratorTaskLifecycle;
   privileges: OrchestratorPrivileges;

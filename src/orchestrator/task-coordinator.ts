@@ -7,7 +7,7 @@ import type { BlockedJobReminderContext, TimerControls } from "./blocked-job-rem
 type WaitingJobInteraction = {
   taskId: string;
   jobName: string;
-  run: () => Promise<void>;
+  run: (channel: ChannelAdapter) => Promise<void>;
   resolve: () => void;
   reject: (error: unknown) => void;
 };
@@ -133,7 +133,7 @@ export class TaskCoordinator {
     chatId: string,
     taskId: string,
     jobName: string,
-    operation: () => Promise<void>,
+    operation: (channel: ChannelAdapter) => Promise<void>,
   ): Promise<void> {
     const session = this.sessionStore.getOrCreate(chatId);
     const taskRecord = session.findTask(taskId);
@@ -144,19 +144,19 @@ export class TaskCoordinator {
     const task = taskRecord.task;
     if (task.origin.kind === "launchedByUser") {
       // User-launched tasks are already the visible task for their chat, so they never wait here.
-      await operation();
+      await operation(this.channel);
       return;
     }
 
     if (session.activeTask?.taskId === taskId) {
       task.interactionState = "interacting";
-      await operation();
+      await operation(this.channel);
       return;
     }
 
     if (this.isVisibleSlotAvailable(session)) {
       this.claimVisibleSlotForJobTask(session, taskId);
-      await operation();
+      await operation(this.channel);
       await this.drainPendingOperationsForActiveTask(session, taskId);
       return;
     }
@@ -282,7 +282,7 @@ export class TaskCoordinator {
   /** Runs a single queued interaction and settles its waiting promise. */
   private async executeWaitingInteraction(interaction: WaitingJobInteraction): Promise<boolean> {
     try {
-      await interaction.run();
+      await interaction.run(this.channel);
       interaction.resolve();
       return true;
     } catch (error) {

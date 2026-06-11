@@ -9,11 +9,10 @@ type UserVisibleOperationRunner = (input: {
   chatId: string;
   taskId: string;
   taskName: string;
-  operation: () => Promise<void>;
+  operation: (channel: ChannelAdapter) => Promise<void>;
 }) => Promise<void>;
 
 export type WorkerToolsHandlerDependencies = {
-  readonly channel: Pick<ChannelAdapter, "sendFile">;
   readonly jobService: JobService;
   readonly getTaskSharePath: (taskId: string) => string;
   readonly runUserVisibleOperation: UserVisibleOperationRunner;
@@ -32,8 +31,8 @@ export class WorkerToolsHandler {
       chatId: input.chatId,
       taskId: input.task.taskId,
       taskName: input.task.taskName,
-      operation: async () => {
-        await this.deps.channel.sendFile(
+      operation: async (channel) => {
+        await channel.sendFile(
           input.chatId,
           resolveTaskShareHostPath(this.deps.getTaskSharePath(input.task.taskId), input.sharePath, "send_file_to_channel path"),
           input.caption,

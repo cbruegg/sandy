@@ -319,8 +319,8 @@ export async function startApp(): Promise<void> {
     }
   };
 
+  const taskCoordinator = new TaskCoordinator(sessionStore, channel);
   const orchestratorCoreDeps: OrchestratorCoreDependencies = {
-    channel,
     mainAgent,
     sandboxRunner,
     buildWorkerStartConfig: () => buildWorkerStartConfig(
@@ -337,10 +337,10 @@ export async function startApp(): Promise<void> {
     jobApprovalStore,
     hostfsBroker: hostfsServices?.broker ?? createNoopHostfsBroker(),
     skillService,
-    taskCoordinator: new TaskCoordinator(sessionStore, channel),
+    taskCoordinator,
   };
   const activeTaskRuntimes = new ActiveTaskRuntimeRegistry();
-  const taskLifecycle = new OrchestratorTaskLifecycleImpl(orchestratorCoreDeps, activeTaskRuntimes, channelFormatting);
+  const taskLifecycle = new OrchestratorTaskLifecycleImpl(orchestratorCoreDeps, activeTaskRuntimes, channelFormatting, channel);
   const jobScheduler = new JobScheduler(jobStore, async (job, workspacePath) => {
     const chatId = await channel.destinationStore.getDefaultChatId();
     if (!chatId) {
@@ -350,16 +350,16 @@ export async function startApp(): Promise<void> {
   });
   const jobService = new ScheduledJobService(jobStore, jobScheduler);
   const workerToolsHandler = new WorkerToolsHandler({
-    channel,
     jobService,
     getTaskSharePath: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskSharePath(),
     runUserVisibleOperation: async ({ chatId, taskId, taskName, operation }) => {
-      await orchestratorCoreDeps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, operation);
+      await taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, operation);
     },
   });
   const privileges = new OrchestratorPrivilegesImpl(orchestratorCoreDeps, activeTaskRuntimes, workerToolsHandler, jobService, taskLifecycle);
   const orchestrator = new SandyOrchestrator({
     ...orchestratorCoreDeps,
+    channel,
     channelFormatting,
     taskLifecycle,
     privileges,

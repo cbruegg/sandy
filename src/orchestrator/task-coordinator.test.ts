@@ -69,7 +69,7 @@ test("TaskCoordinator reminds and resets reminder timing on user-task activity",
   session.backgroundJobTasks.push(jobTask);
 
   let released = false;
-  const blocked = coordinator.runJobUserVisibleOperation("chat-reminder", "job-task", "Daily cleanup", async () => {
+  const blocked = coordinator.runJobUserVisibleOperation("chat-reminder", "job-task", "Daily cleanup", async (_channel) => {
     released = true;
   });
   await Promise.resolve();
@@ -114,10 +114,10 @@ test("TaskCoordinator runs deferred interactions for the promoted job in order",
   session.backgroundJobTasks.push(jobTask);
 
   const visibleOperations: string[] = [];
-  const firstBlockedOperation = coordinator.runJobUserVisibleOperation("chat-job-queue", "job-task", "Daily cleanup", async () => {
+  const firstBlockedOperation = coordinator.runJobUserVisibleOperation("chat-job-queue", "job-task", "Daily cleanup", async (_channel) => {
     visibleOperations.push("first");
   });
-  const secondBlockedOperation = coordinator.runJobUserVisibleOperation("chat-job-queue", "job-task", "Daily cleanup", async () => {
+  const secondBlockedOperation = coordinator.runJobUserVisibleOperation("chat-job-queue", "job-task", "Daily cleanup", async (_channel) => {
     visibleOperations.push("second");
   });
   await Promise.resolve();

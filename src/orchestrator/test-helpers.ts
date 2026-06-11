@@ -380,7 +380,6 @@ export function createTestOrchestrator(options: {
   const skillService = options.skillService ?? new SkillService(mkdtempSync(join(tmpdir(), "sandy-test-config-")));
   const taskCoordinator = options.taskCoordinator ?? new TaskCoordinator(store, channel);
   const coreDeps: OrchestratorCoreDependencies = {
-    channel,
     mainAgent: options.mainAgent,
     sandboxRunner: runner,
     buildWorkerStartConfig: () => Promise.resolve(createTestWorkerStartConfig()),
@@ -393,10 +392,9 @@ export function createTestOrchestrator(options: {
     taskCoordinator,
   };
   const activeTaskRuntimes = new ActiveTaskRuntimeRegistry();
-  const taskLifecycle = new OrchestratorTaskLifecycleImpl(coreDeps, activeTaskRuntimes, channel.getFormatting());
+  const taskLifecycle = new OrchestratorTaskLifecycleImpl(coreDeps, activeTaskRuntimes, channel.getFormatting(), channel);
   const jobService = new FakeJobService();
   const workerToolsHandler = new WorkerToolsHandler({
-    channel,
     jobService,
     getTaskSharePath: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskSharePath(),
     runUserVisibleOperation: async ({ chatId, taskId, taskName, operation }) => {
@@ -406,6 +404,7 @@ export function createTestOrchestrator(options: {
   const privileges = new OrchestratorPrivilegesImpl(coreDeps, activeTaskRuntimes, workerToolsHandler, jobService, taskLifecycle);
   const orchestrator = new SandyOrchestrator({
     ...coreDeps,
+    channel,
     channelFormatting: channel.getFormatting(),
     taskLifecycle,
     privileges,

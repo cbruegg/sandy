@@ -37,7 +37,7 @@ export interface OrchestratorPrivileges {
 export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
 
   constructor(
-    private readonly deps: OrchestratorCoreDependencies,
+    private readonly deps: Omit<OrchestratorCoreDependencies, "channel">,
     private readonly activeTasks: ActiveTaskRuntimeRegistry,
     private readonly workerToolsHandler: WorkerToolsHandler,
     private readonly jobService: JobService,
@@ -155,7 +155,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     } else if (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read") {
       this.activeTasks.resolvePendingMcpPrivilege(request.requestId, result);
     }
-    await this.sendPrivilegeResolutionMessage(session.chatId, activeTask.taskId, result);
+    await this.sendPrivilegeResolutionMessage(session.chatId, activeTask.taskId, activeTask.taskName, result);
 
     activeTask.pendingPrivilegeRequest = null;
     activeTask.status = "running";
@@ -368,8 +368,8 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     const resultPromise = new Promise<PrivilegeResolutionResult>((resolve) => {
       this.activeTasks.setPendingNativeToolResolver(request.requestId, resolve);
     });
-    await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, activeTask.taskName, async () => {
-      await this.deps.channel.sendPrivilegeRequest(chatId, request);
+    await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, activeTask.taskName, async (channel) => {
+      await channel.sendPrivilegeRequest(chatId, request);
     });
 
     return await resultPromise;
@@ -552,6 +552,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   private async sendPrivilegeResolutionMessage(
     chatId: string,
     taskId: string,
+    taskName: string,
     result: PrivilegeResolutionResult,
   ): Promise<void> {
     logger.info("task.privilege_resolved", {
@@ -565,10 +566,14 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       case "approved":
         return;
       case "denied":
-        await this.deps.channel.sendText(chatId, messages.privilegeDenied(result.requestId));
+        await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, async (channel) => {
+          await channel.sendText(chatId, messages.privilegeDenied(result.requestId));
+        });
         return;
       case "failed":
-        await this.deps.channel.sendText(chatId, messages.privilegeFailed(result.requestId, result.message));
+        await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, async (channel) => {
+          await channel.sendText(chatId, messages.privilegeFailed(result.requestId, result.message));
+        });
         return;
       default:
         assertNever(result.outcome);
@@ -641,8 +646,8 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     const resultPromise = new Promise<PrivilegeResolutionResult>((resolve) => {
       this.activeTasks.setPendingMcpPrivilegeResolver(request.requestId, resolve);
     });
-    await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, activeTask.taskName, async () => {
-      await this.deps.channel.sendPrivilegeRequest(chatId, request);
+    await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, activeTask.taskName, async (channel) => {
+      await channel.sendPrivilegeRequest(chatId, request);
     });
 
     return await resultPromise;
