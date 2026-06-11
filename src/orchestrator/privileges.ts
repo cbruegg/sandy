@@ -9,9 +9,9 @@ import type { WorkerToolPayload } from "../subagent/worker-tools.js";
 import type { NormalizedChatEvent, PrivilegeRequest, PrivilegeResolutionResult, SessionState } from "../types.js";
 import type { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
 import type { JobService } from "../jobs/job-service.js";
-import type { JobDefinition } from "../jobs/job-validation.js";
 
-type NativeWorkerToolCallResult = {
+// TODO: This doesn't really belong here
+export type NativeWorkerToolCallResult = {
   isError: boolean;
   message: string;
 };
@@ -219,13 +219,12 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
 
     switch (call.type) {
       case "send_file_to_channel":
-        await this.workerToolsHandler.sendFileToChannel({
+        return await this.workerToolsHandler.sendFileToChannel({
           chatId,
           task: activeTask,
           sharePath: call.path,
           caption: call.caption,
         });
-        return this.buildNativeWorkerToolResult(messages.sharedFileSentToUser(call.path));
       case "copy_into_share":
       case "copy_out_of_share":
         return this.buildNativeWorkerToolResultFromPrivilegeResolution(await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
@@ -277,9 +276,10 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
           skillId: call.skillId,
         }));
       case "list_jobs":
-        return this.buildNativeWorkerToolResult(formatWorkerToolJson(await this.workerToolsHandler.listJobs()));
-      case "get_job":
-        return this.buildGetJobResult(call.jobId, await this.workerToolsHandler.getJob(call.jobId));
+        return await this.workerToolsHandler.listJobs();
+      case "get_job": {
+        return await this.workerToolsHandler.getJob(call.jobId);
+      }
       case "create_job":
         return this.buildNativeWorkerToolResultFromPrivilegeResolution(await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "job_mutation",
@@ -321,33 +321,11 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     assertNever(call);
   }
 
-  private buildNativeWorkerToolResult(message: string): NativeWorkerToolCallResult {
-    return {
-      isError: false,
-      message,
-    };
-  }
-
-  private buildNativeWorkerToolErrorResult(message: string): NativeWorkerToolCallResult {
-    return {
-      isError: true,
-      message,
-    };
-  }
-
   private buildNativeWorkerToolResultFromPrivilegeResolution(result: PrivilegeResolutionResult): NativeWorkerToolCallResult {
     return {
       isError: result.outcome !== "approved",
       message: result.message,
     };
-  }
-
-  private buildGetJobResult(jobId: string, job: JobDefinition | null): NativeWorkerToolCallResult {
-    if (!job) {
-      return this.buildNativeWorkerToolErrorResult(messages.jobDoesNotExist(jobId));
-    }
-
-    return this.buildNativeWorkerToolResult(formatWorkerToolJson(job));
   }
 
   private async awaitNativeToolPrivilegeResolution(
@@ -1118,10 +1096,6 @@ function isMcpAutoApprovalAllowed(task: NonNullable<SessionState["activeTask"]>,
 
 function isHttpTokenAutoApprovalAllowed(task: NonNullable<SessionState["activeTask"]>, tokenId: string): boolean {
   return task.taskPolicy.autoApproveHttpTokens.includes(tokenId);
-}
-
-function formatWorkerToolJson(value: unknown): string {
-  return JSON.stringify(value, null, 2);
 }
 
 function assertNever(value: never): never {

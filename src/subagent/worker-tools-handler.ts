@@ -1,8 +1,9 @@
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
 import type { JobService } from "../jobs/job-service.js";
-import type { JobDefinition } from "../jobs/job-validation.js";
 import { resolveTaskShareHostPath } from "../shared-workspace.js";
 import type { ActiveTaskState } from "../types.js";
+import type {NativeWorkerToolCallResult} from "../orchestrator/privileges.ts";
+import {messages} from "../messages.ts";
 
 type UserVisibleOperationRunner = (input: {
   chatId: string;
@@ -26,7 +27,7 @@ export class WorkerToolsHandler {
     task: ActiveTaskState;
     sharePath: string;
     caption?: string;
-  }): Promise<void> {
+  }): Promise<NativeWorkerToolCallResult> {
     await this.deps.runUserVisibleOperation({
       chatId: input.chatId,
       taskId: input.task.taskId,
@@ -39,13 +40,19 @@ export class WorkerToolsHandler {
         );
       },
     });
+    return { isError: false, message: messages.sharedFileSentToUser(input.sharePath) }
   }
 
-  async listJobs(): Promise<JobDefinition[]> {
-    return await this.deps.jobService.listJobs();
+  async listJobs(): Promise<NativeWorkerToolCallResult> {
+    const jobs = await this.deps.jobService.listJobs();
+    return { isError: false, message: JSON.stringify(jobs) };
   }
 
-  async getJob(jobId: string): Promise<JobDefinition | null> {
-    return await this.deps.jobService.getJob(jobId);
+  async getJob(jobId: string): Promise<NativeWorkerToolCallResult> {
+    const job = await this.deps.jobService.getJob(jobId);
+    if (!job) {
+      return { isError: true, message: messages.jobDoesNotExist(jobId) };
+    }
+    return { isError: false, message: JSON.stringify(job) };
   }
 }
