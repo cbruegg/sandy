@@ -1,84 +1,29 @@
-import { CodexMainAgentController } from "./agent/main-agent-controller.js";
-import { createChannelAdapter } from "./channel/create-channel.js";
-import type { WorkerAuthConfig, WorkerStartConfig } from "./types.js";
-import type { ChannelFormatting } from "./types/channel.js";
-import {
-  defaultCodexAuthFilePath,
-  loadConfig,
-  type HttpTokenConfig,
-  type SandyAuthMode
-} from "./config.js";
-import { CODEX_API_KEY_ENV, ensureManagedCodexPath } from "./codex-client.js";
-import { resolveSandyCacheRoot } from "./cache-paths.js";
-import { configureLogger, logger } from "./logger.js";
-import { ProxyAccess } from "./proxy-access.js";
-import { McpSidecarManager } from "./mcp/sidecar-manager.js";
-import { validateOAuthStateFilesForStartup } from "./mcp/oauth-state-validator.js";
-import { createCertificateAuthority } from "./http/ca.js";
-import { HttpTokenAuthorizer } from "./http/token-authorizer.js";
-import { ProxyAuthService } from "./http/proxy-auth-service.js";
-import { McpWorkerLaunchConfigBuilder } from "./mcp/worker-launch-config-builder.js";
-import { createMcpWorkerNetworkName } from "./mcp/worker-network-name.js";
-import { HostMcpServerRegistry } from "./mcp/host-server-registry.js";
-import { SandyOrchestrator } from "./orchestrator/index.js";
-import { OrchestratorPrivilegesImpl } from "./orchestrator/privileges.js";
-import { ActiveTaskRuntimeRegistry } from "./orchestrator/active-task-runtime-registry.js";
-import type { OrchestratorCoreDependencies } from "./orchestrator/shared.js";
-import { OrchestratorTaskLifecycleImpl } from "./orchestrator/task-lifecycle.js";
-import { TaskCoordinator } from "./orchestrator/task-coordinator.js";
-import { TomlPersistentApprovalStore } from "./privilege/persistent-approval-store.js";
-import { PrivilegeBrokerImpl } from "./privilege/privilege-broker.js";
-import {DockerSandboxRunner, type DockerSandboxRunnerOptions} from "./sandbox/docker-sandbox-runner.js";
-import {TaskBundleLauncherImpl, type TaskBundleLauncherOptions} from "./sandbox/task-bundle-launcher.js";
-import { TaskBundlePoolImpl } from "./sandbox/task-bundle-pool.js";
-import { InMemorySessionStore } from "./session/in-memory-session-store.js";
+import { loadConfig } from "./config.js";
+import { logger } from "./logger.js";
 import { OpenAiTranscriptionProvider } from "./transcription/openai-transcription-provider.js";
-import { resolvePublishedUpdateSource } from "./build-metadata.js";
-import { createRetryingChannelAdapter } from "./channel/retrying-channel-adapter.js";
-import { SelfUpdateCoordinator } from "./update/self-update.js";
-import { WorkerImageManager } from "./worker-image-manager.js";
-import { validateMatrixAuthStateForStartup, resolveMatrixAccessToken } from "./matrix/startup-validator.js";
-import {createNoopHostfsBroker} from "./hostfs/hostfs-broker.js";
-import {initializeHostfs, type HostfsServices} from "./hostfs/index.js";
-import { ChatGPTTokenBroker } from "./auth/chatgpt-token-broker.js";
-import { SkillService } from "./skills.js";
-import { WorkerToolsHandler } from "./subagent/worker-tools-handler.js";
-import { JobApprovalStore } from "./jobs/job-approval-store.js";
-import { JobStore } from "./jobs/job-store.js";
-import { JobScheduler } from "./jobs/job-scheduler.js";
-import { ScheduledJobService } from "./jobs/job-service.js";
-import { randomUUID } from "node:crypto";
-import { createControlDir, removeControlDir, startHeartbeat } from "./sandbox/heartbeat.js";
-import { CodexAppServerClient } from "./codex-app-server-client/app-server-client.js";
-import {buildMempalaceMcpServerConfig, isMemPalaceAvailable} from "./mempalace-availability.js";
-import type {ThreadStartParams} from "./codex-app-server-client/generated/v2";
+import { resolveMatrixAccessToken } from "./matrix/startup-validator.js";
+import { isMemPalaceAvailable } from "./mempalace-availability.js";
+import { buildMempalaceMcpServerConfig } from "./mempalace-availability.js";
+import type { ThreadStartParams } from "./codex-app-server-client/generated/v2";
+
+import { createFoundationLayer } from "./di/foundation.js";
+import { createChannelLayer } from "./di/channel.js";
+import { createCoreStoresLayer } from "./di/core-stores.js";
+import { createMainAgentLayer } from "./di/main-agent.js";
+import { createHttpProxyLayer } from "./di/http-proxy.js";
+import { createHostfsLayer } from "./di/hostfs.js";
+import { createMcpInfrastructureLayer } from "./di/mcp-infrastructure.js";
+import { createSandboxLayer } from "./di/sandbox.js";
+import { createOrchestratorLayer } from "./di/orchestrator.js";
+import { createMcpSidecarLayer } from "./di/mcp-sidecar.js";
+import { createSelfUpdateLayer } from "./di/self-update.js";
 
 export async function startApp(): Promise<void> {
+  // ── 1. Foundation ─────────────────────────────────────────────────────
   const config = loadConfig();
-  configureLogger({
-    minLevel: config.logLevel,
-  });
-  await validateOAuthStateFilesForStartup(config.configDirectory, config.mcpServers);
-  await validateMatrixAuthStateForStartup(config.configDirectory, config.channel);
+  const foundation = await createFoundationLayer({ config });
 
-  logger.info("app.starting", {
-    configFilePath: config.configFilePath,
-    channelKind: config.channel.kind,
-    workerImage: config.workerImage,
-    mcpSidecarImage: config.mcpSidecarImage,
-    httpProxyImage: config.httpProxyImage,
-    networkGuardImage: config.networkGuardImage,
-    shareRoot: config.shareRoot,
-    agentModel: config.agentModel,
-    authMode: config.authMode.mode,
-    codexAuthStrategy: config.authMode.mode === "codex_auth_file" ? config.authMode.codexAuthStrategy : null,
-    sttEnabled: config.sttApiKey !== null,
-    workerPreinstallCommandCount: config.workerPreinstall.commands.length,
-    workerPreinstallRefresh: config.workerPreinstall.refresh,
-    workerNetworkMode: config.workerNetwork.mode,
-    workerNetworkAllowLocalCidrs: config.workerNetwork.allowLocalCidrs,
-  });
-
+  // ── 2. Channel ────────────────────────────────────────────────────────
   const transcriptionProvider = config.sttApiKey
     ? new OpenAiTranscriptionProvider({
         apiKey: config.sttApiKey,
@@ -90,375 +35,137 @@ export async function startApp(): Promise<void> {
   const matrixAccessToken = config.channel.kind === "matrix"
     ? await resolveMatrixAccessToken(config.configDirectory, config.channel)
     : null;
-  const rawChannel = createChannelAdapter(config, transcriptionProvider, matrixAccessToken);
 
-  let rejectFatalError: ((error: Error) => void) | null = null;
-  const fatalErrorPromise = new Promise<never>((_, reject) => {
-    rejectFatalError = (error: Error) => reject(error);
+  const channelLayer = createChannelLayer({
+    config,
+    transcriptionProvider,
+    matrixAccessToken,
   });
 
-  let shutdownRequested = false;
-  let shutdown: (() => Promise<void>) | null = null;
-  const triggerFatalChannelError = (error: unknown, source: string): void => {
-    if (shutdownRequested) {
-      return;
-    }
-    shutdownRequested = true;
-    const wrappedError = error instanceof Error ? error : new Error(`Fatal channel error from ${source}.`);
-    logger.error("app.fatal_channel_error", wrappedError, `Fatal channel error from ${source}.`, {
-      source,
-    });
-    void shutdown?.().finally(() => rejectFatalError?.(wrappedError));
-  };
+  // ── 3. Core stores ────────────────────────────────────────────────────
+  const coreStores = createCoreStoresLayer({ config });
 
-  const channel = createRetryingChannelAdapter(rawChannel, triggerFatalChannelError);
-  const sandyCacheRoot = resolveSandyCacheRoot();
-
-  const workerImageManager = new WorkerImageManager({
-    baseImage: config.workerImage,
-    preinstall: config.workerPreinstall,
-    cacheRoot: sandyCacheRoot,
-  });
-
-  // Pre-resolve the worker Codex binary so each container can reuse the cache
-  // instead of re-downloading it.  Also resolve the host-platform Codex binary
-  // for the main agent's app-server process.
-  const [mainAgentCodexPath, workerCodexBinaryPath, initialWorkerImage] = await Promise.all([
-    ensureManagedCodexPath(),
-    ensureManagedCodexPath({
-      platform: "linux",
-      arch: process.arch,
-    }),
-    workerImageManager.start(),
-  ]);
-  const mainAgentAppServer = await CodexAppServerClient.createWithAmbientAuth({
-    codexPath: mainAgentCodexPath,
-    env: config.authMode.mode === "api_key"
-      ? { [CODEX_API_KEY_ENV]: config.authMode.openAiApiKey }
-      : undefined,
-  });
-
-  const tokenBroker: ChatGPTTokenBroker | null = config.authMode.mode === "codex_auth_file"
-    && config.authMode.codexAuthStrategy === "external_tokens"
-    ? new ChatGPTTokenBroker(defaultCodexAuthFilePath())
-    : null;
-
-  logger.info("worker_image.ready", {
-    baseImage: config.workerImage,
-    launchImage: initialWorkerImage,
-  });
-
-  const hostMcpRegistry = new HostMcpServerRegistry(config.mcpServers);
-  await hostMcpRegistry.start();
-
-  const controllerControlDir = await createControlDir(sandyCacheRoot, `controller-${randomUUID()}`);
-  const controllerHeartbeat = startHeartbeat(controllerControlDir);
-  const stopControllerHeartbeat = async (): Promise<void> => {
-    controllerHeartbeat.stop();
-    await removeControlDir(controllerControlDir);
-  };
-
-  const skillService = new SkillService(config.configDirectory);
-  const jobStore = new JobStore(config.configDirectory);
-
-  const mainAgentConfig = buildMainAgentConfig(config.configDirectory, config.memory.enabled);
+  // ── 4. Main agent ──────────────────────────────────────────────────────
   const mempalaceAvailable = config.memory.enabled && isMemPalaceAvailable();
   logger.info("memory.init", {
     backend: mempalaceAvailable ? "mempalace" : "none",
   });
 
-  const mainAgent = new CodexMainAgentController(
-    mainAgentAppServer,
-    config.agentModel,
-    () => skillService.getSkills(),
-    Object.keys(config.mcpServers),
-    config.httpTokens,
-    mainAgentConfig,
+  const mainAgentLayer = createMainAgentLayer({
+    config,
+    mainAgentAppServer: foundation.mainAgentAppServer,
+    skillService: coreStores.skillService,
+    hostMcpServerKeys: Object.keys(config.mcpServers),
     mempalaceAvailable,
-  );
-
-  const workerAccess = new ProxyAccess();
-  const httpTokensEnabled = Object.keys(config.httpTokens).length > 0;
-  const workerNetworkName = createMcpWorkerNetworkName();
-
-  const certificateAuthority = httpTokensEnabled ? await createCertificateAuthority() : null;
-  const sessionStore = new InMemorySessionStore();
-  const persistentApprovalStore = new TomlPersistentApprovalStore(
-    config.configFilePath,
-    config.persistentMcpApprovals,
-    config.persistentHttpApprovals,
-    config.persistentMcpResourceApprovals,
-    config.persistentHostDirectoryApprovals,
-  );
-  const jobApprovalStore = new JobApprovalStore(config.configDirectory);
-
-  // Docker Desktop (macOS, Windows) runs containers inside a VM. The VM cannot
-  // reach the host via 127.0.0.1, so we must bind the WebDAV server to 0.0.0.0
-  // and tell the rclone volume plugin to connect via host.docker.internal.
-  // On Linux, Docker Engine runs natively and the managed plugin shares the
-  // host network namespace, so 127.0.0.1 is sufficient and more restrictive.
-  const isDockerDesktop = process.platform === "darwin" || process.platform === "win32";
-  const webdavDockerHost = isDockerDesktop
-    ? "host.docker.internal"
-    : "127.0.0.1";
-  let hostfsServices: HostfsServices | null = null;
-  try {
-    hostfsServices = await initializeHostfs({
-      // Bind to all interfaces only on Docker Desktop (macOS/Windows), where the
-      // Docker VM cannot reach the host via 127.0.0.1. On Linux the rclone plugin
-      // runs in the host network namespace, so localhost is sufficient.
-      webdavHost: isDockerDesktop ? "0.0.0.0" : "127.0.0.1",
-      // The URL the rclone volume plugin uses; on macOS/Windows it must use
-      // host.docker.internal because the plugin runs inside the Docker Desktop VM.
-      webdavDockerHost,
-    });
-  } catch (error) {
-    logger.warn("hostfs.startup_disabled", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-  const httpTokenAuthorizer = new HttpTokenAuthorizer(
-    sessionStore,
-    persistentApprovalStore,
-  );
-
-  // The mitmproxy-based HTTP proxy container asks the host orchestrator for per-request
-  // token approvals and header resolution over the proxy container stdio bridge.
-  const proxyAuthService = httpTokensEnabled
-    ? new ProxyAuthService({
-        access: workerAccess,
-        httpTokens: config.httpTokens,
-        authorizeHttpTokenUse: (input) => httpTokenAuthorizer.authorizeHttpTokenUse(input),
-      })
-    : null;
-
-  const mcpWorkerLaunchConfigBuilder = new McpWorkerLaunchConfigBuilder(
-    config.mcpServers,
-    workerAccess,
-  );
-
-  const createHostfsVolume = hostfsServices ? async (bundleId: string): Promise<string | null> => {
-    const services = hostfsServices;
-    const credentials = services.bundleRegistry.createBundle(bundleId);
-    services.broker.registerBundle(bundleId);
-    try {
-      return await services.volumeManager.createVolume(bundleId, credentials.secret);
-    } catch (error) {
-      if (!services.rclonePluginManager.isRecoveryEnabled() || !services.rclonePluginManager.isRecoverablePluginError(error)) {
-        throw error;
-      }
-
-      logger.warn("hostfs.volume_creation_retrying_after_plugin_recovery", {
-        bundleId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      await services.rclonePluginManager.recover();
-      return await services.volumeManager.createVolume(bundleId, credentials.secret);
-    }
-  } : undefined;
-
-  const removeHostfsVolume = hostfsServices ? async (bundleId: string): Promise<void> => {
-    const services = hostfsServices;
-    services.broker.revokeBundle(bundleId);
-    services.bundleRegistry.revokeBundle(bundleId);
-    await services.volumeManager.removeVolume(bundleId);
-  } : undefined;
-
-  const taskBundleLauncherOptions: TaskBundleLauncherOptions = {
-    workerImage: config.workerImage,
-    resolveWorkerImage: () => workerImageManager.getLaunchImage(),
-    shareRoot: config.shareRoot,
-    controllerControlDir,
-    codexAuthFile: config.authMode.mode === "codex_auth_file"
-      && config.authMode.codexAuthStrategy === "copy_file"
-      ? defaultCodexAuthFilePath()
-      : null,
-    getSkillsDirectory: () => skillService.getSkillsDirectory(),
-    workerCodexBinaryPath,
-    networkGuardImage: config.networkGuardImage,
-    workerNetwork: config.workerNetwork,
-    workerNetworkName,
-    httpProxyCaCertPath: certificateAuthority?.certPath ?? null,
-    httpProxyConfDirPath: certificateAuthority?.confDirPath ?? null,
-    httpProxyImage: httpTokensEnabled ? config.httpProxyImage : null,
-    resolveHttpProxyRequest: proxyAuthService
-        ? (request) => proxyAuthService.resolveProxyRequest(request)
-        : undefined,
-    logLevel: config.logLevel,
-    createHostfsVolume,
-    removeHostfsVolume,
-  };
-  const sandboxRunnerOptions: DockerSandboxRunnerOptions = {
-    workerImage: config.workerImage,
-    resolveWorkerImage: () => workerImageManager.getLaunchImage(),
-    workerNetwork: config.workerNetwork,
-    workerCodexConfigBuilder: (taskId: string) => mcpWorkerLaunchConfigBuilder.build(taskId),
-    httpProxyUrlFactory: httpTokensEnabled
-        ? (taskId: string) => {
-          const jwt = workerAccess.issueWorkerGrant(taskId).bearerToken;
-          const encodedJwt = encodeURIComponent(jwt);
-          // The worker container shares the network namespace with the proxy
-          // sidecar, so the proxy is reachable on localhost from the worker.
-          return `http://Bearer:${encodedJwt}@127.0.0.1:8081`;
-        }
-        : undefined,
-  };
-
-  const taskBundleLauncher = new TaskBundleLauncherImpl(taskBundleLauncherOptions);
-  const taskBundlePool = new TaskBundlePoolImpl(taskBundleLauncher);
-  const sandboxRunner = new DockerSandboxRunner(sandboxRunnerOptions, taskBundlePool);
-
-  const channelFormatting = channel.getFormatting();
-  const refreshChatGPTTokens = async (_taskId: string, previousAccountId: string | null) => {
-    if (!tokenBroker) return null;
-    try {
-      return await tokenBroker.refreshTokens(previousAccountId);
-    } catch (error) {
-      logger.error("token_broker.refresh_failed", error, "Unknown error");
-      return null;
-    }
-  };
-
-  const activeTaskRuntimes = new ActiveTaskRuntimeRegistry();
-  const taskCoordinator = new TaskCoordinator({
-    sessionStore,
-    channel,
-    onJobTaskBecameInteractive: async (taskId) => {
-      await activeTaskRuntimes.notifyTaskBecameInteractive(taskId);
-    },
   });
 
-  const orchestratorCoreDeps: OrchestratorCoreDependencies = {
-    mainAgent,
-    sandboxRunner,
-    buildWorkerStartConfig: () => buildWorkerStartConfig(
-      config.authMode,
-      config.agentModel,
-      config.httpTokens,
-      tokenBroker,
-      channelFormatting,
-    ),
-    refreshChatGPTTokens,
-    sessionStore,
-    privilegeBroker: new PrivilegeBrokerImpl(),
-    persistentApprovalStore,
-    jobApprovalStore,
-    hostfsBroker: hostfsServices?.broker ?? createNoopHostfsBroker(),
-    skillService,
-    taskCoordinator,
-  };
-  const taskLifecycle = new OrchestratorTaskLifecycleImpl(orchestratorCoreDeps, activeTaskRuntimes, channelFormatting, channel);
-  const jobScheduler = new JobScheduler(jobStore, async (job, workspacePath) => {
-    const chatId = await channel.destinationStore.getDefaultChatId();
-    if (!chatId) {
-      throw new Error(`Cannot launch scheduled job ${job.id}: no default chat destination is known yet.`);
-    }
-    return await taskLifecycle.launchJobTask(job, chatId, workspacePath);
-  });
-  const jobService = new ScheduledJobService(jobStore, jobScheduler);
-  const workerToolsHandler = new WorkerToolsHandler({
-    jobService,
-    getTaskSharePath: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskSharePath(),
-    runUserVisibleOperation: async ({ chatId, taskId, taskName, operation }) => {
-      await taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, operation);
-    },
-  });
-  const privileges = new OrchestratorPrivilegesImpl(orchestratorCoreDeps, activeTaskRuntimes, workerToolsHandler, jobService, taskLifecycle);
-  const orchestrator = new SandyOrchestrator({
-    ...orchestratorCoreDeps,
-    channel,
-    channelFormatting,
-    taskLifecycle,
-    privileges,
+  // ── 5. HTTP proxy ──────────────────────────────────────────────────────
+  const httpProxy = await createHttpProxyLayer({
+    config,
+    sessionStore: coreStores.sessionStore,
+    persistentApprovalStore: coreStores.persistentApprovalStore,
   });
 
-  const sidecarManager = new McpSidecarManager({
-    configDirectory: config.configDirectory,
-    mcpServers: config.mcpServers,
-    workerNetworkName,
-    sidecarImage: config.mcpSidecarImage,
-    controllerControlDir,
-    authorizeToolCall: orchestrator.authorizeMcpToolCall.bind(orchestrator),
-    authorizeResourceRead: orchestrator.authorizeMcpResourceRead.bind(orchestrator),
-    executeNativeToolCall: orchestrator.executeNativeWorkerToolCall.bind(orchestrator),
-    executeUpstreamMcpRequest: async (input) => await hostMcpRegistry.execute(input.taskId, input.serverId, input.method, input.params),
-  }, workerAccess);
+  // ── 6. Hostfs ─────────────────────────────────────────────────────────
+  const hostfs = await createHostfsLayer();
 
-  await sidecarManager.start();
+  // ── 7. MCP infrastructure (before sandbox/orchestrator) ───────────────
+  const mcpInfra = await createMcpInfrastructureLayer({
+    config,
+    proxyAccess: httpProxy.proxyAccess,
+  });
 
-  sandboxRunner.start();
+  // ── 8. Sandbox ────────────────────────────────────────────────────────
+  const sandbox = createSandboxLayer({
+    config,
+    workerImageManager: foundation.workerImageManager,
+    controllerControlDir: foundation.controllerControlDir,
+    workerCodexBinaryPath: foundation.workerCodexBinaryPath,
+    skillService: coreStores.skillService,
+    certificateAuthority: httpProxy.certificateAuthority,
+    proxyAuthService: httpProxy.proxyAuthService,
+    proxyAccess: httpProxy.proxyAccess,
+    createHostfsVolume: hostfs.createHostfsVolume,
+    removeHostfsVolume: hostfs.removeHostfsVolume,
+    mcpWorkerLaunchConfigBuilder: mcpInfra.mcpWorkerLaunchConfigBuilder,
+    workerNetworkName: mcpInfra.workerNetworkName,
+  });
 
-  const stopWithLogging = async (step: string, fn: (() => Promise<void>) | null | undefined): Promise<void> => {
-    if (!fn) {
-      return;
-    }
-    logger.info("app.shutdown_step_started", { step });
-    await fn();
-    logger.info("app.shutdown_step_completed", { step });
-  };
+  // ── 9. Orchestrator (+ jobs, worker tools) ─────────────────────────────
+  const orchestration = createOrchestratorLayer({
+    config,
+    channel: channelLayer.channel,
+    channelFormatting: channelLayer.channelFormatting,
+    sessionStore: coreStores.sessionStore,
+    persistentApprovalStore: coreStores.persistentApprovalStore,
+    jobApprovalStore: coreStores.jobApprovalStore,
+    skillService: coreStores.skillService,
+    jobStore: coreStores.jobStore,
+    mainAgent: mainAgentLayer.mainAgent,
+    tokenBroker: mainAgentLayer.tokenBroker,
+    sandboxRunner: sandbox.sandboxRunner,
+    hostfsBroker: hostfs.hostfsBroker,
+  });
 
-  shutdown = async () => {
+  // ── 10. MCP sidecar (after orchestrator) ───────────────────────────────
+  const mcpSidecar = await createMcpSidecarLayer({
+    config,
+    controllerControlDir: foundation.controllerControlDir,
+    workerNetworkName: mcpInfra.workerNetworkName,
+    orchestrator: orchestration.orchestrator,
+    hostMcpRegistry: mcpInfra.hostMcpRegistry,
+    proxyAccess: httpProxy.proxyAccess,
+  });
+
+  // ── Start services ────────────────────────────────────────────────────
+  sandbox.sandboxRunner.start();
+
+  // ── Assemble composite shutdown (reverse order of startup) ─────────────
+  // Note: selfUpdate is constructed after the shutdown function because it
+  // needs the shutdown callback, but its stop() should still run during teardown.
+  // We'll add it to the layers array after construction.
+  const layers: Array<{ readonly name: string; stop: () => Promise<void> }> = [
+    foundation,
+    channelLayer,
+    coreStores,
+    mainAgentLayer,
+    httpProxy,
+    hostfs,
+    mcpInfra,
+    sandbox,
+    orchestration,
+    mcpSidecar,
+  ];
+
+  let shutdownRequested = false;
+
+  const shutdown = async (): Promise<void> => {
+    if (shutdownRequested) return;
+    shutdownRequested = true;
     logger.info("app.shutdown_started");
-    jobScheduler.stop();
-    updateCoordinator.stop();
-    await stopWithLogging("channel.stop", () => channel.stop());
-    await stopWithLogging("sidecarManager.stop", sidecarManager?.stop.bind(sidecarManager));
-    await stopWithLogging("hostMcpRegistry.close", () => hostMcpRegistry.close());
-    await stopWithLogging("sandboxRunner.shutdown", sandboxRunner.shutdown?.bind(sandboxRunner));
-    await stopWithLogging("mainAgentAppServer.close", () => Promise.resolve(mainAgentAppServer.close()));
-    await stopWithLogging("controllerHeartbeat.stop", stopControllerHeartbeat);
-    await stopWithLogging("workerImageManager.stop", () => workerImageManager.stop());
-    if (hostfsServices) {
-      await stopWithLogging("hostfs.webdav.stop", () => hostfsServices.webdavServer.stop());
+    for (const layer of [...layers].reverse()) {
+      logger.info("app.shutdown_step_started", { step: layer.name });
+      await layer.stop();
+      logger.info("app.shutdown_step_completed", { step: layer.name });
     }
     logger.info("app.shutdown_completed");
   };
 
-  const updateCoordinator = new SelfUpdateCoordinator({
-    mode: config.updateMode,
-    currentExecutablePath: process.execPath,
-    currentArgs: process.argv.slice(1),
-    currentWorkingDirectory: process.cwd(),
-    updateSource: resolvePublishedUpdateSource(),
-    canInstallUpdate: () => {
-      const sessions = sessionStore.listSessions();
-      const blockingSessions = sessions.filter((session) =>
-        session.activeTask !== null
-        || session.backgroundJobTasks.length > 0
-        || session.pendingShareDeletion !== null);
-      if (blockingSessions.length > 0) {
-        logger.debug("update.blocked_by_sessions", {
-          blockingCount: blockingSessions.length,
-          totalCount: sessions.length,
-          blockingSessions: blockingSessions.map((session) => ({
-            chatId: session.chatId,
-            hasActiveTask: session.activeTask !== null,
-            backgroundJobTaskCount: session.backgroundJobTasks.length,
-            hasPendingTaskSummary: session.pendingTaskSummary !== null,
-            hasPendingShareDeletion: session.pendingShareDeletion !== null,
-          })),
-        });
-        return false;
-      }
-      return true;
-    },
-    notifyChats: async (message) => {
-      const chatIds = Array.from(new Set(sessionStore.listSessions().map((session) => session.chatId)));
-      await Promise.all(chatIds.map(async (chatId) => {
-        try {
-          await channel.sendText(chatId, message);
-        } catch (error) {
-          logger.warn("update.notification_failed", {
-            chatId,
-            message: error instanceof Error ? error.message : "Unknown update notification failure.",
-          });
-        }
-      }));
-    },
-    prepareForRestart: shutdown,
+  // Wire the channel's fatal error handler so it can trigger shutdown.
+  channelLayer.setShutdown(shutdown);
+
+  // ── 11. Self-update (needs shutdown callback) ──────────────────────────
+  const selfUpdate = createSelfUpdateLayer({
+    config,
+    sessionStore: coreStores.sessionStore,
+    channel: channelLayer.channel,
+    shutdown,
   });
-  updateCoordinator.start();
-  await jobScheduler.start();
+  layers.push(selfUpdate);
+  selfUpdate.updateCoordinator.start();
+
+  // ── Start remaining services ───────────────────────────────────────────
+  await orchestration.jobScheduler.start();
 
   process.once("SIGINT", () => {
     shutdownRequested = true;
@@ -469,11 +176,11 @@ export async function startApp(): Promise<void> {
     void shutdown().finally(() => process.exit(143));
   });
 
-  await channel.start(async (event) => {
-    await orchestrator.handleChatEvent(event);
+  await channelLayer.channel.start(async (event) => {
+    await orchestration.orchestrator.handleChatEvent(event);
   });
   logger.info("app.started");
-  await fatalErrorPromise;
+  await channelLayer.fatalErrorPromise;
 }
 
 export function buildMainAgentConfig(configDirectory: string, isMempalaceEnabled: boolean): ThreadStartParams["config"] {
@@ -491,44 +198,5 @@ export function buildMainAgentConfig(configDirectory: string, isMempalaceEnabled
     mcp_servers: {
       mempalace: mempalaceConfig,
     },
-  };
-}
-
-async function buildWorkerStartConfig(
-  authMode: SandyAuthMode,
-  agentModel: string | null,
-  httpTokens: Record<string, HttpTokenConfig>,
-  tokenBroker: ChatGPTTokenBroker | null,
-  channelFormatting: ChannelFormatting | null,
-): Promise<WorkerStartConfig> {
-  let auth: WorkerAuthConfig;
-
-  if (authMode.mode === "api_key") {
-    auth = { mode: "ambient_api_key", openAiApiKey: authMode.openAiApiKey };
-  } else if (tokenBroker) {
-    try {
-      auth = {
-        mode: "external_tokens",
-        tokens: await tokenBroker.getInitialTokens(),
-      };
-    } catch (error) {
-      logger.error("token_broker.worker_launch_tokens_failed", error, "Unknown error");
-      auth = { mode: "ambient_auth_file" };
-    }
-  } else {
-    auth = { mode: "ambient_auth_file" };
-  }
-
-  const httpTokensEnabled = Object.keys(httpTokens).length > 0;
-
-  return {
-    auth,
-    codexModel: agentModel,
-    channelFormatting,
-    httpTokens: Object.entries(httpTokens).map(([tokenId, token]) => ({
-      tokenId,
-      description: token.description,
-    })),
-    httpProxyWrapper: httpTokensEnabled ? "/usr/local/bin/sandy-http-proxy-exec" : null,
   };
 }

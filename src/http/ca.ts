@@ -4,7 +4,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-type CertificateAuthority = {
+export type CertificateAuthority = {
   certPath: string;
   confDirPath: string;
 };
