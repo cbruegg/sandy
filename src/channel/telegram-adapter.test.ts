@@ -4,6 +4,7 @@ import { GrammyError } from "grammy";
 import type { Update } from "grammy/types";
 import { sanitizeTelegramHtml } from "./telegram-html.js";
 import { TelegramBotApiAdapter, normalizeTelegramUpdate } from "./telegram-adapter.js";
+import { ImplicitChannelDestinationStore } from "./channel-destination-store.js";
 import type { TranscriptionProvider } from "../transcription/transcription-provider.js";
 
 const OWNER_ID = "5";
@@ -199,6 +200,7 @@ test("TelegramBotApiAdapter keeps handling later updates after a handler error",
   const adapter = new TelegramBotApiAdapter({
     allowedUser: OWNER_ID,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
   });
 
@@ -244,6 +246,7 @@ test("TelegramBotApiAdapter acknowledges callback queries", async () => {
   const adapter = new TelegramBotApiAdapter({
     allowedUser: OWNER_ID,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
   });
 
@@ -280,6 +283,7 @@ test("TelegramBotApiAdapter transcribes voice messages into normal text events",
   const adapter = new TelegramBotApiAdapter({
     allowedUser: OWNER_ID,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
     fileDownloader: async () => new Uint8Array([1, 2, 3]).buffer,
     transcriptionProvider: {
@@ -331,6 +335,7 @@ test("TelegramBotApiAdapter keeps transcribed voice command text as plain user t
   const adapter = new TelegramBotApiAdapter({
     allowedUser: OWNER_ID,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
     fileDownloader: async () => new Uint8Array([1, 2, 3]).buffer,
     transcriptionProvider: {
@@ -380,6 +385,7 @@ test("TelegramBotApiAdapter reports voice messages as disabled without STT confi
   const adapter = new TelegramBotApiAdapter({
     allowedUser: OWNER_ID,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
   });
 
@@ -414,6 +420,7 @@ test("TelegramBotApiAdapter ignores unauthorized sender messages", async () => {
   const adapter = new TelegramBotApiAdapter({
     allowedUser: OWNER_ID,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
   });
 
@@ -445,6 +452,7 @@ test("TelegramBotApiAdapter ignores unauthorized voice messages before normaliza
   const adapter = new TelegramBotApiAdapter({
     allowedUser: OWNER_ID,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
     fileDownloader: async () => {
       fileDownloads += 1;
@@ -484,6 +492,7 @@ test("TelegramBotApiAdapter ignores owner messages outside private chats", async
   const adapter = new TelegramBotApiAdapter({
     allowedUser: OWNER_ID,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
   });
 
@@ -514,6 +523,7 @@ test("TelegramBotApiAdapter ignores unauthorized callback queries", async () => 
   const adapter = new TelegramBotApiAdapter({
     allowedUser: OWNER_ID,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
   });
 
@@ -553,6 +563,7 @@ test("TelegramBotApiAdapter authorizes by username when configured", async () =>
   const adapter = new TelegramBotApiAdapter({
     allowedUser: "@cbruegg",
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
   });
 
@@ -582,6 +593,7 @@ test("TelegramBotApiAdapter ignores messages when username does not match", asyn
   const adapter = new TelegramBotApiAdapter({
     allowedUser: `@${OWNER_USERNAME}`,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
   });
 
@@ -625,6 +637,7 @@ test("TelegramBotApiAdapter sends sanitized HTML with parse_mode", async () => {
   const adapter = new TelegramBotApiAdapter({
     allowedUser: OWNER_ID,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
   });
 
@@ -644,6 +657,7 @@ test("TelegramBotApiAdapter sends task updates with abort and mark-finished cont
   const adapter = new TelegramBotApiAdapter({
     allowedUser: OWNER_ID,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
   });
 
@@ -671,6 +685,7 @@ test("TelegramBotApiAdapter sends reportable text with a report control", async 
   const adapter = new TelegramBotApiAdapter({
     allowedUser: OWNER_ID,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
   });
 
@@ -697,6 +712,7 @@ test("TelegramBotApiAdapter sends privilege requests with appropriate controls",
   const adapter = new TelegramBotApiAdapter({
     allowedUser: OWNER_ID,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
   });
 
@@ -725,6 +741,7 @@ test("TelegramBotApiAdapter sends share deletion requests with approve and deny 
   const adapter = new TelegramBotApiAdapter({
     allowedUser: OWNER_ID,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
   });
 
@@ -745,6 +762,7 @@ test("TelegramBotApiAdapter sends local files as Telegram documents", async () =
   const adapter = new TelegramBotApiAdapter({
     allowedUser: OWNER_ID,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
   });
 
@@ -760,6 +778,7 @@ test("TelegramBotApiAdapter splits long messages into multiple sendMessage calls
   const adapter = new TelegramBotApiAdapter({
     allowedUser: OWNER_ID,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
   });
 
@@ -778,6 +797,7 @@ test("TelegramBotApiAdapter attaches reply_markup only to the final chunk", asyn
   const adapter = new TelegramBotApiAdapter({
     allowedUser: OWNER_ID,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
   });
 
@@ -800,6 +820,7 @@ test("TelegramBotApiAdapter does not retry non-429 errors for single-chunk messa
   const adapter = new TelegramBotApiAdapter({
     allowedUser: OWNER_ID,
     token: "test-token",
+    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
     botFactory: () => fakeBot,
   });
 

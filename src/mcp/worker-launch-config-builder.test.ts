@@ -19,12 +19,14 @@ test("McpWorkerLaunchConfigBuilder always exposes Sandy's built-in MCP server", 
     mcp_servers: Record<string, {
       url: string;
       bearer_token_env_var: string;
+      tool_timeout_sec: number;
     }>;
   };
 
   assert.deepEqual(Object.keys(parsed.mcp_servers), [sandyMcpServerId]);
   assert.equal(parsed.mcp_servers[sandyMcpServerId]?.url, `${mcpProxyWorkerBaseUrl}/mcp/tasks/task-1/servers/${sandyMcpServerId}`);
   assert.equal(parsed.mcp_servers[sandyMcpServerId]?.bearer_token_env_var, workerProxyTokenEnvVar);
+  assert.equal(parsed.mcp_servers[sandyMcpServerId]?.tool_timeout_sec, 24 * 60 * 60);
 });
 
 test("McpWorkerLaunchConfigBuilder builds worker TOML and env from access data", async () => {
@@ -49,14 +51,18 @@ test("McpWorkerLaunchConfigBuilder builds worker TOML and env from access data",
     mcp_servers: Record<string, {
       url: string;
       bearer_token_env_var: string;
+      tool_timeout_sec: number;
     }>;
   };
 
   assert.equal(parsed.mcp_servers["todoist"]?.url, `${mcpProxyWorkerBaseUrl}/mcp/tasks/task-1/servers/todoist`);
   assert.equal(parsed.mcp_servers["todoist"]?.bearer_token_env_var, workerProxyTokenEnvVar);
+  assert.equal(parsed.mcp_servers["todoist"]?.tool_timeout_sec, 24 * 60 * 60);
   assert.equal(parsed.mcp_servers["github"]?.url, `${mcpProxyWorkerBaseUrl}/mcp/tasks/task-1/servers/github`);
   assert.equal(parsed.mcp_servers["github"]?.bearer_token_env_var, workerProxyTokenEnvVar);
+  assert.equal(parsed.mcp_servers["github"]?.tool_timeout_sec, 24 * 60 * 60);
   assert.equal(parsed.mcp_servers[sandyMcpServerId]?.url, `${mcpProxyWorkerBaseUrl}/mcp/tasks/task-1/servers/${sandyMcpServerId}`);
+  assert.equal(parsed.mcp_servers[sandyMcpServerId]?.tool_timeout_sec, 24 * 60 * 60);
   assert.ok(launchConfig.environment[workerProxyTokenEnvVar]);
   assert.deepEqual(access.validateWorkerGrant({
     taskId: "task-1",

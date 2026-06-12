@@ -11,6 +11,7 @@ import { type HostCommand, type SubAgentEvent } from "../types.js";
 import {
   buildInitialTaskInput,
   buildPrivilegeResolutionInput,
+  buildTaskBecameInteractiveInput,
   type ImageAttachment,
 } from "./worker-prompt.js";
 import { AppServerWorkerSession, streamAppServerTurn, type StreamTurnResult } from "./worker-app-server.js";
@@ -275,6 +276,10 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
           assertTaskStarted(taskStarted, command.type);
           enqueueAppServerTurn(buildAppServerInputWithImages(command.input.text, command.input.images));
           break;
+        case "task_became_interactive":
+          assertTaskStarted(taskStarted, command.type);
+          enqueueAppServerTurn(buildAppServerInputWithImages(buildTaskBecameInteractiveInput(), []));
+          break;
         case "privilege_result":
           assertTaskStarted(taskStarted, command.type);
           enqueueAppServerTurn(buildAppServerInputWithImages(buildPrivilegeResolutionInput(command.result), []));
@@ -420,5 +425,6 @@ export {
   buildInitialTaskInput,
   buildInitialTaskInputWithCapabilities,
   buildPrivilegeResolutionInput,
+  buildTaskBecameInteractiveInput,
   buildTaskSummaryInput,
 } from "./worker-prompt.js";

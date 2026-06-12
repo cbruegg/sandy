@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { PrivilegedWorkerToolPayload } from "../subagent/worker-tools.js";
 import type {HostDirectoryAccessLevel} from "../hostfs/path-policy.ts";
+import type { JobMutationRequest } from "../jobs/job-types.js";
 
 const privilegeApprovalScopeSchema = z.enum(["once", "worker_session", "always"]);
 
@@ -53,7 +54,13 @@ type SkillMutationPrivilegeRequest = {
   body?: string;
 };
 
-export type PrivilegeRequest = HostOperationPrivilegeRequest | HostDirectoryAccessPrivilegeRequest | McpToolCallPrivilegeRequest | McpResourceReadPrivilegeRequest | HttpTokenUsePrivilegeRequest | SkillMutationPrivilegeRequest;
+type JobMutationPrivilegeRequest = {
+  kind: "job_mutation";
+  requestId: string;
+  mutation: JobMutationRequest;
+};
+
+export type PrivilegeRequest = HostOperationPrivilegeRequest | HostDirectoryAccessPrivilegeRequest | McpToolCallPrivilegeRequest | McpResourceReadPrivilegeRequest | HttpTokenUsePrivilegeRequest | SkillMutationPrivilegeRequest | JobMutationPrivilegeRequest;
 
 export const privilegeResolutionResultSchema = z.object({
   requestId: z.string().min(1),

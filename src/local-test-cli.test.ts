@@ -75,7 +75,7 @@ test("local-test CLI rejects unknown commands", async () => {
 test("local-test CLI cancel-all writes a cancel_request event", async () => {
   const root = await mkdtemp(join(tmpdir(), "sandy-local-cli-"));
   try {
-    await runLocalTestCli(["cancel-all", "--spool-root", root]);
+    await runLocalTestCli(["cancel-all", "--spool-root", root], createTestIo(), createTestRuntime());
     const files = await readdir(join(root, "inbox"));
     assert.equal(files.length, 1);
     const event = inboxEventSchema.parse(JSON.parse(await readFile(join(root, "inbox", files[0]!), "utf8")) as unknown);
@@ -93,7 +93,7 @@ test("local-test CLI status shows container status header and managed count", as
       stdout: { write: (s: string) => { output += s; return true; } } as unknown as NodeJS.WriteStream,
       stderr: { write: () => true } as unknown as NodeJS.WriteStream,
     };
-    await runLocalTestCli(["status", "--spool-root", root], io);
+    await runLocalTestCli(["status", "--spool-root", root], io, createTestRuntime());
     assert.ok(output.includes("=== Sandy Container Status ==="), "Should show container status header");
     assert.ok(output.includes("Spool root:"), "Should show spool root");
     assert.ok(output.includes("Managed containers:"), "Should show managed container count");
@@ -108,3 +108,27 @@ test("local-test CLI status shows container status header and managed count", as
     await rm(root, { recursive: true, force: true });
   }
 });
+
+function createTestIo(output?: { stdout: string; stderr: string }) {
+  return {
+    stdout: {
+      write: (s: string) => {
+        if (output) output.stdout += s;
+        return true;
+      },
+    } as unknown as NodeJS.WriteStream,
+    stderr: {
+      write: (s: string) => {
+        if (output) output.stderr += s;
+        return true;
+      },
+    } as unknown as NodeJS.WriteStream,
+  };
+}
+
+function createTestRuntime() {
+  return {
+    listManagedContainers: () => Promise.resolve([]),
+    sleep: (_delayMs: number) => Promise.resolve(),
+  };
+}

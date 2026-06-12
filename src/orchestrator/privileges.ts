@@ -1,31 +1,55 @@
 import { randomUUID } from "node:crypto";
 import { isSupportedPrivilegeRequest } from "../privilege/privilege-broker.js";
-import { resolveTaskShareHostPath } from "../shared-workspace.js";
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
-import { OrchestratorRuntimeState } from "./runtime-state.js";
-import type { SandyOrchestratorDependencies } from "./shared.js";
+import { ActiveTaskRuntimeRegistry } from "./active-task-runtime-registry.js";
+import type {OrchestratorCoreDependencies} from "./shared.js";
 import { parseWorkerToolPayload } from "../subagent/worker-tools.js";
-import type { WorkerToolPayload } from "../subagent/worker-tools.js";
+import type { NativeWorkerToolCallResult, WorkerToolPayload } from "../subagent/worker-tools.js";
 import type { NormalizedChatEvent, PrivilegeRequest, PrivilegeResolutionResult, SessionState } from "../types.js";
+import type { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
+import type { JobService } from "../jobs/job-service.js";
 
-export class OrchestratorPrivileges {
+export interface OrchestratorPrivileges {
+  executeNativeWorkerToolCall(input: {
+    taskId: string;
+    toolName: string;
+    arguments: unknown;
+  }): Promise<NativeWorkerToolCallResult>;
+  authorizeMcpToolCall(input: {
+    taskId: string;
+    serverId: string;
+    toolName: string;
+    arguments: unknown;
+  }): Promise<PrivilegeResolutionResult>;
+  authorizeMcpResourceRead(input: {
+    taskId: string;
+    serverId: string;
+    uri: string;
+  }): Promise<PrivilegeResolutionResult>;
+  resolvePendingPrivilegeRequest(
+    session: SessionState,
+    request: PrivilegeRequest,
+    decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
+  ): Promise<void>;
+}
+
+export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
+
   constructor(
-    private readonly deps: SandyOrchestratorDependencies,
-    private readonly runtimeState: OrchestratorRuntimeState,
-    private readonly failActiveTaskFromEventHandling: (
-      session: SessionState,
-      taskId: string,
-      message: string,
-    ) => Promise<void>,
+    private readonly deps: Omit<OrchestratorCoreDependencies, "channel">,
+    private readonly activeTasks: ActiveTaskRuntimeRegistry,
+    private readonly workerToolsHandler: WorkerToolsHandler,
+    private readonly jobService: JobService,
+    private readonly taskFailureHandler: TaskFailureHandler,
   ) {}
 
   async executeNativeWorkerToolCall(input: {
     taskId: string;
     toolName: string;
     arguments: unknown;
-  }): Promise<{ isError: boolean; message: string }> {
-    const session = this.deps.sessionStore.getByActiveTaskId(input.taskId);
+  }): Promise<NativeWorkerToolCallResult> {
+    const session = this.deps.sessionStore.getByTaskId(input.taskId);
     if (!session) {
       return {
         isError: true,
@@ -34,8 +58,8 @@ export class OrchestratorPrivileges {
     }
 
     const chatId = session.chatId;
-    const activeTask = session.activeTask;
-    if (!activeTask || activeTask.taskId !== input.taskId) {
+    const activeTask = this.deps.taskCoordinator.findTask(session, input.taskId);
+    if (!activeTask) {
       return {
         isError: true,
         message: messages.taskNotActive(input.taskId),
@@ -59,17 +83,14 @@ export class OrchestratorPrivileges {
     }
 
     try {
-      const result = await this.executeWorkerToolCall(chatId, session, call);
+      const result = await this.executeWorkerToolCall(chatId, session, activeTask, call);
       logger.info("task.native_tool_call_executed", {
         chatId,
         taskId: input.taskId,
         toolName: input.toolName,
-        outcome: result.outcome,
+        isError: result.isError,
       });
-      return {
-        isError: result.outcome !== "approved",
-        message: result.message,
-      };
+      return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown native tool execution failure.";
       logger.error("task.native_tool_handler_failed", error, "Unknown native tool execution failure.", {
@@ -77,7 +98,7 @@ export class OrchestratorPrivileges {
         taskId: input.taskId,
         toolName: input.toolName,
       });
-      await this.failActiveTaskFromEventHandling(session, input.taskId, message);
+      await this.taskFailureHandler.failActiveTaskFromEventHandling(session, input.taskId, message);
       return {
         isError: true,
         message,
@@ -106,6 +127,8 @@ export class OrchestratorPrivileges {
       result = await this.resolvePendingHostDirectoryRequest(session, request, decision);
     } else if (request.kind === "skill_mutation") {
       result = await this.resolvePendingSkillMutationRequest(session, request, decision);
+    } else if (request.kind === "job_mutation") {
+      result = await this.resolvePendingJobMutationRequest(session, request, decision);
     } else if (decision === "deny") {
       result = {
         requestId: request.requestId,
@@ -117,7 +140,7 @@ export class OrchestratorPrivileges {
     } else {
       const operation = await this.deps.privilegeBroker.apply(request.payload, {
         taskId: activeTask.taskId,
-        taskSharePath: this.runtimeState.requireHandle(activeTask.taskId).getTaskSharePath(),
+        taskSharePath: this.activeTasks.requireHandle(activeTask.taskId).getTaskSharePath(),
       });
       result = {
         requestId: request.requestId,
@@ -125,14 +148,14 @@ export class OrchestratorPrivileges {
       };
     }
 
-    if (request.kind === "host_operation" || request.kind === "http_token_use" || request.kind === "host_directory_access" || request.kind === "skill_mutation") {
-      if (!this.runtimeState.resolvePendingNativeTool(request.requestId, result)) {
-        await this.runtimeState.requireHandle(activeTask.taskId).resolvePrivilege(result);
+    if (request.kind === "host_operation" || request.kind === "http_token_use" || request.kind === "host_directory_access" || request.kind === "skill_mutation" || request.kind === "job_mutation") {
+      if (!this.activeTasks.resolvePendingNativeTool(request.requestId, result)) {
+        await this.activeTasks.requireHandle(activeTask.taskId).resolvePrivilege(result);
       }
     } else if (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read") {
-      this.runtimeState.resolvePendingMcpPrivilege(request.requestId, result);
+      this.activeTasks.resolvePendingMcpPrivilege(request.requestId, result);
     }
-    await this.sendPrivilegeResolutionMessage(session.chatId, activeTask.taskId, result);
+    await this.sendPrivilegeResolutionMessage(session.chatId, activeTask.taskId, activeTask.taskName, result);
 
     activeTask.pendingPrivilegeRequest = null;
     activeTask.status = "running";
@@ -147,7 +170,7 @@ export class OrchestratorPrivileges {
     return this.authorizeMcpRequest(input.taskId, {
       serverId: input.serverId,
       isTaskGrantAllowed: (task) => this.isTaskToolGrantAllowed(task, input.serverId, input.toolName),
-      isPersistentAllowed: () => this.deps.persistentApprovalStore.isAlwaysAllowed(input.serverId, input.toolName),
+      isPersistentAllowed: () => Promise.resolve(this.deps.persistentApprovalStore.isAlwaysAllowed(input.serverId, input.toolName)),
       sessionMessage: messages.mcpToolAllowedForWorkerSession(input.serverId, input.toolName),
       persistentMessage: messages.mcpToolAllowedFromPersistentConfig(input.serverId, input.toolName),
       buildRequest: (requestId) => ({
@@ -168,7 +191,7 @@ export class OrchestratorPrivileges {
     return this.authorizeMcpRequest(input.taskId, {
       serverId: input.serverId,
       isTaskGrantAllowed: (task) => this.isTaskResourceReadGrantAllowed(task, input.serverId, input.uri),
-      isPersistentAllowed: () => this.deps.persistentApprovalStore.isResourceReadAlwaysAllowed(input.serverId, input.uri),
+      isPersistentAllowed: () => Promise.resolve(this.deps.persistentApprovalStore.isResourceReadAlwaysAllowed(input.serverId, input.uri)),
       sessionMessage: messages.mcpResourceReadAllowedForWorkerSession(input.serverId, input.uri),
       persistentMessage: messages.mcpResourceReadAllowedFromPersistentConfig(input.serverId, input.uri),
       buildRequest: (requestId) => ({
@@ -183,41 +206,50 @@ export class OrchestratorPrivileges {
   private async executeWorkerToolCall(
     chatId: string,
     session: SessionState,
+    activeTask: NonNullable<SessionState["activeTask"]>,
     call: WorkerToolPayload,
-  ): Promise<PrivilegeResolutionResult> {
+  ): Promise<NativeWorkerToolCallResult> {
+    const taskId = activeTask.taskId;
+
     switch (call.type) {
       case "send_file_to_channel":
-        await this.sendSharedFileToUser(chatId, session, call.path, call.caption);
-        return {
-          requestId: randomUUID(),
-          outcome: "approved",
-          message: messages.sharedFileSentToUser(call.path),
-        };
+        return await this.workerToolsHandler.sendFileToChannel({
+          chatId,
+          task: activeTask,
+          sharePath: call.path,
+          caption: call.caption,
+        });
+      case "request_interaction":
+        return await this.workerToolsHandler.requestInteraction({
+          chatId,
+          task: activeTask,
+          message: call.message,
+        });
       case "copy_into_share":
       case "copy_out_of_share":
-        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+        return this.buildNativeWorkerToolResultFromPrivilegeResolution(await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "host_operation",
           requestId: randomUUID(),
           payload: call,
-        });
+        }));
       case "request_http_token":
-        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+        return this.buildNativeWorkerToolResultFromPrivilegeResolution(await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "http_token_use",
           requestId: randomUUID(),
           tokenId: call.tokenId,
           host: call.host,
           reason: call.reason,
-          confirmsAutoApprovalForTask: this.shouldConfirmHttpTokenAutoApprovalForTask(session, call.tokenId, call.host),
-        });
+          confirmsAutoApprovalForTask: this.shouldConfirmHttpTokenAutoApprovalForTask(session, taskId, call.tokenId, call.host),
+        }));
       case "request_host_directory_access":
-        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+        return this.buildNativeWorkerToolResultFromPrivilegeResolution(await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "host_directory_access",
           requestId: randomUUID(),
           path: call.path,
           level: call.level,
-        });
+        }));
       case "create_skill":
-        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+        return this.buildNativeWorkerToolResultFromPrivilegeResolution(await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "skill_mutation",
           requestId: randomUUID(),
           operation: "create",
@@ -225,9 +257,9 @@ export class OrchestratorPrivileges {
           name: call.name,
           description: call.description,
           body: call.body,
-        });
+        }));
       case "update_skill":
-        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+        return this.buildNativeWorkerToolResultFromPrivilegeResolution(await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "skill_mutation",
           requestId: randomUUID(),
           operation: "update",
@@ -235,43 +267,74 @@ export class OrchestratorPrivileges {
           name: call.name,
           description: call.description,
           body: call.body,
-        });
+        }));
       case "delete_skill":
-        return await this.awaitNativeToolPrivilegeResolution(chatId, session, {
+        return this.buildNativeWorkerToolResultFromPrivilegeResolution(await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
           kind: "skill_mutation",
           requestId: randomUUID(),
           operation: "delete",
           skillId: call.skillId,
-        });
+        }));
+      case "list_jobs":
+        return await this.workerToolsHandler.listJobs();
+      case "get_job": {
+        return await this.workerToolsHandler.getJob(call.jobId);
+      }
+      case "create_job":
+        return this.buildNativeWorkerToolResultFromPrivilegeResolution(await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
+          kind: "job_mutation",
+          requestId: randomUUID(),
+          mutation: { operation: "create", jobId: call.definition.id, definition: call.definition },
+        }));
+      case "update_job":
+        return this.buildNativeWorkerToolResultFromPrivilegeResolution(await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
+          kind: "job_mutation",
+          requestId: randomUUID(),
+          mutation: { operation: "update", jobId: call.definition.id, definition: call.definition },
+        }));
+      case "delete_job":
+        return this.buildNativeWorkerToolResultFromPrivilegeResolution(await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
+          kind: "job_mutation",
+          requestId: randomUUID(),
+          mutation: { operation: "delete", jobId: call.jobId },
+        }));
+      case "enable_job":
+        return this.buildNativeWorkerToolResultFromPrivilegeResolution(await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
+          kind: "job_mutation",
+          requestId: randomUUID(),
+          mutation: { operation: "enable", jobId: call.jobId },
+        }));
+      case "disable_job":
+        return this.buildNativeWorkerToolResultFromPrivilegeResolution(await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
+          kind: "job_mutation",
+          requestId: randomUUID(),
+          mutation: { operation: "disable", jobId: call.jobId },
+        }));
+      case "run_job_now":
+        return this.buildNativeWorkerToolResultFromPrivilegeResolution(await this.awaitNativeToolPrivilegeResolution(chatId, session, taskId, {
+          kind: "job_mutation",
+          requestId: randomUUID(),
+          mutation: { operation: "run_now", jobId: call.jobId },
+        }));
     }
 
     assertNever(call);
   }
 
-  private async sendSharedFileToUser(
-    chatId: string,
-    session: SessionState,
-    sharePath: string,
-    caption?: string,
-  ): Promise<void> {
-    const activeTask = session.activeTask;
-    if (!activeTask) {
-      return;
-    }
-
-    await this.deps.channel.sendFile(
-      chatId,
-      resolveTaskShareHostPath(this.runtimeState.requireHandle(activeTask.taskId).getTaskSharePath(), sharePath, "send_file_to_channel path"),
-      caption,
-    );
+  private buildNativeWorkerToolResultFromPrivilegeResolution(result: PrivilegeResolutionResult): NativeWorkerToolCallResult {
+    return {
+      isError: result.outcome !== "approved",
+      message: result.message,
+    };
   }
 
   private async awaitNativeToolPrivilegeResolution(
     chatId: string,
     session: SessionState,
-    request: Extract<PrivilegeRequest, { kind: "host_operation" | "http_token_use" | "host_directory_access" | "skill_mutation" }>,
+    taskId: string,
+    request: Extract<PrivilegeRequest, { kind: "host_operation" | "http_token_use" | "host_directory_access" | "skill_mutation" | "job_mutation" }>,
   ): Promise<PrivilegeResolutionResult> {
-    const activeTask = session.activeTask;
+    const activeTask = this.deps.taskCoordinator.findTask(session, taskId);
     if (!activeTask) {
       return {
         requestId: request.requestId,
@@ -285,14 +348,14 @@ export class OrchestratorPrivileges {
     }
 
     if (request.kind === "http_token_use") {
-      const immediateTokenResult = this.tryAuthorizeNativeHttpTokenUse(session, request);
+      const immediateTokenResult = this.tryAuthorizeNativeHttpTokenUse(activeTask, request);
       if (immediateTokenResult) {
         return immediateTokenResult;
       }
     }
 
     if (request.kind === "host_directory_access") {
-      const immediateHostDirectoryResult = await this.tryAuthorizeHostDirectoryAccess(session, request);
+      const immediateHostDirectoryResult = await this.tryAuthorizeHostDirectoryAccess(activeTask, request);
       if (immediateHostDirectoryResult) {
         return immediateHostDirectoryResult;
       }
@@ -308,27 +371,22 @@ export class OrchestratorPrivileges {
 
     activeTask.pendingPrivilegeRequest = request;
     activeTask.status = "awaiting_privilege_decision";
-    await this.deps.channel.sendPrivilegeRequest(chatId, request);
-
-    return await new Promise<PrivilegeResolutionResult>((resolve) => {
-      this.runtimeState.setPendingNativeToolResolver(request.requestId, resolve);
+    const resultPromise = new Promise<PrivilegeResolutionResult>((resolve) => {
+      this.activeTasks.setPendingNativeToolResolver(request.requestId, resolve);
     });
+    await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, activeTask.taskName, async (channel) => {
+      await channel.sendPrivilegeRequest(chatId, request);
+    });
+
+    return await resultPromise;
   }
 
   private async grantHostDirectoryAccess(
     activeTask: NonNullable<SessionState["activeTask"]>,
     request: Extract<PrivilegeRequest, { kind: "host_directory_access" }>,
   ): Promise<PrivilegeResolutionResult> {
-    const assignment = this.deps.taskBundleAssignmentRegistry.get(activeTask.taskId);
-    if (!assignment) {
-      return {
-        requestId: request.requestId,
-        outcome: "failed",
-        message: "No bundle is assigned to this task.",
-      };
-    }
-
-    if (!assignment.hasHostfsVolume) {
+    const taskBundle = this.activeTasks.requireHandle(activeTask.taskId).getTaskBundle();
+    if (!taskBundle.hostfsVolumeName) {
       return {
         requestId: request.requestId,
         outcome: "failed",
@@ -337,7 +395,7 @@ export class OrchestratorPrivileges {
     }
 
     const result = await this.deps.hostfsBroker.requestDirectoryAccess(
-      assignment.bundleId,
+      taskBundle.bundleId,
       activeTask.taskId,
       request.path,
       request.level,
@@ -402,18 +460,9 @@ export class OrchestratorPrivileges {
   }
 
   private async tryAuthorizeHostDirectoryAccess(
-    session: SessionState,
+    activeTask: NonNullable<SessionState["activeTask"]>,
     request: Extract<PrivilegeRequest, { kind: "host_directory_access" }>,
   ): Promise<PrivilegeResolutionResult | null> {
-    const activeTask = session.activeTask;
-    if (!activeTask) {
-      return {
-        requestId: request.requestId,
-        outcome: "failed",
-        message: messages.taskNoLongerActive(session.chatId),
-      };
-    }
-
     if (this.isTaskHostDirectoryAccessAllowed(activeTask, request.path, request.level)) {
       return this.withHostDirectoryGrantMessage(
         await this.grantHostDirectoryAccess(activeTask, request),
@@ -509,6 +558,7 @@ export class OrchestratorPrivileges {
   private async sendPrivilegeResolutionMessage(
     chatId: string,
     taskId: string,
+    taskName: string,
     result: PrivilegeResolutionResult,
   ): Promise<void> {
     logger.info("task.privilege_resolved", {
@@ -522,10 +572,14 @@ export class OrchestratorPrivileges {
       case "approved":
         return;
       case "denied":
-        await this.deps.channel.sendText(chatId, messages.privilegeDenied(result.requestId));
+        await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, async (channel) => {
+          await channel.sendText(chatId, messages.privilegeDenied(result.requestId));
+        });
         return;
       case "failed":
-        await this.deps.channel.sendText(chatId, messages.privilegeFailed(result.requestId, result.message));
+        await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, async (channel) => {
+          await channel.sendText(chatId, messages.privilegeFailed(result.requestId, result.message));
+        });
         return;
       default:
         assertNever(result.outcome);
@@ -537,13 +591,13 @@ export class OrchestratorPrivileges {
     options: {
       serverId: string;
       isTaskGrantAllowed: (task: NonNullable<SessionState["activeTask"]>) => boolean;
-      isPersistentAllowed: () => boolean;
+      isPersistentAllowed: () => Promise<boolean>;
       sessionMessage: string;
       persistentMessage: string;
       buildRequest: (requestId: string) => Extract<PrivilegeRequest, { kind: "mcp_tool_call" | "mcp_resource_read" }>;
     },
   ): Promise<PrivilegeResolutionResult> {
-    const session = this.deps.sessionStore.getByActiveTaskId(taskId);
+    const session = this.deps.sessionStore.getByTaskId(taskId);
     if (!session) {
       return {
         requestId: randomUUID(),
@@ -553,8 +607,8 @@ export class OrchestratorPrivileges {
     }
 
     const chatId = session.chatId;
-    const activeTask = session.activeTask;
-    if (!activeTask || activeTask.taskId !== taskId) {
+    const activeTask = this.deps.taskCoordinator.findTask(session, taskId);
+    if (!activeTask) {
       return {
         requestId: randomUUID(),
         outcome: "failed",
@@ -571,8 +625,8 @@ export class OrchestratorPrivileges {
       };
     }
 
-    const hasConfiguredAutoApproval = options.isPersistentAllowed();
-    if (isMcpAutoApprovalAllowed(activeTask, options.serverId) && hasConfiguredAutoApproval) {
+    const hasConfiguredAutoApproval = await options.isPersistentAllowed();
+    if (hasConfiguredAutoApproval && isMcpAutoApprovalAllowed(activeTask, options.serverId)) {
       return {
         requestId: randomUUID(),
         outcome: "approved",
@@ -595,11 +649,14 @@ export class OrchestratorPrivileges {
     };
     activeTask.pendingPrivilegeRequest = request;
     activeTask.status = "awaiting_privilege_decision";
-    await this.deps.channel.sendPrivilegeRequest(chatId, request);
-
-    return await new Promise<PrivilegeResolutionResult>((resolve) => {
-      this.runtimeState.setPendingMcpPrivilegeResolver(request.requestId, resolve);
+    const resultPromise = new Promise<PrivilegeResolutionResult>((resolve) => {
+      this.activeTasks.setPendingMcpPrivilegeResolver(request.requestId, resolve);
     });
+    await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, activeTask.taskName, async (channel) => {
+      await channel.sendPrivilegeRequest(chatId, request);
+    });
+
+    return await resultPromise;
   }
 
   private async resolvePendingMcpPrivilegeRequest(
@@ -613,9 +670,9 @@ export class OrchestratorPrivileges {
       sessionMessage: messages.mcpToolAllowedForWorkerSession(request.serverId, request.toolName),
       alwaysMessage: messages.mcpToolAllowedAndPersisted(request.serverId, request.toolName),
       persistentMessage: messages.mcpToolAllowedFromPersistentConfig(request.serverId, request.toolName),
-      grantAutoApprovalForTask: (task) => grantMcpAutoApprovalForTask(task, request.serverId),
+      grantAutoApprovalForTask: async (task) => await this.grantMcpAutoApprovalForTask(task, request.serverId),
       grantAccess: (task) => this.grantTaskToolAccess(task, request.serverId, request.toolName),
-      persist: () => this.deps.persistentApprovalStore.allowTool(request.serverId, request.toolName),
+      persist: async () => await this.deps.persistentApprovalStore.allowTool(request.serverId, request.toolName),
     });
   }
 
@@ -630,9 +687,9 @@ export class OrchestratorPrivileges {
       sessionMessage: messages.mcpResourceReadAllowedForWorkerSession(request.serverId, request.uri),
       alwaysMessage: messages.mcpResourceReadAllowedAndPersisted(request.serverId, request.uri),
       persistentMessage: messages.mcpResourceReadAllowedFromPersistentConfig(request.serverId, request.uri),
-      grantAutoApprovalForTask: (task) => grantMcpAutoApprovalForTask(task, request.serverId),
+      grantAutoApprovalForTask: async (task) => await this.grantMcpAutoApprovalForTask(task, request.serverId),
       grantAccess: (task) => this.grantTaskResourceReadAccess(task, request.serverId, request.uri),
-      persist: () => this.deps.persistentApprovalStore.allowResourceRead(request.serverId, request.uri),
+      persist: async () => await this.deps.persistentApprovalStore.allowResourceRead(request.serverId, request.uri),
     });
   }
 
@@ -646,7 +703,7 @@ export class OrchestratorPrivileges {
       sessionMessage: string;
       alwaysMessage: string;
       persistentMessage: string;
-      grantAutoApprovalForTask: (task: NonNullable<SessionState["activeTask"]>) => void;
+      grantAutoApprovalForTask: (task: NonNullable<SessionState["activeTask"]>) => Promise<void>;
       grantAccess: (task: NonNullable<SessionState["activeTask"]>) => void;
       persist: () => Promise<void>;
     },
@@ -670,7 +727,7 @@ export class OrchestratorPrivileges {
       case "approve":
       case "approve_once":
         if (request.confirmsAutoApprovalForTask) {
-          options.grantAutoApprovalForTask(activeTask);
+          await options.grantAutoApprovalForTask(activeTask);
           return {
             requestId: request.requestId,
             outcome: "approved",
@@ -686,7 +743,7 @@ export class OrchestratorPrivileges {
         };
       case "approve_worker_session":
         if (request.confirmsAutoApprovalForTask) {
-          options.grantAutoApprovalForTask(activeTask);
+          await options.grantAutoApprovalForTask(activeTask);
           return {
             requestId: request.requestId,
             outcome: "approved",
@@ -703,7 +760,7 @@ export class OrchestratorPrivileges {
         };
       case "approve_always":
         await options.persist();
-        options.grantAutoApprovalForTask(activeTask);
+        await options.grantAutoApprovalForTask(activeTask);
         return {
           requestId: request.requestId,
           outcome: "approved",
@@ -777,7 +834,7 @@ export class OrchestratorPrivileges {
       case "approve":
       case "approve_once":
         if (request.confirmsAutoApprovalForTask) {
-          grantHttpTokenAutoApprovalForTask(activeTask, request.tokenId);
+          await this.grantHttpTokenAutoApprovalForTask(activeTask, request.tokenId);
           return {
             requestId: request.requestId,
             outcome: "approved",
@@ -794,7 +851,7 @@ export class OrchestratorPrivileges {
         };
       case "approve_worker_session":
         if (request.confirmsAutoApprovalForTask) {
-          grantHttpTokenAutoApprovalForTask(activeTask, request.tokenId);
+          await this.grantHttpTokenAutoApprovalForTask(activeTask, request.tokenId);
           return {
             requestId: request.requestId,
             outcome: "approved",
@@ -811,7 +868,7 @@ export class OrchestratorPrivileges {
         };
       case "approve_always":
         await this.deps.persistentApprovalStore.allowHttpToken(request.tokenId, request.host);
-        grantHttpTokenAutoApprovalForTask(activeTask, request.tokenId);
+        await this.grantHttpTokenAutoApprovalForTask(activeTask, request.tokenId);
         return {
           requestId: request.requestId,
           outcome: "approved",
@@ -828,8 +885,7 @@ export class OrchestratorPrivileges {
     request: Extract<PrivilegeRequest, { kind: "skill_mutation" }>,
     decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
   ): Promise<PrivilegeResolutionResult> {
-    const activeTask = session.activeTask;
-    if (!activeTask) {
+    if (!session.activeTask) {
       return {
         requestId: request.requestId,
         outcome: "failed",
@@ -846,23 +902,30 @@ export class OrchestratorPrivileges {
     }
 
     try {
-      if (request.operation === "create") {
-        await this.deps.skillService.createSkill({
-          skillId: request.skillId,
-          name: request.name ?? "",
-          description: request.description ?? "",
-          body: request.body ?? "",
-        });
-      } else if (request.operation === "update") {
-        await this.deps.skillService.updateSkill({
-          skillId: request.skillId,
-          ...(request.name !== undefined ? { name: request.name } : {}),
-          ...(request.description !== undefined ? { description: request.description } : {}),
-          ...(request.body !== undefined ? { body: request.body } : {}),
-        });
-      } else if (request.operation === "delete") {
-        await this.deps.skillService.deleteSkill({ skillId: request.skillId });
+      switch (request.operation) {
+        case "create":
+          await this.deps.skillService.createSkill({
+            skillId: request.skillId,
+            name: request.name ?? "",
+            description: request.description ?? "",
+            body: request.body ?? "",
+          });
+          break;
+        case "update":
+          await this.deps.skillService.updateSkill({
+            skillId: request.skillId,
+            ...(request.name !== undefined ? { name: request.name } : {}),
+            ...(request.description !== undefined ? { description: request.description } : {}),
+            ...(request.body !== undefined ? { body: request.body } : {}),
+          });
+          break;
+        case "delete":
+          await this.deps.skillService.deleteSkill({ skillId: request.skillId });
+          break;
+        default:
+          assertNever(request.operation);
       }
+
       return {
         requestId: request.requestId,
         outcome: "approved",
@@ -878,18 +941,49 @@ export class OrchestratorPrivileges {
     }
   }
 
-  private tryAuthorizeNativeHttpTokenUse(
+  private async resolvePendingJobMutationRequest(
     session: SessionState,
-    request: Extract<PrivilegeRequest, { kind: "http_token_use" }>,
-  ): PrivilegeResolutionResult | null {
-    const activeTask = session.activeTask;
-    if (!activeTask) {
+    request: Extract<PrivilegeRequest, { kind: "job_mutation" }>,
+    decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
+  ): Promise<PrivilegeResolutionResult> {
+    if (!session.activeTask) {
       return {
         requestId: request.requestId,
         outcome: "failed",
         message: messages.taskNoLongerActive(session.chatId),
       };
     }
+
+    const { operation, jobId } = request.mutation;
+    if (decision !== "approve") {
+      return {
+        requestId: request.requestId,
+        outcome: "denied",
+        message: messages.jobMutationDenied(operation, jobId),
+      };
+    }
+
+    try {
+      const detail = await this.jobService.applyMutation(request.mutation);
+      return {
+        requestId: request.requestId,
+        outcome: "approved",
+        message: `${messages.jobMutationApproved(operation, jobId)} ${detail}`,
+      };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Unknown job mutation failure.";
+      return {
+        requestId: request.requestId,
+        outcome: "failed",
+        message: messages.jobMutationFailed(operation, jobId, detail),
+      };
+    }
+  }
+
+  private tryAuthorizeNativeHttpTokenUse(
+    activeTask: NonNullable<SessionState["activeTask"]>,
+    request: Extract<PrivilegeRequest, { kind: "http_token_use" }>,
+  ): PrivilegeResolutionResult | null {
 
     if (activeTask.approvedHttpTokenSessionGrants.some((entry) => entry.tokenId === request.tokenId && entry.host === request.host)) {
       return {
@@ -930,10 +1024,11 @@ export class OrchestratorPrivileges {
 
   private shouldConfirmHttpTokenAutoApprovalForTask(
     session: SessionState,
+    taskId: string,
     tokenId: string,
     host: string,
   ): boolean {
-    const activeTask = session.activeTask;
+    const activeTask = this.deps.taskCoordinator.findTask(session, taskId);
     return activeTask !== null
       && !isHttpTokenAutoApprovalAllowed(activeTask, tokenId)
       && this.deps.persistentApprovalStore.isHttpTokenAlwaysAllowed(tokenId, host);
@@ -957,28 +1052,55 @@ export class OrchestratorPrivileges {
     }
     task.approvedHttpTokenSessionGrants.push({ tokenId, host });
   }
+
+  private async grantMcpAutoApprovalForTask(
+    task: NonNullable<SessionState["activeTask"]>,
+    serverId: string,
+  ): Promise<void> {
+    await this.updateTaskPolicy(task, () => {
+      if (isMcpAutoApprovalAllowed(task, serverId)) {
+        return false;
+      }
+      task.taskPolicy.autoApproveMcpServers.push(serverId);
+      return true;
+    });
+  }
+
+  private async grantHttpTokenAutoApprovalForTask(
+    task: NonNullable<SessionState["activeTask"]>,
+    tokenId: string,
+  ): Promise<void> {
+    await this.updateTaskPolicy(task, () => {
+      if (isHttpTokenAutoApprovalAllowed(task, tokenId)) {
+        return false;
+      }
+      task.taskPolicy.autoApproveHttpTokens.push(tokenId);
+      return true;
+    });
+  }
+
+  private async updateTaskPolicy(
+    task: NonNullable<SessionState["activeTask"]>,
+    applyMutation: () => boolean,
+  ): Promise<void> {
+    const changed = applyMutation();
+    if (!changed || task.origin.kind !== "launchedByJob") {
+      return;
+    }
+    await this.deps.jobApprovalStore.saveTaskPolicy(task.origin.jobId, task.taskPolicy);
+  }
+}
+
+export interface TaskFailureHandler {
+  failActiveTaskFromEventHandling(session: SessionState, taskId: string, message: string): Promise<void>;
 }
 
 function isMcpAutoApprovalAllowed(task: NonNullable<SessionState["activeTask"]>, serverId: string): boolean {
   return task.taskPolicy.autoApproveMcpServers.includes(serverId);
 }
 
-function grantMcpAutoApprovalForTask(task: NonNullable<SessionState["activeTask"]>, serverId: string): void {
-  if (isMcpAutoApprovalAllowed(task, serverId)) {
-    return;
-  }
-  task.taskPolicy.autoApproveMcpServers.push(serverId);
-}
-
 function isHttpTokenAutoApprovalAllowed(task: NonNullable<SessionState["activeTask"]>, tokenId: string): boolean {
   return task.taskPolicy.autoApproveHttpTokens.includes(tokenId);
-}
-
-function grantHttpTokenAutoApprovalForTask(task: NonNullable<SessionState["activeTask"]>, tokenId: string): void {
-  if (isHttpTokenAutoApprovalAllowed(task, tokenId)) {
-    return;
-  }
-  task.taskPolicy.autoApproveHttpTokens.push(tokenId);
 }
 
 function assertNever(value: never): never {

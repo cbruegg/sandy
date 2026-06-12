@@ -1,0 +1,83 @@
+import type { ChannelAdapter } from "../channel/channel-adapter.js";
+import type { JobService } from "../jobs/job-service.js";
+import { resolveTaskShareHostPath } from "../shared-workspace.js";
+import type { ActiveTaskState } from "../types.js";
+import type {NativeWorkerToolCallResult} from "../subagent/worker-tools.js";
+import {messages} from "../messages.ts";
+
+type UserVisibleOperationRunner = (input: {
+  chatId: string;
+  taskId: string;
+  taskName: string;
+  operation: (channel: ChannelAdapter) => Promise<void>;
+}) => Promise<void>;
+
+export type WorkerToolsHandlerDependencies = {
+  readonly jobService: JobService;
+  readonly getTaskSharePath: (taskId: string) => string;
+  readonly runUserVisibleOperation: UserVisibleOperationRunner;
+};
+
+export class WorkerToolsHandler {
+  constructor(private readonly deps: WorkerToolsHandlerDependencies) {}
+
+  async sendFileToChannel(input: {
+    chatId: string;
+    task: ActiveTaskState;
+    sharePath: string;
+    caption?: string;
+  }): Promise<NativeWorkerToolCallResult> {
+    await this.deps.runUserVisibleOperation({
+      chatId: input.chatId,
+      taskId: input.task.taskId,
+      taskName: input.task.taskName,
+      operation: async (channel) => {
+        await channel.sendFile(
+          input.chatId,
+          resolveTaskShareHostPath(this.deps.getTaskSharePath(input.task.taskId), input.sharePath, "send_file_to_channel path"),
+          input.caption,
+        );
+      },
+    });
+    return { isError: false, message: messages.sharedFileSentToUser(input.sharePath) }
+  }
+
+  async requestInteraction(input: {
+    chatId: string;
+    task: ActiveTaskState;
+    message?: string;
+  }): Promise<NativeWorkerToolCallResult> {
+    if (input.task.origin.kind !== "launchedByJob") {
+      return { isError: false, message: messages.requestInteractionAlreadyInteractive() };
+    }
+    if (input.task.interactionState === "interacting") {
+      return { isError: false, message: messages.requestInteractionAlreadyInteractive() };
+    }
+    if (input.task.interactionState === "waitingToInteract") {
+      return { isError: false, message: messages.requestInteractionAlreadyRequested() };
+    }
+
+    await this.deps.runUserVisibleOperation({
+      chatId: input.chatId,
+      taskId: input.task.taskId,
+      taskName: input.task.taskName,
+      operation: async (channel) => {
+        await channel.sendTaskUpdate(input.chatId, messages.jobRequestsInteraction(input.task.taskName, input.message));
+      },
+    });
+    return { isError: false, message: messages.requestInteractionApproved() };
+  }
+
+  async listJobs(): Promise<NativeWorkerToolCallResult> {
+    const jobs = await this.deps.jobService.listJobs();
+    return { isError: false, message: JSON.stringify(jobs) };
+  }
+
+  async getJob(jobId: string): Promise<NativeWorkerToolCallResult> {
+    const job = await this.deps.jobService.getJob(jobId);
+    if (!job) {
+      return { isError: true, message: messages.jobDoesNotExist(jobId) };
+    }
+    return { isError: false, message: JSON.stringify(job) };
+  }
+}

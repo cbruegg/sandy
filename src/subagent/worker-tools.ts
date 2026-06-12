@@ -4,6 +4,11 @@ import { hostGrantsPrefix } from "../paths.js";
 
 export const sandyMcpServerId = "sandy";
 
+export type NativeWorkerToolCallResult = {
+  isError: boolean;
+  message: string;
+};
+
 // Infrastructure
 
 type WorkerToolDefinition = Tool & {
@@ -41,9 +46,18 @@ const copyOutOfShareToolName = "copy_out_of_share";
 const sendFileToChannelToolName = "send_file_to_channel";
 const requestHttpTokenToolName = "request_http_token";
 const requestHostDirectoryAccessToolName = "request_host_directory_access";
+const requestInteractionToolName = "request_interaction";
 const createSkillToolName = "create_skill";
 const updateSkillToolName = "update_skill";
 const deleteSkillToolName = "delete_skill";
+const listJobsToolName = "list_jobs";
+const getJobToolName = "get_job";
+const createJobToolName = "create_job";
+const updateJobToolName = "update_job";
+const deleteJobToolName = "delete_job";
+const enableJobToolName = "enable_job";
+const disableJobToolName = "disable_job";
+const runJobNowToolName = "run_job_now";
 
 const copyIntoShareSchema = z.object({
   type: z.literal(copyIntoShareToolName),
@@ -78,6 +92,11 @@ const requestHostDirectoryAccessSchema = z.object({
   level: z.enum(["read_only", "read_write"]),
 }).strict();
 
+const requestInteractionSchema = z.object({
+  type: z.literal(requestInteractionToolName),
+  message: z.string().optional(),
+}).strict();
+
 const createSkillSchema = z.object({
   type: z.literal(createSkillToolName),
   skillId: z.string(),
@@ -98,6 +117,28 @@ const deleteSkillSchema = z.object({
   type: z.literal(deleteSkillToolName),
   skillId: z.string(),
 }).strict();
+
+const jobScheduleSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("one_shot"), runAt: z.string() }).strict(),
+  z.object({ kind: z.literal("cron"), expression: z.string(), timezone: z.string().optional() }).strict(),
+]);
+
+const jobDefinitionInputSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  enabled: z.boolean(),
+  schedule: jobScheduleSchema,
+  skillId: z.string(),
+}).strict();
+
+const listJobsSchema = z.object({ type: z.literal(listJobsToolName) }).strict();
+const getJobSchema = z.object({ type: z.literal(getJobToolName), jobId: z.string() }).strict();
+const createJobSchema = z.object({ type: z.literal(createJobToolName), definition: jobDefinitionInputSchema }).strict();
+const updateJobSchema = z.object({ type: z.literal(updateJobToolName), definition: jobDefinitionInputSchema }).strict();
+const deleteJobSchema = z.object({ type: z.literal(deleteJobToolName), jobId: z.string() }).strict();
+const enableJobSchema = z.object({ type: z.literal(enableJobToolName), jobId: z.string() }).strict();
+const disableJobSchema = z.object({ type: z.literal(disableJobToolName), jobId: z.string() }).strict();
+const runJobNowSchema = z.object({ type: z.literal(runJobNowToolName), jobId: z.string() }).strict();
 
 export const workerToolEntries = [
   defineWorkerTool(
@@ -131,6 +172,12 @@ export const workerToolEntries = [
     requestHostDirectoryAccessSchema,
   ),
   defineWorkerTool(
+    requestInteractionToolName,
+    "Request interactive mode for a scheduled job task. Use this when a scheduled job needs the user's attention or input to continue. The host will promote the task so the user can see your output and respond. Provide an optional message explaining what you need from the user. This tool has no effect on user-launched tasks that are already interactive.",
+    false,
+    requestInteractionSchema,
+  ),
+  defineWorkerTool(
     createSkillToolName,
     "Ask the host to create a new Sandy skill. Provide the skillId, name, description, and body.",
     true,
@@ -148,6 +195,14 @@ export const workerToolEntries = [
     true,
     deleteSkillSchema,
   ),
+  defineWorkerTool(listJobsToolName, "List scheduled Sandy jobs.", false, listJobsSchema),
+  defineWorkerTool(getJobToolName, "Inspect one scheduled Sandy job.", false, getJobSchema),
+  defineWorkerTool(createJobToolName, "Ask the host to create a scheduled Sandy job.", true, createJobSchema),
+  defineWorkerTool(updateJobToolName, "Ask the host to replace a scheduled Sandy job definition.", true, updateJobSchema),
+  defineWorkerTool(deleteJobToolName, "Ask the host to delete a scheduled Sandy job.", true, deleteJobSchema),
+  defineWorkerTool(enableJobToolName, "Ask the host to enable a scheduled Sandy job.", true, enableJobSchema),
+  defineWorkerTool(disableJobToolName, "Ask the host to disable a scheduled Sandy job.", true, disableJobSchema),
+  defineWorkerTool(runJobNowToolName, "Ask the host to run a scheduled Sandy job now.", true, runJobNowSchema),
 ] as const satisfies readonly WorkerToolDefinition[];
 
 // Public API
@@ -158,9 +213,18 @@ export type WorkerToolPayload =
   | z.infer<typeof sendFileToChannelSchema>
   | z.infer<typeof requestHttpTokenSchema>
   | z.infer<typeof requestHostDirectoryAccessSchema>
+  | z.infer<typeof requestInteractionSchema>
   | z.infer<typeof createSkillSchema>
   | z.infer<typeof updateSkillSchema>
-  | z.infer<typeof deleteSkillSchema>;
+  | z.infer<typeof deleteSkillSchema>
+  | z.infer<typeof listJobsSchema>
+  | z.infer<typeof getJobSchema>
+  | z.infer<typeof createJobSchema>
+  | z.infer<typeof updateJobSchema>
+  | z.infer<typeof deleteJobSchema>
+  | z.infer<typeof enableJobSchema>
+  | z.infer<typeof disableJobSchema>
+  | z.infer<typeof runJobNowSchema>;
 export type PrivilegedWorkerToolPayload =
   | z.infer<typeof copyIntoShareSchema>
   | z.infer<typeof copyOutOfShareSchema>
@@ -168,7 +232,13 @@ export type PrivilegedWorkerToolPayload =
   | z.infer<typeof requestHostDirectoryAccessSchema>
   | z.infer<typeof createSkillSchema>
   | z.infer<typeof updateSkillSchema>
-  | z.infer<typeof deleteSkillSchema>;
+  | z.infer<typeof deleteSkillSchema>
+  | z.infer<typeof createJobSchema>
+  | z.infer<typeof updateJobSchema>
+  | z.infer<typeof deleteJobSchema>
+  | z.infer<typeof enableJobSchema>
+  | z.infer<typeof disableJobSchema>
+  | z.infer<typeof runJobNowSchema>;
 
 export function parseWorkerToolPayload(name: string, argumentsValue: unknown): WorkerToolPayload {
   const definition = workerToolEntries.find((entry) => entry.name === name);

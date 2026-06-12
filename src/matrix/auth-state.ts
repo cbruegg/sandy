@@ -1,5 +1,6 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { matrixStateRoot } from "../state-paths.js";
 
 const MATRIX_AUTH_STATE_VERSION = 1;
 
@@ -12,7 +13,7 @@ type MatrixAuthState = {
 };
 
 function buildMatrixAuthStatePath(configDirectory: string): string {
-  return join(configDirectory, "state", "matrix", "auth.json");
+  return join(matrixStateRoot(configDirectory), "auth.json");
 }
 
 export async function loadMatrixAuthState(

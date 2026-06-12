@@ -255,7 +255,7 @@ export type WorkerNetworkConfig = {
   allowLocalCidrs: string[];
 };
 
-type SandyAuthMode =
+export type SandyAuthMode =
   | { mode: "api_key"; openAiApiKey: string }
   | {
       mode: "codex_auth_file";

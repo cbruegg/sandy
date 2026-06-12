@@ -3,17 +3,17 @@ import type { PrivilegeResolutionResult } from "../types.js";
 
 type PrivilegeResolver = (result: PrivilegeResolutionResult) => void;
 
-export class OrchestratorRuntimeState {
-  private readonly handles = new Map<string, SandboxHandle>();
+export class ActiveTaskRuntimeRegistry {
+  private readonly activeTaskHandles = new Map<string, SandboxHandle>();
   private readonly pendingMcpPrivilegeResolvers = new Map<string, PrivilegeResolver>();
   private readonly pendingNativeToolResolvers = new Map<string, PrivilegeResolver>();
 
   registerHandle(taskId: string, handle: SandboxHandle): void {
-    this.handles.set(taskId, handle);
+    this.activeTaskHandles.set(taskId, handle);
   }
 
   requireHandle(taskId: string): SandboxHandle {
-    const handle = this.handles.get(taskId);
+    const handle = this.activeTaskHandles.get(taskId);
     if (!handle) {
       throw new Error(`No sandbox handle is registered for task ${taskId}.`);
     }
@@ -21,11 +21,15 @@ export class OrchestratorRuntimeState {
   }
 
   getHandle(taskId: string): SandboxHandle | undefined {
-    return this.handles.get(taskId);
+    return this.activeTaskHandles.get(taskId);
+  }
+
+  async notifyTaskBecameInteractive(taskId: string): Promise<void> {
+    await this.requireHandle(taskId).notifyTaskBecameInteractive();
   }
 
   deleteHandle(taskId: string): void {
-    this.handles.delete(taskId);
+    this.activeTaskHandles.delete(taskId);
   }
 
   setPendingMcpPrivilegeResolver(requestId: string, resolve: PrivilegeResolver): void {
@@ -63,4 +67,5 @@ export class OrchestratorRuntimeState {
     resolver(result);
     return true;
   }
+
 }

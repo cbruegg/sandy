@@ -5,16 +5,20 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MainAgentController } from "../agent/main-agent-controller.js";
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
+import { ImplicitChannelDestinationStore } from "../channel/channel-destination-store.js";
 import { createNoopHostfsBroker } from "../hostfs/hostfs-broker.js";
 import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import { SandyOrchestrator } from "./index.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 import { createNoopPersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 import type { PrivilegeBroker, SupportedPrivilegeRequest } from "../privilege/privilege-broker.js";
-import { createNoopTaskBundleAssignmentRegistry } from "../sandbox/task-bundle-assignment-registry.js";
-import type { TaskBundleAssignmentLookup } from "../sandbox/task-bundle-assignment-registry.js";
-import type { LaunchTaskRequest, SandboxHandle, SandboxRunner } from "../sandbox/sandbox-runner.js";
+import type { LaunchTaskRequest, SandboxHandle, SandboxRunner, SandboxTaskBundle } from "../sandbox/sandbox-runner.js";
 import { InMemorySessionStore } from "../session/in-memory-session-store.js";
+import { OrchestratorPrivilegesImpl } from "./privileges.js";
+import { ActiveTaskRuntimeRegistry } from "./active-task-runtime-registry.js";
+import type { OrchestratorCoreDependencies } from "./shared.js";
+import { OrchestratorTaskLifecycleImpl } from "./task-lifecycle.js";
+import { TaskCoordinator } from "./task-coordinator.js";
 import type {
   ChannelFormatting,
   DecideContext,
@@ -28,6 +32,11 @@ import type {
   WorkerStartConfig,
 } from "../types.js";
 import { SkillService } from "../skills.js";
+import { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
+import { JobApprovalStore, type JobApprovalStoreApi } from "../jobs/job-approval-store.js";
+import type { JobService } from "../jobs/job-service.js";
+import type { JobDefinition } from "../jobs/job-validation.js";
+import type { JobMutationRequest } from "../jobs/job-types.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
@@ -43,6 +52,8 @@ export function expectDefined<T>(value: T | null | undefined, message: string): 
 }
 
 export class RecordingChannel implements ChannelAdapter {
+  readonly destinationStore = new ImplicitChannelDestinationStore("test-chat");
+  private readonly lastUserInteractionTimestamps = new Map<string, string>();
   public readonly sentTexts: Array<{ chatId: string; text: string }> = [];
   public readonly taskUpdates: Array<{ chatId: string; text: string }> = [];
   public readonly sentFiles: Array<{ chatId: string; filePath: string; caption?: string }> = [];
@@ -61,6 +72,14 @@ export class RecordingChannel implements ChannelAdapter {
 
   getFormatting(): ChannelFormatting {
     return testFormatting;
+  }
+
+  getLastUserInteractionTimestamp(chatId: string): string | null {
+    return this.lastUserInteractionTimestamps.get(chatId) ?? null;
+  }
+
+  recordUserInteraction(chatId: string, timestamp: string): void {
+    this.lastUserInteractionTimestamps.set(chatId, timestamp);
   }
 
   saveAttachments(chatId: string, attachments: MessageAttachment[], targetDirectory: string): Promise<SavedAttachment[]> {
@@ -153,7 +172,9 @@ function createTestWorkerStartConfig(): WorkerStartConfig {
 class FakeSandboxHandle implements SandboxHandle {
   public readonly userMessages: TaskInputPayload[] = [];
   public readonly privilegeResults: PrivilegeResolutionResult[] = [];
+  public interactiveNotices = 0;
   public taskSharePath = "";
+  public taskBundle: SandboxTaskBundle = { bundleId: "fake-bundle", hostfsVolumeName: null };
   public markFinishedCalls = 0;
   public closeCalls = 0;
   public readonly cancellations: string[] = [];
@@ -165,8 +186,17 @@ class FakeSandboxHandle implements SandboxHandle {
     return this.taskSharePath;
   }
 
+  getTaskBundle(): SandboxTaskBundle {
+    return this.taskBundle;
+  }
+
   sendUserMessage(input: TaskInputPayload): Promise<void> {
     this.userMessages.push(input);
+    return Promise.resolve();
+  }
+
+  notifyTaskBecameInteractive(): Promise<void> {
+    this.interactiveNotices += 1;
     return Promise.resolve();
   }
 
@@ -198,15 +228,17 @@ type RecordedLaunch = Omit<LaunchTaskRequest, "prepareStartInput"> & {
 
 class FakeSandboxRunner implements SandboxRunner {
   public readonly launches: RecordedLaunch[] = [];
-  public readonly handle = new FakeSandboxHandle();
-  public onEvent: ((event: SubAgentEvent) => Promise<void>) | null = null;
+  public handle = new FakeSandboxHandle();
+  public readonly handles = new Map<string, FakeSandboxHandle>();
+  public readonly onEvents = new Map<string, (event: SubAgentEvent) => Promise<void>>();
   public readonly deletedTaskShares: string[] = [];
   public readonly launchedTaskShares: string[] = [];
   public shareInspections = new Map<string, { isEmpty: boolean; summary: string | null }>();
   private readonly taskSharePaths = new Map<string, string>();
 
   async launchTask(request: LaunchTaskRequest, onEvent: (event: SubAgentEvent) => Promise<void>): Promise<SandboxHandle> {
-    const taskSharePath = `/tmp/${request.taskId}`;
+    const handle = new FakeSandboxHandle();
+    const taskSharePath = resolve(import.meta.dirname, "../../tmp", request.taskId);
     const startInput = await request.prepareStartInput(taskSharePath);
     this.launches.push({
       chatId: request.chatId,
@@ -218,18 +250,25 @@ class FakeSandboxRunner implements SandboxRunner {
       taskBrief: startInput.taskBrief,
       initialInput: startInput.initialInput,
     });
-    this.onEvent = onEvent;
+    this.onEvents.set(request.taskId, onEvent);
     this.launchedTaskShares.push(request.taskId);
     this.taskSharePaths.set(request.taskId, taskSharePath);
-    this.handle.taskSharePath = taskSharePath;
-    return this.handle;
+    handle.taskSharePath = taskSharePath;
+    this.handles.set(request.taskId, handle);
+    this.handle = handle;
+    return handle;
   }
 
-  async emit(event: SubAgentEvent): Promise<void> {
-    if (!this.onEvent) {
+  async emit(event: SubAgentEvent, taskId?: string): Promise<void> {
+    const resolvedTaskId = taskId ?? this.launches.at(-1)?.taskId;
+    if (!resolvedTaskId) {
       throw new Error("No task is active.");
     }
-    await this.onEvent(event);
+    const onEvent = this.onEvents.get(resolvedTaskId);
+    if (!onEvent) {
+      throw new Error(`Task ${resolvedTaskId} is not active.`);
+    }
+    await onEvent(event);
   }
 
   inspectTaskShare(taskId: string): Promise<{ isEmpty: boolean; summary: string | null }> {
@@ -244,6 +283,27 @@ class FakeSandboxRunner implements SandboxRunner {
 
 }
 
+/** In-memory JobApprovalStore for tests that need predictable job-scoped persistence without file I/O. */
+export class InMemoryJobApprovalStore implements JobApprovalStoreApi {
+  private readonly taskPolicies = new Map<string, { autoApproveMcpServers: string[]; autoApproveHttpTokens: string[] }>();
+
+  getTaskPolicy(jobId: string): Promise<{ autoApproveMcpServers: string[]; autoApproveHttpTokens: string[] }> {
+    const taskPolicy = this.taskPolicies.get(jobId);
+    return Promise.resolve({
+      autoApproveMcpServers: [...(taskPolicy?.autoApproveMcpServers ?? [])],
+      autoApproveHttpTokens: [...(taskPolicy?.autoApproveHttpTokens ?? [])],
+    });
+  }
+
+  saveTaskPolicy(jobId: string, taskPolicy: { autoApproveMcpServers: string[]; autoApproveHttpTokens: string[] }): Promise<void> {
+    this.taskPolicies.set(jobId, {
+      autoApproveMcpServers: Array.from(new Set(taskPolicy.autoApproveMcpServers)).sort(),
+      autoApproveHttpTokens: Array.from(new Set(taskPolicy.autoApproveHttpTokens)).sort(),
+    });
+    return Promise.resolve();
+  }
+}
+
 export class FakePrivilegeBroker implements PrivilegeBroker {
   public readonly appliedRequests: Array<{ request: SupportedPrivilegeRequest; taskId: string; taskSharePath: string }> = [];
 
@@ -256,6 +316,57 @@ export class FakePrivilegeBroker implements PrivilegeBroker {
   }
 }
 
+class FakeJobService implements JobService {
+  public readonly jobs = new Map<string, JobDefinition>();
+  public started = false;
+
+  start(): Promise<void> {
+    this.started = true;
+    return Promise.resolve();
+  }
+
+  stop(): void {
+    this.started = false;
+  }
+
+  listJobs(): Promise<JobDefinition[]> {
+    return Promise.resolve(Array.from(this.jobs.values()));
+  }
+
+  getJob(jobId: string): Promise<JobDefinition | null> {
+    return Promise.resolve(this.jobs.get(jobId) ?? null);
+  }
+
+  applyMutation(mutation: JobMutationRequest): Promise<string> {
+    switch (mutation.operation) {
+      case "create":
+      case "update": {
+        if (!mutation.definition) throw new Error("Job definition is required.");
+        this.jobs.set(mutation.jobId, mutation.definition);
+        return Promise.resolve(`Updated job ${mutation.jobId}.`);
+      }
+      case "delete": {
+        this.jobs.delete(mutation.jobId);
+        return Promise.resolve(`Deleted job ${mutation.jobId}.`);
+      }
+      case "enable": {
+        const job = this.jobs.get(mutation.jobId);
+        if (job) job.enabled = true;
+        return Promise.resolve(`Enabled job ${mutation.jobId}.`);
+      }
+      case "disable": {
+        const job = this.jobs.get(mutation.jobId);
+        if (job) job.enabled = false;
+        return Promise.resolve(`Disabled job ${mutation.jobId}.`);
+      }
+      case "run_now":
+        return Promise.resolve(`Launched task for job ${mutation.jobId}.`);
+      default:
+        throw new Error(`Unexpected job mutation operation: ${String(mutation.operation)}`);
+    }
+  }
+}
+
 export function createTestOrchestrator(options: {
   channel?: RecordingChannel;
   mainAgent: MainAgentController;
@@ -264,25 +375,51 @@ export function createTestOrchestrator(options: {
   privilegeBroker?: PrivilegeBroker;
   persistentApprovalStore?: PersistentApprovalStore;
   hostfsBroker?: HostfsBroker;
-  taskBundleAssignmentRegistry?: TaskBundleAssignmentLookup;
   skillService?: SkillService;
+  taskCoordinator?: TaskCoordinator;
+  jobApprovalStore?: JobApprovalStoreApi;
 }) {
   const channel = options.channel ?? new RecordingChannel();
   const runner = options.sandboxRunner ?? new FakeSandboxRunner();
   const store = options.sessionStore ?? new InMemorySessionStore();
   const privilegeBroker = options.privilegeBroker ?? new FakePrivilegeBroker();
   const skillService = options.skillService ?? new SkillService(mkdtempSync(join(tmpdir(), "sandy-test-config-")));
-  const orchestrator = new SandyOrchestrator({
+  const activeTaskRuntimes = new ActiveTaskRuntimeRegistry();
+  const taskCoordinator = options.taskCoordinator ?? new TaskCoordinator({
+    sessionStore: store,
     channel,
+    onJobTaskBecameInteractive: async (taskId) => {
+      await activeTaskRuntimes.notifyTaskBecameInteractive(taskId);
+    },
+  });
+  const coreDeps: OrchestratorCoreDependencies = {
     mainAgent: options.mainAgent,
     sandboxRunner: runner,
     buildWorkerStartConfig: () => Promise.resolve(createTestWorkerStartConfig()),
     sessionStore: store,
     privilegeBroker,
     persistentApprovalStore: options.persistentApprovalStore ?? createNoopPersistentApprovalStore(),
+    jobApprovalStore: options.jobApprovalStore ?? new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
     hostfsBroker: options.hostfsBroker ?? createNoopHostfsBroker(),
-    taskBundleAssignmentRegistry: options.taskBundleAssignmentRegistry ?? createNoopTaskBundleAssignmentRegistry(),
     skillService,
+    taskCoordinator,
+  };
+  const taskLifecycle = new OrchestratorTaskLifecycleImpl(coreDeps, activeTaskRuntimes, channel.getFormatting(), channel);
+  const jobService = new FakeJobService();
+  const workerToolsHandler = new WorkerToolsHandler({
+    jobService,
+    getTaskSharePath: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskSharePath(),
+    runUserVisibleOperation: async ({ chatId, taskId, taskName, operation }) => {
+      await taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, operation);
+    },
+  });
+  const privileges = new OrchestratorPrivilegesImpl(coreDeps, activeTaskRuntimes, workerToolsHandler, jobService, taskLifecycle);
+  const orchestrator = new SandyOrchestrator({
+    ...coreDeps,
+    channel,
+    channelFormatting: channel.getFormatting(),
+    taskLifecycle,
+    privileges,
   });
 
   return {
@@ -291,6 +428,10 @@ export function createTestOrchestrator(options: {
     runner,
     store,
     privilegeBroker,
+    activeTaskRuntimes,
     skillService,
+    taskCoordinator,
+    taskLifecycle,
+    privileges,
   };
 }

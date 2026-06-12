@@ -5,6 +5,7 @@ import type { PrivilegeResolutionResult } from "../types.js";
 import { messages } from "../messages.js";
 import type { SessionState } from "../types/task-state.js";
 
+
 type AuthorizeHttpTokenUseInput = {
   taskId: string;
   tokenId: string;
@@ -17,42 +18,42 @@ export class HttpTokenAuthorizer {
     private readonly persistentApprovalStore: PersistentApprovalStore,
   ) {}
 
-  authorizeHttpTokenUse(input: AuthorizeHttpTokenUseInput): Promise<PrivilegeResolutionResult> {
-    const session = this.sessionStore.getByActiveTaskId(input.taskId);
+  authorizeHttpTokenUse(input: AuthorizeHttpTokenUseInput): PrivilegeResolutionResult {
+    const session = this.sessionStore.getByTaskId(input.taskId);
     if (!session) {
-      return Promise.resolve({
+      return {
         requestId: randomUUID(),
         outcome: "failed",
         message: messages.taskNotActive(input.taskId),
-      });
+      };
     }
 
-    const activeTask = session.activeTask;
-    if (!activeTask || activeTask.taskId !== input.taskId) {
-      return Promise.resolve({
+    const activeTask = session.findTask(input.taskId)?.task;
+    if (!activeTask) {
+      return {
         requestId: randomUUID(),
         outcome: "failed",
         message: messages.taskNotActive(input.taskId),
-      });
+      };
     }
 
     if (isHttpTokenSessionGrantAllowed(activeTask, input.tokenId, input.host)) {
-      return Promise.resolve({
+      return {
         requestId: randomUUID(),
         outcome: "approved",
         message: messages.httpTokenAllowedForWorkerSession(input.tokenId, input.host),
         scope: "worker_session",
-      });
+      };
     }
 
     if (isHttpTokenAutoApprovalAllowed(activeTask, input.tokenId)
-      && this.persistentApprovalStore.isHttpTokenAlwaysAllowed(input.tokenId, input.host)) {
-      return Promise.resolve({
+      && this.isHttpTokenAlwaysAllowed(input.tokenId, input.host)) {
+      return {
         requestId: randomUUID(),
         outcome: "approved",
         message: messages.httpTokenAllowedFromPersistentConfig(input.tokenId, input.host),
         scope: "always",
-      });
+      };
     }
 
     const onceGrant = activeTask.approvedHttpTokenOnceGrants.find(
@@ -60,19 +61,23 @@ export class HttpTokenAuthorizer {
     );
     if (onceGrant) {
       onceGrant.consumed = true;
-      return Promise.resolve({
+      return {
         requestId: randomUUID(),
         outcome: "approved",
         message: messages.httpTokenAllowedOnce(input.tokenId, input.host),
         scope: "once",
-      });
+      };
     }
 
-    return Promise.resolve({
+    return {
       requestId: randomUUID(),
       outcome: "denied",
       message: messages.httpTokenProxyRejected(input.tokenId),
-    });
+    };
+  }
+
+  private isHttpTokenAlwaysAllowed(tokenId: string, host: string): boolean {
+    return this.persistentApprovalStore.isHttpTokenAlwaysAllowed(tokenId, host);
   }
 }
 

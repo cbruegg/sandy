@@ -103,7 +103,7 @@ export function buildPrivilegeControls(request: PrivilegeRequest): ControlSurfac
     return { rows };
   }
 
-  if (request.kind === "skill_mutation") {
+  if (request.kind === "skill_mutation" || request.kind === "job_mutation") {
     rows.push([
       { actionId: "approve", label: buttonLabels.approve, event: { kind: "approval_response", decision: "approve", requestId: request.requestId } },
       { actionId: "deny", label: buttonLabels.deny, event: { kind: "approval_response", decision: "deny", requestId: request.requestId } },
@@ -144,5 +144,7 @@ export function formatPrivilegeRequestLogType(request: PrivilegeRequest): string
       return `host_directory_access:${request.path}:${request.level}`;
     case "skill_mutation":
       return `skill_mutation:${request.operation}:${request.skillId}`;
+    case "job_mutation":
+      return `job_mutation:${request.mutation.operation}:${request.mutation.jobId}`;
   }
 }

@@ -97,6 +97,9 @@ export type HostCommand =
       input: TaskInputPayload;
     }
   | {
+      type: "task_became_interactive";
+    }
+  | {
       type: "privilege_result";
       result: PrivilegeResolutionResult;
     }

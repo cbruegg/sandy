@@ -9,13 +9,13 @@ type ProxyAuthServiceOptions = {
     taskId: string;
     tokenId: string;
     host: string;
-  }) => Promise<{ outcome: "approved" | "denied" | "failed"; message: string }>;
+  }) => { outcome: "approved" | "denied" | "failed"; message: string };
 };
 
 export class ProxyAuthService {
   constructor(private readonly options: ProxyAuthServiceOptions) {}
 
-  async resolveProxyRequest(request: HttpProxyAuthRequestMessage): Promise<HttpProxyAuthResponseMessage> {
+  resolveProxyRequest(request: HttpProxyAuthRequestMessage): HttpProxyAuthResponseMessage {
     if (request.proxyAuthUsername !== "Bearer") {
       return {
         type: "auth_response",
@@ -36,7 +36,7 @@ export class ProxyAuthService {
     }
 
     const resolvedHeaders: HttpProxyRequestHeader[] = [];
-    const tokenRequests = new Map<string, Promise<{ approved: boolean; message: string }>>();
+    const tokenRequests = new Map<string, { approved: boolean; message: string }>();
 
     for (const header of request.headers) {
       if (isHopByHopHeader(header.name)) {
@@ -52,7 +52,7 @@ export class ProxyAuthService {
       if (!tokenRequests.has(tokenId)) {
         tokenRequests.set(tokenId, this.checkTokenApproval(grant.taskId, tokenId, request.targetHost));
       }
-      const result = await tokenRequests.get(tokenId)!;
+      const result = tokenRequests.get(tokenId)!;
       if (!result.approved) {
         return {
           type: "auth_response",
@@ -86,17 +86,17 @@ export class ProxyAuthService {
     };
   }
 
-  private async checkTokenApproval(
+  private checkTokenApproval(
     taskId: string,
     tokenId: string,
     host: string,
-  ): Promise<{ approved: boolean; message: string }> {
+  ): { approved: boolean; message: string } {
     const tokenConfig = this.options.httpTokens[tokenId];
     if (!tokenConfig) {
       return { approved: false, message: `HTTP token "${tokenId}" is not configured.` };
     }
 
-    const result = await this.options.authorizeHttpTokenUse({
+    const result = this.options.authorizeHttpTokenUse({
       taskId,
       tokenId,
       host,

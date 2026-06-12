@@ -8,6 +8,7 @@ import {
   SequenceMainAgent,
   StubMainAgent,
 } from "./test-helpers.js";
+import type { JobDefinition } from "../jobs/job-validation.js";
 
 test("orchestrator stages attached files into the task share before launching the worker", async () => {
   const mainAgent = new StubMainAgent({
@@ -594,3 +595,115 @@ test("orchestrator blocks new idle input while shared workspace deletion is pend
   assert.equal(mainAgent.contexts.length, 1);
   assert.equal(channel.sentTexts.at(-1)?.text, messages.shareDeletionStillPending());
 });
+
+test("orchestrator prompts for share deletion from a silent job task", async () => {
+  const { taskLifecycle, runner, store, channel } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
+  });
+
+  const job: JobDefinition = {
+    id: "job-1",
+    name: "Daily cleanup",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt: "2026-04-01T00:00:00.000Z" },
+    skillId: "cleanup",
+  };
+  const taskId = await taskLifecycle.launchJobTask(job, "chat-job-silent", null);
+  runner.shareInspections.set(taskId, {
+    isEmpty: false,
+    summary: "report.txt",
+  });
+
+  await runner.emit({ type: "task_done" }, taskId);
+
+  const session = store.getOrCreate("chat-job-silent");
+  assert.equal(session.activeTask, null);
+  assert.equal(channel.shareDeletionRequests.length, 1);
+  assert.equal(channel.shareDeletionRequests[0]?.taskName, "Scheduled job: Daily cleanup");
+});
+
+test("orchestrator defers job share deletion prompt while a user task is active", async () => {
+  const mainAgent = new SequenceMainAgent([
+    {
+      action: "launch_task",
+      taskBrief: "Inspect the filesystem.",
+      taskName: "fs-inspect",
+      taskLanguage: "English",
+    },
+    {
+      action: "reply",
+      replyText: "ok",
+    },
+  ]);
+  const { orchestrator, taskLifecycle, runner, store, channel } = createTestOrchestrator({ mainAgent });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-job-defer",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Inspect the filesystem",
+    rawText: "Inspect the filesystem",
+    attachments: [],
+  });
+
+  const job: JobDefinition = {
+    id: "job-1",
+    name: "Daily cleanup",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt: "2026-04-01T00:00:00.000Z" },
+    skillId: "cleanup",
+  };
+  const jobTaskId = await taskLifecycle.launchJobTask(job, "chat-job-defer", null);
+  runner.shareInspections.set(jobTaskId, {
+    isEmpty: false,
+    summary: "report.txt",
+  });
+
+  await runner.emit({ type: "task_done" }, jobTaskId);
+
+  const session = store.getOrCreate("chat-job-defer");
+  assert.equal(session.activeTask?.taskId, runner.launches[0]?.taskId);
+  assert.equal(channel.shareDeletionRequests.length, 0);
+
+  const userTaskId = runner.launches[0]?.taskId;
+  assert.ok(userTaskId);
+  runner.shareInspections.set(userTaskId, {
+    isEmpty: true,
+    summary: null,
+  });
+  await runner.emit({ type: "task_done" }, userTaskId);
+
+  assert.equal(session.activeTask, null);
+  assert.equal(channel.shareDeletionRequests.length, 1);
+  assert.equal(channel.shareDeletionRequests[0]?.taskName, "Scheduled job: Daily cleanup");
+});
+
+test("silent job task progress updates are suppressed", async () => {
+  const { taskLifecycle, runner, store, channel } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
+  });
+
+  const job: JobDefinition = {
+    id: "job-silent-progress",
+    name: "Daily cleanup",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt: "2026-04-01T00:00:00.000Z" },
+    skillId: "cleanup",
+  };
+  const taskId = await taskLifecycle.launchJobTask(job, "chat-silent-progress", null);
+
+  await runner.emit({ type: "progress", message: "Cleaning up old files." }, taskId);
+  await runner.emit({ type: "assistant_output", text: "I'm working on the cleanup." }, taskId);
+
+  // Progress and assistant_output should be suppressed for a silent job task.
+  assert.equal(channel.taskUpdates.length, 0);
+  assert.equal(channel.sentTexts.length, 0);
+
+  const session = store.getOrCreate("chat-silent-progress");
+  const task = session.findTask(taskId)?.task;
+  assert.ok(task);
+  assert.equal(task.interactionState, "silent");
+});
+
+

@@ -7,8 +7,16 @@ import {
   describeUserMessageForMainAgent,
 } from "./worker-input.js";
 import { stageSharedAttachments } from "./task-share.js";
-import { OrchestratorRuntimeState } from "./runtime-state.js";
-import type { ActiveTaskStatus, SandyOrchestratorDependencies, UserMessageEvent } from "./shared.js";
+import { ActiveTaskRuntimeRegistry } from "./active-task-runtime-registry.js";
+
+import type {
+  ActiveTaskStatus,
+  OrchestratorCoreDependencies,
+  UserMessageEvent
+} from "./shared.js";
+import {
+  createActiveTaskState,
+} from "../types.js";
 import type {
   ChannelFormatting,
   MainAgentDecision,
@@ -16,20 +24,44 @@ import type {
   MainAgentTaskPolicyInput,
   NormalizedChatEvent,
   SessionState,
+  SharedAttachment,
   SubAgentEvent,
+  TaskOrigin,
   TranscriptEntry,
 } from "../types.js";
+import type { JobDefinition } from "../jobs/job-validation.js";
+import { buildJobTaskBrief } from "../jobs/job-task-brief.js";
+import type { SandboxHandle, TaskStartInput } from "../sandbox/sandbox-runner.js";
+import type {TaskFailureHandler} from "./privileges.ts";
+import type { ChannelAdapter } from "../channel/channel-adapter.js";
 
-export class OrchestratorTaskLifecycle {
+export interface OrchestratorTaskLifecycle {
+  resolvePendingShareDeletion(session: SessionState, decision: "approve" | "deny"): Promise<void>;
+  releasePendingTaskSummaries(session: SessionState): TranscriptEntry[];
+  executeMainAgentDecision(session: SessionState, event: UserMessageEvent, decision: MainAgentDecision): Promise<void>;
+  cancelActiveTask(session: SessionState, reason: string): Promise<void>;
+  markActiveTaskFinished(taskId: string): Promise<void>;
+  requireActiveTaskHandle(taskId: string): SandboxHandle;
+  stageAttachments(
+    chatId: string,
+    messageId: string,
+    attachments: UserMessageEvent["attachments"],
+    taskSharePath: string,
+  ): Promise<SharedAttachment[]>;
+}
+
+export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, OrchestratorTaskLifecycle {
   constructor(
-    private readonly deps: SandyOrchestratorDependencies,
-    private readonly runtimeState: OrchestratorRuntimeState,
+    private readonly deps: OrchestratorCoreDependencies,
+    private readonly activeTasks: ActiveTaskRuntimeRegistry,
     private readonly channelFormatting: ChannelFormatting,
+    private readonly channel: ChannelAdapter,
   ) {}
 
   async routeSubAgentEvent(chatId: string, taskId: string, event: SubAgentEvent): Promise<void> {
     const session = this.deps.sessionStore.getOrCreate(chatId);
-    if (!session.activeTask || session.activeTask.taskId !== taskId) {
+    const taskRecord = session.findTask(taskId);
+    if (!taskRecord) {
       logger.warn("task.event_ignored", {
         chatId,
         taskId,
@@ -38,7 +70,7 @@ export class OrchestratorTaskLifecycle {
       return;
     }
 
-    session.activeTask.lastActivityAt = new Date().toISOString();
+    const task = taskRecord.task;
     logger.info("task.event_received", {
       chatId,
       taskId,
@@ -48,40 +80,62 @@ export class OrchestratorTaskLifecycle {
     try {
       switch (event.type) {
         case "worker_connected":
-          session.activeTask.workerConnected = true;
+          task.workerConnected = true;
           break;
         case "worker_disconnected":
-          await this.failTaskAfterWorkerDisconnect(session, event.message);
+          await this.failTaskAfterWorkerDisconnect(session, taskId, event.message);
           break;
         case "progress": {
+          if (this.isSilentJobTask(session, taskId)) {
+            logger.debug("task.progress_ignored_silent_job", {
+              chatId,
+              taskId,
+            });
+            break;
+          }
           const message = event.message.trim();
           if (!message) {
             break;
           }
-          await this.deps.channel.sendTaskUpdate(chatId, message);
+          await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async (channel) => {
+            this.markTaskInteracting(session, taskId);
+            await channel.sendTaskUpdate(chatId, message);
+          });
           break;
         }
         case "assistant_output":
-          await this.deps.channel.sendTaskUpdate(chatId, event.text);
+          if (this.isSilentJobTask(session, taskId)) {
+            logger.debug("task.assistant_output_ignored_silent_job", {
+              chatId,
+              taskId,
+            });
+            break;
+          }
+          await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async (channel) => {
+            this.markTaskInteracting(session, taskId);
+            await channel.sendTaskUpdate(chatId, event.text);
+          });
           break;
         case "task_summary":
-          this.recordTaskSummary(session, event.summary);
+          this.recordTaskSummary(session, taskId, event.summary);
           break;
         case "task_done":
           // Workers usually emit task_summary first, then task_done to publish that stored summary for review.
-          if (session.activeTask.status !== "completed") {
-            await this.sendTaskSummaryForReview(chatId, session);
-            await this.finishActiveTask(session, "completed");
+          if (task.status !== "completed") {
+            // A launchedByJob task that never interacted with the user may finish silently without the usual review step.
+            if (!this.isSilentJobTask(session, taskId)) await this.sendTaskSummaryForReview(chatId, session, taskId);
+            await this.finishTask(session, taskId, "completed");
           }
           break;
         case "final_result":
-          this.recordTaskSummary(session, [
+          this.recordTaskSummary(session, taskId, [
             `Summary: ${event.text}`,
             "Artifacts: none",
             "Open questions: none",
           ].join("\n"));
-          await this.sendTaskSummaryForReview(chatId, session);
-          await this.finishActiveTask(session, "completed");
+          // A launchedByJob task that never interacted with the user may finish silently without the usual review step.
+          if (!this.isSilentJobTask(session, taskId)) await this.sendTaskSummaryForReview(chatId, session, taskId);
+          await this.finishTask(session, taskId, "completed");
           break;
         case "task_error":
           logger.error("task.failed", null, undefined, {
@@ -89,8 +143,10 @@ export class OrchestratorTaskLifecycle {
             taskId,
             message: event.message,
           });
-          await this.deps.channel.sendText(chatId, messages.taskFailed(event.message));
-          await this.finishActiveTask(session, "failed");
+          await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async (channel) => {
+            await channel.sendText(chatId, messages.taskFailed(event.message));
+          });
+          await this.finishTask(session, taskId, "failed");
           break;
         case "worker_log":
           break;
@@ -120,7 +176,7 @@ export class OrchestratorTaskLifecycle {
         logger.info("task.reply_direct", {
           chatId: event.chatId,
         });
-        await this.deps.channel.sendText(event.chatId, decision.replyText);
+        await this.channel.sendText(event.chatId, decision.replyText);
         return;
       case "launch_task": {
         const taskId = randomUUID();
@@ -133,54 +189,41 @@ export class OrchestratorTaskLifecycle {
             taskName: decision.taskName,
           });
           const taskPolicy = normalizeTaskPolicy(decision.taskPolicy);
-          session.activeTask = {
-            taskId,
-            taskName: decision.taskName,
-            status: "running",
-            startedAt: now,
-            lastActivityAt: now,
-            pendingPrivilegeRequest: null,
-            taskPolicy,
-            approvedMcpTools: [],
-            approvedMcpResourceReads: [],
-            approvedHttpTokenSessionGrants: [],
-            approvedHttpTokenOnceGrants: [],
-            approvedHostDirectories: [],
-            workerConnected: false,
-            taskSummary: null,
-          };
-
-          const handle = await this.deps.sandboxRunner.launchTask(
+          session.activeTask = createActiveTaskState(
             {
-              chatId: event.chatId,
               taskId,
               taskName: decision.taskName,
-              taskLanguage: decision.taskLanguage,
-              channelFormatting: this.channelFormatting,
-              workerStartConfig: await this.deps.buildWorkerStartConfig(),
-              prepareStartInput: async (taskSharePath) => {
-                const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskSharePath);
-                const brief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
-                logger.debug("task.task_brief", {
-                  chatId: event.chatId,
-                  taskId,
-                  taskBrief: brief,
-                });
-                const initialInput = buildTaskInputPayload(stagedAttachments);
-                return { taskBrief: brief, initialInput };
-              },
+              startedAt: now,
+              taskPolicy,
+              origin: { kind: "launchedByUser" },
+              interactionState: "interacting",
             },
-            async (subAgentEvent) => this.routeSubAgentEvent(event.chatId, taskId, subAgentEvent),
           );
 
-          this.runtimeState.registerHandle(taskId, handle);
+          await this.launchTaskInSandbox(
+            event.chatId,
+            taskId,
+            decision.taskName,
+            decision.taskLanguage,
+            async (taskSharePath) => {
+              const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskSharePath);
+              const brief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
+              logger.debug("task.task_brief", {
+                chatId: event.chatId,
+                taskId,
+                taskBrief: brief,
+              });
+              const initialInput = buildTaskInputPayload(stagedAttachments);
+              return { taskBrief: brief, initialInput };
+            },
+          );
           launchSucceeded = true;
           logger.info("task.started", {
             chatId: event.chatId,
             taskId,
             taskName: decision.taskName,
           });
-          await this.deps.channel.sendText(event.chatId, messages.taskStarted(decision.taskName));
+          await this.channel.sendText(event.chatId, messages.taskStarted(decision.taskName));
           return;
         } catch (error) {
           if (!launchSucceeded && session.activeTask?.taskId === taskId) {
@@ -192,6 +235,77 @@ export class OrchestratorTaskLifecycle {
       default:
         assertNever(decision);
     }
+  }
+
+  async launchJobTask(job: JobDefinition, chatId: string, workspacePath: string | null): Promise<string> {
+    const session = this.deps.sessionStore.getOrCreate(chatId);
+
+    const taskId = randomUUID();
+    const now = new Date().toISOString();
+    const taskName = `Scheduled job: ${job.name}`;
+    const taskPolicy = await this.deps.jobApprovalStore.getTaskPolicy(job.id);
+    const taskState = createActiveTaskState(
+      {
+        taskId,
+        taskName,
+        startedAt: now,
+        taskPolicy,
+        origin: { kind: "launchedByJob", jobId: job.id },
+        interactionState: "silent",
+      },
+      {
+        approvedHostDirectories: workspacePath ? [{ path: workspacePath, level: "read_write" }] : [],
+      },
+    );
+    this.deps.taskCoordinator.addBackgroundJobTask(session, taskState);
+
+    try {
+      await this.launchTaskInSandbox(
+        chatId,
+        taskId,
+        taskName,
+        "en",
+        () => Promise.resolve({
+          taskBrief: buildJobTaskBrief(job, workspacePath),
+          initialInput: { text: `Execute skill ${job.skillId}.`, images: [] },
+        }),
+      );
+      return taskId;
+    } catch (error) {
+      session.removeTask(taskId);
+      this.deps.taskCoordinator.removeTask(chatId, taskId);
+      throw error;
+    }
+  }
+
+  private async launchTaskInSandbox(
+    chatId: string,
+    taskId: string,
+    taskName: string,
+    taskLanguage: string,
+    prepareStartInput: (taskSharePath: string) => Promise<TaskStartInput>,
+  ): Promise<void> {
+    const handle = await this.deps.sandboxRunner.launchTask(
+      {
+        chatId,
+        taskId,
+        taskName,
+        taskLanguage,
+        channelFormatting: this.channelFormatting,
+        workerStartConfig: await this.deps.buildWorkerStartConfig(),
+        prepareStartInput,
+      },
+      async (subAgentEvent) => this.routeSubAgentEvent(chatId, taskId, subAgentEvent),
+    );
+    this.activeTasks.registerHandle(taskId, handle);
+  }
+
+  requireActiveTaskHandle(taskId: string): SandboxHandle {
+    return this.activeTasks.requireHandle(taskId);
+  }
+
+  async markActiveTaskFinished(taskId: string): Promise<void> {
+    await this.activeTasks.requireHandle(taskId).markFinished();
   }
 
   releasePendingTaskSummaries(session: SessionState): TranscriptEntry[] {
@@ -215,9 +329,9 @@ export class OrchestratorTaskLifecycle {
     return releasedEntries;
   }
 
-  recordTaskSummary(session: SessionState, summary: string): void {
-    const activeTask = session.activeTask;
-    if (!activeTask) {
+  recordTaskSummary(session: SessionState, taskId: string, summary: string): void {
+    const task = this.deps.taskCoordinator.findTask(session, taskId);
+    if (!task) {
       return;
     }
 
@@ -226,21 +340,23 @@ export class OrchestratorTaskLifecycle {
       return;
     }
 
-    activeTask.taskSummary = trimmedSummary;
+    task.taskSummary = trimmedSummary;
   }
 
-  async sendTaskSummaryForReview(chatId: string, session: SessionState): Promise<void> {
-    const activeTask = session.activeTask;
+  async sendTaskSummaryForReview(chatId: string, session: SessionState, taskId: string): Promise<void> {
+    const activeTask = this.deps.taskCoordinator.findTask(session, taskId);
     if (!activeTask) {
       return;
     }
 
     const summary = activeTask.taskSummary ?? this.buildCompletedTaskFallbackSummary(activeTask);
-    session.pendingTaskSummary = {
-      taskName: activeTask.taskName,
-      summary,
-    };
-    await this.deps.channel.sendReportableText(chatId, messages.taskSummaryReady(activeTask.taskName, summary));
+    await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, activeTask.taskName, async (channel) => {
+      session.pendingTaskSummary = {
+        taskName: activeTask.taskName,
+        summary,
+      };
+      await channel.sendReportableText(chatId, messages.taskSummaryReady(activeTask.taskName, summary));
+    });
   }
 
   async cancelActiveTask(session: SessionState, reason: string): Promise<void> {
@@ -254,39 +370,43 @@ export class OrchestratorTaskLifecycle {
       taskId: activeTask.taskId,
       reason,
     });
-    await this.runtimeState.requireHandle(activeTask.taskId).cancel(reason);
-    await this.finishActiveTask(session, "cancelled", { discardSummary: true });
+    await this.activeTasks.requireHandle(activeTask.taskId).cancel(reason);
+    await this.finishTask(session, activeTask.taskId, "cancelled", { discardSummary: true });
   }
 
-  async finishActiveTask(
+  async finishTask(
     session: SessionState,
+    taskId: string,
     status: ActiveTaskStatus,
     options?: { discardSummary?: boolean },
   ): Promise<void> {
-    const activeTask = session.activeTask;
-    if (!activeTask) {
+    const task = this.deps.taskCoordinator.findTask(session, taskId);
+    if (!task) {
       return;
     }
 
-    activeTask.status = status;
-    await this.closeActiveTask(session, options);
+    task.status = status;
+    await this.closeTask(session, taskId, options);
   }
 
   async failActiveTaskFromEventHandling(session: SessionState, taskId: string, message: string): Promise<void> {
-    if (!session.activeTask || session.activeTask.taskId !== taskId) {
+    const task = this.deps.taskCoordinator.findTask(session, taskId);
+    if (!task) {
       return;
     }
 
-    session.activeTask.status = "failed";
+    task.status = "failed";
     try {
-      await this.deps.channel.sendText(session.chatId, messages.taskFailed(message));
+      await this.deps.taskCoordinator.runJobUserVisibleOperation(session.chatId, taskId, task.taskName, async (channel) => {
+        await channel.sendText(session.chatId, messages.taskFailed(message));
+      });
     } catch (notifyError) {
       logger.error("task.event_failure_notification_failed", notifyError, "Unknown notification failure.", {
         chatId: session.chatId,
         taskId,
       });
     }
-    await this.closeActiveTask(session);
+    await this.closeTask(session, taskId);
   }
 
   async stageAttachments(
@@ -296,7 +416,7 @@ export class OrchestratorTaskLifecycle {
     taskSharePath: string,
   ) {
     return stageSharedAttachments({
-      channel: this.deps.channel,
+      channel: this.channel,
       chatId,
       messageId,
       attachments,
@@ -312,20 +432,21 @@ export class OrchestratorTaskLifecycle {
 
     if (decision === "approve") {
       await this.deps.sandboxRunner.deleteTaskShare(pending.taskId);
-      await this.deps.channel.sendText(session.chatId, messages.shareDeleted(pending.taskName));
+      await this.channel.sendText(session.chatId, messages.shareDeleted(pending.taskName));
     } else {
-      await this.deps.channel.sendText(session.chatId, messages.sharePreserved(pending.taskName));
+      await this.channel.sendText(session.chatId, messages.sharePreserved(pending.taskName));
     }
 
     session.pendingShareDeletion = null;
+    await this.deps.taskCoordinator.onVisibleSlotAvailable(session.chatId);
   }
 
-  private async closeActiveTask(session: SessionState, options?: { discardSummary?: boolean }): Promise<void> {
-    const task = session.activeTask;
+  private async closeTask(session: SessionState, taskId: string, options?: { discardSummary?: boolean }): Promise<void> {
+    const task = this.deps.taskCoordinator.findTask(session, taskId);
     if (!task) {
       return;
     }
-    const handle = this.runtimeState.getHandle(task.taskId);
+    const handle = this.activeTasks.getHandle(task.taskId);
     if (handle) {
       await handle.close();
     }
@@ -338,20 +459,37 @@ export class OrchestratorTaskLifecycle {
       status: task.status,
     });
     this.failPendingPrivilegeRequestOnTaskClose(task);
-    this.runtimeState.deleteHandle(task.taskId);
-    session.activeTask = null;
-    await this.promptForShareDeletionIfNeeded(session, task.taskId, task.taskName);
+    session.removeTask(task.taskId);
+    this.deps.taskCoordinator.removeTask(session.chatId, task.taskId);
+    this.activeTasks.deleteHandle(task.taskId);
+    await this.promptForShareDeletionIfNeeded(session, task.taskId, task.taskName, task.origin);
+    await this.deps.taskCoordinator.onVisibleSlotAvailable(session.chatId);
   }
 
-  private async failTaskAfterWorkerDisconnect(session: SessionState, message: string): Promise<void> {
-    if (!session.activeTask) {
+  private isSilentJobTask(session: SessionState, taskId: string): boolean {
+    const task = this.deps.taskCoordinator.findTask(session, taskId);
+    return !!task && task.origin.kind === "launchedByJob" && task.interactionState === "silent";
+  }
+
+  private markTaskInteracting(session: SessionState, taskId: string): void {
+    const task = this.deps.taskCoordinator.findTask(session, taskId);
+    if (task && task.origin.kind === "launchedByJob") {
+      task.interactionState = "interacting";
+    }
+  }
+
+  private async failTaskAfterWorkerDisconnect(session: SessionState, taskId: string, message: string): Promise<void> {
+    const task = this.deps.taskCoordinator.findTask(session, taskId);
+    if (!task) {
       return;
     }
 
-    session.activeTask.workerConnected = false;
-    session.activeTask.status = "failed";
-    await this.deps.channel.sendText(session.chatId, message);
-    await this.closeActiveTask(session);
+    task.workerConnected = false;
+    task.status = "failed";
+    await this.deps.taskCoordinator.runJobUserVisibleOperation(session.chatId, taskId, task.taskName, async (channel) => {
+      await channel.sendText(session.chatId, message);
+    });
+    await this.closeTask(session, taskId);
   }
 
   private buildCompletedTaskFallbackSummary(task: NonNullable<SessionState["activeTask"]>): string {
@@ -375,23 +513,25 @@ export class OrchestratorTaskLifecycle {
       ),
     };
     if (task.pendingPrivilegeRequest.kind === "mcp_tool_call" || task.pendingPrivilegeRequest.kind === "mcp_resource_read") {
-      this.runtimeState.resolvePendingMcpPrivilege(task.pendingPrivilegeRequest.requestId, failedResult);
+      this.activeTasks.resolvePendingMcpPrivilege(task.pendingPrivilegeRequest.requestId, failedResult);
     }
     if (
       task.pendingPrivilegeRequest.kind === "host_operation"
       || task.pendingPrivilegeRequest.kind === "http_token_use"
       || task.pendingPrivilegeRequest.kind === "host_directory_access"
+      || task.pendingPrivilegeRequest.kind === "skill_mutation"
+      || task.pendingPrivilegeRequest.kind === "job_mutation"
     ) {
-      this.runtimeState.resolvePendingNativeTool(task.pendingPrivilegeRequest.requestId, failedResult);
+      this.activeTasks.resolvePendingNativeTool(task.pendingPrivilegeRequest.requestId, failedResult);
     }
   }
 
   private async handleAuthRefresh(taskId: string, previousAccountId: string | null): Promise<void> {
     const tokens = await this.deps.refreshChatGPTTokens?.(taskId, previousAccountId) ?? null;
-    await this.runtimeState.getHandle(taskId)?.resolveAuthRefresh?.(tokens);
+    await this.activeTasks.getHandle(taskId)?.resolveAuthRefresh?.(tokens);
   }
 
-  private async promptForShareDeletionIfNeeded(session: SessionState, taskId: string, taskName: string): Promise<void> {
+  private async promptForShareDeletionIfNeeded(session: SessionState, taskId: string, taskName: string, origin: TaskOrigin): Promise<void> {
     const inspection = await this.deps.sandboxRunner.inspectTaskShare(taskId);
     if (inspection.isEmpty) {
       await this.deps.sandboxRunner.deleteTaskShare(taskId);
@@ -399,34 +539,34 @@ export class OrchestratorTaskLifecycle {
     }
 
     const requestId = randomUUID();
+    const summary = inspection.summary ?? "";
+
+    if (origin.kind === "launchedByJob" && session.activeTask?.origin.kind === "launchedByUser") {
+      this.deps.taskCoordinator.scheduleShareDeletionPrompt(session.chatId, {
+        requestId,
+        taskId,
+        taskName,
+        summary,
+      });
+      return;
+    }
+
     session.pendingShareDeletion = {
       requestId,
       taskId,
       taskName,
-      summary: inspection.summary ?? "",
+      summary,
     };
-    await this.deps.channel.sendShareDeletionRequest(session.chatId, requestId, taskName, inspection.summary ?? "");
+    await this.channel.sendShareDeletionRequest(session.chatId, requestId, taskName, summary);
   }
+
 }
 
 function normalizeTaskPolicy(policy: MainAgentTaskPolicyInput | undefined): MainAgentTaskPolicy {
   return {
-    autoApproveMcpServers: uniqueStrings(policy?.autoApproveMcpServers ?? []),
-    autoApproveHttpTokens: uniqueStrings(policy?.autoApproveHttpTokens ?? []),
+    autoApproveMcpServers: [...new Set(policy?.autoApproveMcpServers ?? [])],
+    autoApproveHttpTokens: [...new Set(policy?.autoApproveHttpTokens ?? [])],
   };
-}
-
-function uniqueStrings(entries: string[]): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const entry of entries) {
-    if (seen.has(entry)) {
-      continue;
-    }
-    seen.add(entry);
-    result.push(entry);
-  }
-  return result;
 }
 
 function assertNever(value: never): never {

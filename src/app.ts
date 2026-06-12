@@ -1,7 +1,13 @@
 import { CodexMainAgentController } from "./agent/main-agent-controller.js";
 import { createChannelAdapter } from "./channel/create-channel.js";
-import type { WorkerAuthConfig } from "./types.js";
-import { defaultCodexAuthFilePath, loadConfig } from "./config.js";
+import type { WorkerAuthConfig, WorkerStartConfig } from "./types.js";
+import type { ChannelFormatting } from "./types/channel.js";
+import {
+  defaultCodexAuthFilePath,
+  loadConfig,
+  type HttpTokenConfig,
+  type SandyAuthMode
+} from "./config.js";
 import { CODEX_API_KEY_ENV, ensureManagedCodexPath } from "./codex-client.js";
 import { resolveSandyCacheRoot } from "./cache-paths.js";
 import { configureLogger, logger } from "./logger.js";
@@ -15,12 +21,16 @@ import { McpWorkerLaunchConfigBuilder } from "./mcp/worker-launch-config-builder
 import { createMcpWorkerNetworkName } from "./mcp/worker-network-name.js";
 import { HostMcpServerRegistry } from "./mcp/host-server-registry.js";
 import { SandyOrchestrator } from "./orchestrator/index.js";
+import { OrchestratorPrivilegesImpl } from "./orchestrator/privileges.js";
+import { ActiveTaskRuntimeRegistry } from "./orchestrator/active-task-runtime-registry.js";
+import type { OrchestratorCoreDependencies } from "./orchestrator/shared.js";
+import { OrchestratorTaskLifecycleImpl } from "./orchestrator/task-lifecycle.js";
+import { TaskCoordinator } from "./orchestrator/task-coordinator.js";
 import { TomlPersistentApprovalStore } from "./privilege/persistent-approval-store.js";
 import { PrivilegeBrokerImpl } from "./privilege/privilege-broker.js";
 import {DockerSandboxRunner, type DockerSandboxRunnerOptions} from "./sandbox/docker-sandbox-runner.js";
 import {TaskBundleLauncherImpl, type TaskBundleLauncherOptions} from "./sandbox/task-bundle-launcher.js";
 import { TaskBundlePoolImpl } from "./sandbox/task-bundle-pool.js";
-import { TaskBundleAssignmentRegistry } from "./sandbox/task-bundle-assignment-registry.js";
 import { InMemorySessionStore } from "./session/in-memory-session-store.js";
 import { OpenAiTranscriptionProvider } from "./transcription/openai-transcription-provider.js";
 import { resolvePublishedUpdateSource } from "./build-metadata.js";
@@ -32,6 +42,11 @@ import {createNoopHostfsBroker} from "./hostfs/hostfs-broker.js";
 import {initializeHostfs, type HostfsServices} from "./hostfs/index.js";
 import { ChatGPTTokenBroker } from "./auth/chatgpt-token-broker.js";
 import { SkillService } from "./skills.js";
+import { WorkerToolsHandler } from "./subagent/worker-tools-handler.js";
+import { JobApprovalStore } from "./jobs/job-approval-store.js";
+import { JobStore } from "./jobs/job-store.js";
+import { JobScheduler } from "./jobs/job-scheduler.js";
+import { ScheduledJobService } from "./jobs/job-service.js";
 import { randomUUID } from "node:crypto";
 import { createControlDir, removeControlDir, startHeartbeat } from "./sandbox/heartbeat.js";
 import { CodexAppServerClient } from "./codex-app-server-client/app-server-client.js";
@@ -144,6 +159,7 @@ export async function startApp(): Promise<void> {
   };
 
   const skillService = new SkillService(config.configDirectory);
+  const jobStore = new JobStore(config.configDirectory);
 
   const mainAgentConfig = buildMainAgentConfig(config.configDirectory, config.memory.enabled);
   const mempalaceAvailable = config.memory.enabled && isMemPalaceAvailable();
@@ -174,6 +190,7 @@ export async function startApp(): Promise<void> {
     config.persistentMcpResourceApprovals,
     config.persistentHostDirectoryApprovals,
   );
+  const jobApprovalStore = new JobApprovalStore(config.configDirectory);
 
   // Docker Desktop (macOS, Windows) runs containers inside a VM. The VM cannot
   // reach the host via 127.0.0.1, so we must bind the WebDAV server to 0.0.0.0
@@ -211,7 +228,7 @@ export async function startApp(): Promise<void> {
     ? new ProxyAuthService({
         access: workerAccess,
         httpTokens: config.httpTokens,
-        authorizeHttpTokenUse: async (input) => await httpTokenAuthorizer.authorizeHttpTokenUse(input),
+        authorizeHttpTokenUse: (input) => httpTokenAuthorizer.authorizeHttpTokenUse(input),
       })
     : null;
 
@@ -265,7 +282,7 @@ export async function startApp(): Promise<void> {
     httpProxyConfDirPath: certificateAuthority?.confDirPath ?? null,
     httpProxyImage: httpTokensEnabled ? config.httpProxyImage : null,
     resolveHttpProxyRequest: proxyAuthService
-        ? async (request) => await proxyAuthService.resolveProxyRequest(request)
+        ? (request) => proxyAuthService.resolveProxyRequest(request)
         : undefined,
     logLevel: config.logLevel,
     createHostfsVolume,
@@ -288,71 +305,71 @@ export async function startApp(): Promise<void> {
   };
 
   const taskBundleLauncher = new TaskBundleLauncherImpl(taskBundleLauncherOptions);
-  const taskBundleAssignmentRegistry = new TaskBundleAssignmentRegistry();
-  const taskBundlePool = new TaskBundlePoolImpl(
-    taskBundleLauncher,
-    (bundle) => {
-      taskBundleAssignmentRegistry.activate(
-        bundle.taskId,
-        bundle.bundleId,
-        bundle.hostfsVolumeName !== null,
-      );
-    },
-    (bundle) => {
-      taskBundleAssignmentRegistry.release(bundle.taskId);
-    },
-  );
+  const taskBundlePool = new TaskBundlePoolImpl(taskBundleLauncher);
   const sandboxRunner = new DockerSandboxRunner(sandboxRunnerOptions, taskBundlePool);
 
-  const orchestrator = new SandyOrchestrator({
+  const channelFormatting = channel.getFormatting();
+  const refreshChatGPTTokens = async (_taskId: string, previousAccountId: string | null) => {
+    if (!tokenBroker) return null;
+    try {
+      return await tokenBroker.refreshTokens(previousAccountId);
+    } catch (error) {
+      logger.error("token_broker.refresh_failed", error, "Unknown error");
+      return null;
+    }
+  };
+
+  const activeTaskRuntimes = new ActiveTaskRuntimeRegistry();
+  const taskCoordinator = new TaskCoordinator({
+    sessionStore,
     channel,
+    onJobTaskBecameInteractive: async (taskId) => {
+      await activeTaskRuntimes.notifyTaskBecameInteractive(taskId);
+    },
+  });
+
+  const orchestratorCoreDeps: OrchestratorCoreDependencies = {
     mainAgent,
     sandboxRunner,
-    buildWorkerStartConfig: async () => {
-      let auth: WorkerAuthConfig;
-
-      if (config.authMode.mode === "api_key") {
-        auth = { mode: "ambient_api_key", openAiApiKey: config.authMode.openAiApiKey };
-      } else if (tokenBroker) {
-        try {
-          auth = {
-            mode: "external_tokens",
-            tokens: await tokenBroker.getInitialTokens(),
-          };
-        } catch (error) {
-          logger.error("token_broker.worker_launch_tokens_failed", error, "Unknown error");
-          auth = { mode: "ambient_auth_file" };
-        }
-      } else {
-        auth = { mode: "ambient_auth_file" };
-      }
-
-      return {
-        auth,
-        codexModel: config.agentModel,
-        channelFormatting: channel.getFormatting(),
-        httpTokens: Object.entries(config.httpTokens).map(([tokenId, token]) => ({
-          tokenId,
-          description: token.description,
-        })),
-        httpProxyWrapper: httpTokensEnabled ? "/usr/local/bin/sandy-http-proxy-exec" : null,
-      };
-    },
-    refreshChatGPTTokens: async (_taskId: string, previousAccountId: string | null) => {
-      if (!tokenBroker) return null;
-      try {
-        return await tokenBroker.refreshTokens(previousAccountId);
-      } catch (error) {
-        logger.error("token_broker.refresh_failed", error, "Unknown error");
-        return null;
-      }
-    },
+    buildWorkerStartConfig: () => buildWorkerStartConfig(
+      config.authMode,
+      config.agentModel,
+      config.httpTokens,
+      tokenBroker,
+      channelFormatting,
+    ),
+    refreshChatGPTTokens,
     sessionStore,
     privilegeBroker: new PrivilegeBrokerImpl(),
     persistentApprovalStore,
+    jobApprovalStore,
     hostfsBroker: hostfsServices?.broker ?? createNoopHostfsBroker(),
-    taskBundleAssignmentRegistry,
     skillService,
+    taskCoordinator,
+  };
+  const taskLifecycle = new OrchestratorTaskLifecycleImpl(orchestratorCoreDeps, activeTaskRuntimes, channelFormatting, channel);
+  const jobScheduler = new JobScheduler(jobStore, async (job, workspacePath) => {
+    const chatId = await channel.destinationStore.getDefaultChatId();
+    if (!chatId) {
+      throw new Error(`Cannot launch scheduled job ${job.id}: no default chat destination is known yet.`);
+    }
+    return await taskLifecycle.launchJobTask(job, chatId, workspacePath);
+  });
+  const jobService = new ScheduledJobService(jobStore, jobScheduler);
+  const workerToolsHandler = new WorkerToolsHandler({
+    jobService,
+    getTaskSharePath: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskSharePath(),
+    runUserVisibleOperation: async ({ chatId, taskId, taskName, operation }) => {
+      await taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, operation);
+    },
+  });
+  const privileges = new OrchestratorPrivilegesImpl(orchestratorCoreDeps, activeTaskRuntimes, workerToolsHandler, jobService, taskLifecycle);
+  const orchestrator = new SandyOrchestrator({
+    ...orchestratorCoreDeps,
+    channel,
+    channelFormatting,
+    taskLifecycle,
+    privileges,
   });
 
   const sidecarManager = new McpSidecarManager({
@@ -382,6 +399,7 @@ export async function startApp(): Promise<void> {
 
   shutdown = async () => {
     logger.info("app.shutdown_started");
+    jobScheduler.stop();
     updateCoordinator.stop();
     await stopWithLogging("channel.stop", () => channel.stop());
     await stopWithLogging("sidecarManager.stop", sidecarManager?.stop.bind(sidecarManager));
@@ -406,6 +424,7 @@ export async function startApp(): Promise<void> {
       const sessions = sessionStore.listSessions();
       const blockingSessions = sessions.filter((session) =>
         session.activeTask !== null
+        || session.backgroundJobTasks.length > 0
         || session.pendingShareDeletion !== null);
       if (blockingSessions.length > 0) {
         logger.debug("update.blocked_by_sessions", {
@@ -414,6 +433,7 @@ export async function startApp(): Promise<void> {
           blockingSessions: blockingSessions.map((session) => ({
             chatId: session.chatId,
             hasActiveTask: session.activeTask !== null,
+            backgroundJobTaskCount: session.backgroundJobTasks.length,
             hasPendingTaskSummary: session.pendingTaskSummary !== null,
             hasPendingShareDeletion: session.pendingShareDeletion !== null,
           })),
@@ -438,6 +458,7 @@ export async function startApp(): Promise<void> {
     prepareForRestart: shutdown,
   });
   updateCoordinator.start();
+  await jobScheduler.start();
 
   process.once("SIGINT", () => {
     shutdownRequested = true;
@@ -460,5 +481,44 @@ function buildMainAgentConfig(configDirectory: string, isMempalaceEnabled: boole
     mcp_servers: {
       mempalace: buildMempalaceMcpServerConfig(configDirectory, isMempalaceEnabled)
     },
+  };
+}
+
+async function buildWorkerStartConfig(
+  authMode: SandyAuthMode,
+  agentModel: string | null,
+  httpTokens: Record<string, HttpTokenConfig>,
+  tokenBroker: ChatGPTTokenBroker | null,
+  channelFormatting: ChannelFormatting | null,
+): Promise<WorkerStartConfig> {
+  let auth: WorkerAuthConfig;
+
+  if (authMode.mode === "api_key") {
+    auth = { mode: "ambient_api_key", openAiApiKey: authMode.openAiApiKey };
+  } else if (tokenBroker) {
+    try {
+      auth = {
+        mode: "external_tokens",
+        tokens: await tokenBroker.getInitialTokens(),
+      };
+    } catch (error) {
+      logger.error("token_broker.worker_launch_tokens_failed", error, "Unknown error");
+      auth = { mode: "ambient_auth_file" };
+    }
+  } else {
+    auth = { mode: "ambient_auth_file" };
+  }
+
+  const httpTokensEnabled = Object.keys(httpTokens).length > 0;
+
+  return {
+    auth,
+    codexModel: agentModel,
+    channelFormatting,
+    httpTokens: Object.entries(httpTokens).map(([tokenId, token]) => ({
+      tokenId,
+      description: token.description,
+    })),
+    httpProxyWrapper: httpTokensEnabled ? "/usr/local/bin/sandy-http-proxy-exec" : null,
   };
 }

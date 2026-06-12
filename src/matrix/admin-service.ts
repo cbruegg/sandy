@@ -1,5 +1,5 @@
-import {join} from "node:path";
 import {rm} from "node:fs/promises";
+import { matrixStateRoot } from "../state-paths.js";
 import {
   deleteMatrixAuthState,
   loadMatrixAuthState,
@@ -136,7 +136,7 @@ export class SandyMatrixAdminService {
   }
 
   private async clearMatrixState(): Promise<void> {
-    const matrixRoot = join(this.configDirectory, "state", "matrix");
+    const matrixRoot = matrixStateRoot(this.configDirectory);
     await rm(matrixRoot, { recursive: true, force: true });
   }
 }

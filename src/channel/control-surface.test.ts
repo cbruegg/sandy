@@ -154,6 +154,31 @@ test("buildPrivilegeControls for skill_mutation returns approve once, deny, repo
   assert.ok(!allActionIds.includes("approve_once"));
 });
 
+test("buildPrivilegeControls for job_mutation returns approve and deny with no persistent approval", () => {
+  const controls = buildPrivilegeControls({
+    kind: "job_mutation",
+    requestId: "req-2",
+    mutation: {
+      operation: "update",
+      jobId: "daily-cleanup",
+      definition: {
+        id: "daily-cleanup",
+        name: "Daily cleanup",
+        enabled: true,
+        schedule: { kind: "cron", expression: "0 9 * * *" },
+        skillId: "cleanup-skill",
+      },
+    },
+  });
+
+  const allActionIds = controls.rows.flat().map((action) => action.actionId);
+  assert.ok(allActionIds.includes("approve"));
+  assert.ok(allActionIds.includes("deny"));
+  assert.ok(!allActionIds.includes("approve_always"));
+  assert.ok(!allActionIds.includes("approve_worker_session"));
+  assert.ok(!allActionIds.includes("approve_once"));
+});
+
 test("formatPrivilegeRequestLogType formats each request kind", () => {
   assert.equal(
     formatPrivilegeRequestLogType({ kind: "host_operation", requestId: "r1", payload: { type: "copy_into_share", sourcePath: "/tmp", targetPath: "/share", reason: "test" } }),
@@ -178,5 +203,9 @@ test("formatPrivilegeRequestLogType formats each request kind", () => {
   assert.equal(
     formatPrivilegeRequestLogType({ kind: "skill_mutation", requestId: "r1", operation: "create", skillId: "my-skill" }),
     "skill_mutation:create:my-skill",
+  );
+  assert.equal(
+    formatPrivilegeRequestLogType({ kind: "job_mutation", requestId: "r1", mutation: { operation: "run_now", jobId: "daily-cleanup" } }),
+    "job_mutation:run_now:daily-cleanup",
   );
 });

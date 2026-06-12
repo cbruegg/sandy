@@ -1,5 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import type { HostDirectoryAccessLevel } from "../hostfs/path-policy.js";
 import { HttpTokenAuthorizer } from "../http/token-authorizer.js";
@@ -8,12 +9,24 @@ import {
   createTestOrchestrator,
   expectDefined,
   FakePrivilegeBroker,
+  InMemoryJobApprovalStore,
   RecordingChannel,
   StubMainAgent,
 } from "./test-helpers.js";
 import { hostGrantsPrefix } from "../paths.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
+import type { JobDefinition } from "../jobs/job-validation.js";
+
+async function waitFor(check: () => boolean, attempts = 20): Promise<void> {
+  for (let index = 0; index < attempts; index += 1) {
+    if (check()) {
+      return;
+    }
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error("Timed out waiting for test condition.");
+}
 
 test("orchestrator applies supported privilege requests deterministically and outside the main agent path", async () => {
   const privilegeBroker = new FakePrivilegeBroker();
@@ -68,7 +81,7 @@ test("orchestrator applies supported privilege requests deterministically and ou
       reason: "Need a local fixture file.",
     },
     taskId,
-    taskSharePath: `/tmp/${taskId}`,
+    taskSharePath: resolve(import.meta.dirname, "../../tmp", taskId),
   }]);
   assert.deepEqual(await toolCallPromise, {
     isError: false,
@@ -108,9 +121,163 @@ test("orchestrator sends worker-requested shared files back through the channel"
 
   assert.deepEqual(channel.sentFiles, [{
     chatId: "chat-file-out",
-    filePath: `/tmp/${expectDefined(runner.launches[0], "Expected launch.").taskId}/results/output.txt`,
+    filePath: resolve(import.meta.dirname, "../../tmp", expectDefined(runner.launches[0], "Expected launch.").taskId, "results/output.txt"),
     caption: "Generated output",
   }]);
+});
+
+test("request_interaction tool promotes a silent job task to interactive mode", async () => {
+  const { orchestrator, taskLifecycle, store, channel } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
+  });
+
+  const job: JobDefinition = {
+    id: "job-request-interaction-tool",
+    name: "Daily report",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt: "2026-04-01T00:00:00.000Z" },
+    skillId: "report",
+  };
+  const taskId = await taskLifecycle.launchJobTask(job, "chat-request-interaction-tool", null);
+
+  // Before request_interaction, the job task is silent.
+  const session = store.getOrCreate("chat-request-interaction-tool");
+  const task = session.findTask(taskId)?.task;
+  assert.ok(task);
+  assert.equal(task.interactionState, "silent");
+
+  const toolResult = await orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "request_interaction",
+    arguments: { message: "I need the user to confirm the report format." },
+  });
+
+  assert.equal(toolResult.isError, false);
+  assert.match(toolResult.message, /promoted to interactive mode/i);
+  assert.equal(channel.taskUpdates.length, 1);
+  assert.match(channel.taskUpdates[0]?.text ?? "", /needs your attention.*confirm the report format/);
+
+  const updatedTask = session.findTask(taskId)?.task;
+  assert.ok(updatedTask);
+  assert.equal(updatedTask.interactionState, "interacting");
+});
+
+test("request_interaction tool is a no-op for user-launched tasks", async () => {
+  const mainAgent = new StubMainAgent({
+    action: "launch_task",
+    taskBrief: "Test task.",
+    taskName: "user-task",
+    taskLanguage: "English",
+  });
+  const { orchestrator, runner, channel } = createTestOrchestrator({ mainAgent });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-user-interaction-tool",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Start a task",
+    rawText: "Start a task",
+    attachments: [],
+  });
+
+  const taskId = expectDefined(runner.launches[0], "Expected launch.").taskId;
+
+  const toolResult = await orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "request_interaction",
+    arguments: { message: "Should be a no-op." },
+  });
+
+  assert.equal(toolResult.isError, false);
+  assert.match(toolResult.message, /already in interactive mode/i);
+  // No task updates should be sent since the task is already interactive.
+  assert.equal(channel.taskUpdates.length, 0);
+});
+
+test("request_interaction tool is a no-op for an already interactive job task", async () => {
+  const { orchestrator, taskLifecycle, channel, runner } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
+  });
+
+  const job: JobDefinition = {
+    id: "job-request-interaction-again",
+    name: "Daily report",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt: "2026-04-01T00:00:00.000Z" },
+    skillId: "report",
+  };
+  const taskId = await taskLifecycle.launchJobTask(job, "chat-request-interaction-again", null);
+
+  await orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "request_interaction",
+    arguments: { message: "I need the user to confirm the report format." },
+  });
+
+  const toolResult = await orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "request_interaction",
+    arguments: { message: "Still waiting." },
+  });
+
+  assert.equal(toolResult.isError, false);
+  assert.match(toolResult.message, /already in interactive mode/i);
+  assert.equal(channel.taskUpdates.length, 1);
+  assert.equal(runner.handles.get(taskId)?.interactiveNotices, 1);
+});
+
+test("request_interaction tool reports already waiting when a job task is blocked behind a user task", async () => {
+  const { orchestrator, runner, taskLifecycle, channel, store } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Handle the user's request.",
+      taskName: "user-task",
+      taskLanguage: "English",
+    }),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-request-interaction-waiting",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Do the first thing",
+    rawText: "Do the first thing",
+    attachments: [],
+  });
+
+  const job: JobDefinition = {
+    id: "job-request-interaction-waiting",
+    name: "Daily cleanup",
+    enabled: true,
+    schedule: { kind: "cron", expression: "0 9 * * *" },
+    skillId: "cleanup-skill",
+  };
+  const taskId = await taskLifecycle.launchJobTask(job, "chat-request-interaction-waiting", null);
+
+  const blockedInteraction = orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "request_interaction",
+    arguments: { message: "Waiting on the user task." },
+  });
+  await Promise.resolve();
+
+  const toolResult = await orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "request_interaction",
+    arguments: { message: "Still waiting on the user task." },
+  });
+
+  assert.equal(toolResult.isError, false);
+  assert.match(toolResult.message, /already waiting to become interactive/i);
+  assert.equal(store.getOrCreate("chat-request-interaction-waiting").backgroundJobTasks[0]?.interactionState, "waitingToInteract");
+  assert.equal(channel.taskUpdates.length, 0);
+
+  const userTaskId = expectDefined(runner.launches[0], "Expected launch.").taskId;
+  await runner.emit({ type: "task_done" }, userTaskId);
+  await blockedInteraction;
+  assert.equal(runner.handles.get(taskId)?.interactiveNotices, 1);
 });
 
 test("orchestrator fails the active task if channel file delivery fails", async () => {
@@ -391,6 +558,7 @@ test("orchestrator confirms persisted http token suitability and enables later p
     },
   });
 
+  await waitFor(() => channel.privilegeRequests.length === 1);
   assert.equal(channel.privilegeRequests.length, 1);
   const request = channel.privilegeRequests[0]?.request;
   assert.equal(request?.kind, "http_token_use");
@@ -414,7 +582,7 @@ test("orchestrator confirms persisted http token suitability and enables later p
   assert.deepEqual(session.activeTask?.taskPolicy.autoApproveHttpTokens, ["vid2text"]);
 
   const authorizer = new HttpTokenAuthorizer(store, persistentApprovalStore);
-  const proxyResult = await authorizer.authorizeHttpTokenUse({
+  const proxyResult = authorizer.authorizeHttpTokenUse({
     taskId,
     tokenId: "vid2text",
     host: "api.example.com",
@@ -426,7 +594,6 @@ test("orchestrator confirms persisted http token suitability and enables later p
 
 test("orchestrator creates a hostfs grant for worker-session host directory approval", async () => {
   const hostfsCalls: Array<{ bundleId: string; taskId: string; path: string; level: string }> = [];
-  let launchedTaskId: string | null = null;
   const { orchestrator, runner, channel } = createTestOrchestrator({
     mainAgent: new StubMainAgent({
       action: "launch_task",
@@ -452,11 +619,6 @@ test("orchestrator creates a hostfs grant for worker-session host directory appr
         };
       },
     } as unknown as HostfsBroker,
-    taskBundleAssignmentRegistry: {
-      get: (taskId: string) => taskId === launchedTaskId
-        ? { bundleId: "bundle-1", hasHostfsVolume: true }
-        : null,
-    },
   });
 
   await orchestrator.handleChatEvent({
@@ -470,7 +632,7 @@ test("orchestrator creates a hostfs grant for worker-session host directory appr
   });
 
   const taskId = expectDefined(runner.launches[0], "Expected launch.").taskId;
-  launchedTaskId = taskId;
+  runner.handle.taskBundle = { bundleId: "bundle-1", hostfsVolumeName: "hostfs-volume-1" };
 
   const toolCallPromise = orchestrator.executeNativeWorkerToolCall({
     taskId,
@@ -559,4 +721,95 @@ test("orchestrator sends mcp resource read privilege request to user when not pr
 
   const session = store.getOrCreate("chat-resource-pending");
   assert.ok(session.activeTask?.approvedMcpResourceReads.some((entry) => entry.serverId === "todoist" && entry.uri === "test://resource"));
+});
+
+test("job-scoped persistent approvals apply only to later executions of the same job", async () => {
+  const allowedServers = new Map<string, Set<string>>();
+  const persistentApprovalStore: PersistentApprovalStore = {
+    isAlwaysAllowed: (serverId, toolName) => allowedServers.get(serverId)?.has(toolName) ?? false,
+    allowTool: async (serverId, toolName) => {
+      const tools = allowedServers.get(serverId) ?? new Set<string>();
+      tools.add(toolName);
+      allowedServers.set(serverId, tools);
+    },
+    isResourceReadAlwaysAllowed: () => false,
+    allowResourceRead: async () => {},
+    isHttpTokenAlwaysAllowed: () => false,
+    allowHttpToken: async () => {},
+    isHostDirectoryAlwaysAllowed: () => false,
+    allowHostDirectory: async () => {},
+  };
+  const { orchestrator, channel, taskLifecycle, runner } = createTestOrchestrator({
+    persistentApprovalStore,
+    jobApprovalStore: new InMemoryJobApprovalStore(),
+    mainAgent: new StubMainAgent({
+      action: "reply",
+      replyText: "idle",
+    }),
+  });
+
+  const job: JobDefinition = {
+    id: "daily-cleanup",
+    name: "Daily cleanup",
+    enabled: true,
+    schedule: { kind: "cron", expression: "0 9 * * *" },
+    skillId: "cleanup-skill",
+  };
+
+  const firstTaskId = await taskLifecycle.launchJobTask(job, "chat-job-approval", null);
+  const firstApproval = orchestrator.authorizeMcpToolCall({
+    taskId: firstTaskId,
+    serverId: "todoist",
+    toolName: "list_projects",
+    arguments: {},
+  });
+  await waitFor(() => channel.privilegeRequests.length === 1);
+
+  const firstRequestId = channel.privilegeRequests[0]?.request.requestId;
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-job-approval",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    decision: "approve_always",
+    requestId: firstRequestId,
+  });
+  assert.equal((await firstApproval).scope, "always");
+
+  await runner.emit({ type: "task_done" }, firstTaskId);
+
+  const secondTaskId = await taskLifecycle.launchJobTask(job, "chat-job-approval", null);
+  const secondApproval = orchestrator.authorizeMcpToolCall({
+    taskId: secondTaskId,
+    serverId: "todoist",
+    toolName: "list_projects",
+    arguments: {},
+  });
+  assert.equal((await secondApproval).scope, "always");
+  assert.equal(channel.privilegeRequests.length, 1);
+
+  await runner.emit({ type: "task_done" }, secondTaskId);
+
+  const thirdTaskId = await taskLifecycle.launchJobTask({ ...job, id: "weekly-cleanup", name: "Weekly cleanup" }, "chat-job-approval", null);
+  const thirdApproval = orchestrator.authorizeMcpToolCall({
+    taskId: thirdTaskId,
+    serverId: "todoist",
+    toolName: "list_projects",
+    arguments: {},
+  });
+  await waitFor(() => channel.privilegeRequests.length >= 2);
+
+  assert.equal(channel.privilegeRequests.length, 2);
+  const thirdRequest = channel.privilegeRequests[1]?.request;
+  assert.equal(thirdRequest?.kind, "mcp_tool_call");
+  assert.equal(thirdRequest?.confirmsAutoApprovalForTask, true);
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-job-approval",
+    messageId: "3",
+    timestamp: "2026-04-01T00:00:30.000Z",
+    decision: "deny",
+    requestId: thirdRequest?.requestId,
+  });
+  assert.equal((await thirdApproval).outcome, "denied");
 });

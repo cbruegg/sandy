@@ -316,6 +316,10 @@ export class DockerSandboxRunner implements SandboxRunner {
 
       return {
         getTaskSharePath: () => reservedBundle.shareHostPath,
+        getTaskBundle: () => ({
+          bundleId: reservedBundle.bundleId,
+          hostfsVolumeName: reservedBundle.hostfsVolumeName,
+        }),
         sendUserMessage: async (input: TaskInputPayload) => {
           logger.debugContent("sandbox.user_message", {
             taskId: request.taskId,
@@ -329,6 +333,21 @@ export class DockerSandboxRunner implements SandboxRunner {
             await this.sendToWorker(child, {
               type: "user_message",
               input,
+            });
+          } catch (error) {
+            await reportDisconnect(this.describeWriteFailure(error));
+          }
+        },
+        notifyTaskBecameInteractive: async () => {
+          logger.info("sandbox.task_became_interactive", {
+            taskId: request.taskId,
+          });
+          try {
+            if (!taskInitialized) {
+              await taskInitializedBarrier;
+            }
+            await this.sendToWorker(child, {
+              type: "task_became_interactive",
             });
           } catch (error) {
             await reportDisconnect(this.describeWriteFailure(error));

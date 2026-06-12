@@ -1,8 +1,8 @@
-import type { SessionState } from "../types.js";
+import { SessionState } from "../types.js";
 
 export interface SessionStore {
   getOrCreate(chatId: string): SessionState;
-  getByActiveTaskId(taskId: string): SessionState | undefined;
+  getByTaskId(taskId: string): SessionState | undefined;
   listSessions(): SessionState[];
 }
 
@@ -14,19 +14,14 @@ export class InMemorySessionStore implements SessionStore {
     if (existing) {
       return existing;
     }
-    const session: SessionState = {
-      chatId,
-      activeTask: null,
-      pendingTaskSummary: null,
-      pendingShareDeletion: null,
-    };
+    const session = new SessionState(chatId);
     this.sessions.set(chatId, session);
     return session;
   }
 
-  getByActiveTaskId(taskId: string): SessionState | undefined {
+  getByTaskId(taskId: string): SessionState | undefined {
     for (const session of this.sessions.values()) {
-      if (session.activeTask?.taskId === taskId) {
+      if (session.activeTask?.taskId === taskId || session.backgroundJobTasks.some((task) => task.taskId === taskId)) {
         return session;
       }
     }

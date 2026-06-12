@@ -4,7 +4,9 @@ import type { MessageAttachment, SavedAttachment, SharedAttachment } from "../ty
 import { toSharedWorkspacePath } from "../shared-workspace.js";
 
 export async function stageSharedAttachments(input: {
-  channel: ChannelAdapter;
+  // Narrow to the single method we use so callers can pass the raw adapter
+  // without granting wider channel access.
+  channel: Pick<ChannelAdapter, "saveAttachments">;
   chatId: string;
   messageId: string;
   attachments: MessageAttachment[];

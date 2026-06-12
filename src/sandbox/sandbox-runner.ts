@@ -17,7 +17,7 @@ export type LaunchTaskRequest = {
   prepareStartInput: (taskSharePath: string) => Promise<TaskStartInput>;
 };
 
-type TaskStartInput = {
+export type TaskStartInput = {
   taskBrief: string;
   initialInput: TaskInputPayload;
 };
@@ -27,9 +27,16 @@ export type ShareInspection = {
   summary: string | null;
 };
 
+export type SandboxTaskBundle = {
+  bundleId: string;
+  hostfsVolumeName: string | null;
+};
+
 export interface SandboxHandle {
   getTaskSharePath(): string;
+  getTaskBundle(): SandboxTaskBundle;
   sendUserMessage(input: TaskInputPayload): Promise<void>;
+  notifyTaskBecameInteractive(): Promise<void>;
   resolvePrivilege(result: PrivilegeResolutionResult): Promise<void>;
   markFinished(): Promise<void>;
   close(): Promise<void>;

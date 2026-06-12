@@ -69,7 +69,7 @@ export type TaskBundleLauncherOptions = {
   httpProxyCaCertPath?: string | null;
   httpProxyConfDirPath?: string | null;
   httpProxyImage?: string | null;
-  resolveHttpProxyRequest?: (request: HttpProxyAuthRequestMessage) => Promise<HttpProxyAuthResponseMessage>;
+  resolveHttpProxyRequest?: (request: HttpProxyAuthRequestMessage) => HttpProxyAuthResponseMessage;
   handshakeTimeoutMs?: number;
   logLevel?: LogLevel;
   spawnImpl?: typeof spawn;
@@ -197,7 +197,7 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
         await this.attachProxyControlChannelAndWaitForReady(
           proxyChild,
           proxyContainerName,
-          async (proxyRequest) => await this.options.resolveHttpProxyRequest!(proxyRequest),
+          (proxyRequest) => this.options.resolveHttpProxyRequest!(proxyRequest),
         );
       } catch (error) {
         proxyChild.kill("SIGTERM");
@@ -354,7 +354,7 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
   private async attachProxyControlChannelAndWaitForReady(
     proxyChild: ChildProcessWithoutNullStreams,
     containerName: string,
-    resolveHttpProxyRequest: (request: HttpProxyAuthRequestMessage) => Promise<HttpProxyAuthResponseMessage>,
+    resolveHttpProxyRequest: (request: HttpProxyAuthRequestMessage) => HttpProxyAuthResponseMessage,
   ): Promise<void> {
     const proxyStdout = createInterface({
       input: proxyChild.stdout,
@@ -440,12 +440,12 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
 
   private async handleHttpProxyAuthRequest(
     proxyChild: ChildProcessWithoutNullStreams,
-    resolveHttpProxyRequest: (request: HttpProxyAuthRequestMessage) => Promise<HttpProxyAuthResponseMessage>,
+    resolveHttpProxyRequest: (request: HttpProxyAuthRequestMessage) => HttpProxyAuthResponseMessage,
     request: HttpProxyAuthRequestMessage,
   ): Promise<void> {
     let response: HttpProxyAuthResponseMessage;
     try {
-      response = await resolveHttpProxyRequest(request);
+      response = resolveHttpProxyRequest(request);
     } catch (error) {
       response = {
         type: "auth_response",

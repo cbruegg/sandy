@@ -212,6 +212,13 @@ Local test channel behavior:
 - The poll interval is fixed in code and is not configurable.
 - The recommended way to interact with this channel is `./scripts/run-local-test-cli.sh ...`, not direct file editing.
 
+Scheduled jobs:
+
+- Sandy can persist one-shot and recurring scheduled jobs under `state/jobs/jobs.json` in the config directory.
+- Jobs reference a Sandy skill by `skillId`; worker executions are still normal Sandy sub-agent tasks and use the same sandbox and approval flow, but may have to wait for active user-invoked tasks to complete.
+- Recurring jobs have a persistent workspace directory for durable notes, caches, generated files, and job state.
+- Workers manage jobs through Sandy worker tools: `list_jobs`, `get_job`, `create_job`, `update_job`, `delete_job`, `enable_job`, `disable_job`, and `run_job_now`.
+
 Codex auth behavior:
 
 - Sandy supports two Codex auth modes:
