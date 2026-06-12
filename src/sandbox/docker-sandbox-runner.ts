@@ -338,6 +338,21 @@ export class DockerSandboxRunner implements SandboxRunner {
             await reportDisconnect(this.describeWriteFailure(error));
           }
         },
+        notifyTaskBecameInteractive: async () => {
+          logger.info("sandbox.task_became_interactive", {
+            taskId: request.taskId,
+          });
+          try {
+            if (!taskInitialized) {
+              await taskInitializedBarrier;
+            }
+            await this.sendToWorker(child, {
+              type: "task_became_interactive",
+            });
+          } catch (error) {
+            await reportDisconnect(this.describeWriteFailure(error));
+          }
+        },
         resolvePrivilege: async (result: PrivilegeResolutionResult) => {
           logger.info("sandbox.privilege_decision", {
             taskId: request.taskId,

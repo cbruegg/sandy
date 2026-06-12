@@ -172,6 +172,7 @@ function createTestWorkerStartConfig(): WorkerStartConfig {
 class FakeSandboxHandle implements SandboxHandle {
   public readonly userMessages: TaskInputPayload[] = [];
   public readonly privilegeResults: PrivilegeResolutionResult[] = [];
+  public interactiveNotices = 0;
   public taskSharePath = "";
   public taskBundle: SandboxTaskBundle = { bundleId: "fake-bundle", hostfsVolumeName: null };
   public markFinishedCalls = 0;
@@ -191,6 +192,11 @@ class FakeSandboxHandle implements SandboxHandle {
 
   sendUserMessage(input: TaskInputPayload): Promise<void> {
     this.userMessages.push(input);
+    return Promise.resolve();
+  }
+
+  notifyTaskBecameInteractive(): Promise<void> {
+    this.interactiveNotices += 1;
     return Promise.resolve();
   }
 
@@ -378,7 +384,14 @@ export function createTestOrchestrator(options: {
   const store = options.sessionStore ?? new InMemorySessionStore();
   const privilegeBroker = options.privilegeBroker ?? new FakePrivilegeBroker();
   const skillService = options.skillService ?? new SkillService(mkdtempSync(join(tmpdir(), "sandy-test-config-")));
-  const taskCoordinator = options.taskCoordinator ?? new TaskCoordinator(store, channel);
+  const activeTaskRuntimes = new ActiveTaskRuntimeRegistry();
+  const taskCoordinator = options.taskCoordinator ?? new TaskCoordinator({
+    sessionStore: store,
+    channel,
+    onJobTaskBecameInteractive: async (taskId) => {
+      await activeTaskRuntimes.notifyTaskBecameInteractive(taskId);
+    },
+  });
   const coreDeps: OrchestratorCoreDependencies = {
     mainAgent: options.mainAgent,
     sandboxRunner: runner,
@@ -391,7 +404,6 @@ export function createTestOrchestrator(options: {
     skillService,
     taskCoordinator,
   };
-  const activeTaskRuntimes = new ActiveTaskRuntimeRegistry();
   const taskLifecycle = new OrchestratorTaskLifecycleImpl(coreDeps, activeTaskRuntimes, channel.getFormatting(), channel);
   const jobService = new FakeJobService();
   const workerToolsHandler = new WorkerToolsHandler({

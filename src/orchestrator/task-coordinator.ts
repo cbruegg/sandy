@@ -19,6 +19,13 @@ type PendingShareDeletionPrompt = {
   summary: string;
 };
 
+type TaskCoordinatorDependencies = {
+  readonly sessionStore: SessionStore;
+  readonly channel: ChannelAdapter;
+  readonly timerControls?: TimerControls;
+  readonly onJobTaskBecameInteractive: (taskId: string) => Promise<void>;
+};
+
 /**
  * A FIFO queue of `T` kept independently per chat. Empty chat keys are removed
  * automatically so callers never observe lingering empty arrays.
@@ -90,15 +97,11 @@ export class TaskCoordinator {
   private readonly pendingShareDeletionPrompts = new PerChatQueue<PendingShareDeletionPrompt>();
   private readonly reminders: BlockedJobReminderScheduler;
 
-  constructor(
-    private readonly sessionStore: SessionStore,
-    private readonly channel: ChannelAdapter,
-    timerControls?: TimerControls,
-  ) {
+  constructor(private readonly deps: TaskCoordinatorDependencies) {
     this.reminders = new BlockedJobReminderScheduler(
-      channel,
+      deps.channel,
       (chatId) => this.getBlockedJobReminderContext(chatId),
-      timerControls,
+      deps.timerControls,
     );
   }
 
@@ -135,7 +138,7 @@ export class TaskCoordinator {
     jobName: string,
     operation: (channel: ChannelAdapter) => Promise<void>,
   ): Promise<void> {
-    const session = this.sessionStore.getOrCreate(chatId);
+    const session = this.deps.sessionStore.getOrCreate(chatId);
     const taskRecord = session.findTask(taskId);
     if (!taskRecord) {
       throw new Error(`Task ${taskId} is no longer active.`);
@@ -144,19 +147,19 @@ export class TaskCoordinator {
     const task = taskRecord.task;
     if (task.origin.kind === "launchedByUser") {
       // User-launched tasks are already the visible task for their chat, so they never wait here.
-      await operation(this.channel);
+      await operation(this.deps.channel);
       return;
     }
 
     if (session.activeTask?.taskId === taskId) {
-      task.interactionState = "interacting";
-      await operation(this.channel);
+      await this.transitionJobTaskToInteractive(task);
+      await operation(this.deps.channel);
       return;
     }
 
     if (this.isVisibleSlotAvailable(session)) {
-      this.claimVisibleSlotForJobTask(session, taskId);
-      await operation(this.channel);
+      await this.claimVisibleSlotForJobTask(session, taskId);
+      await operation(this.deps.channel);
       await this.drainPendingOperationsForActiveTask(session, taskId);
       return;
     }
@@ -174,7 +177,7 @@ export class TaskCoordinator {
    * job task into the slot.
    */
   async onVisibleSlotAvailable(chatId: string): Promise<void> {
-    const session = this.sessionStore.getOrCreate(chatId);
+    const session = this.deps.sessionStore.getOrCreate(chatId);
     if (!this.isVisibleSlotAvailable(session)) {
       this.reminders.sync(chatId);
       return;
@@ -205,15 +208,23 @@ export class TaskCoordinator {
   }
 
   /** Moves a background job task into the visible slot and marks it interacting. */
-  private claimVisibleSlotForJobTask(session: SessionState, taskId: string): void {
+  private async claimVisibleSlotForJobTask(session: SessionState, taskId: string): Promise<void> {
     if (session.activeTask?.taskId !== taskId) {
       session.promoteBackgroundJobTask(taskId);
     }
     const task = session.activeTask;
     if (task) {
-      task.interactionState = "interacting";
+      await this.transitionJobTaskToInteractive(task);
     }
     this.reminders.sync(session.chatId);
+  }
+
+  private async transitionJobTaskToInteractive(task: ActiveTaskState): Promise<void> {
+    if (task.origin.kind !== "launchedByJob" || task.interactionState === "interacting") {
+      return;
+    }
+    task.interactionState = "interacting";
+    await this.deps.onJobTaskBecameInteractive(task.taskId);
   }
 
   private async showNextDeferredShareDeletionPrompt(session: SessionState): Promise<boolean> {
@@ -228,7 +239,7 @@ export class TaskCoordinator {
       taskName: next.taskName,
       summary: next.summary,
     };
-    await this.channel.sendShareDeletionRequest(session.chatId, next.requestId, next.taskName, next.summary);
+    await this.deps.channel.sendShareDeletionRequest(session.chatId, next.requestId, next.taskName, next.summary);
     this.reminders.sync(session.chatId);
     return true;
   }
@@ -246,7 +257,7 @@ export class TaskCoordinator {
         continue;
       }
 
-      this.claimVisibleSlotForJobTask(session, next.taskId);
+      await this.claimVisibleSlotForJobTask(session, next.taskId);
       if (await this.executeWaitingInteraction(next)) {
         await this.drainPendingOperationsForActiveTask(session, next.taskId);
       }
@@ -282,7 +293,7 @@ export class TaskCoordinator {
   /** Runs a single queued interaction and settles its waiting promise. */
   private async executeWaitingInteraction(interaction: WaitingJobInteraction): Promise<boolean> {
     try {
-      await interaction.run(this.channel);
+      await interaction.run(this.deps.channel);
       interaction.resolve();
       return true;
     } catch (error) {
@@ -296,7 +307,7 @@ export class TaskCoordinator {
   // ---------------------------------------------------------------------------
 
   private getBlockedJobReminderContext(chatId: string): BlockedJobReminderContext | null {
-    const session = this.sessionStore.getOrCreate(chatId);
+    const session = this.deps.sessionStore.getOrCreate(chatId);
     const blocker = session.activeTask;
     if (!blocker || blocker.origin.kind !== "launchedByUser") {
       return null;

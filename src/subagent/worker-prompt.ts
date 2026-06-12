@@ -113,6 +113,14 @@ export function buildPrivilegeResolutionInput(result: PrivilegeResolutionResult)
   ].join("\n");
 }
 
+export function buildTaskBecameInteractiveInput(): string {
+  return [
+    "Sandy host notice: this scheduled job task is now interactive.",
+    "The user can now see subsequent user-visible output from this task and can respond to it.",
+    "From this point on, treat your later user-visible messages and operations as visible to the user.",
+  ].join("\n");
+}
+
 export function buildTaskSummaryInput(): string {
   return [
     "Your task work is complete.",

@@ -56,10 +56,15 @@ test("TaskCoordinator reminds and resets reminder timing on user-task activity",
   const timers = new FakeTimers();
   const store = new InMemorySessionStore();
   const channel = new RecordingChannel();
-  const coordinator = new TaskCoordinator(store, channel, {
-    now: () => timers.now,
-    setTimeoutImpl: timers.setTimeoutImpl,
-    clearTimeoutImpl: timers.clearTimeoutImpl,
+  const coordinator = new TaskCoordinator({
+    sessionStore: store,
+    channel,
+    timerControls: {
+      now: () => timers.now,
+      setTimeoutImpl: timers.setTimeoutImpl,
+      clearTimeoutImpl: timers.clearTimeoutImpl,
+    },
+    onJobTaskBecameInteractive: async () => {},
   });
 
   const session = store.getOrCreate("chat-reminder");
@@ -105,7 +110,11 @@ test("TaskCoordinator reminds and resets reminder timing on user-task activity",
 test("TaskCoordinator runs deferred interactions for the promoted job in order", async () => {
   const store = new InMemorySessionStore();
   const channel = new RecordingChannel();
-  const coordinator = new TaskCoordinator(store, channel);
+  const coordinator = new TaskCoordinator({
+    sessionStore: store,
+    channel,
+    onJobTaskBecameInteractive: async () => {},
+  });
 
   const session = store.getOrCreate("chat-job-queue");
   const userTask = createTask("user-task", "User task", { kind: "launchedByUser" });
@@ -133,14 +142,42 @@ test("TaskCoordinator runs deferred interactions for the promoted job in order",
   assert.equal(store.getOrCreate("chat-job-queue").activeTask?.taskId, "job-task");
 });
 
+test("TaskCoordinator notifies exactly once when a job task becomes interactive", async () => {
+  const store = new InMemorySessionStore();
+  const channel = new RecordingChannel();
+  const notifiedTaskIds: string[] = [];
+  const coordinator = new TaskCoordinator({
+    sessionStore: store,
+    channel,
+    onJobTaskBecameInteractive: async (taskId) => {
+      notifiedTaskIds.push(taskId);
+    },
+  });
+
+  const session = store.getOrCreate("chat-job-notice");
+  const jobTask = createTask("job-task", "Scheduled job: Daily cleanup", { kind: "launchedByJob", jobId: "daily-cleanup" });
+  session.backgroundJobTasks.push(jobTask);
+
+  await coordinator.runJobUserVisibleOperation("chat-job-notice", "job-task", "Daily cleanup", async (_channel) => {});
+  await coordinator.runJobUserVisibleOperation("chat-job-notice", "job-task", "Daily cleanup", async (_channel) => {});
+
+  assert.deepEqual(notifiedTaskIds, ["job-task"]);
+  assert.equal(store.getOrCreate("chat-job-notice").activeTask?.interactionState, "interacting");
+});
+
 test("TaskCoordinator defers share deletion prompt while a user task is active", async () => {
   const timers = new FakeTimers();
   const store = new InMemorySessionStore();
   const channel = new RecordingChannel();
-  const coordinator = new TaskCoordinator(store, channel, {
-    now: () => timers.now,
-    setTimeoutImpl: timers.setTimeoutImpl,
-    clearTimeoutImpl: timers.clearTimeoutImpl,
+  const coordinator = new TaskCoordinator({
+    sessionStore: store,
+    channel,
+    timerControls: {
+      now: () => timers.now,
+      setTimeoutImpl: timers.setTimeoutImpl,
+      clearTimeoutImpl: timers.clearTimeoutImpl,
+    },
+    onJobTaskBecameInteractive: async () => {},
   });
 
   const session = store.getOrCreate("chat-defer-share");
@@ -172,7 +209,11 @@ test("TaskCoordinator defers share deletion prompt while a user task is active",
 test("TaskCoordinator queues multiple deferred share deletion prompts behind an active user task", async () => {
   const store = new InMemorySessionStore();
   const channel = new RecordingChannel();
-  const coordinator = new TaskCoordinator(store, channel);
+  const coordinator = new TaskCoordinator({
+    sessionStore: store,
+    channel,
+    onJobTaskBecameInteractive: async () => {},
+  });
 
   const session = store.getOrCreate("chat-queue-shares");
   const userTask = createTask("user-task", "User task", { kind: "launchedByUser" });

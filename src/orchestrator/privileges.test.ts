@@ -195,6 +195,91 @@ test("request_interaction tool is a no-op for user-launched tasks", async () => 
   assert.equal(channel.taskUpdates.length, 0);
 });
 
+test("request_interaction tool is a no-op for an already interactive job task", async () => {
+  const { orchestrator, taskLifecycle, channel, runner } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
+  });
+
+  const job: JobDefinition = {
+    id: "job-request-interaction-again",
+    name: "Daily report",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt: "2026-04-01T00:00:00.000Z" },
+    skillId: "report",
+  };
+  const taskId = await taskLifecycle.launchJobTask(job, "chat-request-interaction-again", null);
+
+  await orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "request_interaction",
+    arguments: { message: "I need the user to confirm the report format." },
+  });
+
+  const toolResult = await orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "request_interaction",
+    arguments: { message: "Still waiting." },
+  });
+
+  assert.equal(toolResult.isError, false);
+  assert.match(toolResult.message, /already in interactive mode/i);
+  assert.equal(channel.taskUpdates.length, 1);
+  assert.equal(runner.handles.get(taskId)?.interactiveNotices, 1);
+});
+
+test("request_interaction tool reports already waiting when a job task is blocked behind a user task", async () => {
+  const { orchestrator, runner, taskLifecycle, channel, store } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Handle the user's request.",
+      taskName: "user-task",
+      taskLanguage: "English",
+    }),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-request-interaction-waiting",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Do the first thing",
+    rawText: "Do the first thing",
+    attachments: [],
+  });
+
+  const job: JobDefinition = {
+    id: "job-request-interaction-waiting",
+    name: "Daily cleanup",
+    enabled: true,
+    schedule: { kind: "cron", expression: "0 9 * * *" },
+    skillId: "cleanup-skill",
+  };
+  const taskId = await taskLifecycle.launchJobTask(job, "chat-request-interaction-waiting", null);
+
+  const blockedInteraction = orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "request_interaction",
+    arguments: { message: "Waiting on the user task." },
+  });
+  await Promise.resolve();
+
+  const toolResult = await orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "request_interaction",
+    arguments: { message: "Still waiting on the user task." },
+  });
+
+  assert.equal(toolResult.isError, false);
+  assert.match(toolResult.message, /already waiting to become interactive/i);
+  assert.equal(store.getOrCreate("chat-request-interaction-waiting").backgroundJobTasks[0]?.interactionState, "waitingToInteract");
+  assert.equal(channel.taskUpdates.length, 0);
+
+  const userTaskId = expectDefined(runner.launches[0], "Expected launch.").taskId;
+  await runner.emit({ type: "task_done" }, userTaskId);
+  await blockedInteraction;
+  assert.equal(runner.handles.get(taskId)?.interactiveNotices, 1);
+});
+
 test("orchestrator fails the active task if channel file delivery fails", async () => {
   const channel = new RecordingChannel();
   channel.sendFileError = new Error("Telegram upload failed.");

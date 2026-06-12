@@ -152,6 +152,8 @@ export const messages = {
     "The task has been promoted to interactive mode. The user can now see your output and respond.",
   requestInteractionAlreadyInteractive: (): string =>
     "This task is already in interactive mode. No promotion is needed.",
+  requestInteractionAlreadyRequested: (): string =>
+    "This task is already waiting to become interactive. Sandy will notify you once the user can see your output.",
 } as const;
 
 function formatCommandForChannel(command: string, channelFormatting: ChannelFormatting | null): string {

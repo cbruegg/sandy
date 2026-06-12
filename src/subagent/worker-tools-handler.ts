@@ -50,6 +50,12 @@ export class WorkerToolsHandler {
     if (input.task.origin.kind !== "launchedByJob") {
       return { isError: false, message: messages.requestInteractionAlreadyInteractive() };
     }
+    if (input.task.interactionState === "interacting") {
+      return { isError: false, message: messages.requestInteractionAlreadyInteractive() };
+    }
+    if (input.task.interactionState === "waitingToInteract") {
+      return { isError: false, message: messages.requestInteractionAlreadyRequested() };
+    }
 
     await this.deps.runUserVisibleOperation({
       chatId: input.chatId,

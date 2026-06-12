@@ -319,7 +319,15 @@ export async function startApp(): Promise<void> {
     }
   };
 
-  const taskCoordinator = new TaskCoordinator(sessionStore, channel);
+  const activeTaskRuntimes = new ActiveTaskRuntimeRegistry();
+  const taskCoordinator = new TaskCoordinator({
+    sessionStore,
+    channel,
+    onJobTaskBecameInteractive: async (taskId) => {
+      await activeTaskRuntimes.notifyTaskBecameInteractive(taskId);
+    },
+  });
+
   const orchestratorCoreDeps: OrchestratorCoreDependencies = {
     mainAgent,
     sandboxRunner,
@@ -339,7 +347,6 @@ export async function startApp(): Promise<void> {
     skillService,
     taskCoordinator,
   };
-  const activeTaskRuntimes = new ActiveTaskRuntimeRegistry();
   const taskLifecycle = new OrchestratorTaskLifecycleImpl(orchestratorCoreDeps, activeTaskRuntimes, channelFormatting, channel);
   const jobScheduler = new JobScheduler(jobStore, async (job, workspacePath) => {
     const chatId = await channel.destinationStore.getDefaultChatId();

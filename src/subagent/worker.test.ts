@@ -4,6 +4,7 @@ import { type Input, type Thread } from "@openai/codex-sdk";
 import { messages } from "../messages.js";
 import { AppServerWorkerSession, type StreamTurnResult } from "./worker-app-server.js";
 import {
+  buildTaskBecameInteractiveInput,
   buildInitialTaskInput,
   buildInitialTaskInputWithCapabilities,
   buildPrivilegeResolutionInput,
@@ -111,6 +112,13 @@ test("buildPrivilegeResolutionInput explains the host privilege result to the su
   assert.match(input, /approved/);
   assert.match(input, /Copied \/tmp\/input.txt into the shared workspace\./);
   assert.match(input, /Continue the task from here\./);
+});
+
+test("buildTaskBecameInteractiveInput tells the worker that the task is now visible", () => {
+  const input = buildTaskBecameInteractiveInput();
+
+  assert.match(input, /scheduled job task is now interactive/i);
+  assert.match(input, /user can now see subsequent user-visible output/i);
 });
 
 test("buildTaskSummaryInput requests a host-facing handoff summary", () => {
@@ -375,6 +383,51 @@ test("worker passes image attachments through app-server user_message turns", as
     { type: "text", text: "Look at this image too" },
     { type: "local_image", path: "/workspace/share/photo.jpg" },
   ]);
+});
+
+test("worker turns a task_became_interactive host command into follow-up input", async () => {
+  const turnInputs: Input[] = [];
+  const processor = createWorkerCommandProcessor({
+    sendEvent: () => {},
+    env: { SANDY_CODEX_PATH: "/usr/local/bin/codex" },
+    applyWorkerCodexConfigPatch: async () => {},
+    startAppServerWorkerSession: createAppServerSessionStarter({
+      async streamTurn(input) {
+        turnInputs.push(input);
+        return { sawTerminalError: false };
+      },
+      async emitTaskSummary() {},
+      close() {},
+      cancelPendingAuthRefresh() {},
+      handleAuthRefreshResult() {},
+    }),
+    onShutdown: () => {},
+  });
+
+  await processor.handleLine(JSON.stringify({
+    type: "start_task",
+    taskId: "task-1",
+    taskBrief: "Inspect the collection.",
+    input: { text: "Initial request", images: [] },
+    taskLanguage: "English",
+    config: {
+      auth: { mode: "ambient_auth_file" },
+      codexModel: null,
+      channelFormatting: testFormatting,
+      httpTokens: [],
+      httpProxyWrapper: null,
+    },
+    environment: {},
+    codexConfigToml: null,
+    httpProxyUrl: null,
+  } satisfies Extract<HostCommand, { type: "start_task" }>));
+
+  await processor.handleLine(JSON.stringify({
+    type: "task_became_interactive",
+  } satisfies Extract<HostCommand, { type: "task_became_interactive" }>));
+
+  assert.equal(turnInputs.length, 2);
+  assert.deepEqual(turnInputs[1], [{ type: "text", text: buildTaskBecameInteractiveInput() }]);
 });
 
 test("mcpToolProgress includes payloads for completed MCP calls", () => {

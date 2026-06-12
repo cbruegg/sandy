@@ -24,6 +24,10 @@ export class ActiveTaskRuntimeRegistry {
     return this.activeTaskHandles.get(taskId);
   }
 
+  async notifyTaskBecameInteractive(taskId: string): Promise<void> {
+    await this.requireHandle(taskId).notifyTaskBecameInteractive();
+  }
+
   deleteHandle(taskId: string): void {
     this.activeTaskHandles.delete(taskId);
   }
