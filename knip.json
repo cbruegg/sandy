@@ -8,6 +8,7 @@
   "project": [
     "src/**/*.ts"
   ],
-  "ignoreBinaries": ["codex"],
+  "ignoreBinaries": ["codex", "openssl", "uv", "zypper", "brew", "knip", "eslint", "tsc"],
+  "ignoreDependencies": ["eslint"],
   "ignore": ["src/codex-app-server-client/generated/**"]
 }
