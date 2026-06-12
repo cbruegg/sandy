@@ -179,13 +179,13 @@ export const workerToolEntries = [
   ),
   defineWorkerTool(
     createSkillToolName,
-    "Ask the host to create a new Sandy skill. Provide the skillId, name, description, and body.",
+    "Ask the host to create a new Sandy skill. Provide the skillId, name, description, and body. It is not necessary to write any files to disk.",
     true,
     createSkillSchema,
   ),
   defineWorkerTool(
     updateSkillToolName,
-    "Ask the host to update an existing Sandy skill. Provide the skillId, name, description, and body.",
+    "Ask the host to update an existing Sandy skill. Provide the skillId, name, description, and body. It is not necessary to write any files to disk.",
     true,
     updateSkillSchema,
   ),
