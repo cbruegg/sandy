@@ -1,5 +1,5 @@
 import { basename } from "node:path";
-import { Bot, GrammyError, InputFile, type Context, type PollingOptions } from "grammy";
+import { Bot, InputFile, type Context, type PollingOptions } from "grammy";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { type ChannelDestinationStore } from "./channel-destination-store.js";
 import { logger } from "../logger.js";
@@ -84,7 +84,6 @@ function defaultBotFactory(token: string): TelegramBotLike {
 
 export class TelegramBotApiAdapter implements ChannelAdapter {
   readonly destinationStore: ChannelDestinationStore;
-  private readonly adapterInstanceId = crypto.randomUUID();
   private readonly bot: TelegramBotLike;
   private readonly allowedUser: string;
   private readonly pollTimeoutSeconds: number;
@@ -92,9 +91,6 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
   private readonly transcriptionProvider: TranscriptionProvider | null;
   private readonly fileDownloader: (api: TelegramFileApiLike, token: string, fileId: string) => Promise<ArrayBuffer>;
   private readonly lastUserInteractionTimestamps = new Map<ChatId, string>();
-  private activePollingSessionId: string | null = null;
-  private pollingStartCount = 0;
-  private stopRequested = false;
   private startPromise: Promise<void> | null = null;
 
   constructor(options: TelegramAdapterOptions) {
@@ -117,25 +113,8 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
 
   start(handler: MessageHandler): Promise<void> {
     if (this.startPromise) {
-      logger.warn("telegram.polling_start_ignored", {
-        adapterInstanceId: this.adapterInstanceId,
-        pollingSessionId: this.activePollingSessionId,
-        pollTimeoutSeconds: this.pollTimeoutSeconds,
-        pid: process.pid,
-      });
       return Promise.resolve();
     }
-
-    this.pollingStartCount += 1;
-    this.stopRequested = false;
-    this.activePollingSessionId = `${this.adapterInstanceId}:${this.pollingStartCount}`;
-
-    logger.info("telegram.polling_start_requested", {
-      adapterInstanceId: this.adapterInstanceId,
-      pollingSessionId: this.activePollingSessionId,
-      pollTimeoutSeconds: this.pollTimeoutSeconds,
-      pid: process.pid,
-    });
 
     const middleware = async (ctx: TelegramContextLike): Promise<void> => {
       const metadata = extractTelegramUpdateMetadata(ctx.update);
@@ -190,80 +169,32 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     this.bot.on("message", middleware);
     this.bot.on("callback_query:data", middleware);
     this.bot.catch((error) => {
-      const errorDetails = extractTelegramPollingErrorDetails(error);
-      logger.error("telegram.polling_error", error, "Unknown Telegram polling error.", {
-        adapterInstanceId: this.adapterInstanceId,
-        pollingSessionId: this.activePollingSessionId,
-        pid: process.pid,
-        ...errorDetails,
-      });
-      if (errorDetails['isConflict'] === true) {
-        logger.warn("telegram.polling_conflict_detected", {
-          adapterInstanceId: this.adapterInstanceId,
-          pollingSessionId: this.activePollingSessionId,
-          pid: process.pid,
-          ...errorDetails,
-        });
-      }
+      logger.error("telegram.polling_error", error, "Unknown Telegram polling error.");
     });
 
     logger.info("telegram.polling_started", {
-      adapterInstanceId: this.adapterInstanceId,
-      pollingSessionId: this.activePollingSessionId,
       pollTimeoutSeconds: this.pollTimeoutSeconds,
-      pid: process.pid,
     });
 
-    const pollingPromise = this.bot.start({
+    this.startPromise = this.bot.start({
       timeout: this.pollTimeoutSeconds,
       allowed_updates: ["message", "callback_query"],
       onStart: () => {
-        logger.info("telegram.bot_started", {
-          adapterInstanceId: this.adapterInstanceId,
-          pollingSessionId: this.activePollingSessionId,
-          pid: process.pid,
-        });
+        logger.info("telegram.bot_started");
       },
     });
-
-    void pollingPromise.finally(() => {
-      logger.info("telegram.polling_ended", {
-        adapterInstanceId: this.adapterInstanceId,
-        pollingSessionId: this.activePollingSessionId,
-        pid: process.pid,
-        stopRequested: this.stopRequested,
-      });
-    });
-
-    this.startPromise = pollingPromise;
     return Promise.resolve();
   }
 
   async stop(): Promise<void> {
     if (!this.startPromise) {
-      logger.info("telegram.polling_stop_ignored", {
-        adapterInstanceId: this.adapterInstanceId,
-        pid: process.pid,
-      });
       return;
     }
-
-    this.stopRequested = true;
-    logger.info("telegram.polling_stop_requested", {
-      adapterInstanceId: this.adapterInstanceId,
-      pollingSessionId: this.activePollingSessionId,
-      pid: process.pid,
-    });
 
     await this.bot.stop();
     await this.startPromise;
     this.startPromise = null;
-    logger.info("telegram.polling_stopped", {
-      adapterInstanceId: this.adapterInstanceId,
-      pollingSessionId: this.activePollingSessionId,
-      pid: process.pid,
-    });
-    this.activePollingSessionId = null;
+    logger.info("telegram.polling_stopped");
   }
 
   async sendText(chatId: ChatId, text: string): Promise<void> {
@@ -386,28 +317,6 @@ function controlSurfaceToTelegramKeyboard(controls: ControlSurface): Array<Array
 
 function previewText(text: string): string {
   return text.length <= 120 ? text : `${text.slice(0, 117)}...`;
-}
-
-function extractTelegramPollingErrorDetails(error: unknown): Record<string, unknown> {
-  if (error instanceof GrammyError) {
-    return {
-      isConflict: error.error_code === 409,
-      description: error.description,
-      errorCode: error.error_code,
-      method: error.method,
-    };
-  }
-
-  if (error instanceof Error) {
-    return {
-      errorName: error.name,
-      message: error.message,
-    };
-  }
-
-  return {
-    message: "Unknown Telegram polling error.",
-  };
 }
 
 export { normalizeTelegramUpdate } from "./telegram-normalization.js";

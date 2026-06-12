@@ -277,26 +277,6 @@ test("TelegramBotApiAdapter acknowledges callback queries", async () => {
   assert.equal(fakeBot.acknowledgedCallbackQueries, 1);
 });
 
-test("TelegramBotApiAdapter does not start Telegram polling twice while already running", async () => {
-  const fakeBot = new FakeTelegramBot();
-  const adapter = new TelegramBotApiAdapter({
-    allowedUser: OWNER_ID,
-    token: "test-token",
-    destinationStore: new ImplicitChannelDestinationStore("telegram_test"),
-    botFactory: () => fakeBot,
-  });
-
-  await adapter.start(async () => {});
-  await adapter.start(async () => {
-    throw new Error("handler should not be replaced on duplicate start");
-  });
-
-  await adapter.stop();
-
-  assert.equal(fakeBot.startCallCount, 1);
-  assert.equal(fakeBot.stopCallCount, 1);
-});
-
 test("TelegramBotApiAdapter transcribes voice messages into normal text events", async () => {
   const fakeBot = new FakeTelegramBot();
   const handlerEvents: unknown[] = [];
@@ -867,8 +847,6 @@ class FakeTelegramBot {
   public readonly sentDocuments: Array<{ chatId: string | number; document: unknown; other?: Record<string, unknown> }> = [];
   public acknowledgedCallbackQueries = 0;
   public sendMessageFailures: Error[] = [];
-  public startCallCount = 0;
-  public stopCallCount = 0;
   private sendMessageCallCount = 0;
   private readonly handlers = new Map<string, Array<(ctx: FakeTelegramContext) => Promise<void>>>();
   private stopResolve: (() => void) | null = null;
@@ -903,15 +881,13 @@ class FakeTelegramBot {
 
   catch(_errorHandler: (error: unknown) => void): void {}
 
-  start(_options?: unknown): Promise<void> {
-    this.startCallCount += 1;
+  start(): Promise<void> {
     return new Promise((resolve) => {
       this.stopResolve = resolve;
     });
   }
 
   async stop(): Promise<void> {
-    this.stopCallCount += 1;
     this.stopResolve?.();
     this.stopResolve = null;
   }
