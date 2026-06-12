@@ -9,20 +9,6 @@ export type NativeWorkerToolCallResult = {
   message: string;
 };
 
-export type FileCopyWorkerToolPayload =
-  | {
-    type: "copy_into_share";
-    sourcePath: string;
-    targetPath: string;
-    reason: string;
-  }
-  | {
-    type: "copy_out_of_share";
-    sourcePath: string;
-    targetPath: string;
-    reason: string;
-  };
-
 // Infrastructure
 
 type WorkerToolDefinition = Tool & {
@@ -86,6 +72,10 @@ const copyOutOfShareSchema = z.object({
   targetPath: z.string(),
   reason: z.string(),
 }).strict();
+
+export type FileCopyWorkerToolPayload =
+  | z.infer<typeof copyIntoShareSchema>
+  | z.infer<typeof copyOutOfShareSchema>;
 
 const sendFileToChannelSchema = z.object({
   type: z.literal(sendFileToChannelToolName),
