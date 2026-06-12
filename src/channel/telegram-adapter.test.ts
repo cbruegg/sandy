@@ -717,7 +717,7 @@ test("TelegramBotApiAdapter sends privilege requests with appropriate controls",
   });
 
   await adapter.sendPrivilegeRequest("7", {
-    kind: "host_operation",
+    kind: "file_copy",
     requestId: "req-1",
     payload: { type: "copy_into_share", sourcePath: "/tmp", targetPath: "/share", reason: "test" },
   });

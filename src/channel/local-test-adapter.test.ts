@@ -114,7 +114,7 @@ test("LocalTestChannelAdapter writes privilege requests and file sends to the ou
   try {
     await adapter.start(async () => {});
     const request: PrivilegeRequest = {
-      kind: "host_operation",
+      kind: "file_copy",
       requestId: "req-1",
       payload: {
         type: "copy_into_share",

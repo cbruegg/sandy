@@ -359,8 +359,6 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
       return `Copy file into the shared workspace: ${request.payload.sourcePath} -> ${request.payload.targetPath}\nReason: ${request.payload.reason}`;
     case "copy_out_of_share":
       return `Copy file out of the shared workspace: ${request.payload.sourcePath} -> ${request.payload.targetPath}\nReason: ${request.payload.reason}`;
-    default:
-      return `Host operation: ${request.payload.type}`;
   }
 }
 

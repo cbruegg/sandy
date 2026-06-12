@@ -10,6 +10,7 @@ import type {
   ChatGPTExternalTokens,
   ChannelFormatting,
   NormalizedChatEvent,
+  SessionState,
   WorkerStartConfig,
 } from "../types.js";
 import type { PrivilegeBroker } from "../privilege/privilege-broker.js";
@@ -42,3 +43,7 @@ export type SandyOrchestratorDependencies = OrchestratorCoreDependencies & {
   taskLifecycle: OrchestratorTaskLifecycle;
   privileges: OrchestratorPrivileges;
 };
+
+export interface TaskFailureHandler {
+  failActiveTaskFromEventHandling(session: SessionState, taskId: string, message: string): Promise<void>;
+}

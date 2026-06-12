@@ -1,20 +1,15 @@
-import { messages } from "../messages.js";
 import type {
   PrivilegeRequest,
   PrivilegeResolutionResult,
 } from "../types.js";
 import type { NativeWorkerToolCallResult } from "../subagent/worker-tools.js";
 
-type UnsupportedPrivilegeRequest = Extract<PrivilegeRequest, {
-  kind: "host_operation" | "mcp_tool_call" | "mcp_resource_read" | "http_token_use";
-}>;
-
 export type McpPrivilegeRequest = Extract<PrivilegeRequest, {
   kind: "mcp_tool_call" | "mcp_resource_read";
 }>;
 
 export type NativeToolPrivilegeRequest = Extract<PrivilegeRequest, {
-  kind: "host_operation" | "http_token_use" | "host_directory_access" | "skill_mutation" | "job_mutation";
+  kind: "file_copy" | "http_token_use" | "host_directory_access" | "skill_mutation" | "job_mutation";
 }>;
 
 export function approvedPrivilegeResult(
@@ -66,7 +61,7 @@ export function isMcpPrivilegeRequest(request: PrivilegeRequest): request is Mcp
 }
 
 export function isNativeToolPrivilegeRequest(request: PrivilegeRequest): request is NativeToolPrivilegeRequest {
-  return request.kind === "host_operation"
+  return request.kind === "file_copy"
     || request.kind === "http_token_use"
     || request.kind === "host_directory_access"
     || request.kind === "skill_mutation"
@@ -89,27 +84,6 @@ export function withHostDirectoryGrantMessage(
   };
 }
 
-export function buildUnsupportedPrivilegeResult(request: UnsupportedPrivilegeRequest): PrivilegeResolutionResult {
-  switch (request.kind) {
-    case "host_operation":
-      return failedPrivilegeResult(request.requestId, messages.unsupportedPrivilegeRequestType(request.payload.type));
-    case "mcp_tool_call":
-      return failedPrivilegeResult(
-        request.requestId,
-        messages.unsupportedMcpPrivilegeRequest(request.serverId, request.toolName),
-      );
-    case "mcp_resource_read":
-      return failedPrivilegeResult(
-        request.requestId,
-        messages.unsupportedMcpResourceReadPrivilegeRequest(request.serverId, request.uri),
-      );
-    case "http_token_use":
-      return failedPrivilegeResult(request.requestId, messages.httpTokenNotConfigured(request.tokenId));
-    default:
-      return assertNever(request);
-  }
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled privilege request: ${JSON.stringify(value)}`);
+export function assertNever(value: never): never {
+  throw new Error(`Unhandled privilege value: ${JSON.stringify(value)}`);
 }

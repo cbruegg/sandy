@@ -52,9 +52,9 @@ test("buildShareDeletionControls returns approve and deny actions", () => {
   });
 });
 
-test("buildPrivilegeControls for host_operation returns approve, deny, report, cancel", () => {
+test("buildPrivilegeControls for file_copy returns approve, deny, report, cancel", () => {
   const controls = buildPrivilegeControls({
-    kind: "host_operation",
+    kind: "file_copy",
     requestId: "req-1",
     payload: { type: "copy_into_share", sourcePath: "/tmp", targetPath: "/share", reason: "test" },
   });
@@ -181,7 +181,7 @@ test("buildPrivilegeControls for job_mutation returns approve and deny with no p
 
 test("formatPrivilegeRequestLogType formats each request kind", () => {
   assert.equal(
-    formatPrivilegeRequestLogType({ kind: "host_operation", requestId: "r1", payload: { type: "copy_into_share", sourcePath: "/tmp", targetPath: "/share", reason: "test" } }),
+    formatPrivilegeRequestLogType({ kind: "file_copy", requestId: "r1", payload: { type: "copy_into_share", sourcePath: "/tmp", targetPath: "/share", reason: "test" } }),
     "copy_into_share",
   );
   assert.equal(

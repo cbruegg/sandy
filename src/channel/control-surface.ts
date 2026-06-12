@@ -132,7 +132,7 @@ export function buildPrivilegeControls(request: PrivilegeRequest): ControlSurfac
  */
 export function formatPrivilegeRequestLogType(request: PrivilegeRequest): string {
   switch (request.kind) {
-    case "host_operation":
+    case "file_copy":
       return request.payload.type;
     case "mcp_tool_call":
       return `${request.serverId}.${request.toolName}`;

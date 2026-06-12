@@ -225,20 +225,6 @@ export type WorkerToolPayload =
   | z.infer<typeof enableJobSchema>
   | z.infer<typeof disableJobSchema>
   | z.infer<typeof runJobNowSchema>;
-export type PrivilegedWorkerToolPayload =
-  | z.infer<typeof copyIntoShareSchema>
-  | z.infer<typeof copyOutOfShareSchema>
-  | z.infer<typeof requestHttpTokenSchema>
-  | z.infer<typeof requestHostDirectoryAccessSchema>
-  | z.infer<typeof createSkillSchema>
-  | z.infer<typeof updateSkillSchema>
-  | z.infer<typeof deleteSkillSchema>
-  | z.infer<typeof createJobSchema>
-  | z.infer<typeof updateJobSchema>
-  | z.infer<typeof deleteJobSchema>
-  | z.infer<typeof enableJobSchema>
-  | z.infer<typeof disableJobSchema>
-  | z.infer<typeof runJobNowSchema>;
 
 export function parseWorkerToolPayload(name: string, argumentsValue: unknown): WorkerToolPayload {
   const definition = workerToolEntries.find((entry) => entry.name === name);

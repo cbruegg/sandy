@@ -34,7 +34,7 @@ import type { ChatId } from "../types.js";
 import type { JobDefinition } from "../jobs/job-validation.js";
 import { buildJobTaskBrief } from "../jobs/job-task-brief.js";
 import type { SandboxHandle, TaskStartInput } from "../sandbox/sandbox-runner.js";
-import type {TaskFailureHandler} from "./privileges.ts";
+import type { TaskFailureHandler } from "./shared.js";
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
 import { failedPrivilegeResult, isMcpPrivilegeRequest, isNativeToolPrivilegeRequest } from "./privilege-results.js";
 

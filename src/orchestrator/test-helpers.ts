@@ -11,7 +11,7 @@ import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import { SandyOrchestrator } from "./index.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 import { createNoopPersistentApprovalStore } from "../privilege/persistent-approval-store.js";
-import type { PrivilegeBroker, SupportedPrivilegeRequest } from "../privilege/privilege-broker.js";
+import type { PrivilegeBroker, FileCopyPrivilegePayload } from "../privilege/privilege-broker.js";
 import type { LaunchTaskRequest, SandboxHandle, SandboxRunner, SandboxTaskBundle } from "../sandbox/sandbox-runner.js";
 import { InMemorySessionStore } from "../session/in-memory-session-store.js";
 import { OrchestratorPrivilegesImpl } from "./privileges.js";
@@ -306,9 +306,9 @@ export class InMemoryJobApprovalStore implements JobApprovalStoreApi {
 }
 
 export class FakePrivilegeBroker implements PrivilegeBroker {
-  public readonly appliedRequests: Array<{ request: SupportedPrivilegeRequest; taskId: string; taskSharePath: string }> = [];
+  public readonly appliedRequests: Array<{ request: FileCopyPrivilegePayload; taskId: string; taskSharePath: string }> = [];
 
-  apply(request: SupportedPrivilegeRequest, context: { taskId: string; taskSharePath: string }): Promise<{ outcome: "approved"; message: string }> {
+  apply(request: FileCopyPrivilegePayload, context: { taskId: string; taskSharePath: string }): Promise<{ outcome: "approved"; message: string }> {
     this.appliedRequests.push({ request, taskId: context.taskId, taskSharePath: context.taskSharePath });
     return Promise.resolve({
       outcome: "approved",

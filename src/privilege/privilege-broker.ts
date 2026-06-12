@@ -2,15 +2,15 @@ import {cp, mkdir} from "node:fs/promises";
 import {dirname} from "node:path";
 import {resolveAbsoluteHostPath} from "../host-paths.js";
 import {resolveTaskShareHostPath} from "../shared-workspace.js";
-import type {PrivilegedWorkerToolPayload} from "../subagent/worker-tools.js";
+import type {WorkerToolPayload} from "../subagent/worker-tools.js";
 
 type PrivilegeContext = {
   taskId: string;
   taskSharePath: string;
 };
 
-export type SupportedPrivilegeRequest = Extract<
-  PrivilegedWorkerToolPayload,
+export type FileCopyPrivilegePayload = Extract<
+  WorkerToolPayload,
   { type: "copy_into_share" | "copy_out_of_share" }
 >;
 
@@ -20,11 +20,11 @@ type PrivilegeOperationResult = {
 };
 
 export interface PrivilegeBroker {
-  apply(request: SupportedPrivilegeRequest, context: PrivilegeContext): Promise<PrivilegeOperationResult>;
+  apply(request: FileCopyPrivilegePayload, context: PrivilegeContext): Promise<PrivilegeOperationResult>;
 }
 
 export class PrivilegeBrokerImpl implements PrivilegeBroker {
-  async apply(request: SupportedPrivilegeRequest, context: PrivilegeContext): Promise<PrivilegeOperationResult> {
+  async apply(request: FileCopyPrivilegePayload, context: PrivilegeContext): Promise<PrivilegeOperationResult> {
     try {
       switch (request.type) {
         case "copy_into_share":
@@ -41,7 +41,7 @@ export class PrivilegeBrokerImpl implements PrivilegeBroker {
   }
 
   private async copyIntoShare(
-    request: Extract<SupportedPrivilegeRequest, { type: "copy_into_share" }>,
+    request: Extract<FileCopyPrivilegePayload, { type: "copy_into_share" }>,
     context: PrivilegeContext,
   ): Promise<PrivilegeOperationResult> {
     const sourcePath = resolveAbsoluteHostPath(request.sourcePath, "copy_into_share sourcePath");
@@ -57,7 +57,7 @@ export class PrivilegeBrokerImpl implements PrivilegeBroker {
   }
 
   private async copyOutOfShare(
-    request: Extract<SupportedPrivilegeRequest, { type: "copy_out_of_share" }>,
+    request: Extract<FileCopyPrivilegePayload, { type: "copy_out_of_share" }>,
     context: PrivilegeContext,
   ): Promise<PrivilegeOperationResult> {
     const sourcePath = resolveTaskShareHostPath(context.taskSharePath, request.sourcePath, "copy_out_of_share sourcePath");
@@ -71,8 +71,4 @@ export class PrivilegeBrokerImpl implements PrivilegeBroker {
       message: `Copied ${request.sourcePath} out of the shared workspace to ${targetPath}.`,
     };
   }
-}
-
-export function isSupportedPrivilegeRequest(request: PrivilegedWorkerToolPayload): request is SupportedPrivilegeRequest {
-  return request.type === "copy_into_share" || request.type === "copy_out_of_share";
 }

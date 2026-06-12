@@ -1,36 +1,34 @@
 import { randomUUID } from "node:crypto";
-import { isSupportedPrivilegeRequest } from "../privilege/privilege-broker.js";
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
 import { ActiveTaskRuntimeRegistry } from "./active-task-runtime-registry.js";
-import type {OrchestratorCoreDependencies} from "./shared.js";
+import type { OrchestratorCoreDependencies, TaskFailureHandler } from "./shared.js";
 import { parseWorkerToolPayload } from "../subagent/worker-tools.js";
 import type { NativeWorkerToolCallResult, WorkerToolPayload } from "../subagent/worker-tools.js";
 import type { ActiveTaskState, NormalizedChatEvent, PrivilegeRequest, PrivilegeResolutionResult, SessionState } from "../types.js";
 import type { ChatId } from "../types.js";
 import type { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
 import {
-  approvedPrivilegeResult,
-  buildUnsupportedPrivilegeResult,
-  deniedPrivilegeResult,
+  assertNever,
   failedPrivilegeResult,
   isMcpPrivilegeRequest,
   isNativeToolPrivilegeRequest,
   toNativeWorkerToolCallResult,
-  withHostDirectoryGrantMessage,
 } from "./privilege-results.js";
 import type { NativeToolPrivilegeRequest } from "./privilege-results.js";
+import { buildNativeToolPrivilegeRequest } from "./privilege-request-builder.js";
 import {
-  grantHttpTokenOnce,
-  grantHttpTokenSessionAccess,
-  grantHttpTokenAutoApprovalForTask,
-  grantMcpAutoApprovalForTask,
-  grantTaskHostDirectoryAccess,
-  grantTaskResourceReadAccess,
-  grantTaskToolAccess,
-  isHttpTokenAutoApprovalAllowed,
-  isMcpAutoApprovalAllowed,
-  isTaskHostDirectoryAccessAllowed,
+  resolveFileCopyRequest,
+  resolveHostDirectoryRequest,
+  resolveHttpTokenRequest,
+  resolveJobMutationRequest,
+  resolveMcpResourceReadRequest,
+  resolveMcpToolCallRequest,
+  resolveSkillMutationRequest,
+} from "./privilege-resolvers.js";
+import type { PrivilegeContext } from "./privilege-resolvers.js";
+import { authorizeMcpImmediately, tryAuthorizeHostDirectoryAccess, tryAuthorizeNativeHttpTokenUse } from "./privilege-authorizers.js";
+import {
   isTaskResourceReadGrantAllowed,
   isTaskToolGrantAllowed,
 } from "./task-grants.js";
@@ -59,14 +57,30 @@ export interface OrchestratorPrivileges {
   ): Promise<void>;
 }
 
+/**
+ * Coordinates privilege handling: dispatching native tool calls, enqueuing privilege
+ * requests for user decisions, and applying those decisions. The per-kind decision
+ * logic lives in privilege-request-builder, privilege-resolvers, and privilege-authorizers;
+ * this class owns the shared request lifecycle and task/channel wiring.
+ */
 export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
+  private readonly privilegeContext: PrivilegeContext;
 
   constructor(
     private readonly deps: Omit<OrchestratorCoreDependencies, "channel">,
     private readonly activeTasks: ActiveTaskRuntimeRegistry,
     private readonly workerToolsHandler: WorkerToolsHandler,
     private readonly taskFailureHandler: TaskFailureHandler,
-  ) {}
+  ) {
+    this.privilegeContext = {
+      persistentApprovalStore: deps.persistentApprovalStore,
+      jobApprovalStore: deps.jobApprovalStore,
+      hostfsBroker: deps.hostfsBroker,
+      privilegeBroker: deps.privilegeBroker,
+      activeTasks,
+      workerToolsHandler,
+    };
+  }
 
   async executeNativeWorkerToolCall(input: {
     taskId: string;
@@ -136,42 +150,26 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     let result: PrivilegeResolutionResult;
     switch (request.kind) {
       case "mcp_tool_call":
-        result = await this.resolvePendingMcpPrivilegeRequest(session, request, decision);
+        result = await resolveMcpToolCallRequest(this.privilegeContext, session, request, decision);
         break;
       case "mcp_resource_read":
-        result = await this.resolvePendingMcpResourceReadRequest(session, request, decision);
+        result = await resolveMcpResourceReadRequest(this.privilegeContext, session, request, decision);
         break;
       case "http_token_use":
-        result = await this.resolvePendingHttpTokenRequest(session, request, decision);
+        result = await resolveHttpTokenRequest(this.privilegeContext, session, request, decision);
         break;
       case "host_directory_access":
-        result = await this.resolvePendingHostDirectoryRequest(session, request, decision);
+        result = await resolveHostDirectoryRequest(this.privilegeContext, session, request, decision);
         break;
       case "skill_mutation":
-        result = await this.resolvePendingSkillMutationRequest(session, request, decision);
+        result = await resolveSkillMutationRequest(this.privilegeContext, session, request, decision);
         break;
       case "job_mutation":
-        result = await this.resolvePendingJobMutationRequest(session, request, decision);
+        result = await resolveJobMutationRequest(this.privilegeContext, session, request, decision);
         break;
-      case "host_operation": {
-        if (decision === "deny") {
-          result = deniedPrivilegeResult(request.requestId, messages.userDeniedPrivilegeRequest(request.requestId));
-          break;
-        }
-        if (!isSupportedPrivilegeRequest(request.payload)) {
-          result = buildUnsupportedPrivilegeResult(request);
-          break;
-        }
-        const operation = await this.deps.privilegeBroker.apply(request.payload, {
-          taskId: activeTask.taskId,
-          taskSharePath: this.activeTasks.requireHandle(activeTask.taskId).getTaskSharePath(),
-        });
-        result = {
-          requestId: request.requestId,
-          ...operation,
-        };
+      case "file_copy":
+        result = await resolveFileCopyRequest(this.privilegeContext, request, decision, activeTask.taskId);
         break;
-      }
       default:
         assertNever(request);
     }
@@ -270,7 +268,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
           chatId,
           session,
           taskId,
-          (requestId) => this.buildNativeToolPrivilegeRequest(session, taskId, call, requestId),
+          (requestId) => buildNativeToolPrivilegeRequest(this.deps, session, taskId, call, requestId),
         );
         return toNativeWorkerToolCallResult(result);
       }
@@ -296,21 +294,19 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       return failedPrivilegeResult(request.requestId, messages.taskNoLongerActive(chatId));
     }
 
-    if (request.kind === "host_operation" && !isSupportedPrivilegeRequest(request.payload)) {
-      return buildUnsupportedPrivilegeResult(request);
-    }
-
     if (request.kind === "http_token_use") {
-      const immediateTokenResult = this.tryAuthorizeNativeHttpTokenUse(activeTask, request);
-      if (immediateTokenResult) {
-        return immediateTokenResult;
+      const immediateResult = tryAuthorizeNativeHttpTokenUse(this.privilegeContext, activeTask, request);
+      if (immediateResult) {
+        return immediateResult;
       }
     }
 
+    // Host directory grants require an async hostfs mount, so they are checked separately
+    // from the synchronous fast paths above.
     if (request.kind === "host_directory_access") {
-      const immediateHostDirectoryResult = await this.tryAuthorizeHostDirectoryAccess(activeTask, request);
-      if (immediateHostDirectoryResult) {
-        return immediateHostDirectoryResult;
+      const hostDirectoryResult = await tryAuthorizeHostDirectoryAccess(this.privilegeContext, activeTask, request);
+      if (hostDirectoryResult) {
+        return hostDirectoryResult;
       }
     }
 
@@ -329,88 +325,47 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     });
   }
 
-  private async grantHostDirectoryAccess(
-    activeTask: ActiveTaskState,
-    request: Extract<PrivilegeRequest, { kind: "host_directory_access" }>,
+  private async authorizeMcpRequest(
+    taskId: string,
+    options: {
+      serverId: string;
+      isTaskGrantAllowed: (task: ActiveTaskState) => boolean;
+      isPersistentAllowed: () => Promise<boolean>;
+      sessionMessage: string;
+      persistentMessage: string;
+      buildRequest: (requestId: string) => Extract<PrivilegeRequest, { kind: "mcp_tool_call" | "mcp_resource_read" }>;
+    },
   ): Promise<PrivilegeResolutionResult> {
-    const taskBundle = this.activeTasks.requireHandle(activeTask.taskId).getTaskBundle();
-    if (!taskBundle.hostfsVolumeName) {
-      return failedPrivilegeResult(
-        request.requestId,
-        messages.hostDirectoryAccessFailed(request.path, "This task bundle does not have a hostfs mount."),
-      );
+    const taskContext = this.getTaskContext(taskId);
+    if (!taskContext) {
+      return failedPrivilegeResult(randomUUID(), messages.taskNotActive(taskId));
     }
 
-    const result = await this.deps.hostfsBroker.requestDirectoryAccess(
-      taskBundle.bundleId,
-      activeTask.taskId,
-      request.path,
-      request.level,
-    );
+    const { chatId, activeTask } = taskContext;
 
-    if (!result.ok) {
-      return failedPrivilegeResult(request.requestId, messages.hostDirectoryAccessFailed(request.path, result.error));
+    const authorization = await authorizeMcpImmediately(activeTask, {
+      serverId: options.serverId,
+      isTaskGrantAllowed: options.isTaskGrantAllowed,
+      isPersistentAllowed: options.isPersistentAllowed,
+      sessionMessage: options.sessionMessage,
+      persistentMessage: options.persistentMessage,
+    });
+    if (authorization.kind === "resolved") {
+      return authorization.result;
     }
 
-    return approvedPrivilegeResult(request.requestId, `Use the path: ${result.grantPath}`);
-  }
-
-  private async resolvePendingHostDirectoryRequest(
-    session: SessionState,
-    request: Extract<PrivilegeRequest, { kind: "host_directory_access" }>,
-    decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
-  ): Promise<PrivilegeResolutionResult> {
-    const activeTask = this.requireSessionActiveTask(session, request.requestId);
-    if ("result" in activeTask) {
-      return activeTask.result;
-    }
-
-    switch (decision) {
-      case "deny":
-        return deniedPrivilegeResult(request.requestId, messages.hostDirectoryAccessDenied(request.path, request.level));
-      case "approve":
-      case "approve_once":
-      case "approve_worker_session":
-        grantTaskHostDirectoryAccess(activeTask.activeTask, request.path, request.level);
-        return withHostDirectoryGrantMessage(
-          await this.grantHostDirectoryAccess(activeTask.activeTask, request),
-          messages.hostDirectoryAccessAllowedForWorkerSession(request.path, request.level),
-          "worker_session",
-        );
-      case "approve_always":
-        await this.deps.persistentApprovalStore.allowHostDirectory(request.path, request.level);
-        grantTaskHostDirectoryAccess(activeTask.activeTask, request.path, request.level);
-        return withHostDirectoryGrantMessage(
-          await this.grantHostDirectoryAccess(activeTask.activeTask, request),
-          messages.hostDirectoryAccessAllowedAndPersisted(request.path, request.level),
-          "always",
-        );
-      default:
-        assertNever(decision);
-    }
-  }
-
-  private async tryAuthorizeHostDirectoryAccess(
-    activeTask: ActiveTaskState,
-    request: Extract<PrivilegeRequest, { kind: "host_directory_access" }>,
-  ): Promise<PrivilegeResolutionResult | null> {
-    if (isTaskHostDirectoryAccessAllowed(activeTask, request.path, request.level)) {
-      return withHostDirectoryGrantMessage(
-        await this.grantHostDirectoryAccess(activeTask, request),
-        messages.hostDirectoryAccessAllowedForWorkerSession(request.path, request.level),
-        "worker_session",
-      );
-    }
-
-    if (this.deps.persistentApprovalStore.isHostDirectoryAlwaysAllowed(request.path, request.level)) {
-      return withHostDirectoryGrantMessage(
-        await this.grantHostDirectoryAccess(activeTask, request),
-        messages.hostDirectoryAccessAllowedFromPersistentConfig(request.path, request.level),
-        "always",
-      );
-    }
-
-    return null;
+    return await this.enqueuePrivilegeRequest({
+      chatId,
+      taskId,
+      activeTask,
+      request: {
+        ...options.buildRequest(randomUUID()),
+        confirmsAutoApprovalForTask: authorization.confirmsAutoApprovalForTask,
+      },
+      registerResolver: (requestId, resolve) => {
+        this.activeTasks.setPendingMcpPrivilegeResolver(requestId, resolve);
+      },
+    });
   }
 
   private async sendPrivilegeResolutionMessage(
@@ -444,394 +399,6 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     }
   }
 
-  private async authorizeMcpRequest(
-    taskId: string,
-    options: {
-      serverId: string;
-      isTaskGrantAllowed: (task: ActiveTaskState) => boolean;
-      isPersistentAllowed: () => Promise<boolean>;
-      sessionMessage: string;
-      persistentMessage: string;
-      buildRequest: (requestId: string) => Extract<PrivilegeRequest, { kind: "mcp_tool_call" | "mcp_resource_read" }>;
-    },
-  ): Promise<PrivilegeResolutionResult> {
-    const taskContext = this.getTaskContext(taskId);
-    if (!taskContext) {
-      return failedPrivilegeResult(randomUUID(), messages.taskNotActive(taskId));
-    }
-
-    const { chatId, activeTask } = taskContext;
-
-    if (options.isTaskGrantAllowed(activeTask)) {
-      return approvedPrivilegeResult(randomUUID(), options.sessionMessage, "worker_session");
-    }
-
-    const hasConfiguredAutoApproval = await options.isPersistentAllowed();
-    if (hasConfiguredAutoApproval && isMcpAutoApprovalAllowed(activeTask, options.serverId)) {
-      return approvedPrivilegeResult(randomUUID(), options.persistentMessage, "always");
-    }
-
-    return await this.enqueuePrivilegeRequest({
-      chatId,
-      taskId,
-      activeTask,
-      request: {
-        ...options.buildRequest(randomUUID()),
-        confirmsAutoApprovalForTask: hasConfiguredAutoApproval,
-      },
-      registerResolver: (requestId, resolve) => {
-        this.activeTasks.setPendingMcpPrivilegeResolver(requestId, resolve);
-      },
-    });
-  }
-
-  private async resolvePendingMcpPrivilegeRequest(
-    session: SessionState,
-    request: Extract<PrivilegeRequest, { kind: "mcp_tool_call" }>,
-    decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
-  ): Promise<PrivilegeResolutionResult> {
-    return this.resolvePendingMcpRequest(session, request, decision, {
-      deniedMessage: messages.userDeniedMcpToolCall(request.serverId, request.toolName),
-      onceMessage: messages.mcpToolAllowedOnce(request.serverId, request.toolName),
-      sessionMessage: messages.mcpToolAllowedForWorkerSession(request.serverId, request.toolName),
-      alwaysMessage: messages.mcpToolAllowedAndPersisted(request.serverId, request.toolName),
-      persistentMessage: messages.mcpToolAllowedFromPersistentConfig(request.serverId, request.toolName),
-      grantAutoApprovalForTask: async (task) => await grantMcpAutoApprovalForTask(this.deps.jobApprovalStore, task, request.serverId),
-      grantAccess: (task) => grantTaskToolAccess(task, request.serverId, request.toolName),
-      persist: async () => await this.deps.persistentApprovalStore.allowTool(request.serverId, request.toolName),
-    });
-  }
-
-  private async resolvePendingMcpResourceReadRequest(
-    session: SessionState,
-    request: Extract<PrivilegeRequest, { kind: "mcp_resource_read" }>,
-    decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
-  ): Promise<PrivilegeResolutionResult> {
-    return this.resolvePendingMcpRequest(session, request, decision, {
-      deniedMessage: messages.userDeniedMcpResourceRead(request.serverId, request.uri),
-      onceMessage: messages.mcpResourceReadAllowedOnce(request.serverId, request.uri),
-      sessionMessage: messages.mcpResourceReadAllowedForWorkerSession(request.serverId, request.uri),
-      alwaysMessage: messages.mcpResourceReadAllowedAndPersisted(request.serverId, request.uri),
-      persistentMessage: messages.mcpResourceReadAllowedFromPersistentConfig(request.serverId, request.uri),
-      grantAutoApprovalForTask: async (task) => await grantMcpAutoApprovalForTask(this.deps.jobApprovalStore, task, request.serverId),
-      grantAccess: (task) => grantTaskResourceReadAccess(task, request.serverId, request.uri),
-      persist: async () => await this.deps.persistentApprovalStore.allowResourceRead(request.serverId, request.uri),
-    });
-  }
-
-  private async resolvePendingMcpRequest(
-    session: SessionState,
-    request: Extract<PrivilegeRequest, { kind: "mcp_tool_call" | "mcp_resource_read" }>,
-    decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
-    options: {
-      deniedMessage: string;
-      onceMessage: string;
-      sessionMessage: string;
-      alwaysMessage: string;
-      persistentMessage: string;
-      grantAutoApprovalForTask: (task: ActiveTaskState) => Promise<void>;
-      grantAccess: (task: ActiveTaskState) => void;
-      persist: () => Promise<void>;
-    },
-  ): Promise<PrivilegeResolutionResult> {
-    const activeTask = this.requireSessionActiveTask(session, request.requestId);
-    if ("result" in activeTask) {
-      return activeTask.result;
-    }
-
-    switch (decision) {
-      case "deny":
-        return deniedPrivilegeResult(request.requestId, options.deniedMessage);
-      case "approve":
-      case "approve_once":
-        if (request.confirmsAutoApprovalForTask) {
-          await options.grantAutoApprovalForTask(activeTask.activeTask);
-          return approvedPrivilegeResult(request.requestId, options.persistentMessage, "always");
-        }
-        return approvedPrivilegeResult(request.requestId, options.onceMessage, "once");
-      case "approve_worker_session":
-        if (request.confirmsAutoApprovalForTask) {
-          await options.grantAutoApprovalForTask(activeTask.activeTask);
-          return approvedPrivilegeResult(request.requestId, options.persistentMessage, "always");
-        }
-        options.grantAccess(activeTask.activeTask);
-        return approvedPrivilegeResult(request.requestId, options.sessionMessage, "worker_session");
-      case "approve_always":
-        await options.persist();
-        await options.grantAutoApprovalForTask(activeTask.activeTask);
-        return approvedPrivilegeResult(request.requestId, options.alwaysMessage, "always");
-      default:
-        assertNever(decision);
-    }
-  }
-
-  private async resolvePendingHttpTokenRequest(
-    session: SessionState,
-    request: Extract<PrivilegeRequest, { kind: "http_token_use" }>,
-    decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
-  ): Promise<PrivilegeResolutionResult> {
-    const activeTask = this.requireSessionActiveTask(session, request.requestId);
-    if ("result" in activeTask) {
-      return activeTask.result;
-    }
-
-    switch (decision) {
-      case "deny":
-        return deniedPrivilegeResult(request.requestId, messages.httpTokenDenied(request.tokenId, request.host));
-      case "approve":
-      case "approve_once":
-        if (request.confirmsAutoApprovalForTask) {
-          await grantHttpTokenAutoApprovalForTask(this.deps.jobApprovalStore, activeTask.activeTask, request.tokenId);
-          return approvedPrivilegeResult(
-            request.requestId,
-            messages.httpTokenAllowedFromPersistentConfig(request.tokenId, request.host),
-            "always",
-          );
-        }
-        grantHttpTokenOnce(activeTask.activeTask, request.tokenId, request.host);
-        return approvedPrivilegeResult(request.requestId, messages.httpTokenAllowedOnce(request.tokenId, request.host), "once");
-      case "approve_worker_session":
-        if (request.confirmsAutoApprovalForTask) {
-          await grantHttpTokenAutoApprovalForTask(this.deps.jobApprovalStore, activeTask.activeTask, request.tokenId);
-          return approvedPrivilegeResult(
-            request.requestId,
-            messages.httpTokenAllowedFromPersistentConfig(request.tokenId, request.host),
-            "always",
-          );
-        }
-        grantHttpTokenSessionAccess(activeTask.activeTask, request.tokenId, request.host);
-        return approvedPrivilegeResult(
-          request.requestId,
-          messages.httpTokenAllowedForWorkerSession(request.tokenId, request.host),
-          "worker_session",
-        );
-      case "approve_always":
-        await this.deps.persistentApprovalStore.allowHttpToken(request.tokenId, request.host);
-        await grantHttpTokenAutoApprovalForTask(this.deps.jobApprovalStore, activeTask.activeTask, request.tokenId);
-        return approvedPrivilegeResult(
-          request.requestId,
-          messages.httpTokenAllowedAndPersisted(request.tokenId, request.host),
-          "always",
-        );
-      default:
-        assertNever(decision);
-    }
-  }
-
-  private async resolvePendingSkillMutationRequest(
-    session: SessionState,
-    request: Extract<PrivilegeRequest, { kind: "skill_mutation" }>,
-    decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
-  ): Promise<PrivilegeResolutionResult> {
-    if (!session.activeTask) {
-      return failedPrivilegeResult(request.requestId, messages.taskNoLongerActive(session.chatId));
-    }
-
-    if (decision !== "approve") {
-      return deniedPrivilegeResult(request.requestId, messages.skillMutationDenied(request.operation, request.skillId));
-    }
-
-    try {
-      await this.workerToolsHandler.applySkillMutation({
-        operation: request.operation,
-        skillId: request.skillId,
-        name: request.name,
-        description: request.description,
-        body: request.body,
-      });
-      return approvedPrivilegeResult(request.requestId, messages.skillMutationApproved(request.operation, request.skillId));
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : "Unknown skill mutation failure.";
-      return failedPrivilegeResult(
-        request.requestId,
-        messages.skillMutationFailed(request.operation, request.skillId, detail),
-      );
-    }
-  }
-
-  private async resolvePendingJobMutationRequest(
-    session: SessionState,
-    request: Extract<PrivilegeRequest, { kind: "job_mutation" }>,
-    decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
-  ): Promise<PrivilegeResolutionResult> {
-    if (!session.activeTask) {
-      return failedPrivilegeResult(request.requestId, messages.taskNoLongerActive(session.chatId));
-    }
-
-    const { operation, jobId } = request.mutation;
-    if (decision !== "approve") {
-      return deniedPrivilegeResult(request.requestId, messages.jobMutationDenied(operation, jobId));
-    }
-
-    try {
-      const detail = await this.workerToolsHandler.applyJobMutation(request.mutation);
-      return approvedPrivilegeResult(request.requestId, `${messages.jobMutationApproved(operation, jobId)} ${detail}`);
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : "Unknown job mutation failure.";
-      return failedPrivilegeResult(request.requestId, messages.jobMutationFailed(operation, jobId, detail));
-    }
-  }
-
-  private tryAuthorizeNativeHttpTokenUse(
-    activeTask: ActiveTaskState,
-    request: Extract<PrivilegeRequest, { kind: "http_token_use" }>,
-  ): PrivilegeResolutionResult | null {
-
-    if (activeTask.approvedHttpTokenSessionGrants.some((entry) => entry.tokenId === request.tokenId && entry.host === request.host)) {
-      return approvedPrivilegeResult(
-        request.requestId,
-        messages.httpTokenAllowedForWorkerSession(request.tokenId, request.host),
-        "worker_session",
-      );
-    }
-
-    if (
-      isHttpTokenAutoApprovalAllowed(activeTask, request.tokenId)
-      && this.deps.persistentApprovalStore.isHttpTokenAlwaysAllowed(request.tokenId, request.host)
-    ) {
-      return approvedPrivilegeResult(
-        request.requestId,
-        messages.httpTokenAllowedFromPersistentConfig(request.tokenId, request.host),
-        "always",
-      );
-    }
-
-    const onceGrant = activeTask.approvedHttpTokenOnceGrants.find(
-      (entry) => entry.tokenId === request.tokenId && entry.host === request.host && !entry.consumed,
-    );
-    if (!onceGrant) {
-      return null;
-    }
-
-    onceGrant.consumed = true;
-    return approvedPrivilegeResult(request.requestId, messages.httpTokenAllowedOnce(request.tokenId, request.host), "once");
-  }
-
-  private shouldConfirmHttpTokenAutoApprovalForTask(
-    session: SessionState,
-    taskId: string,
-    tokenId: string,
-    host: string,
-  ): boolean {
-    const activeTask = this.deps.taskCoordinator.findTask(session, taskId);
-    return activeTask !== null
-      && !isHttpTokenAutoApprovalAllowed(activeTask, tokenId)
-      && this.deps.persistentApprovalStore.isHttpTokenAlwaysAllowed(tokenId, host);
-  }
-
-  private buildNativeToolPrivilegeRequest(
-    session: SessionState,
-    taskId: string,
-    call: Extract<WorkerToolPayload, {
-      type:
-        | "copy_into_share"
-        | "copy_out_of_share"
-        | "request_http_token"
-        | "request_host_directory_access"
-        | "create_skill"
-        | "update_skill"
-        | "delete_skill"
-        | "create_job"
-        | "update_job"
-        | "delete_job"
-        | "enable_job"
-        | "disable_job"
-        | "run_job_now";
-    }>,
-    requestId: string,
-  ): NativeToolPrivilegeRequest {
-    switch (call.type) {
-      case "copy_into_share":
-      case "copy_out_of_share":
-        return {
-          kind: "host_operation",
-          requestId,
-          payload: call,
-        };
-      case "request_http_token":
-        return {
-          kind: "http_token_use",
-          requestId,
-          tokenId: call.tokenId,
-          host: call.host,
-          reason: call.reason,
-          confirmsAutoApprovalForTask: this.shouldConfirmHttpTokenAutoApprovalForTask(session, taskId, call.tokenId, call.host),
-        };
-      case "request_host_directory_access":
-        return {
-          kind: "host_directory_access",
-          requestId,
-          path: call.path,
-          level: call.level,
-        };
-      case "create_skill":
-        return {
-          kind: "skill_mutation",
-          requestId,
-          operation: "create",
-          skillId: call.skillId,
-          name: call.name,
-          description: call.description,
-          body: call.body,
-        };
-      case "update_skill":
-        return {
-          kind: "skill_mutation",
-          requestId,
-          operation: "update",
-          skillId: call.skillId,
-          name: call.name,
-          description: call.description,
-          body: call.body,
-        };
-      case "delete_skill":
-        return {
-          kind: "skill_mutation",
-          requestId,
-          operation: "delete",
-          skillId: call.skillId,
-        };
-      case "create_job":
-        return {
-          kind: "job_mutation",
-          requestId,
-          mutation: { operation: "create", jobId: call.definition.id, definition: call.definition },
-        };
-      case "update_job":
-        return {
-          kind: "job_mutation",
-          requestId,
-          mutation: { operation: "update", jobId: call.definition.id, definition: call.definition },
-        };
-      case "delete_job":
-        return {
-          kind: "job_mutation",
-          requestId,
-          mutation: { operation: "delete", jobId: call.jobId },
-        };
-      case "enable_job":
-        return {
-          kind: "job_mutation",
-          requestId,
-          mutation: { operation: "enable", jobId: call.jobId },
-        };
-      case "disable_job":
-        return {
-          kind: "job_mutation",
-          requestId,
-          mutation: { operation: "disable", jobId: call.jobId },
-        };
-      case "run_job_now":
-        return {
-          kind: "job_mutation",
-          requestId,
-          mutation: { operation: "run_now", jobId: call.jobId },
-        };
-      default:
-        return assertNever(call);
-    }
-  }
-
   private getTaskContext(taskId: string): { session: SessionState; chatId: ChatId; activeTask: ActiveTaskState } | null {
     const session = this.deps.sessionStore.getByTaskId(taskId);
     if (!session) {
@@ -847,21 +414,6 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       session,
       chatId: session.chatId,
       activeTask,
-    };
-  }
-
-  private requireSessionActiveTask(
-    session: SessionState,
-    requestId: string,
-  ): { activeTask: ActiveTaskState } | { result: PrivilegeResolutionResult } {
-    if (!session.activeTask) {
-      return {
-        result: failedPrivilegeResult(requestId, messages.taskNoLongerActive(session.chatId)),
-      };
-    }
-
-    return {
-      activeTask: session.activeTask,
     };
   }
 
@@ -892,12 +444,4 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
 
     return await resultPromise;
   }
-}
-
-export interface TaskFailureHandler {
-  failActiveTaskFromEventHandling(session: SessionState, taskId: string, message: string): Promise<void>;
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled main agent decision: ${JSON.stringify(value)}`);
 }
