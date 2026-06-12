@@ -11,7 +11,6 @@ import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import { SandyOrchestrator } from "./index.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 import { createNoopPersistentApprovalStore } from "../privilege/persistent-approval-store.js";
-import type { PrivilegeBroker, FileCopyPrivilegePayload } from "../privilege/privilege-broker.js";
 import type { LaunchTaskRequest, SandboxHandle, SandboxRunner, SandboxTaskBundle } from "../sandbox/sandbox-runner.js";
 import { InMemorySessionStore } from "../session/in-memory-session-store.js";
 import { OrchestratorPrivilegesImpl } from "./privileges.js";
@@ -34,6 +33,7 @@ import type {
 import type { ChatId } from "../types.js";
 import { SkillService } from "../skills.js";
 import { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
+import type { FileCopyWorkerToolPayload } from "../subagent/worker-tools.js";
 import { JobApprovalStore, type JobApprovalStoreApi } from "../jobs/job-approval-store.js";
 import type { JobService } from "../jobs/job-service.js";
 import type { JobDefinition } from "../jobs/job-validation.js";
@@ -305,16 +305,8 @@ export class InMemoryJobApprovalStore implements JobApprovalStoreApi {
   }
 }
 
-export class FakePrivilegeBroker implements PrivilegeBroker {
-  public readonly appliedRequests: Array<{ request: FileCopyPrivilegePayload; taskId: string; taskSharePath: string }> = [];
-
-  apply(request: FileCopyPrivilegePayload, context: { taskId: string; taskSharePath: string }): Promise<{ outcome: "approved"; message: string }> {
-    this.appliedRequests.push({ request, taskId: context.taskId, taskSharePath: context.taskSharePath });
-    return Promise.resolve({
-      outcome: "approved",
-      message: `Applied ${request.type}.`,
-    });
-  }
+export class FileCopySpy {
+  public readonly appliedRequests: Array<{ request: FileCopyWorkerToolPayload; taskId: string; taskSharePath: string }> = [];
 }
 
 class FakeJobService implements JobService {
@@ -373,17 +365,17 @@ export function createTestOrchestrator(options: {
   mainAgent: MainAgentController;
   sandboxRunner?: FakeSandboxRunner;
   sessionStore?: InMemorySessionStore;
-  privilegeBroker?: PrivilegeBroker;
   persistentApprovalStore?: PersistentApprovalStore;
   hostfsBroker?: HostfsBroker;
   skillService?: SkillService;
   taskCoordinator?: TaskCoordinator;
   jobApprovalStore?: JobApprovalStoreApi;
+  fileCopySpy?: FileCopySpy;
 }) {
   const channel = options.channel ?? new RecordingChannel();
   const runner = options.sandboxRunner ?? new FakeSandboxRunner();
   const store = options.sessionStore ?? new InMemorySessionStore();
-  const privilegeBroker = options.privilegeBroker ?? new FakePrivilegeBroker();
+  const fileCopySpy = options.fileCopySpy ?? new FileCopySpy();
   const skillService = options.skillService ?? new SkillService(mkdtempSync(join(tmpdir(), "sandy-test-config-")));
   const activeTaskRuntimes = new ActiveTaskRuntimeRegistry();
   const taskCoordinator = options.taskCoordinator ?? new TaskCoordinator({
@@ -398,7 +390,6 @@ export function createTestOrchestrator(options: {
     sandboxRunner: runner,
     buildWorkerStartConfig: () => Promise.resolve(createTestWorkerStartConfig()),
     sessionStore: store,
-    privilegeBroker,
     persistentApprovalStore: options.persistentApprovalStore ?? createNoopPersistentApprovalStore(),
     jobApprovalStore: options.jobApprovalStore ?? new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
     hostfsBroker: options.hostfsBroker ?? createNoopHostfsBroker(),
@@ -410,11 +401,22 @@ export function createTestOrchestrator(options: {
   const workerToolsHandler = new WorkerToolsHandler({
     jobService,
     skillService,
+    hostfsBroker: coreDeps.hostfsBroker,
     getTaskSharePath: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskSharePath(),
+    getTaskBundle: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskBundle(),
     runUserVisibleOperation: async ({ chatId, taskId, taskName, operation }) => {
       await taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, operation);
     },
   });
+  const originalApplyFileCopy = workerToolsHandler.applyFileCopy.bind(workerToolsHandler);
+  workerToolsHandler.applyFileCopy = async (request, input) => {
+    fileCopySpy.appliedRequests.push({
+      request,
+      taskId: input.taskId,
+      taskSharePath: activeTaskRuntimes.requireHandle(input.taskId).getTaskSharePath(),
+    });
+    return await originalApplyFileCopy(request, input);
+  };
   const privileges = new OrchestratorPrivilegesImpl(coreDeps, activeTaskRuntimes, workerToolsHandler, taskLifecycle);
   const orchestrator = new SandyOrchestrator({
     ...coreDeps,
@@ -429,7 +431,7 @@ export function createTestOrchestrator(options: {
     channel,
     runner,
     store,
-    privilegeBroker,
+    fileCopySpy,
     activeTaskRuntimes,
     skillService,
     taskCoordinator,

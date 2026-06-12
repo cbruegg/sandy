@@ -9,6 +9,20 @@ export type NativeWorkerToolCallResult = {
   message: string;
 };
 
+export type FileCopyWorkerToolPayload =
+  | {
+    type: "copy_into_share";
+    sourcePath: string;
+    targetPath: string;
+    reason: string;
+  }
+  | {
+    type: "copy_out_of_share";
+    sourcePath: string;
+    targetPath: string;
+    reason: string;
+  };
+
 // Infrastructure
 
 type WorkerToolDefinition = Tool & {

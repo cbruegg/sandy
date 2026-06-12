@@ -1,14 +1,14 @@
 import { z } from "zod";
-import type { FileCopyPrivilegePayload } from "../privilege/privilege-broker.js";
 import type {HostDirectoryAccessLevel} from "../hostfs/path-policy.ts";
 import type { JobMutationRequest } from "../jobs/job-types.js";
+import type { FileCopyWorkerToolPayload } from "../subagent/worker-tools.js";
 
 const privilegeApprovalScopeSchema = z.enum(["once", "worker_session", "always"]);
 
 type FileCopyPrivilegeRequest = {
   kind: "file_copy";
   requestId: string;
-  payload: FileCopyPrivilegePayload;
+  payload: FileCopyWorkerToolPayload;
 };
 
 type HostDirectoryAccessPrivilegeRequest = {

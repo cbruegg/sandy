@@ -1,5 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import type { HostDirectoryAccessLevel } from "../hostfs/path-policy.js";
@@ -8,7 +9,7 @@ import { messages } from "../messages.js";
 import {
   createTestOrchestrator,
   expectDefined,
-  FakePrivilegeBroker,
+  FileCopySpy,
   InMemoryJobApprovalStore,
   RecordingChannel,
   StubMainAgent,
@@ -29,65 +30,74 @@ async function waitFor(check: () => boolean, attempts = 20): Promise<void> {
 }
 
 test("orchestrator applies supported privilege requests deterministically and outside the main agent path", async () => {
-  const privilegeBroker = new FakePrivilegeBroker();
-  const { orchestrator, runner, channel } = createTestOrchestrator({
-    mainAgent: new StubMainAgent({
-      action: "launch_task",
-      taskBrief: "Need a host file copied into the share.",
-      taskName: "copy-in",
-      taskLanguage: "English",
-    }),
-    privilegeBroker,
-  });
+  const tmpRoot = resolve(import.meta.dirname, "../../tmp");
+  await mkdir(tmpRoot, { recursive: true });
+  const root = await mkdtemp(resolve(tmpRoot, "sandy-privileges-test-"));
+  const sourcePath = resolve(root, "input.txt");
+  await writeFile(sourcePath, "fixture contents");
+  const fileCopySpy = new FileCopySpy();
+  try {
+    const { orchestrator, runner, channel } = createTestOrchestrator({
+      mainAgent: new StubMainAgent({
+        action: "launch_task",
+        taskBrief: "Need a host file copied into the share.",
+        taskName: "copy-in",
+        taskLanguage: "English",
+      }),
+      fileCopySpy,
+    });
 
-  await orchestrator.handleChatEvent({
-    kind: "user_message",
-    chatId: "chat-3",
-    messageId: "1",
-    timestamp: "2026-04-01T00:00:00.000Z",
-    text: "Copy a host file into the shared workspace",
-    rawText: "Copy a host file into the shared workspace",
-    attachments: [],
-  });
+    await orchestrator.handleChatEvent({
+      kind: "user_message",
+      chatId: "chat-3",
+      messageId: "1",
+      timestamp: "2026-04-01T00:00:00.000Z",
+      text: "Copy a host file into the shared workspace",
+      rawText: "Copy a host file into the shared workspace",
+      attachments: [],
+    });
 
-  const taskId = expectDefined(runner.launches[0], "Expected launch.").taskId;
-  const toolCallPromise = orchestrator.executeNativeWorkerToolCall({
-    taskId,
-    toolName: "copy_into_share",
-    arguments: {
-      sourcePath: "/Users/test/input.txt",
-      targetPath: `${sharedWorkspaceMountPath}/input.txt`,
-      reason: "Need a local fixture file.",
-    },
-  });
+    const taskId = expectDefined(runner.launches[0], "Expected launch.").taskId;
+    const toolCallPromise = orchestrator.executeNativeWorkerToolCall({
+      taskId,
+      toolName: "copy_into_share",
+      arguments: {
+        sourcePath,
+        targetPath: `${sharedWorkspaceMountPath}/input.txt`,
+        reason: "Need a local fixture file.",
+      },
+    });
 
-  const requestId = channel.privilegeRequests[0]?.request.requestId;
+    const requestId = channel.privilegeRequests[0]?.request.requestId;
 
-  await orchestrator.handleChatEvent({
-    kind: "approval_response",
-    chatId: "chat-3",
-    messageId: "2",
-    timestamp: "2026-04-01T00:00:10.000Z",
-    decision: "approve",
-    requestId,
-  });
+    await orchestrator.handleChatEvent({
+      kind: "approval_response",
+      chatId: "chat-3",
+      messageId: "2",
+      timestamp: "2026-04-01T00:00:10.000Z",
+      decision: "approve",
+      requestId,
+    });
 
-  assert.equal(channel.privilegeRequests.length, 1);
-  assert.deepEqual(privilegeBroker.appliedRequests, [{
-    request: {
-      type: "copy_into_share",
-      sourcePath: "/Users/test/input.txt",
-      targetPath: `${sharedWorkspaceMountPath}/input.txt`,
-      reason: "Need a local fixture file.",
-    },
-    taskId,
-    taskSharePath: resolve(import.meta.dirname, "../../tmp", taskId),
-  }]);
-  assert.deepEqual(await toolCallPromise, {
-    isError: false,
-    message: "Applied copy_into_share.",
-  });
-  assert.ok(requestId);
+    assert.equal(channel.privilegeRequests.length, 1);
+    assert.deepEqual(fileCopySpy.appliedRequests, [{
+      request: {
+        type: "copy_into_share",
+        sourcePath,
+        targetPath: `${sharedWorkspaceMountPath}/input.txt`,
+        reason: "Need a local fixture file.",
+      },
+      taskId,
+      taskSharePath: resolve(import.meta.dirname, "../../tmp", taskId),
+    }]);
+    assert.deepEqual(await toolCallPromise, {
+      isError: false,
+      message: `Copied ${sourcePath} into the shared workspace at ${sharedWorkspaceMountPath}/input.txt.`,
+    });
+    assert.ok(requestId);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("orchestrator sends worker-requested shared files back through the channel", async () => {

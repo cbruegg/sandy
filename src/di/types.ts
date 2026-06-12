@@ -37,7 +37,6 @@ import type { HostfsServices } from "../hostfs/index.js";
 import type { WorkerImageManager } from "../worker-image-manager.js";
 import type { JobScheduler } from "../jobs/job-scheduler.js";
 import type { ScheduledJobService } from "../jobs/job-service.js";
-import type { PrivilegeBrokerImpl } from "../privilege/privilege-broker.js";
 import type { TranscriptionProvider } from "../transcription/transcription-provider.js";
 
 // ---------------------------------------------------------------------------
@@ -222,7 +221,6 @@ export type OrchestratorLayerResult = {
   readonly workerToolsHandler: WorkerToolsHandler;
   readonly privileges: OrchestratorPrivilegesImpl;
   readonly orchestrator: SandyOrchestrator;
-  readonly privilegeBroker: PrivilegeBrokerImpl;
   stop(): Promise<void>;
 };
 

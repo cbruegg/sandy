@@ -1,7 +1,5 @@
-import type { PrivilegeBroker } from "../privilege/privilege-broker.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 import type { JobApprovalStoreApi } from "../jobs/job-approval-store.js";
-import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import { messages } from "../messages.js";
 import type {
   ActiveTaskState,
@@ -11,7 +9,6 @@ import type {
   SessionState,
 } from "../types.js";
 import type { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
-import { ActiveTaskRuntimeRegistry } from "./active-task-runtime-registry.js";
 import {
   approvedPrivilegeResult,
   assertNever,
@@ -38,9 +35,6 @@ type ApprovalDecision = Extract<NormalizedChatEvent, { kind: "approval_response"
 export interface PrivilegeContext {
   readonly persistentApprovalStore: PersistentApprovalStore;
   readonly jobApprovalStore: JobApprovalStoreApi;
-  readonly hostfsBroker: HostfsBroker;
-  readonly privilegeBroker: PrivilegeBroker;
-  readonly activeTasks: ActiveTaskRuntimeRegistry;
   readonly workerToolsHandler: WorkerToolsHandler;
 }
 
@@ -193,8 +187,8 @@ export async function resolveHostDirectoryRequest(
 }
 
 /**
- * Performs the actual host directory mount grant via the hostfs broker, prefixing the
- * caller-provided scope message onto the returned grant path.
+ * Performs the actual host directory mount grant via the worker tools handler,
+ * prefixing the caller-provided scope message onto the returned grant path.
  */
 export async function grantHostDirectoryWithMessage(
   ctx: PrivilegeContext,
@@ -211,23 +205,17 @@ async function grantHostDirectoryAccess(
   activeTask: ActiveTaskState,
   request: Extract<PrivilegeRequest, { kind: "host_directory_access" }>,
 ): Promise<PrivilegeResolutionResult> {
-  const taskBundle = ctx.activeTasks.requireHandle(activeTask.taskId).getTaskBundle();
-  if (!taskBundle.hostfsVolumeName) {
-    return failedPrivilegeResult(
-      request.requestId,
-      messages.hostDirectoryAccessFailed(request.path, "This task bundle does not have a hostfs mount."),
-    );
-  }
-
-  const result = await ctx.hostfsBroker.requestDirectoryAccess(
-    taskBundle.bundleId,
-    activeTask.taskId,
-    request.path,
-    request.level,
-  );
+  const result = await ctx.workerToolsHandler.mountHostDirectory({
+    taskId: activeTask.taskId,
+    path: request.path,
+    level: request.level,
+  });
 
   if (!result.ok) {
-    return failedPrivilegeResult(request.requestId, messages.hostDirectoryAccessFailed(request.path, result.error));
+    return failedPrivilegeResult(
+      request.requestId,
+      messages.hostDirectoryAccessFailed(request.path, result.error),
+    );
   }
 
   return approvedPrivilegeResult(request.requestId, `Use the path: ${result.grantPath}`);
@@ -316,10 +304,7 @@ export async function resolveFileCopyRequest(
     return deniedPrivilegeResult(request.requestId, messages.userDeniedPrivilegeRequest(request.requestId));
   }
 
-  const operation = await ctx.privilegeBroker.apply(request.payload, {
-    taskId,
-    taskSharePath: ctx.activeTasks.requireHandle(taskId).getTaskSharePath(),
-  });
+  const operation = await ctx.workerToolsHandler.applyFileCopy(request.payload, { taskId });
   return {
     requestId: request.requestId,
     ...operation,

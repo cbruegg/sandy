@@ -13,7 +13,6 @@ import type {
   SessionState,
   WorkerStartConfig,
 } from "../types.js";
-import type { PrivilegeBroker } from "../privilege/privilege-broker.js";
 import type { SkillService } from "../skills.js";
 import type { OrchestratorTaskLifecycle } from "./task-lifecycle.js";
 import type { OrchestratorPrivileges } from "./privileges.js";
@@ -29,7 +28,6 @@ export type OrchestratorCoreDependencies = {
   buildWorkerStartConfig: () => Promise<WorkerStartConfig>;
   refreshChatGPTTokens?: (taskId: string, previousAccountId: string | null) => Promise<ChatGPTExternalTokens | null>;
   sessionStore: SessionStore;
-  privilegeBroker: PrivilegeBroker;
   persistentApprovalStore: PersistentApprovalStore;
   jobApprovalStore: JobApprovalStoreApi;
   hostfsBroker: HostfsBroker;
