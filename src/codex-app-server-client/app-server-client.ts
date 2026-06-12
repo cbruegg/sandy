@@ -287,6 +287,10 @@ export class CodexAppServerClient implements AgentClient {
       input: this.child.stdout,
       crlfDelay: Infinity,
     });
+    const stderr = createInterface({
+      input: this.child.stderr,
+      crlfDelay: Infinity,
+    });
 
     stdout.on("line", (line) => {
       const trimmed = line.trim();
@@ -297,6 +301,16 @@ export class CodexAppServerClient implements AgentClient {
       } catch {
         // non-JSON line, ignore
       }
+    });
+
+    stderr.on("line", (line) => {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        return;
+      }
+      logger.warn("appserver.stderr", {
+        line: trimmed,
+      });
     });
   }
 

@@ -126,6 +126,37 @@ test("CodexAppServerClient starts threads with kebab-case sandbox mode", async (
   assert.equal(await startThreadPromise, "thread-1");
 });
 
+test("CodexAppServerClient logs app-server stderr lines", async () => {
+  const child = new FakeChildProcess();
+  const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
+  const logs: Array<{ level: LogLevel; event: string; data?: Record<string, unknown> }> = [];
+
+  configureLogger({
+    minLevel: "debug",
+    outputMode: "split",
+    forwardLog: (payload) => {
+      logs.push(payload);
+    },
+  });
+
+  try {
+    await createAmbientAuthClient(spawnImpl, child);
+    child.stderr.write("failed to load configuration\n");
+    await new Promise((resolve) => setImmediate(resolve));
+
+    const logEntry = logs.find((entry) => entry.event === "appserver.stderr");
+    assert.ok(logEntry);
+    assert.equal(logEntry.level, "warn");
+    assert.equal(logEntry.data?.["line"], "failed to load configuration");
+  } finally {
+    configureLogger({
+      minLevel: "info",
+      outputMode: "split",
+      forwardLog: undefined,
+    });
+  }
+});
+
 test("CodexAppServerClient answers auth refresh requests during turns", async () => {
   const child = new FakeChildProcess();
   const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;

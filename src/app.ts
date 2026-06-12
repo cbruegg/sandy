@@ -476,10 +476,20 @@ export async function startApp(): Promise<void> {
   await fatalErrorPromise;
 }
 
-function buildMainAgentConfig(configDirectory: string, isMempalaceEnabled: boolean): ThreadStartParams["config"] {
+export function buildMainAgentConfig(configDirectory: string, isMempalaceEnabled: boolean): ThreadStartParams["config"] {
+  const mempalaceConfig = buildMempalaceMcpServerConfig(configDirectory, isMempalaceEnabled);
+  if (!mempalaceConfig) {
+    if (isMempalaceEnabled) {
+      logger.warn("memory.mempalace_disabled_for_session", {
+        reason: "mcp_config_unavailable",
+      });
+    }
+    return {};
+  }
+
   return {
     mcp_servers: {
-      mempalace: buildMempalaceMcpServerConfig(configDirectory, isMempalaceEnabled)
+      mempalace: mempalaceConfig,
     },
   };
 }
