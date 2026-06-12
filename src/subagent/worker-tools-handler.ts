@@ -1,5 +1,7 @@
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
+import type { JobMutationRequest } from "../jobs/job-types.js";
 import type { JobService } from "../jobs/job-service.js";
+import type { SkillService } from "../skills.js";
 import { resolveTaskShareHostPath } from "../shared-workspace.js";
 import type { ActiveTaskState } from "../types.js";
 import type { ChatId } from "../types.js";
@@ -15,6 +17,7 @@ type UserVisibleOperationRunner = (input: {
 
 export type WorkerToolsHandlerDependencies = {
   readonly jobService: JobService;
+  readonly skillService: SkillService;
   readonly getTaskSharePath: (taskId: string) => string;
   readonly runUserVisibleOperation: UserVisibleOperationRunner;
 };
@@ -81,4 +84,44 @@ export class WorkerToolsHandler {
     }
     return { isError: false, message: JSON.stringify(job) };
   }
+
+  async applySkillMutation(input: {
+    operation: "create" | "update" | "delete";
+    skillId: string;
+    name?: string;
+    description?: string;
+    body?: string;
+  }): Promise<void> {
+    switch (input.operation) {
+      case "create":
+        await this.deps.skillService.createSkill({
+          skillId: input.skillId,
+          name: input.name ?? "",
+          description: input.description ?? "",
+          body: input.body ?? "",
+        });
+        return;
+      case "update":
+        await this.deps.skillService.updateSkill({
+          skillId: input.skillId,
+          ...(input.name !== undefined ? { name: input.name } : {}),
+          ...(input.description !== undefined ? { description: input.description } : {}),
+          ...(input.body !== undefined ? { body: input.body } : {}),
+        });
+        return;
+      case "delete":
+        await this.deps.skillService.deleteSkill({ skillId: input.skillId });
+        return;
+      default:
+        assertNever(input.operation);
+    }
+  }
+
+  async applyJobMutation(mutation: JobMutationRequest): Promise<string> {
+    return await this.deps.jobService.applyMutation(mutation);
+  }
+}
+
+function assertNever(value: never): never {
+  throw new Error(`Unexpected worker tool handler case: ${String(value)}`);
 }

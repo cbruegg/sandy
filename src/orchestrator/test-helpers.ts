@@ -409,12 +409,13 @@ export function createTestOrchestrator(options: {
   const jobService = new FakeJobService();
   const workerToolsHandler = new WorkerToolsHandler({
     jobService,
+    skillService,
     getTaskSharePath: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskSharePath(),
     runUserVisibleOperation: async ({ chatId, taskId, taskName, operation }) => {
       await taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, operation);
     },
   });
-  const privileges = new OrchestratorPrivilegesImpl(coreDeps, activeTaskRuntimes, workerToolsHandler, jobService, taskLifecycle);
+  const privileges = new OrchestratorPrivilegesImpl(coreDeps, activeTaskRuntimes, workerToolsHandler, taskLifecycle);
   const orchestrator = new SandyOrchestrator({
     ...coreDeps,
     channel,

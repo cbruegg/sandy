@@ -126,6 +126,60 @@ test("orchestrator sends worker-requested shared files back through the channel"
   }]);
 });
 
+test("approved skill mutation delegates execution through the worker tools handler", async () => {
+  const { orchestrator, runner, channel, skillService } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Create a skill.",
+      taskName: "skill-create",
+      taskLanguage: "English",
+    }),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-skill-create",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Create a skill",
+    rawText: "Create a skill",
+    attachments: [],
+  });
+
+  const taskId = expectDefined(runner.launches[0], "Expected launch.").taskId;
+  const toolCallPromise = orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "create_skill",
+    arguments: {
+      skillId: "daily-report",
+      name: "Daily report",
+      description: "Generate a daily report.",
+      body: "Run the report and summarize the results.",
+    },
+  });
+
+  await waitFor(() => channel.privilegeRequests.length === 1);
+  const requestId = channel.privilegeRequests[0]?.request.requestId;
+
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-skill-create",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    decision: "approve",
+    requestId,
+  });
+
+  assert.deepEqual(await toolCallPromise, {
+    isError: false,
+    message: messages.skillMutationApproved("create", "daily-report"),
+  });
+  assert.deepEqual(skillService.getSkills(), [{
+    name: "Daily report",
+    description: "Generate a daily report.",
+  }]);
+});
+
 test("request_interaction tool promotes a silent job task to interactive mode", async () => {
   const { orchestrator, taskLifecycle, store, channel } = createTestOrchestrator({
     mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
@@ -160,6 +214,67 @@ test("request_interaction tool promotes a silent job task to interactive mode", 
   const updatedTask = session.findTask(taskId)?.task;
   assert.ok(updatedTask);
   assert.equal(updatedTask.interactionState, "interacting");
+});
+
+test("approved job mutation delegates execution through the worker tools handler", async () => {
+  const { orchestrator, runner, channel } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Create a job.",
+      taskName: "job-create",
+      taskLanguage: "English",
+    }),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-job-create",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Create a job",
+    rawText: "Create a job",
+    attachments: [],
+  });
+
+  const definition: JobDefinition = {
+    id: "daily-report",
+    name: "Daily report",
+    enabled: true,
+    schedule: { kind: "cron", expression: "0 9 * * *" },
+    skillId: "report-skill",
+  };
+
+  const taskId = expectDefined(runner.launches[0], "Expected launch.").taskId;
+  const toolCallPromise = orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "create_job",
+    arguments: { definition },
+  });
+
+  await waitFor(() => channel.privilegeRequests.length === 1);
+  const requestId = channel.privilegeRequests[0]?.request.requestId;
+
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-job-create",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    decision: "approve",
+    requestId,
+  });
+
+  assert.deepEqual(await toolCallPromise, {
+    isError: false,
+    message: `${messages.jobMutationApproved("create", "daily-report")} Updated job daily-report.`,
+  });
+
+  const getJobResult = await orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "get_job",
+    arguments: { jobId: "daily-report" },
+  });
+  assert.equal(getJobResult.isError, false);
+  assert.deepEqual(JSON.parse(getJobResult.message), definition);
 });
 
 test("request_interaction tool is a no-op for user-launched tasks", async () => {

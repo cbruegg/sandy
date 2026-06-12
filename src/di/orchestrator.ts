@@ -127,6 +127,7 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
 
   const workerToolsHandler = new WorkerToolsHandler({
     jobService,
+    skillService: orchestratorCoreDeps.skillService,
     getTaskSharePath: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskSharePath(),
     runUserVisibleOperation: async ({ chatId, taskId, taskName, operation }) => {
       await taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, operation);
@@ -137,7 +138,6 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     orchestratorCoreDeps,
     activeTaskRuntimes,
     workerToolsHandler,
-    jobService,
     taskLifecycle,
   );
 

@@ -9,7 +9,6 @@ import type { NativeWorkerToolCallResult, WorkerToolPayload } from "../subagent/
 import type { ActiveTaskState, NormalizedChatEvent, PrivilegeRequest, PrivilegeResolutionResult, SessionState } from "../types.js";
 import type { ChatId } from "../types.js";
 import type { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
-import type { JobService } from "../jobs/job-service.js";
 
 export interface OrchestratorPrivileges {
   executeNativeWorkerToolCall(input: {
@@ -41,7 +40,6 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     private readonly deps: Omit<OrchestratorCoreDependencies, "channel">,
     private readonly activeTasks: ActiveTaskRuntimeRegistry,
     private readonly workerToolsHandler: WorkerToolsHandler,
-    private readonly jobService: JobService,
     private readonly taskFailureHandler: TaskFailureHandler,
   ) {}
 
@@ -903,30 +901,13 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     }
 
     try {
-      switch (request.operation) {
-        case "create":
-          await this.deps.skillService.createSkill({
-            skillId: request.skillId,
-            name: request.name ?? "",
-            description: request.description ?? "",
-            body: request.body ?? "",
-          });
-          break;
-        case "update":
-          await this.deps.skillService.updateSkill({
-            skillId: request.skillId,
-            ...(request.name !== undefined ? { name: request.name } : {}),
-            ...(request.description !== undefined ? { description: request.description } : {}),
-            ...(request.body !== undefined ? { body: request.body } : {}),
-          });
-          break;
-        case "delete":
-          await this.deps.skillService.deleteSkill({ skillId: request.skillId });
-          break;
-        default:
-          assertNever(request.operation);
-      }
-
+      await this.workerToolsHandler.applySkillMutation({
+        operation: request.operation,
+        skillId: request.skillId,
+        name: request.name,
+        description: request.description,
+        body: request.body,
+      });
       return {
         requestId: request.requestId,
         outcome: "approved",
@@ -965,7 +946,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     }
 
     try {
-      const detail = await this.jobService.applyMutation(request.mutation);
+      const detail = await this.workerToolsHandler.applyJobMutation(request.mutation);
       return {
         requestId: request.requestId,
         outcome: "approved",
