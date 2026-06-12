@@ -6,7 +6,7 @@ import { ActiveTaskRuntimeRegistry } from "./active-task-runtime-registry.js";
 import type {OrchestratorCoreDependencies} from "./shared.js";
 import { parseWorkerToolPayload } from "../subagent/worker-tools.js";
 import type { NativeWorkerToolCallResult, WorkerToolPayload } from "../subagent/worker-tools.js";
-import type { NormalizedChatEvent, PrivilegeRequest, PrivilegeResolutionResult, SessionState } from "../types.js";
+import type { ActiveTaskState, NormalizedChatEvent, PrivilegeRequest, PrivilegeResolutionResult, SessionState } from "../types.js";
 import type { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
 import type { JobService } from "../jobs/job-service.js";
 
@@ -206,7 +206,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   private async executeWorkerToolCall(
     chatId: string,
     session: SessionState,
-    activeTask: NonNullable<SessionState["activeTask"]>,
+    activeTask: ActiveTaskState,
     call: WorkerToolPayload,
   ): Promise<NativeWorkerToolCallResult> {
     const taskId = activeTask.taskId;
@@ -382,7 +382,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   }
 
   private async grantHostDirectoryAccess(
-    activeTask: NonNullable<SessionState["activeTask"]>,
+    activeTask: ActiveTaskState,
     request: Extract<PrivilegeRequest, { kind: "host_directory_access" }>,
   ): Promise<PrivilegeResolutionResult> {
     const taskBundle = this.activeTasks.requireHandle(activeTask.taskId).getTaskBundle();
@@ -460,7 +460,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   }
 
   private async tryAuthorizeHostDirectoryAccess(
-    activeTask: NonNullable<SessionState["activeTask"]>,
+    activeTask: ActiveTaskState,
     request: Extract<PrivilegeRequest, { kind: "host_directory_access" }>,
   ): Promise<PrivilegeResolutionResult | null> {
     if (this.isTaskHostDirectoryAccessAllowed(activeTask, request.path, request.level)) {
@@ -483,7 +483,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   }
 
   private grantTaskHostDirectoryAccess(
-    task: NonNullable<SessionState["activeTask"]>,
+    task: ActiveTaskState,
     path: string,
     level: "read_only" | "read_write",
   ): void {
@@ -499,7 +499,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   }
 
   private isTaskHostDirectoryAccessAllowed(
-    task: NonNullable<SessionState["activeTask"]>,
+    task: ActiveTaskState,
     path: string,
     level: "read_only" | "read_write",
   ): boolean {
@@ -590,7 +590,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     taskId: string,
     options: {
       serverId: string;
-      isTaskGrantAllowed: (task: NonNullable<SessionState["activeTask"]>) => boolean;
+      isTaskGrantAllowed: (task: ActiveTaskState) => boolean;
       isPersistentAllowed: () => Promise<boolean>;
       sessionMessage: string;
       persistentMessage: string;
@@ -703,8 +703,8 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       sessionMessage: string;
       alwaysMessage: string;
       persistentMessage: string;
-      grantAutoApprovalForTask: (task: NonNullable<SessionState["activeTask"]>) => Promise<void>;
-      grantAccess: (task: NonNullable<SessionState["activeTask"]>) => void;
+      grantAutoApprovalForTask: (task: ActiveTaskState) => Promise<void>;
+      grantAccess: (task: ActiveTaskState) => void;
       persist: () => Promise<void>;
     },
   ): Promise<PrivilegeResolutionResult> {
@@ -773,7 +773,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   }
 
   private isTaskToolGrantAllowed(
-    task: NonNullable<SessionState["activeTask"]>,
+    task: ActiveTaskState,
     serverId: string,
     toolName: string,
   ): boolean {
@@ -781,7 +781,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   }
 
   private grantTaskToolAccess(
-    task: NonNullable<SessionState["activeTask"]>,
+    task: ActiveTaskState,
     serverId: string,
     toolName: string,
   ): void {
@@ -792,7 +792,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   }
 
   private isTaskResourceReadGrantAllowed(
-    task: NonNullable<SessionState["activeTask"]>,
+    task: ActiveTaskState,
     serverId: string,
     uri: string,
   ): boolean {
@@ -800,7 +800,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   }
 
   private grantTaskResourceReadAccess(
-    task: NonNullable<SessionState["activeTask"]>,
+    task: ActiveTaskState,
     serverId: string,
     uri: string,
   ): void {
@@ -981,7 +981,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   }
 
   private tryAuthorizeNativeHttpTokenUse(
-    activeTask: NonNullable<SessionState["activeTask"]>,
+    activeTask: ActiveTaskState,
     request: Extract<PrivilegeRequest, { kind: "http_token_use" }>,
   ): PrivilegeResolutionResult | null {
 
@@ -1035,7 +1035,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   }
 
   private grantHttpTokenOnce(
-    task: NonNullable<SessionState["activeTask"]>,
+    task: ActiveTaskState,
     tokenId: string,
     host: string,
   ): void {
@@ -1043,7 +1043,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   }
 
   private grantHttpTokenSessionAccess(
-    task: NonNullable<SessionState["activeTask"]>,
+    task: ActiveTaskState,
     tokenId: string,
     host: string,
   ): void {
@@ -1054,7 +1054,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   }
 
   private async grantMcpAutoApprovalForTask(
-    task: NonNullable<SessionState["activeTask"]>,
+    task: ActiveTaskState,
     serverId: string,
   ): Promise<void> {
     await this.updateTaskPolicy(task, () => {
@@ -1067,7 +1067,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   }
 
   private async grantHttpTokenAutoApprovalForTask(
-    task: NonNullable<SessionState["activeTask"]>,
+    task: ActiveTaskState,
     tokenId: string,
   ): Promise<void> {
     await this.updateTaskPolicy(task, () => {
@@ -1080,7 +1080,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   }
 
   private async updateTaskPolicy(
-    task: NonNullable<SessionState["activeTask"]>,
+    task: ActiveTaskState,
     applyMutation: () => boolean,
   ): Promise<void> {
     const changed = applyMutation();
@@ -1095,11 +1095,11 @@ export interface TaskFailureHandler {
   failActiveTaskFromEventHandling(session: SessionState, taskId: string, message: string): Promise<void>;
 }
 
-function isMcpAutoApprovalAllowed(task: NonNullable<SessionState["activeTask"]>, serverId: string): boolean {
+function isMcpAutoApprovalAllowed(task: ActiveTaskState, serverId: string): boolean {
   return task.taskPolicy.autoApproveMcpServers.includes(serverId);
 }
 
-function isHttpTokenAutoApprovalAllowed(task: NonNullable<SessionState["activeTask"]>, tokenId: string): boolean {
+function isHttpTokenAutoApprovalAllowed(task: ActiveTaskState, tokenId: string): boolean {
   return task.taskPolicy.autoApproveHttpTokens.includes(tokenId);
 }
 

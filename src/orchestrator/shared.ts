@@ -6,10 +6,10 @@ import type { SandboxRunner } from "../sandbox/sandbox-runner.js";
 import type { SessionStore } from "../session/in-memory-session-store.js";
 import type { JobApprovalStoreApi } from "../jobs/job-approval-store.js";
 import type {
+  ActiveTaskState,
   ChatGPTExternalTokens,
   ChannelFormatting,
   NormalizedChatEvent,
-  SessionState,
   WorkerStartConfig,
 } from "../types.js";
 import type { PrivilegeBroker } from "../privilege/privilege-broker.js";
@@ -20,7 +20,7 @@ import type { TaskCoordinator } from "./task-coordinator.js";
 
 export type SupportedChatEvent = Exclude<NormalizedChatEvent, { kind: "unsupported_input" }>;
 export type UserMessageEvent = Extract<NormalizedChatEvent, { kind: "user_message" }>;
-export type ActiveTaskStatus = NonNullable<SessionState["activeTask"]>["status"];
+export type ActiveTaskStatus = ActiveTaskState["status"];
 
 export type OrchestratorCoreDependencies = {
   mainAgent: MainAgentController;

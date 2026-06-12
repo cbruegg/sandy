@@ -3,7 +3,7 @@ import type { SessionStore } from "../session/in-memory-session-store.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 import type { PrivilegeResolutionResult } from "../types.js";
 import { messages } from "../messages.js";
-import type { SessionState } from "../types/task-state.js";
+import type { ActiveTaskState } from "../types/task-state.js";
 
 
 type AuthorizeHttpTokenUseInput = {
@@ -82,14 +82,14 @@ export class HttpTokenAuthorizer {
 }
 
 function isHttpTokenAutoApprovalAllowed(
-  task: NonNullable<SessionState["activeTask"]>,
+  task: ActiveTaskState,
   tokenId: string,
 ): boolean {
   return task.taskPolicy.autoApproveHttpTokens.includes(tokenId);
 }
 
 function isHttpTokenSessionGrantAllowed(
-  task: NonNullable<SessionState["activeTask"]>,
+  task: ActiveTaskState,
   tokenId: string,
   host: string,
 ): boolean {

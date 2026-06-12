@@ -18,6 +18,7 @@ import {
   createActiveTaskState,
 } from "../types.js";
 import type {
+  ActiveTaskState,
   ChannelFormatting,
   MainAgentDecision,
   MainAgentTaskPolicy,
@@ -492,14 +493,14 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     await this.closeTask(session, taskId);
   }
 
-  private buildCompletedTaskFallbackSummary(task: NonNullable<SessionState["activeTask"]>): string {
+  private buildCompletedTaskFallbackSummary(task: ActiveTaskState): string {
     return [
       `The task ended without a worker-provided handoff summary. Task name: ${task.taskName}.`,
       "Open questions: Review the visible task updates above if more detail is needed.",
     ].join("\n");
   }
 
-  private failPendingPrivilegeRequestOnTaskClose(task: NonNullable<SessionState["activeTask"]>): void {
+  private failPendingPrivilegeRequestOnTaskClose(task: ActiveTaskState): void {
     if (!task.pendingPrivilegeRequest) {
       return;
     }
