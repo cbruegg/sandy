@@ -1,14 +1,14 @@
 import { z } from "zod";
-import type { PrivilegedWorkerToolPayload } from "../subagent/worker-tools.js";
 import type {HostDirectoryAccessLevel} from "../hostfs/path-policy.ts";
 import type { JobMutationRequest } from "../jobs/job-types.js";
+import type { FileCopyWorkerToolPayload } from "../subagent/worker-tools.js";
 
 const privilegeApprovalScopeSchema = z.enum(["once", "worker_session", "always"]);
 
-type HostOperationPrivilegeRequest = {
-  kind: "host_operation";
+type FileCopyPrivilegeRequest = {
+  kind: "file_copy";
   requestId: string;
-  payload: PrivilegedWorkerToolPayload;
+  payload: FileCopyWorkerToolPayload;
 };
 
 type HostDirectoryAccessPrivilegeRequest = {
@@ -60,7 +60,7 @@ type JobMutationPrivilegeRequest = {
   mutation: JobMutationRequest;
 };
 
-export type PrivilegeRequest = HostOperationPrivilegeRequest | HostDirectoryAccessPrivilegeRequest | McpToolCallPrivilegeRequest | McpResourceReadPrivilegeRequest | HttpTokenUsePrivilegeRequest | SkillMutationPrivilegeRequest | JobMutationPrivilegeRequest;
+export type PrivilegeRequest = FileCopyPrivilegeRequest | HostDirectoryAccessPrivilegeRequest | McpToolCallPrivilegeRequest | McpResourceReadPrivilegeRequest | HttpTokenUsePrivilegeRequest | SkillMutationPrivilegeRequest | JobMutationPrivilegeRequest;
 
 export const privilegeResolutionResultSchema = z.object({
   requestId: z.string().min(1),

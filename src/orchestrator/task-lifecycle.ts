@@ -34,8 +34,9 @@ import type { ChatId } from "../types.js";
 import type { JobDefinition } from "../jobs/job-validation.js";
 import { buildJobTaskBrief } from "../jobs/job-task-brief.js";
 import type { SandboxHandle, TaskStartInput } from "../sandbox/sandbox-runner.js";
-import type {TaskFailureHandler} from "./privileges.ts";
+import type { TaskFailureHandler } from "./shared.js";
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
+import { failedPrivilegeResult, isMcpPrivilegeRequest, isNativeToolPrivilegeRequest } from "./privilege-results.js";
 
 export interface OrchestratorTaskLifecycle {
   resolvePendingShareDeletion(session: SessionState, decision: "approve" | "deny"): Promise<void>;
@@ -507,23 +508,15 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     }
 
     const failedResult = {
-      requestId: task.pendingPrivilegeRequest.requestId,
-      outcome: "failed" as const,
-      message: messages.taskEndedBeforePrivilegeRequestResolved(
-        task.taskId,
+      ...failedPrivilegeResult(
         task.pendingPrivilegeRequest.requestId,
+        messages.taskEndedBeforePrivilegeRequestResolved(task.taskId, task.pendingPrivilegeRequest.requestId),
       ),
     };
-    if (task.pendingPrivilegeRequest.kind === "mcp_tool_call" || task.pendingPrivilegeRequest.kind === "mcp_resource_read") {
+    if (isMcpPrivilegeRequest(task.pendingPrivilegeRequest)) {
       this.activeTasks.resolvePendingMcpPrivilege(task.pendingPrivilegeRequest.requestId, failedResult);
     }
-    if (
-      task.pendingPrivilegeRequest.kind === "host_operation"
-      || task.pendingPrivilegeRequest.kind === "http_token_use"
-      || task.pendingPrivilegeRequest.kind === "host_directory_access"
-      || task.pendingPrivilegeRequest.kind === "skill_mutation"
-      || task.pendingPrivilegeRequest.kind === "job_mutation"
-    ) {
+    if (isNativeToolPrivilegeRequest(task.pendingPrivilegeRequest)) {
       this.activeTasks.resolvePendingNativeTool(task.pendingPrivilegeRequest.requestId, failedResult);
     }
   }

@@ -7,7 +7,6 @@ import { OrchestratorPrivilegesImpl } from "../orchestrator/privileges.js";
 import { ActiveTaskRuntimeRegistry } from "../orchestrator/active-task-runtime-registry.js";
 import { OrchestratorTaskLifecycleImpl } from "../orchestrator/task-lifecycle.js";
 import { TaskCoordinator } from "../orchestrator/task-coordinator.js";
-import { PrivilegeBrokerImpl } from "../privilege/privilege-broker.js";
 import { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
 import { JobScheduler } from "../jobs/job-scheduler.js";
 import { ScheduledJobService } from "../jobs/job-service.js";
@@ -87,7 +86,6 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     },
   });
 
-  const privilegeBroker = new PrivilegeBrokerImpl();
   const orchestratorCoreDeps = {
     mainAgent,
     sandboxRunner,
@@ -100,7 +98,6 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     ),
     refreshChatGPTTokens,
     sessionStore,
-    privilegeBroker,
     persistentApprovalStore,
     jobApprovalStore,
     hostfsBroker,
@@ -128,7 +125,9 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
   const workerToolsHandler = new WorkerToolsHandler({
     jobService,
     skillService: orchestratorCoreDeps.skillService,
+    hostfsBroker,
     getTaskSharePath: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskSharePath(),
+    getTaskBundle: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskBundle(),
     runUserVisibleOperation: async ({ chatId, taskId, taskName, operation }) => {
       await taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, operation);
     },
@@ -159,7 +158,6 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     activeTaskRuntimes,
     taskCoordinator,
     orchestratorCoreDeps,
-    privilegeBroker,
     taskLifecycle,
     jobScheduler,
     jobService,

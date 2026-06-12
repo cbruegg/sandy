@@ -1,12 +1,18 @@
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
+import { cp, mkdir } from "node:fs/promises";
+import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
+import type { HostDirectoryAccessLevel } from "../hostfs/path-policy.js";
 import type { JobMutationRequest } from "../jobs/job-types.js";
 import type { JobService } from "../jobs/job-service.js";
+import { messages } from "../messages.js";
+import { dirname } from "node:path";
+import { resolveAbsoluteHostPath } from "../host-paths.js";
+import type { SandboxTaskBundle } from "../sandbox/sandbox-runner.js";
 import type { SkillService } from "../skills.js";
 import { resolveTaskShareHostPath } from "../shared-workspace.js";
 import type { ActiveTaskState } from "../types.js";
 import type { ChatId } from "../types.js";
-import type {NativeWorkerToolCallResult} from "../subagent/worker-tools.js";
-import {messages} from "../messages.ts";
+import type { FileCopyWorkerToolPayload, NativeWorkerToolCallResult } from "../subagent/worker-tools.js";
 
 type UserVisibleOperationRunner = (input: {
   chatId: ChatId;
@@ -18,8 +24,15 @@ type UserVisibleOperationRunner = (input: {
 export type WorkerToolsHandlerDependencies = {
   readonly jobService: JobService;
   readonly skillService: SkillService;
+  readonly hostfsBroker: HostfsBroker;
   readonly getTaskSharePath: (taskId: string) => string;
+  readonly getTaskBundle: (taskId: string) => SandboxTaskBundle;
   readonly runUserVisibleOperation: UserVisibleOperationRunner;
+};
+
+type FileCopyOperationResult = {
+  outcome: "approved" | "failed";
+  message: string;
 };
 
 export class WorkerToolsHandler {
@@ -43,7 +56,7 @@ export class WorkerToolsHandler {
         );
       },
     });
-    return { isError: false, message: messages.sharedFileSentToUser(input.sharePath) }
+    return { isError: false, message: messages.sharedFileSentToUser(input.sharePath) };
   }
 
   async requestInteraction(input: {
@@ -119,6 +132,90 @@ export class WorkerToolsHandler {
 
   async applyJobMutation(mutation: JobMutationRequest): Promise<string> {
     return await this.deps.jobService.applyMutation(mutation);
+  }
+
+  async applyFileCopy(
+    request: FileCopyWorkerToolPayload,
+    input: { taskId: string },
+  ): Promise<FileCopyOperationResult> {
+    const taskSharePath = this.deps.getTaskSharePath(input.taskId);
+
+    try {
+      switch (request.type) {
+        case "copy_into_share":
+          return await this.copyIntoShare(request, taskSharePath);
+        case "copy_out_of_share":
+          return await this.copyOutOfShare(request, taskSharePath);
+        default:
+          return assertNever(request);
+      }
+    } catch (error) {
+      return {
+        outcome: "failed",
+        message: error instanceof Error ? error.message : "Privilege operation failed.",
+      };
+    }
+  }
+
+  async mountHostDirectory(input: {
+    taskId: string;
+    path: string;
+    level: HostDirectoryAccessLevel;
+  }): Promise<{ ok: true; grantPath: string } | { ok: false; error: string }> {
+    const taskBundle = this.deps.getTaskBundle(input.taskId);
+    if (!taskBundle.hostfsVolumeName) {
+      return {
+        ok: false,
+        error: "This task bundle does not have a hostfs mount.",
+      };
+    }
+
+    const result = await this.deps.hostfsBroker.requestDirectoryAccess(
+      taskBundle.bundleId,
+      input.taskId,
+      input.path,
+      input.level,
+    );
+    if (!result.ok) {
+      return result;
+    }
+
+    return {
+      ok: true,
+      grantPath: result.grantPath,
+    };
+  }
+
+  private async copyIntoShare(
+    request: Extract<FileCopyWorkerToolPayload, { type: "copy_into_share" }>,
+    taskSharePath: string,
+  ): Promise<FileCopyOperationResult> {
+    const sourcePath = resolveAbsoluteHostPath(request.sourcePath, "copy_into_share sourcePath");
+    const targetPath = resolveTaskShareHostPath(taskSharePath, request.targetPath, "copy_into_share targetPath");
+
+    await mkdir(dirname(targetPath), { recursive: true });
+    await cp(sourcePath, targetPath, { recursive: true });
+
+    return {
+      outcome: "approved",
+      message: `Copied ${sourcePath} into the shared workspace at ${request.targetPath}.`,
+    };
+  }
+
+  private async copyOutOfShare(
+    request: Extract<FileCopyWorkerToolPayload, { type: "copy_out_of_share" }>,
+    taskSharePath: string,
+  ): Promise<FileCopyOperationResult> {
+    const sourcePath = resolveTaskShareHostPath(taskSharePath, request.sourcePath, "copy_out_of_share sourcePath");
+    const targetPath = resolveAbsoluteHostPath(request.targetPath, "copy_out_of_share targetPath");
+
+    await mkdir(dirname(targetPath), { recursive: true });
+    await cp(sourcePath, targetPath, { recursive: true });
+
+    return {
+      outcome: "approved",
+      message: `Copied ${request.sourcePath} out of the shared workspace to ${targetPath}.`,
+    };
   }
 }
 

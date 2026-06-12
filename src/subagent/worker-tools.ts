@@ -73,6 +73,10 @@ const copyOutOfShareSchema = z.object({
   reason: z.string(),
 }).strict();
 
+export type FileCopyWorkerToolPayload =
+  | z.infer<typeof copyIntoShareSchema>
+  | z.infer<typeof copyOutOfShareSchema>;
+
 const sendFileToChannelSchema = z.object({
   type: z.literal(sendFileToChannelToolName),
   path: z.string(),
@@ -219,20 +223,6 @@ export type WorkerToolPayload =
   | z.infer<typeof deleteSkillSchema>
   | z.infer<typeof listJobsSchema>
   | z.infer<typeof getJobSchema>
-  | z.infer<typeof createJobSchema>
-  | z.infer<typeof updateJobSchema>
-  | z.infer<typeof deleteJobSchema>
-  | z.infer<typeof enableJobSchema>
-  | z.infer<typeof disableJobSchema>
-  | z.infer<typeof runJobNowSchema>;
-export type PrivilegedWorkerToolPayload =
-  | z.infer<typeof copyIntoShareSchema>
-  | z.infer<typeof copyOutOfShareSchema>
-  | z.infer<typeof requestHttpTokenSchema>
-  | z.infer<typeof requestHostDirectoryAccessSchema>
-  | z.infer<typeof createSkillSchema>
-  | z.infer<typeof updateSkillSchema>
-  | z.infer<typeof deleteSkillSchema>
   | z.infer<typeof createJobSchema>
   | z.infer<typeof updateJobSchema>
   | z.infer<typeof deleteJobSchema>

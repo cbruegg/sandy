@@ -10,9 +10,9 @@ import type {
   ChatGPTExternalTokens,
   ChannelFormatting,
   NormalizedChatEvent,
+  SessionState,
   WorkerStartConfig,
 } from "../types.js";
-import type { PrivilegeBroker } from "../privilege/privilege-broker.js";
 import type { SkillService } from "../skills.js";
 import type { OrchestratorTaskLifecycle } from "./task-lifecycle.js";
 import type { OrchestratorPrivileges } from "./privileges.js";
@@ -28,7 +28,6 @@ export type OrchestratorCoreDependencies = {
   buildWorkerStartConfig: () => Promise<WorkerStartConfig>;
   refreshChatGPTTokens?: (taskId: string, previousAccountId: string | null) => Promise<ChatGPTExternalTokens | null>;
   sessionStore: SessionStore;
-  privilegeBroker: PrivilegeBroker;
   persistentApprovalStore: PersistentApprovalStore;
   jobApprovalStore: JobApprovalStoreApi;
   hostfsBroker: HostfsBroker;
@@ -42,3 +41,7 @@ export type SandyOrchestratorDependencies = OrchestratorCoreDependencies & {
   taskLifecycle: OrchestratorTaskLifecycle;
   privileges: OrchestratorPrivileges;
 };
+
+export interface TaskFailureHandler {
+  failActiveTaskFromEventHandling(session: SessionState, taskId: string, message: string): Promise<void>;
+}
