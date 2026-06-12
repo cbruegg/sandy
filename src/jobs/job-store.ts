@@ -25,8 +25,13 @@ export class JobStore {
     const index = data.definitions.findIndex((candidate) => candidate.id === validDefinition.id);
     if (index === -1) data.definitions.push(validDefinition);
     else data.definitions[index] = validDefinition;
-    if (!data.runtimeState.some((state) => state.jobId === validDefinition.id)) {
+    const existingState = data.runtimeState.find((state) => state.jobId === validDefinition.id);
+    if (!existingState) {
       data.runtimeState.push({ jobId: validDefinition.id, lastRunAt: null });
+    } else if (validDefinition.schedule.kind === "one_shot") {
+      // When a one-shot job definition is replaced, reset its lastRunAt so the
+      // scheduler picks up the new run time instead of skipping it.
+      existingState.lastRunAt = null;
     }
     await this.save(data);
   }

@@ -129,7 +129,6 @@ const jobDefinitionInputSchema = z.object({
   enabled: z.boolean(),
   schedule: jobScheduleSchema,
   skillId: z.string(),
-  prompt: z.string().optional(),
 }).strict();
 
 const listJobsSchema = z.object({ type: z.literal(listJobsToolName) }).strict();

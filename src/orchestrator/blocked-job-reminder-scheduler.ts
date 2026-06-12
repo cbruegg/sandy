@@ -95,6 +95,10 @@ export class BlockedJobReminderScheduler {
       (this.scheduledReminders.get(chatId)?.nextDelayMs ?? initialReminderDelayMs) * 2,
       maximumReminderDelayMs,
     );
-    this.scheduleOrClear(chatId, nextDelayMs);
+    this.clearExistingTimeout(chatId);
+    const timeout = this.setTimeoutImpl(() => {
+      void this.sendReminder(chatId);
+    }, nextDelayMs);
+    this.scheduledReminders.set(chatId, { timeout, nextDelayMs });
   }
 }
