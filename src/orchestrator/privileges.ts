@@ -7,6 +7,7 @@ import type {OrchestratorCoreDependencies} from "./shared.js";
 import { parseWorkerToolPayload } from "../subagent/worker-tools.js";
 import type { NativeWorkerToolCallResult, WorkerToolPayload } from "../subagent/worker-tools.js";
 import type { ActiveTaskState, NormalizedChatEvent, PrivilegeRequest, PrivilegeResolutionResult, SessionState } from "../types.js";
+import type { ChatId } from "../types.js";
 import type { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
 import type { JobService } from "../jobs/job-service.js";
 
@@ -204,7 +205,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   }
 
   private async executeWorkerToolCall(
-    chatId: string,
+    chatId: ChatId,
     session: SessionState,
     activeTask: ActiveTaskState,
     call: WorkerToolPayload,
@@ -329,7 +330,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   }
 
   private async awaitNativeToolPrivilegeResolution(
-    chatId: string,
+    chatId: ChatId,
     session: SessionState,
     taskId: string,
     request: Extract<PrivilegeRequest, { kind: "host_operation" | "http_token_use" | "host_directory_access" | "skill_mutation" | "job_mutation" }>,
@@ -556,7 +557,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
   }
 
   private async sendPrivilegeResolutionMessage(
-    chatId: string,
+    chatId: ChatId,
     taskId: string,
     taskName: string,
     result: PrivilegeResolutionResult,

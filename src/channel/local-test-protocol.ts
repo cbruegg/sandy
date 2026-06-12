@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import { z } from "zod";
 import type { MessageAttachment, NormalizedChatEvent, PrivilegeRequest } from "../types.js";
+import type { ChatId } from "../types.js";
 
 const approvalDecisionSchema = z.enum(["approve", "approve_once", "approve_worker_session", "approve_always", "deny"]);
 
@@ -47,7 +48,7 @@ const localTestInboundEventSchema = z.discriminatedUnion("kind", [
 
 type OutboundBase = {
   eventId: string;
-  chatId: string;
+  chatId: ChatId;
   timestamp: string;
 };
 

@@ -1,7 +1,9 @@
 import type { MessageAttachment } from "./attachments.js";
 
+export type ChatId = string;
+
 type ChatEventBase = {
-  chatId: string;
+  chatId: ChatId;
   messageId: string;
   timestamp: string;
 };

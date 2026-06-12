@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { ChannelFormatting } from "./channel.js";
 import type { ActiveTaskState } from "./task-state.js";
 import type { TranscriptEntry } from "./transcript.js";
+import type { ChatId } from "./chat-events.js";
 
 const mainAgentTaskPolicySchema = z.object({
   autoApproveMcpServers: z.array(z.string().min(1)).default([]),
@@ -27,7 +28,7 @@ export type MainAgentTaskPolicy = z.infer<typeof mainAgentTaskPolicySchema>;
 export type MainAgentTaskPolicyInput = z.input<typeof mainAgentTaskPolicySchema>;
 
 export type DecideContext = {
-  chatId: string;
+  chatId: ChatId;
   newVisibleEntries: TranscriptEntry[];
   activeTask: ActiveTaskState | null;
   channelFormatting: ChannelFormatting;

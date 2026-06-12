@@ -30,6 +30,7 @@ import type {
   TaskOrigin,
   TranscriptEntry,
 } from "../types.js";
+import type { ChatId } from "../types.js";
 import type { JobDefinition } from "../jobs/job-validation.js";
 import { buildJobTaskBrief } from "../jobs/job-task-brief.js";
 import type { SandboxHandle, TaskStartInput } from "../sandbox/sandbox-runner.js";
@@ -44,7 +45,7 @@ export interface OrchestratorTaskLifecycle {
   markActiveTaskFinished(taskId: string): Promise<void>;
   requireActiveTaskHandle(taskId: string): SandboxHandle;
   stageAttachments(
-    chatId: string,
+    chatId: ChatId,
     messageId: string,
     attachments: UserMessageEvent["attachments"],
     taskSharePath: string,
@@ -59,7 +60,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     private readonly channel: ChannelAdapter,
   ) {}
 
-  async routeSubAgentEvent(chatId: string, taskId: string, event: SubAgentEvent): Promise<void> {
+  async routeSubAgentEvent(chatId: ChatId, taskId: string, event: SubAgentEvent): Promise<void> {
     const session = this.deps.sessionStore.getOrCreate(chatId);
     const taskRecord = session.findTask(taskId);
     if (!taskRecord) {
@@ -238,7 +239,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     }
   }
 
-  async launchJobTask(job: JobDefinition, chatId: string, workspacePath: string | null): Promise<string> {
+  async launchJobTask(job: JobDefinition, chatId: ChatId, workspacePath: string | null): Promise<string> {
     const session = this.deps.sessionStore.getOrCreate(chatId);
 
     const taskId = randomUUID();
@@ -280,7 +281,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
   }
 
   private async launchTaskInSandbox(
-    chatId: string,
+    chatId: ChatId,
     taskId: string,
     taskName: string,
     taskLanguage: string,
@@ -344,7 +345,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     task.taskSummary = trimmedSummary;
   }
 
-  async sendTaskSummaryForReview(chatId: string, session: SessionState, taskId: string): Promise<void> {
+  async sendTaskSummaryForReview(chatId: ChatId, session: SessionState, taskId: string): Promise<void> {
     const activeTask = this.deps.taskCoordinator.findTask(session, taskId);
     if (!activeTask) {
       return;
@@ -411,7 +412,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
   }
 
   async stageAttachments(
-    chatId: string,
+    chatId: ChatId,
     messageId: string,
     attachments: Extract<NormalizedChatEvent, { kind: "user_message" }>["attachments"],
     taskSharePath: string,

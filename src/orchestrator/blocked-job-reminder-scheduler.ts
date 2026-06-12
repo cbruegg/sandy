@@ -1,6 +1,7 @@
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
+import type { ChatId } from "../types.js";
 
 export type TimerControls = {
   now?: () => number;
@@ -9,7 +10,7 @@ export type TimerControls = {
 };
 
 export type BlockedJobReminderContext = {
-  chatId: string;
+  chatId: ChatId;
   blockerTaskId: string;
   blockerTaskName: string;
   blockerStartedAt: string;
@@ -25,14 +26,14 @@ const initialReminderDelayMs = 5 * 60 * 1000;
 const maximumReminderDelayMs = 60 * 60 * 1000;
 
 export class BlockedJobReminderScheduler {
-  private readonly scheduledReminders = new Map<string, ScheduledReminder>();
+  private readonly scheduledReminders = new Map<ChatId, ScheduledReminder>();
   private readonly now: () => number;
   private readonly setTimeoutImpl: typeof setTimeout;
   private readonly clearTimeoutImpl: typeof clearTimeout;
 
   constructor(
     private readonly channel: ChannelAdapter,
-    private readonly getContext: (chatId: string) => BlockedJobReminderContext | null,
+    private readonly getContext: (chatId: ChatId) => BlockedJobReminderContext | null,
     timerControls?: TimerControls,
   ) {
     this.now = timerControls?.now ?? (() => Date.now());
@@ -40,16 +41,16 @@ export class BlockedJobReminderScheduler {
     this.clearTimeoutImpl = timerControls?.clearTimeoutImpl ?? clearTimeout;
   }
 
-  sync(chatId: string): void {
+  sync(chatId: ChatId): void {
     const nextDelayMs = this.scheduledReminders.get(chatId)?.nextDelayMs ?? initialReminderDelayMs;
     this.scheduleOrClear(chatId, nextDelayMs);
   }
 
-  resetAfterUserInteraction(chatId: string): void {
+  resetAfterUserInteraction(chatId: ChatId): void {
     this.scheduleOrClear(chatId, initialReminderDelayMs);
   }
 
-  private scheduleOrClear(chatId: string, nextDelayMs: number): void {
+  private scheduleOrClear(chatId: ChatId, nextDelayMs: number): void {
     this.clearExistingTimeout(chatId);
 
     const context = this.getContext(chatId);
@@ -66,7 +67,7 @@ export class BlockedJobReminderScheduler {
     this.scheduledReminders.set(chatId, { timeout, nextDelayMs });
   }
 
-  private clearExistingTimeout(chatId: string): void {
+  private clearExistingTimeout(chatId: ChatId): void {
     const scheduled = this.scheduledReminders.get(chatId);
     if (!scheduled) {
       return;
@@ -76,7 +77,7 @@ export class BlockedJobReminderScheduler {
     this.scheduledReminders.delete(chatId);
   }
 
-  private async sendReminder(chatId: string): Promise<void> {
+  private async sendReminder(chatId: ChatId): Promise<void> {
     const context = this.getContext(chatId);
     if (!context) {
       this.clearExistingTimeout(chatId);

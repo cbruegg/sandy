@@ -28,6 +28,7 @@ import type {
   PrivilegeRequest,
   SavedAttachment,
 } from "../types.js";
+import type { ChatId } from "../types.js";
 import type { TranscriptionProvider } from "../transcription/transcription-provider.js";
 
 type TelegramApiLike = {
@@ -89,7 +90,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
   private readonly token: string;
   private readonly transcriptionProvider: TranscriptionProvider | null;
   private readonly fileDownloader: (api: TelegramFileApiLike, token: string, fileId: string) => Promise<ArrayBuffer>;
-  private readonly lastUserInteractionTimestamps = new Map<string, string>();
+  private readonly lastUserInteractionTimestamps = new Map<ChatId, string>();
   private startPromise: Promise<void> | null = null;
 
   constructor(options: TelegramAdapterOptions) {
@@ -106,7 +107,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     return telegramFormatting;
   }
 
-  getLastUserInteractionTimestamp(chatId: string): string | null {
+  getLastUserInteractionTimestamp(chatId: ChatId): string | null {
     return this.lastUserInteractionTimestamps.get(chatId) ?? null;
   }
 
@@ -196,7 +197,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     logger.info("telegram.polling_stopped");
   }
 
-  async sendText(chatId: string, text: string): Promise<void> {
+  async sendText(chatId: ChatId, text: string): Promise<void> {
     logger.debug("telegram.send_text", {
       chatId,
       textPreview: previewText(text),
@@ -204,7 +205,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     await this.sendFormattedMessage(chatId, text);
   }
 
-  async sendTaskUpdate(chatId: string, text: string): Promise<void> {
+  async sendTaskUpdate(chatId: ChatId, text: string): Promise<void> {
     logger.debug("telegram.send_task_update", {
       chatId,
       textPreview: previewText(text),
@@ -215,7 +216,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     });
   }
 
-  async sendReportableText(chatId: string, text: string): Promise<void> {
+  async sendReportableText(chatId: ChatId, text: string): Promise<void> {
     logger.debug("telegram.send_reportable_text", {
       chatId,
       textPreview: previewText(text),
@@ -226,7 +227,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     });
   }
 
-  async sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void> {
+  async sendPrivilegeRequest(chatId: ChatId, request: PrivilegeRequest): Promise<void> {
     const requestType = formatPrivilegeRequestLogType(request);
     logger.info("telegram.send_privilege_request", {
       chatId,
@@ -239,7 +240,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     });
   }
 
-  async sendShareDeletionRequest(chatId: string, requestId: string, taskName: string, summary: string): Promise<void> {
+  async sendShareDeletionRequest(chatId: ChatId, requestId: string, taskName: string, summary: string): Promise<void> {
     logger.info("telegram.send_share_deletion_request", {
       chatId,
       requestId,
@@ -251,7 +252,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     });
   }
 
-  async saveAttachments(chatId: string, attachments: MessageAttachment[], targetDirectory: string): Promise<SavedAttachment[]> {
+  async saveAttachments(chatId: ChatId, attachments: MessageAttachment[], targetDirectory: string): Promise<SavedAttachment[]> {
     return saveTelegramAttachments({
       api: this.bot.api,
       token: this.token,
@@ -264,7 +265,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     });
   }
 
-  async sendFile(chatId: string, filePath: string, caption?: string): Promise<void> {
+  async sendFile(chatId: ChatId, filePath: string, caption?: string): Promise<void> {
     logger.info("telegram.send_file", {
       chatId,
       filePath,
@@ -276,7 +277,7 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
   }
 
   private async sendFormattedMessage(
-    chatId: string,
+    chatId: ChatId,
     text: string,
     other?: Record<string, unknown>,
   ): Promise<void> {

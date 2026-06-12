@@ -1,13 +1,14 @@
 import { join } from "node:path";
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
 import type { MessageAttachment, SavedAttachment, SharedAttachment } from "../types.js";
+import type { ChatId } from "../types.js";
 import { toSharedWorkspacePath } from "../shared-workspace.js";
 
 export async function stageSharedAttachments(input: {
   // Narrow to the single method we use so callers can pass the raw adapter
   // without granting wider channel access.
   channel: Pick<ChannelAdapter, "saveAttachments">;
-  chatId: string;
+  chatId: ChatId;
   messageId: string;
   attachments: MessageAttachment[];
   taskSharePath: string;

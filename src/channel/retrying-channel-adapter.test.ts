@@ -10,6 +10,7 @@ import type {
   PrivilegeRequest,
   SavedAttachment,
 } from "../types.js";
+import type { ChatId } from "../types.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "local_test",
@@ -23,7 +24,7 @@ class RetryTestChannelAdapter implements ChannelAdapter {
   public sendTextCalls = 0;
   public sendTextFailuresRemaining = 0;
 
-  getLastUserInteractionTimestamp(_chatId: string): string | null {
+  getLastUserInteractionTimestamp(_chatId: ChatId): string | null {
     return null;
   }
 
@@ -36,16 +37,16 @@ class RetryTestChannelAdapter implements ChannelAdapter {
   async stop(): Promise<void> {}
 
   async saveAttachments(
-    _chatId: string,
+    _chatId: ChatId,
     _attachments: MessageAttachment[],
     _targetDirectory: string,
   ): Promise<SavedAttachment[]> {
     return [];
   }
 
-  async sendFile(_chatId: string, _filePath: string, _caption?: string): Promise<void> {}
+  async sendFile(_chatId: ChatId, _filePath: string, _caption?: string): Promise<void> {}
 
-  async sendText(_chatId: string, _text: string): Promise<void> {
+  async sendText(_chatId: ChatId, _text: string): Promise<void> {
     this.sendTextCalls += 1;
     if (this.sendTextFailuresRemaining > 0) {
       this.sendTextFailuresRemaining -= 1;
@@ -53,14 +54,14 @@ class RetryTestChannelAdapter implements ChannelAdapter {
     }
   }
 
-  async sendTaskUpdate(_chatId: string, _text: string): Promise<void> {}
+  async sendTaskUpdate(_chatId: ChatId, _text: string): Promise<void> {}
 
-  async sendReportableText(_chatId: string, _text: string): Promise<void> {}
+  async sendReportableText(_chatId: ChatId, _text: string): Promise<void> {}
 
-  async sendPrivilegeRequest(_chatId: string, _request: PrivilegeRequest): Promise<void> {}
+  async sendPrivilegeRequest(_chatId: ChatId, _request: PrivilegeRequest): Promise<void> {}
 
   async sendShareDeletionRequest(
-    _chatId: string,
+    _chatId: ChatId,
     _requestId: string,
     _taskName: string,
     _summary: string,

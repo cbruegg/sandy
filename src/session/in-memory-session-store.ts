@@ -1,15 +1,16 @@
 import { SessionState } from "../types.js";
+import type { ChatId } from "../types.js";
 
 export interface SessionStore {
-  getOrCreate(chatId: string): SessionState;
+  getOrCreate(chatId: ChatId): SessionState;
   getByTaskId(taskId: string): SessionState | undefined;
   listSessions(): SessionState[];
 }
 
 export class InMemorySessionStore implements SessionStore {
-  private readonly sessions = new Map<string, SessionState>();
+  private readonly sessions = new Map<ChatId, SessionState>();
 
-  getOrCreate(chatId: string): SessionState {
+  getOrCreate(chatId: ChatId): SessionState {
     const existing = this.sessions.get(chatId);
     if (existing) {
       return existing;

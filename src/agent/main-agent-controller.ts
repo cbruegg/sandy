@@ -6,6 +6,7 @@ import { ZodError } from "zod";
 import { formatDateTimePrefix } from "../datetime-prefix.js";
 import { logger } from "../logger.js";
 import type { DecideContext, MainAgentDecision } from "../types.js";
+import type { ChatId } from "../types.js";
 import type { SkillMetadata } from "../skills.js";
 import {
   formatMainAgentDecisionValidationError,
@@ -76,18 +77,18 @@ export class CodexMainAgentController implements MainAgentController {
    * Active app-server thread IDs keyed by Sandy chat ID.
    * One chat may have at most one active thread at any time.
    */
-  private readonly threadIds = new Map<string, string>();
+  private readonly threadIds = new Map<ChatId, string>();
   /**
    * Temporary working directories keyed by Sandy chat ID.
    * Each directory is created on first use and kept for the chat lifetime.
    */
-  private readonly threadDirectories = new Map<string, string>();
+  private readonly threadDirectories = new Map<ChatId, string>();
   /**
    * Whether the next decide() call for a chat should re-inject the
    * full orchestration instructions. Set after auto-compaction is
    * detected and cleared immediately after the restored prompt is built.
    */
-  private readonly needsInstructionRefresh = new Map<string, boolean>();
+  private readonly needsInstructionRefresh = new Map<ChatId, boolean>();
 
   constructor(
     appServer: AgentClient,
@@ -145,7 +146,7 @@ export class CodexMainAgentController implements MainAgentController {
   private async runValidatedDecision(
     threadId: string,
     initialInput: Input,
-    context: { chatId: string },
+    context: { chatId: ChatId },
   ): Promise<MainAgentDecision> {
     let nextInput = initialInput;
 
@@ -251,7 +252,7 @@ export class CodexMainAgentController implements MainAgentController {
     return result;
   }
 
-  private async getOrCreateThreadId(chatId: string): Promise<string> {
+  private async getOrCreateThreadId(chatId: ChatId): Promise<string> {
     const existing = this.threadIds.get(chatId);
     if (existing) {
       return existing;
@@ -268,7 +269,7 @@ export class CodexMainAgentController implements MainAgentController {
     return threadId;
   }
 
-  private getOrCreateThreadDirectory(chatId: string): string {
+  private getOrCreateThreadDirectory(chatId: ChatId): string {
     const existing = this.threadDirectories.get(chatId);
     if (existing) {
       return existing;

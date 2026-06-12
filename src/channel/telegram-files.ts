@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { MessageAttachment, SavedAttachment } from "../types.js";
+import type { ChatId } from "../types.js";
 
 type TelegramFileApi = {
   getFile(fileId: string): Promise<{ file_path?: string }>;
@@ -9,10 +10,10 @@ type TelegramFileApi = {
 export async function saveTelegramAttachments(input: {
   api: TelegramFileApi;
   token: string;
-  chatId: string;
+  chatId: ChatId;
   attachments: MessageAttachment[];
   targetDirectory: string;
-  logSavedAttachment: (entry: { chatId: string; attachmentId: string; hostPath: string }) => void;
+  logSavedAttachment: (entry: { chatId: ChatId; attachmentId: string; hostPath: string }) => void;
 }): Promise<SavedAttachment[]> {
   if (input.attachments.length === 0) {
     return [];

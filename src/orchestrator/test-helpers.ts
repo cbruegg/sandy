@@ -31,6 +31,7 @@ import type {
   TaskInputPayload,
   WorkerStartConfig,
 } from "../types.js";
+import type { ChatId } from "../types.js";
 import { SkillService } from "../skills.js";
 import { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
 import { JobApprovalStore, type JobApprovalStoreApi } from "../jobs/job-approval-store.js";
@@ -53,13 +54,13 @@ export function expectDefined<T>(value: T | null | undefined, message: string): 
 
 export class RecordingChannel implements ChannelAdapter {
   readonly destinationStore = new ImplicitChannelDestinationStore("test-chat");
-  private readonly lastUserInteractionTimestamps = new Map<string, string>();
-  public readonly sentTexts: Array<{ chatId: string; text: string }> = [];
-  public readonly taskUpdates: Array<{ chatId: string; text: string }> = [];
-  public readonly sentFiles: Array<{ chatId: string; filePath: string; caption?: string }> = [];
-  public readonly privilegeRequests: Array<{ chatId: string; request: PrivilegeRequest }> = [];
-  public readonly shareDeletionRequests: Array<{ chatId: string; requestId: string; taskName: string; summary: string }> = [];
-  public readonly savedAttachments: Array<{ chatId: string; attachments: MessageAttachment[]; targetDirectory: string }> = [];
+  private readonly lastUserInteractionTimestamps = new Map<ChatId, string>();
+  public readonly sentTexts: Array<{ chatId: ChatId; text: string }> = [];
+  public readonly taskUpdates: Array<{ chatId: ChatId; text: string }> = [];
+  public readonly sentFiles: Array<{ chatId: ChatId; filePath: string; caption?: string }> = [];
+  public readonly privilegeRequests: Array<{ chatId: ChatId; request: PrivilegeRequest }> = [];
+  public readonly shareDeletionRequests: Array<{ chatId: ChatId; requestId: string; taskName: string; summary: string }> = [];
+  public readonly savedAttachments: Array<{ chatId: ChatId; attachments: MessageAttachment[]; targetDirectory: string }> = [];
   public sendFileError: Error | null = null;
 
   start(): Promise<void> {
@@ -74,15 +75,15 @@ export class RecordingChannel implements ChannelAdapter {
     return testFormatting;
   }
 
-  getLastUserInteractionTimestamp(chatId: string): string | null {
+  getLastUserInteractionTimestamp(chatId: ChatId): string | null {
     return this.lastUserInteractionTimestamps.get(chatId) ?? null;
   }
 
-  recordUserInteraction(chatId: string, timestamp: string): void {
+  recordUserInteraction(chatId: ChatId, timestamp: string): void {
     this.lastUserInteractionTimestamps.set(chatId, timestamp);
   }
 
-  saveAttachments(chatId: string, attachments: MessageAttachment[], targetDirectory: string): Promise<SavedAttachment[]> {
+  saveAttachments(chatId: ChatId, attachments: MessageAttachment[], targetDirectory: string): Promise<SavedAttachment[]> {
     this.savedAttachments.push({ chatId, attachments, targetDirectory });
     return Promise.resolve(attachments.map((attachment, index) => ({
       attachmentId: attachment.attachmentId,
@@ -93,7 +94,7 @@ export class RecordingChannel implements ChannelAdapter {
     })));
   }
 
-  sendFile(chatId: string, filePath: string, caption?: string): Promise<void> {
+  sendFile(chatId: ChatId, filePath: string, caption?: string): Promise<void> {
     if (this.sendFileError) {
       return Promise.reject(this.sendFileError);
     }
@@ -101,27 +102,27 @@ export class RecordingChannel implements ChannelAdapter {
     return Promise.resolve();
   }
 
-  sendText(chatId: string, text: string): Promise<void> {
+  sendText(chatId: ChatId, text: string): Promise<void> {
     this.sentTexts.push({ chatId, text });
     return Promise.resolve();
   }
 
-  sendTaskUpdate(chatId: string, text: string): Promise<void> {
+  sendTaskUpdate(chatId: ChatId, text: string): Promise<void> {
     this.taskUpdates.push({ chatId, text });
     return Promise.resolve();
   }
 
-  sendReportableText(chatId: string, text: string): Promise<void> {
+  sendReportableText(chatId: ChatId, text: string): Promise<void> {
     this.sentTexts.push({ chatId, text });
     return Promise.resolve();
   }
 
-  sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void> {
+  sendPrivilegeRequest(chatId: ChatId, request: PrivilegeRequest): Promise<void> {
     this.privilegeRequests.push({ chatId, request });
     return Promise.resolve();
   }
 
-  sendShareDeletionRequest(chatId: string, requestId: string, taskName: string, summary: string): Promise<void> {
+  sendShareDeletionRequest(chatId: ChatId, requestId: string, taskName: string, summary: string): Promise<void> {
     this.shareDeletionRequests.push({ chatId, requestId, taskName, summary });
     return Promise.resolve();
   }

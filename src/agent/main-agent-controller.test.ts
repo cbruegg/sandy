@@ -7,6 +7,7 @@ import {
 } from "./main-agent-controller.js";
 import type { SkillMetadata } from "../skills.js";
 import type { ChannelFormatting, DecideContext } from "../types.js";
+import type { ChatId } from "../types.js";
 import type { HttpTokenConfig } from "../config.js";
 import type {
   AgentClient, AppServerEvent,
@@ -57,7 +58,7 @@ function buildTurnEventsWithCompaction(finalResponse: string): AppServerEvent[] 
 class FakeAppServerClient implements AgentClient {
   public readonly startedProfiles: ThreadStartParams[] = [];
   public readonly threadInputs: string[][] = [];
-  public readonly threadIds = new Map<string, string>();
+  public readonly threadIds = new Map<ChatId, string>();
   private nextThreadId = 1;
   private nextChatId = 0;
 

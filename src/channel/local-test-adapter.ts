@@ -4,6 +4,7 @@ import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { type ChannelDestinationStore } from "./channel-destination-store.js";
 import { logger } from "../logger.js";
 import type { ChannelFormatting, MessageAttachment, PrivilegeRequest, SavedAttachment } from "../types.js";
+import type { ChatId } from "../types.js";
 import {
   createIdentifier,
   parseLocalTestInboundEvent,
@@ -29,7 +30,7 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
   private readonly inboxFailedRoot: string;
   private readonly outboxRoot: string;
   private readonly attachmentHostPaths = new Map<string, string>();
-  private readonly lastUserInteractionTimestamps = new Map<string, string>();
+  private readonly lastUserInteractionTimestamps = new Map<ChatId, string>();
   private stopRequested = false;
   private loopPromise: Promise<void> | null = null;
   readonly destinationStore: ChannelDestinationStore;
@@ -47,7 +48,7 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
     return localTestFormatting;
   }
 
-  getLastUserInteractionTimestamp(chatId: string): string | null {
+  getLastUserInteractionTimestamp(chatId: ChatId): string | null {
     return this.lastUserInteractionTimestamps.get(chatId) ?? null;
   }
 
@@ -75,7 +76,7 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
     }
   }
 
-  async saveAttachments(chatId: string, attachments: MessageAttachment[], targetDirectory: string): Promise<SavedAttachment[]> {
+  async saveAttachments(chatId: ChatId, attachments: MessageAttachment[], targetDirectory: string): Promise<SavedAttachment[]> {
     await mkdir(targetDirectory, { recursive: true });
     const saved: SavedAttachment[] = [];
     for (const attachment of attachments) {
@@ -101,7 +102,7 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
     return saved;
   }
 
-  async sendFile(chatId: string, filePath: string, caption?: string): Promise<void> {
+  async sendFile(chatId: ChatId, filePath: string, caption?: string): Promise<void> {
     await this.writeOutbound({
       type: "send_file",
       eventId: createIdentifier("outbound"),
@@ -112,19 +113,19 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
     });
   }
 
-  async sendText(chatId: string, text: string): Promise<void> {
+  async sendText(chatId: ChatId, text: string): Promise<void> {
     await this.writeTextEvent("send_text", chatId, text);
   }
 
-  async sendTaskUpdate(chatId: string, text: string): Promise<void> {
+  async sendTaskUpdate(chatId: ChatId, text: string): Promise<void> {
     await this.writeTextEvent("send_task_update", chatId, text);
   }
 
-  async sendReportableText(chatId: string, text: string): Promise<void> {
+  async sendReportableText(chatId: ChatId, text: string): Promise<void> {
     await this.writeTextEvent("send_reportable_text", chatId, text);
   }
 
-  async sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void> {
+  async sendPrivilegeRequest(chatId: ChatId, request: PrivilegeRequest): Promise<void> {
     await this.writeOutbound({
       type: "send_privilege_request",
       eventId: createIdentifier("outbound"),
@@ -134,7 +135,7 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
     });
   }
 
-  async sendShareDeletionRequest(chatId: string, requestId: string, taskName: string, summary: string): Promise<void> {
+  async sendShareDeletionRequest(chatId: ChatId, requestId: string, taskName: string, summary: string): Promise<void> {
     await this.writeOutbound({
       type: "send_share_deletion_request",
       eventId: createIdentifier("outbound"),
@@ -146,7 +147,7 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
     });
   }
 
-  private async writeTextEvent(type: "send_text" | "send_task_update" | "send_reportable_text", chatId: string, text: string): Promise<void> {
+  private async writeTextEvent(type: "send_text" | "send_task_update" | "send_reportable_text", chatId: ChatId, text: string): Promise<void> {
     await this.writeOutbound({
       type,
       eventId: createIdentifier("outbound"),

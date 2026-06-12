@@ -3,6 +3,7 @@ import type {
   NormalizedChatEvent,
   UserMessageEvent,
 } from "../types.js";
+import type { ChatId } from "../types.js";
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
 import type { TranscriptionProvider } from "../transcription/transcription-provider.js";
@@ -17,7 +18,7 @@ type TelegramEventMetadata = {
 
 export type TelegramNormalizedChatEvent = NormalizedChatEvent & TelegramEventMetadata;
 export type TelegramUpdateMetadata = TelegramEventMetadata & {
-  chatId: string;
+  chatId: ChatId;
   messageId: string;
   kind: NormalizedChatEvent["kind"] | "unknown";
 };
@@ -25,7 +26,7 @@ export type TelegramUpdateMetadata = TelegramEventMetadata & {
 type VoiceNormalizationDeps = {
   transcriptionProvider: TranscriptionProvider | null;
   fileDownloader: (fileId: string) => Promise<ArrayBuffer>;
-  sendText: (chatId: string, text: string) => Promise<void>;
+  sendText: (chatId: ChatId, text: string) => Promise<void>;
 };
 
 export async function normalizeTelegramUpdate(

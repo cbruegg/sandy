@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
 import { channelStateFile } from "../state-paths.js";
+import type { ChatId } from "../types.js";
 
 const channelDestinationStateSchema = z.object({
   defaultChatIds: z.record(z.string(), z.string().min(1)).default({}),
@@ -10,8 +11,8 @@ const channelDestinationStateSchema = z.object({
 export type ChannelDestinationState = z.infer<typeof channelDestinationStateSchema>;
 
 export interface ChannelDestinationStore {
-  getDefaultChatId(): Promise<string | null>;
-  setDefaultChatId(chatId: string): Promise<void>;
+  getDefaultChatId(): Promise<ChatId | null>;
+  setDefaultChatId(chatId: ChatId): Promise<void>;
 }
 
 export class PersistentChannelDestinationStore implements ChannelDestinationStore {
@@ -21,11 +22,11 @@ export class PersistentChannelDestinationStore implements ChannelDestinationStor
     this.filePath = channelStateFile(configDirectory);
   }
 
-  async getDefaultChatId(): Promise<string | null> {
+  async getDefaultChatId(): Promise<ChatId | null> {
     return (await this.load()).defaultChatIds[this.channelId] ?? null;
   }
 
-  async setDefaultChatId(chatId: string): Promise<void> {
+  async setDefaultChatId(chatId: ChatId): Promise<void> {
     const state = await this.load();
     state.defaultChatIds[this.channelId] = chatId;
     await this.save(state);
@@ -50,13 +51,13 @@ export class PersistentChannelDestinationStore implements ChannelDestinationStor
 }
 
 export class ImplicitChannelDestinationStore implements ChannelDestinationStore {
-  constructor(private readonly chatId: string) {}
+  constructor(private readonly chatId: ChatId) {}
 
-  getDefaultChatId(): Promise<string | null> {
+  getDefaultChatId(): Promise<ChatId | null> {
     return Promise.resolve(this.chatId);
   }
 
-  setDefaultChatId(_chatId: string): Promise<void> {
+  setDefaultChatId(_chatId: ChatId): Promise<void> {
     return Promise.resolve();
   }
 }

@@ -2,11 +2,12 @@ import type { ChannelAdapter } from "../channel/channel-adapter.js";
 import type { JobService } from "../jobs/job-service.js";
 import { resolveTaskShareHostPath } from "../shared-workspace.js";
 import type { ActiveTaskState } from "../types.js";
+import type { ChatId } from "../types.js";
 import type {NativeWorkerToolCallResult} from "../subagent/worker-tools.js";
 import {messages} from "../messages.ts";
 
 type UserVisibleOperationRunner = (input: {
-  chatId: string;
+  chatId: ChatId;
   taskId: string;
   taskName: string;
   operation: (channel: ChannelAdapter) => Promise<void>;
@@ -22,7 +23,7 @@ export class WorkerToolsHandler {
   constructor(private readonly deps: WorkerToolsHandlerDependencies) {}
 
   async sendFileToChannel(input: {
-    chatId: string;
+    chatId: ChatId;
     task: ActiveTaskState;
     sharePath: string;
     caption?: string;
@@ -43,7 +44,7 @@ export class WorkerToolsHandler {
   }
 
   async requestInteraction(input: {
-    chatId: string;
+    chatId: ChatId;
     task: ActiveTaskState;
     message?: string;
   }): Promise<NativeWorkerToolCallResult> {

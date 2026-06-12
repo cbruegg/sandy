@@ -6,9 +6,10 @@ import type {
   TaskInputPayload,
   WorkerStartConfig,
 } from "../types.js";
+import type { ChatId } from "../types.js";
 
 export type LaunchTaskRequest = {
-  chatId: string;
+  chatId: ChatId;
   taskId: string;
   taskName: string;
   taskLanguage: string;

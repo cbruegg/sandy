@@ -22,6 +22,7 @@ import type {
   PrivilegeRequest,
   SavedAttachment,
 } from "../types.js";
+import type { ChatId } from "../types.js";
 import type { TranscriptionProvider } from "../transcription/transcription-provider.js";
 
 type EncryptedFile = {
@@ -121,7 +122,7 @@ type MatrixPollRecord = {
 };
 
 type MatrixEventBase = {
-  chatId: string;
+  chatId: ChatId;
   messageId: string;
   senderUserId: string;
   timestamp: string;
@@ -130,7 +131,7 @@ type MatrixEventBase = {
 type MatrixNormalizeDeps = {
   client: MatrixClientLike;
   transcriptionProvider: TranscriptionProvider | null;
-  sendText: (chatId: string, text: string) => Promise<void>;
+  sendText: (chatId: ChatId, text: string) => Promise<void>;
   saveAttachmentRef: (attachmentId: string, ref: MatrixAttachmentRef) => void;
 };
 
@@ -175,7 +176,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   private startPromise: Promise<void> | null = null;
   private botUserId: string | null = null;
   private botDeviceId: string | null = null;
-  private readonly lastUserInteractionTimestamps = new Map<string, string>();
+  private readonly lastUserInteractionTimestamps = new Map<ChatId, string>();
   private readonly activePolls = new Map<string, MatrixPollRecord>();
   private readonly attachmentRefs = new Map<string, MatrixAttachmentRef>();
   private readonly qualifiedRooms = new Set<string>();
@@ -195,7 +196,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     return matrixFormatting;
   }
 
-  getLastUserInteractionTimestamp(chatId: string): string | null {
+  getLastUserInteractionTimestamp(chatId: ChatId): string | null {
     return this.lastUserInteractionTimestamps.get(chatId) ?? null;
   }
 
@@ -261,7 +262,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     logger.info("matrix.sync_stopped");
   }
 
-  async saveAttachments(chatId: string, attachments: MessageAttachment[], targetDirectory: string): Promise<SavedAttachment[]> {
+  async saveAttachments(chatId: ChatId, attachments: MessageAttachment[], targetDirectory: string): Promise<SavedAttachment[]> {
     await mkdir(targetDirectory, { recursive: true });
     const client = this.requireClient();
     const saved: SavedAttachment[] = [];
@@ -292,7 +293,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     return saved;
   }
 
-  async sendFile(chatId: string, filePath: string, caption?: string): Promise<void> {
+  async sendFile(chatId: ChatId, filePath: string, caption?: string): Promise<void> {
     const client = this.requireClient();
     const fileName = basename(filePath);
     const raw = await readFile(filePath);
@@ -308,7 +309,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     }
   }
 
-  async sendText(chatId: string, text: string): Promise<void> {
+  async sendText(chatId: ChatId, text: string): Promise<void> {
     logger.debug("matrix.send_text", {
       chatId,
       textPreview: previewText(text),
@@ -316,7 +317,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     await this.sendNotice(chatId, text);
   }
 
-  async sendTaskUpdate(chatId: string, text: string): Promise<void> {
+  async sendTaskUpdate(chatId: ChatId, text: string): Promise<void> {
     logger.debug("matrix.send_task_update", {
       chatId,
       textPreview: previewText(text),
@@ -326,7 +327,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     await this.sendPoll(chatId, "Task controls", controls.rows.flat().map((a) => ({ answerId: a.actionId, label: a.label, event: a.event })));
   }
 
-  async sendReportableText(chatId: string, text: string): Promise<void> {
+  async sendReportableText(chatId: ChatId, text: string): Promise<void> {
     logger.debug("matrix.send_reportable_text", {
       chatId,
       textPreview: previewText(text),
@@ -337,7 +338,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     await this.sendPoll(chatId, "Output controls", controls.rows.flat().map((a) => ({ answerId: a.actionId, label: a.label, event: a.event })));
   }
 
-  async sendPrivilegeRequest(chatId: string, request: PrivilegeRequest): Promise<void> {
+  async sendPrivilegeRequest(chatId: ChatId, request: PrivilegeRequest): Promise<void> {
     const requestType = formatPrivilegeRequestLogType(request);
     logger.info("matrix.send_privilege_request", {
       chatId,
@@ -349,7 +350,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     await this.sendPoll(chatId, "Privilege request", controls.rows.flat().map((a) => ({ answerId: a.actionId, label: a.label, event: a.event })));
   }
 
-  async sendShareDeletionRequest(chatId: string, requestId: string, taskName: string, summary: string): Promise<void> {
+  async sendShareDeletionRequest(chatId: ChatId, requestId: string, taskName: string, summary: string): Promise<void> {
     logger.info("matrix.send_share_deletion_request", {
       chatId,
       requestId,
@@ -360,7 +361,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     await this.sendPoll(chatId, "Shared workspace cleanup", controls.rows.flat().map((a) => ({ answerId: a.actionId, label: a.label, event: a.event })));
   }
 
-  private async sendNotice(chatId: string, text: string): Promise<void> {
+  private async sendNotice(chatId: ChatId, text: string): Promise<void> {
     await this.sendWithMatrixBackoff(
       "matrix.send_notice",
       () => this.requireClient().sendHtmlNotice(chatId, sanitizeMatrixHtml(text)),

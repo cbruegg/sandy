@@ -1,6 +1,7 @@
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
 import type { SessionStore } from "../session/in-memory-session-store.js";
 import type { ActiveTaskState, SessionState } from "../types.js";
+import type { ChatId } from "../types.js";
 import { BlockedJobReminderScheduler } from "./blocked-job-reminder-scheduler.js";
 import type { BlockedJobReminderContext, TimerControls } from "./blocked-job-reminder-scheduler.js";
 
@@ -31,19 +32,19 @@ type TaskCoordinatorDependencies = {
  * automatically so callers never observe lingering empty arrays.
  */
 class PerChatQueue<T> {
-  private readonly byChat = new Map<string, T[]>();
+  private readonly byChat = new Map<ChatId, T[]>();
 
-  enqueue(chatId: string, entry: T): void {
+  enqueue(chatId: ChatId, entry: T): void {
     const queue = this.byChat.get(chatId) ?? [];
     queue.push(entry);
     this.byChat.set(chatId, queue);
   }
 
-  peek(chatId: string): T | undefined {
+  peek(chatId: ChatId): T | undefined {
     return this.byChat.get(chatId)?.[0];
   }
 
-  shift(chatId: string): T | null {
+  shift(chatId: ChatId): T | null {
     const queue = this.byChat.get(chatId);
     const next = queue?.shift() ?? null;
     if (queue && queue.length === 0) {
@@ -53,7 +54,7 @@ class PerChatQueue<T> {
   }
 
   /** Drops every entry matching `predicate`, invoking `onRemoved` for each. */
-  removeWhere(chatId: string, predicate: (entry: T) => boolean, onRemoved: (entry: T) => void): void {
+  removeWhere(chatId: ChatId, predicate: (entry: T) => boolean, onRemoved: (entry: T) => void): void {
     const queue = this.byChat.get(chatId);
     if (!queue) {
       return;
@@ -117,11 +118,11 @@ export class TaskCoordinator {
   findTask(session: SessionState, taskId: string): ActiveTaskState | null {
     return session.findTask(taskId)?.task ?? null;
   }
-  onUserInteraction(chatId: string): void {
+  onUserInteraction(chatId: ChatId): void {
     this.reminders.resetAfterUserInteraction(chatId);
   }
 
-  scheduleShareDeletionPrompt(chatId: string, prompt: PendingShareDeletionPrompt): void {
+  scheduleShareDeletionPrompt(chatId: ChatId, prompt: PendingShareDeletionPrompt): void {
     this.pendingShareDeletionPrompts.enqueue(chatId, prompt);
     this.reminders.sync(chatId);
   }
@@ -133,7 +134,7 @@ export class TaskCoordinator {
    * this promise settles once it eventually runs.
    */
   async runJobUserVisibleOperation(
-    chatId: string,
+    chatId: ChatId,
     taskId: string,
     jobName: string,
     operation: (channel: ChannelAdapter) => Promise<void>,
@@ -176,7 +177,7 @@ export class TaskCoordinator {
    * share-deletion prompt if one is queued, otherwise promotes the next waiting
    * job task into the slot.
    */
-  async onVisibleSlotAvailable(chatId: string): Promise<void> {
+  async onVisibleSlotAvailable(chatId: ChatId): Promise<void> {
     const session = this.deps.sessionStore.getOrCreate(chatId);
     if (!this.isVisibleSlotAvailable(session)) {
       this.reminders.sync(chatId);
@@ -190,7 +191,7 @@ export class TaskCoordinator {
     await this.promoteNextWaitingJobTask(session);
   }
 
-  removeTask(chatId: string, taskId: string): void {
+  removeTask(chatId: ChatId, taskId: string): void {
     this.waitingJobInteractions.removeWhere(
       chatId,
       (entry) => entry.taskId === taskId,
@@ -306,7 +307,7 @@ export class TaskCoordinator {
   // Blocked-job reminders
   // ---------------------------------------------------------------------------
 
-  private getBlockedJobReminderContext(chatId: string): BlockedJobReminderContext | null {
+  private getBlockedJobReminderContext(chatId: ChatId): BlockedJobReminderContext | null {
     const session = this.deps.sessionStore.getOrCreate(chatId);
     const blocker = session.activeTask;
     if (!blocker || blocker.origin.kind !== "launchedByUser") {
