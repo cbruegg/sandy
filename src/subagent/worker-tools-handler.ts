@@ -28,6 +28,7 @@ export type WorkerToolsHandlerDependencies = {
   readonly getTaskSharePath: (taskId: string) => string;
   readonly getTaskBundle: (taskId: string) => SandboxTaskBundle;
   readonly runUserVisibleOperation: UserVisibleOperationRunner;
+  readonly markTaskFinished: (taskId: string) => Promise<void>;
 };
 
 type FileCopyOperationResult = {
@@ -83,6 +84,17 @@ export class WorkerToolsHandler {
       },
     });
     return { isError: false, message: messages.requestInteractionApproved() };
+  }
+
+  async terminateTask(input: {
+    task: ActiveTaskState;
+  }): Promise<NativeWorkerToolCallResult> {
+    if (input.task.origin.kind !== "launchedByJob") {
+      return { isError: true, message: messages.terminateTaskNotJobTask() };
+    }
+
+    await this.deps.markTaskFinished(input.task.taskId);
+    return { isError: false, message: messages.terminateTaskApproved() };
   }
 
   async listJobs(): Promise<NativeWorkerToolCallResult> {

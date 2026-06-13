@@ -248,6 +248,10 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
           task: activeTask,
           message: call.message,
         });
+      case "terminate_task":
+        return await this.workerToolsHandler.terminateTask({
+          task: activeTask,
+        });
       case "copy_into_share":
       case "copy_out_of_share":
       case "request_http_token":

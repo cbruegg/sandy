@@ -480,6 +480,14 @@ test("parseWorkerToolPayload throws a helpful error for invalid payloads", () =>
   );
 });
 
+test("parseWorkerToolPayload parses terminate_task", () => {
+  const payload = parseWorkerToolPayload("terminate_task", {});
+
+  assert.deepEqual(payload, {
+    type: "terminate_task",
+  });
+});
+
 test("parseSubAgentEvent accepts task-summary events", () => {
   const event = parseSubAgentEvent('{"type":"task_summary","summary":"Task completed successfully"}');
 

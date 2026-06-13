@@ -47,6 +47,7 @@ const sendFileToChannelToolName = "send_file_to_channel";
 const requestHttpTokenToolName = "request_http_token";
 const requestHostDirectoryAccessToolName = "request_host_directory_access";
 const requestInteractionToolName = "request_interaction";
+const terminateTaskToolName = "terminate_task";
 const createSkillToolName = "create_skill";
 const updateSkillToolName = "update_skill";
 const deleteSkillToolName = "delete_skill";
@@ -99,6 +100,10 @@ const requestHostDirectoryAccessSchema = z.object({
 const requestInteractionSchema = z.object({
   type: z.literal(requestInteractionToolName),
   message: z.string().optional(),
+}).strict();
+
+const terminateTaskSchema = z.object({
+  type: z.literal(terminateTaskToolName),
 }).strict();
 
 const createSkillSchema = z.object({
@@ -182,6 +187,12 @@ export const workerToolEntries = [
     requestInteractionSchema,
   ),
   defineWorkerTool(
+    terminateTaskToolName,
+    "Terminate this scheduled job task, finalizing it with any pending summary. Call this when a scheduled job can be completed without further user interaction. The host will ask the worker to emit a final summary and then close the task. This tool has no effect on user-launched tasks.",
+    false,
+    terminateTaskSchema,
+  ),
+  defineWorkerTool(
     createSkillToolName,
     "Ask the host to create a new Sandy skill. Provide the skillId, name, description, and body. It is not necessary to write any files to disk.",
     true,
@@ -218,6 +229,7 @@ export type WorkerToolPayload =
   | z.infer<typeof requestHttpTokenSchema>
   | z.infer<typeof requestHostDirectoryAccessSchema>
   | z.infer<typeof requestInteractionSchema>
+  | z.infer<typeof terminateTaskSchema>
   | z.infer<typeof createSkillSchema>
   | z.infer<typeof updateSkillSchema>
   | z.infer<typeof deleteSkillSchema>

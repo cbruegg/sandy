@@ -33,6 +33,7 @@ function createWorkerToolsHandler(input?: {
     getTaskSharePath: input?.getTaskSharePath ?? ((taskId) => `/share/${taskId}`),
     getTaskBundle: input?.getTaskBundle ?? (() => ({ bundleId: "bundle-1", hostfsVolumeName: "hostfs-volume-1" })),
     runUserVisibleOperation: async () => {},
+    markTaskFinished: async () => {},
   });
 }
 

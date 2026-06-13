@@ -405,6 +405,74 @@ test("request_interaction tool reports already waiting when a job task is blocke
   assert.equal(runner.handles.get(taskId)?.interactiveNotices, 1);
 });
 
+test("terminate_task marks a silent job task for completion", async () => {
+  const { orchestrator, taskLifecycle, store, runner } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
+  });
+
+  const job: JobDefinition = {
+    id: "job-terminate-task",
+    name: "Daily cleanup",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt: "2026-04-01T00:00:00.000Z" },
+    skillId: "cleanup",
+  };
+  const taskId = await taskLifecycle.launchJobTask(job, "chat-terminate-task", null);
+
+  const session = store.getOrCreate("chat-terminate-task");
+  const task = session.findTask(taskId)?.task;
+  assert.ok(task);
+  assert.equal(task.interactionState, "silent");
+
+  const handle = runner.handles.get(taskId);
+  assert.ok(handle);
+  assert.equal(handle.markFinishedCalls, 0);
+
+  const toolResult = await orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "terminate_task",
+    arguments: {},
+  });
+
+  assert.equal(toolResult.isError, false);
+  assert.match(toolResult.message, /marked for completion/i);
+  assert.equal(handle.markFinishedCalls, 1);
+});
+
+test("terminate_task returns an error for user-launched tasks", async () => {
+  const mainAgent = new StubMainAgent({
+    action: "launch_task",
+    taskBrief: "Test task.",
+    taskName: "user-task",
+    taskLanguage: "English",
+  });
+  const { orchestrator, runner } = createTestOrchestrator({ mainAgent });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-terminate-user-task",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Start a task",
+    rawText: "Start a task",
+    attachments: [],
+  });
+
+  const taskId = expectDefined(runner.launches[0], "Expected launch.").taskId;
+  const handle = runner.handles.get(taskId);
+  assert.ok(handle);
+
+  const toolResult = await orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "terminate_task",
+    arguments: {},
+  });
+
+  assert.equal(toolResult.isError, true);
+  assert.match(toolResult.message, /only available for scheduled job tasks/i);
+  assert.equal(handle.markFinishedCalls, 0);
+});
+
 test("orchestrator fails the active task if channel file delivery fails", async () => {
   const channel = new RecordingChannel();
   channel.sendFileError = new Error("Telegram upload failed.");

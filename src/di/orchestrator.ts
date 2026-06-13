@@ -132,6 +132,7 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     runUserVisibleOperation: async ({ chatId, taskId, taskName, operation }) => {
       await taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, operation);
     },
+    markTaskFinished: (taskId) => taskLifecycle.markActiveTaskFinished(taskId),
   });
 
   const privileges = new OrchestratorPrivilegesImpl(

@@ -156,6 +156,10 @@ export const messages = {
     "This task is already in interactive mode. No promotion is needed.",
   requestInteractionAlreadyRequested: (): string =>
     "This task is already waiting to become interactive. Sandy will notify you once the user can see your output.",
+  terminateTaskApproved: (): string =>
+    "This task has been marked for completion. Sandy will finalize it after the current turn.",
+  terminateTaskNotJobTask: (): string =>
+    "This tool is only available for scheduled job tasks. User-launched tasks are already interactive and can be cancelled by the user.",
 } as const;
 
 function formatCommandForChannel(command: string, channelFormatting: ChannelFormatting | null): string {

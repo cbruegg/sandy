@@ -407,6 +407,7 @@ export function createTestOrchestrator(options: {
     runUserVisibleOperation: async ({ chatId, taskId, taskName, operation }) => {
       await taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, operation);
     },
+    markTaskFinished: (taskId) => taskLifecycle.markActiveTaskFinished(taskId),
   });
   const originalApplyFileCopy = workerToolsHandler.applyFileCopy.bind(workerToolsHandler);
   workerToolsHandler.applyFileCopy = async (request, input) => {
