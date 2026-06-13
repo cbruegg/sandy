@@ -125,8 +125,6 @@ test("WorkerImageManager builds and persists a derived overlay image on first st
     });
     assert.equal(dockerfiles[0], [
       `FROM ${baseImageBuildRef}`,
-      "RUN install -d /etc/zypp/zypp.conf.d",
-      "RUN printf '[main]\\ndownload.max_silent_tries = 5\\n' > /etc/zypp/zypp.conf.d/99-sandy-ci-retries.conf",
       "RUN zypper --non-interactive install jq",
       "RUN brew install gh",
       "",
@@ -326,8 +324,6 @@ test("WorkerImageManager falls back to an existing local base image when docker 
     assert.equal(manager.getLaunchImage(), launchImage);
     assert.equal(dockerfiles[0], [
       `FROM ${baseImageBuildRef}`,
-      "RUN install -d /etc/zypp/zypp.conf.d",
-      "RUN printf '[main]\\ndownload.max_silent_tries = 5\\n' > /etc/zypp/zypp.conf.d/99-sandy-ci-retries.conf",
       "RUN zypper --non-interactive install jq",
       "",
     ].join("\n"));
