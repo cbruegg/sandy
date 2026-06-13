@@ -218,12 +218,63 @@ test("request_interaction tool promotes a silent job task to interactive mode", 
 
   assert.equal(toolResult.isError, false);
   assert.match(toolResult.message, /promoted to interactive mode/i);
-  assert.equal(channel.taskUpdates.length, 1);
-  assert.match(channel.taskUpdates[0]?.text ?? "", /needs your attention.*confirm the report format/);
+  assert.equal(channel.taskUpdates.length, 2);
+  assert.equal(channel.taskUpdates[0]?.text, messages.scheduledJobBecameInteractive("Scheduled job: Daily report", "Daily report"));
+  assert.match(channel.taskUpdates[1]?.text ?? "", /needs your attention.*confirm the report format/);
 
   const updatedTask = session.findTask(taskId)?.task;
   assert.ok(updatedTask);
   assert.equal(updatedTask.interactionState, "interacting");
+});
+
+test("silent job privilege requests are preceded by task context when they make the task visible", async () => {
+  const persistentApprovalStore: PersistentApprovalStore = {
+    isAlwaysAllowed: (serverId, toolName) => serverId === "todoist" && toolName === "find-projects",
+    allowTool: async () => {},
+    isResourceReadAlwaysAllowed: () => false,
+    allowResourceRead: async () => {},
+    isHttpTokenAlwaysAllowed: () => false,
+    allowHttpToken: async () => {},
+    isHostDirectoryAlwaysAllowed: () => false,
+    allowHostDirectory: async () => {},
+  };
+  const { orchestrator, taskLifecycle, channel } = createTestOrchestrator({
+    persistentApprovalStore,
+    mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
+  });
+
+  const job: JobDefinition = {
+    id: "job-privilege-context",
+    name: "Shopping sync",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt: "2026-04-01T00:00:00.000Z" },
+    skillId: "shopping-sync",
+  };
+  const taskId = await taskLifecycle.launchJobTask(job, "chat-privilege-context", null);
+
+  const privilegePromise = orchestrator.authorizeMcpToolCall({
+    taskId,
+    serverId: "todoist",
+    toolName: "find-projects",
+    arguments: { searchText: "Alexa Shopping List", limit: 10 },
+  });
+  await waitFor(() => channel.privilegeRequests.length === 1);
+
+  assert.deepEqual(channel.taskUpdates, [{
+    chatId: "chat-privilege-context",
+    text: messages.scheduledJobBecameInteractive("Scheduled job: Shopping sync", "Shopping sync"),
+  }]);
+
+  const requestId = channel.privilegeRequests[0]?.request.requestId;
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-privilege-context",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    decision: "deny",
+    requestId,
+  });
+  assert.equal((await privilegePromise).outcome, "denied");
 });
 
 test("approved job mutation delegates execution through the worker tools handler", async () => {
@@ -348,7 +399,20 @@ test("request_interaction tool is a no-op for an already interactive job task", 
 
   assert.equal(toolResult.isError, false);
   assert.match(toolResult.message, /already in interactive mode/i);
-  assert.equal(channel.taskUpdates.length, 1);
+  assert.deepEqual(channel.taskUpdates, [
+    {
+      chatId: "chat-request-interaction-again",
+      text: messages.scheduledJobBecameInteractive("Scheduled job: Daily report", "Daily report"),
+    },
+    {
+      chatId: "chat-request-interaction-again",
+      text: messages.jobRequestsInteraction(
+        "Scheduled job: Daily report",
+        "Daily report",
+        "I need the user to confirm the report format.",
+      ),
+    },
+  ]);
   assert.equal(runner.handles.get(taskId)?.interactiveNotices, 1);
 });
 

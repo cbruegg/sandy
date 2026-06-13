@@ -1,4 +1,5 @@
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
+import { messages } from "../messages.js";
 import type { SessionStore } from "../session/in-memory-session-store.js";
 import type { ActiveTaskState, SessionState } from "../types.js";
 import type { ChatId } from "../types.js";
@@ -17,6 +18,7 @@ type PendingShareDeletionPrompt = {
   requestId: string;
   taskId: string;
   taskName: string;
+  jobName: string;
   summary: string;
 };
 
@@ -157,7 +159,10 @@ export class TaskCoordinator {
     }
 
     if (session.visibleTask?.taskId === taskId) {
-      await this.transitionJobTaskToInteractive(task);
+      const jobName = task.origin.kind === "launchedByJob" ? task.origin.jobName : null;
+      if (await this.transitionJobTaskToInteractive(task)) {
+        await this.deps.channel.sendTaskUpdate(chatId, messages.scheduledJobBecameInteractive(task.taskName, jobName));
+      }
       await operation(this.deps.channel);
       return;
     }
@@ -171,7 +176,13 @@ export class TaskCoordinator {
 
     task.interactionState = "waitingToInteract";
     await new Promise<void>((resolve, reject) => {
-      this.waitingJobInteractions.enqueue(chatId, { taskId, jobName, run: operation, resolve, reject });
+      this.waitingJobInteractions.enqueue(chatId, {
+        taskId,
+        jobName,
+        run: operation,
+        resolve,
+        reject,
+      });
       this.reminders.sync(chatId);
     });
   }
@@ -218,18 +229,20 @@ export class TaskCoordinator {
       session.promoteBackgroundJobTask(taskId);
     }
     const task = session.visibleTask;
-    if (task) {
-      await this.transitionJobTaskToInteractive(task);
+    if (task && await this.transitionJobTaskToInteractive(task)) {
+      const jobName = task.origin.kind === "launchedByJob" ? task.origin.jobName : null;
+      await this.deps.channel.sendTaskUpdate(session.chatId, messages.scheduledJobBecameInteractive(task.taskName, jobName));
     }
     this.reminders.sync(session.chatId);
   }
 
-  private async transitionJobTaskToInteractive(task: ActiveTaskState): Promise<void> {
+  private async transitionJobTaskToInteractive(task: ActiveTaskState): Promise<boolean> {
     if (task.origin.kind !== "launchedByJob" || task.interactionState === "interacting") {
-      return;
+      return false;
     }
     task.interactionState = "interacting";
     await this.deps.onJobTaskBecameInteractive(task.taskId);
+    return true;
   }
 
   private async showNextDeferredShareDeletionPrompt(session: SessionState): Promise<boolean> {
@@ -262,7 +275,13 @@ export class TaskCoordinator {
         continue;
       }
 
-      await this.claimVisibleSlotForJobTask(session, next.taskId);
+      try {
+        await this.claimVisibleSlotForJobTask(session, next.taskId);
+      } catch (error) {
+        next.reject(error);
+        this.reminders.sync(session.chatId);
+        return;
+      }
       if (await this.executeWaitingInteraction(next)) {
         await this.drainPendingOperationsForActiveTask(session, next.taskId);
       }
@@ -318,9 +337,9 @@ export class TaskCoordinator {
       return null;
     }
 
-    const waitingTaskName = this.waitingJobInteractions.peek(chatId)?.jobName
-      ?? this.pendingShareDeletionPrompts.peek(chatId)?.taskName;
-    if (!waitingTaskName) {
+    const waitingJobName = this.waitingJobInteractions.peek(chatId)?.jobName
+      ?? this.pendingShareDeletionPrompts.peek(chatId)?.jobName;
+    if (!waitingJobName) {
       return null;
     }
 
@@ -329,11 +348,7 @@ export class TaskCoordinator {
       blockerTaskId: blocker.taskId,
       blockerTaskName: blocker.taskName,
       blockerStartedAt: blocker.startedAt,
-      waitingTaskName: normalizeJobName(waitingTaskName),
+      waitingJobName,
     };
   }
-}
-
-function normalizeJobName(jobName: string): string {
-  return jobName.startsWith("Scheduled job: ") ? jobName.slice("Scheduled job: ".length) : jobName;
 }

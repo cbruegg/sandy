@@ -110,3 +110,17 @@ test("privilegeRequestPrompt shows skill delete with only operation and skillId"
   assert.doesNotMatch(prompt, /Skill content:/);
   assert.match(prompt, /Approve or deny this request\./);
 });
+
+test("scheduledJobBecameInteractive introduces the newly visible task", () => {
+  const message = messages.scheduledJobBecameInteractive("Scheduled job: Daily cleanup", "Daily cleanup");
+
+  assert.match(message, /Scheduled job "Daily cleanup" is now interactive\./);
+  assert.match(message, /next update or request comes from this task/i);
+});
+
+test("scheduledJobBecameInteractive falls back to a generic task label without a job name", () => {
+  const message = messages.scheduledJobBecameInteractive("Scheduled job: Daily cleanup", null);
+
+  assert.match(message, /Task "Scheduled job: Daily cleanup" is now interactive\./);
+  assert.doesNotMatch(message, /Scheduled job "Scheduled job: Daily cleanup"/);
+});
