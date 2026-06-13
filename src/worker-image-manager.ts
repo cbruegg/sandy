@@ -6,9 +6,11 @@ import { dirname, join } from "node:path";
 import { logger } from "./logger.js";
 import { resolveSandyCacheRoot, resolveWorkerImageCacheStatePath } from "./cache-paths.js";
 
-const OVERLAY_FORMAT_VERSION = 4;
+const OVERLAY_FORMAT_VERSION = 5;
 const WEEKLY_REFRESH_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 const FAILED_REFRESH_RETRY_MS = 60 * 60 * 1000;
+const ZYPPER_AUTO_RETRY_CONFIG_PATH = "/etc/zypp/zypp.conf.d/99-sandy-ci-retries.conf";
+const ZYPPER_AUTO_RETRY_CONFIG = "[main]\\ndownload.max_silent_tries = 5\\n";
 
 type WorkerPreinstallRefreshMode = "weekly" | "manual";
 
@@ -351,6 +353,8 @@ export class WorkerImageManager {
     const dockerfilePath = join(stagingDirectory, "Dockerfile");
     const dockerfile = [
       `FROM ${baseImage.buildRef}`,
+      "RUN install -d /etc/zypp/zypp.conf.d",
+      `RUN printf '${ZYPPER_AUTO_RETRY_CONFIG}' > ${ZYPPER_AUTO_RETRY_CONFIG_PATH}`,
       ...this.normalizedCommands.map((command) => `RUN ${command}`),
       "",
     ].join("\n");
