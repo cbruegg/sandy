@@ -23,7 +23,7 @@ export class SandyOrchestrator {
       logger.info("chat.event_handled", {
         chatId: event.chatId,
         kind: event.kind,
-        hasActiveTask: session.activeTask !== null,
+        hasVisibleTask: session.visibleTask !== null,
       });
       await this.deps.destinationStore.setDefaultChatId(event.chatId);
       this.deps.taskCoordinator.onUserInteraction(event.chatId);
@@ -50,7 +50,7 @@ export class SandyOrchestrator {
         return;
       }
 
-      if (!session.activeTask) {
+      if (!session.visibleTask) {
         await this.routeIdleChatEvent(session, event);
         return;
       }
@@ -61,7 +61,7 @@ export class SandyOrchestrator {
       logger.error("chat.event_handler_failed", error, "Unknown chat event handling failure.", {
         chatId: event.chatId,
         kind: event.kind,
-        hasActiveTask: session.activeTask !== null,
+        hasVisibleTask: session.visibleTask !== null,
       });
 
       try {
@@ -148,7 +148,7 @@ export class SandyOrchestrator {
         const decision: MainAgentDecision = await this.deps.mainAgent.decide({
           chatId: event.chatId,
           newVisibleEntries,
-          activeTask: session.activeTask,
+          activeTask: session.visibleTask,
           channelFormatting: this.channelFormatting,
         });
 
@@ -159,7 +159,7 @@ export class SandyOrchestrator {
   }
 
   private async routeActiveTaskChatEvent(session: SessionState, event: SupportedChatEvent): Promise<void> {
-    const activeTask = session.activeTask;
+    const activeTask = session.visibleTask;
     if (!activeTask) {
       return;
     }

@@ -192,7 +192,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
             taskName: decision.taskName,
           });
           const taskPolicy = normalizeTaskPolicy(decision.taskPolicy);
-          session.activeTask = createActiveTaskState(
+          session.visibleTask = createActiveTaskState(
             {
               taskId,
               taskName: decision.taskName,
@@ -229,8 +229,8 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
           await this.channel.sendText(event.chatId, messages.taskStarted(decision.taskName));
           return;
         } catch (error) {
-          if (!launchSucceeded && session.activeTask?.taskId === taskId) {
-            session.activeTask = null;
+          if (!launchSucceeded && session.visibleTask?.taskId === taskId) {
+            session.visibleTask = null;
           }
           throw error;
         }
@@ -363,7 +363,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
   }
 
   async cancelActiveTask(session: SessionState, reason: string): Promise<void> {
-    const activeTask = session.activeTask;
+    const activeTask = session.visibleTask;
     if (!activeTask) {
       return;
     }
@@ -536,7 +536,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     const requestId = randomUUID();
     const summary = inspection.summary ?? "";
 
-    if (origin.kind === "launchedByJob" && session.activeTask?.origin.kind === "launchedByUser") {
+    if (origin.kind === "launchedByJob" && session.visibleTask?.origin.kind === "launchedByUser") {
       this.deps.taskCoordinator.scheduleShareDeletionPrompt(session.chatId, {
         requestId,
         taskId,

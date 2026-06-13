@@ -114,7 +114,7 @@ test("orchestrator keeps completed-task summary pending until the user sends ano
   await runner.emit({ type: "task_done" });
 
   const session = store.getOrCreate("chat-4");
-  assert.equal(session.activeTask, null);
+  assert.equal(session.visibleTask, null);
   assert.deepEqual(session.pendingTaskSummary, {
     taskName: "env-inspection",
     summary: [
@@ -190,7 +190,7 @@ test("orchestrator asks the worker to finalize when the user marks the task as f
   await runner.emit({ type: "task_done" });
 
   const session = store.getOrCreate("chat-mark-finished");
-  assert.equal(session.activeTask, null);
+  assert.equal(session.visibleTask, null);
   assert.deepEqual(session.pendingTaskSummary, {
     taskName: "env-inspection",
     summary: [
@@ -327,7 +327,7 @@ test("orchestrator discards completed-task output when the user sends a danger r
   });
 
   const session = store.getOrCreate("chat-5");
-  assert.equal(session.activeTask, null);
+  assert.equal(session.visibleTask, null);
   assert.equal(session.pendingTaskSummary, null);
   assert.equal(channel.sentTexts.at(-1)?.text, messages.discardedPendingOutput());
 });
@@ -360,7 +360,7 @@ test("orchestrator keeps final_result output pending until the user continues no
   await runner.emit({ type: "final_result", text: "The environment has 8 CPUs." });
 
   let session = store.getOrCreate("chat-6");
-  assert.equal(session.activeTask, null);
+  assert.equal(session.visibleTask, null);
   assert.deepEqual(session.pendingTaskSummary, {
     taskName: "env-inspection",
     summary: [
@@ -424,7 +424,7 @@ test("orchestrator marks worker disconnects as task failure and clears the task"
   });
 
   const session = store.getOrCreate("chat-7");
-  assert.equal(session.activeTask, null);
+  assert.equal(session.visibleTask, null);
   assert.equal(channel.sentTexts.at(-1)?.text, "Sub-agent control channel disconnected unexpectedly.");
 });
 
@@ -458,7 +458,7 @@ test("orchestrator prompts before deleting a non-empty shared workspace", async 
   await runner.emit({ type: "task_done" });
 
   const session = store.getOrCreate("chat-8");
-  assert.equal(session.activeTask, null);
+  assert.equal(session.visibleTask, null);
   assert.equal(channel.shareDeletionRequests.length, 1);
   assert.equal(channel.shareDeletionRequests[0]?.taskName, "fs-inspect");
   assert.equal(runner.deletedTaskShares.length, 0);
@@ -617,7 +617,7 @@ test("orchestrator prompts for share deletion from a silent job task", async () 
   await runner.emit({ type: "task_done" }, taskId);
 
   const session = store.getOrCreate("chat-job-silent");
-  assert.equal(session.activeTask, null);
+  assert.equal(session.visibleTask, null);
   assert.equal(channel.shareDeletionRequests.length, 1);
   assert.equal(channel.shareDeletionRequests[0]?.taskName, "Scheduled job: Daily cleanup");
 });
@@ -663,7 +663,7 @@ test("orchestrator defers job share deletion prompt while a user task is active"
   await runner.emit({ type: "task_done" }, jobTaskId);
 
   const session = store.getOrCreate("chat-job-defer");
-  assert.equal(session.activeTask?.taskId, runner.launches[0]?.taskId);
+  assert.equal(session.visibleTask?.taskId, runner.launches[0]?.taskId);
   assert.equal(channel.shareDeletionRequests.length, 0);
 
   const userTaskId = runner.launches[0]?.taskId;
@@ -674,7 +674,7 @@ test("orchestrator defers job share deletion prompt while a user task is active"
   });
   await runner.emit({ type: "task_done" }, userTaskId);
 
-  assert.equal(session.activeTask, null);
+  assert.equal(session.visibleTask, null);
   assert.equal(channel.shareDeletionRequests.length, 1);
   assert.equal(channel.shareDeletionRequests[0]?.taskName, "Scheduled job: Daily cleanup");
 });

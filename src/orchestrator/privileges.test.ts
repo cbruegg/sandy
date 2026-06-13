@@ -506,7 +506,7 @@ test("orchestrator fails the active task if channel file delivery fails", async 
   });
 
   const session = store.getOrCreate("chat-file-failure");
-  assert.equal(session.activeTask, null);
+  assert.equal(session.visibleTask, null);
   assert.equal(channel.sentTexts.at(-1)?.text, messages.taskFailed("Telegram upload failed."));
   assert.equal(runner.handle.closeCalls, 1);
   assert.deepEqual(toolResult, {
@@ -689,7 +689,7 @@ test("orchestrator confirms persisted mcp tool approval suitability and reuses i
   assert.equal(result.scope, "always");
 
   const session = store.getOrCreate("chat-mcp-confirm");
-  assert.deepEqual(session.activeTask?.taskPolicy.autoApproveMcpServers, ["todoist"]);
+  assert.deepEqual(session.visibleTask?.taskPolicy.autoApproveMcpServers, ["todoist"]);
 
   const second = await orchestrator.authorizeMcpToolCall({
     taskId,
@@ -772,7 +772,7 @@ test("orchestrator confirms persisted http token suitability and enables later p
   });
 
   const session = store.getOrCreate("chat-http-confirm");
-  assert.deepEqual(session.activeTask?.taskPolicy.autoApproveHttpTokens, ["vid2text"]);
+  assert.deepEqual(session.visibleTask?.taskPolicy.autoApproveHttpTokens, ["vid2text"]);
 
   const authorizer = new HttpTokenAuthorizer(store, persistentApprovalStore);
   const proxyResult = authorizer.authorizeHttpTokenUse({
@@ -913,7 +913,7 @@ test("orchestrator sends mcp resource read privilege request to user when not pr
   assert.equal(result.scope, "worker_session");
 
   const session = store.getOrCreate("chat-resource-pending");
-  assert.ok(session.activeTask?.approvedMcpResourceReads.some((entry) => entry.serverId === "todoist" && entry.uri === "test://resource"));
+  assert.ok(session.visibleTask?.approvedMcpResourceReads.some((entry) => entry.serverId === "todoist" && entry.uri === "test://resource"));
 });
 
 test("job-scoped persistent approvals apply only to later executions of the same job", async () => {
