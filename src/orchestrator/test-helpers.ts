@@ -405,8 +405,8 @@ export function createTestOrchestrator(options: {
     hostfsBroker: coreDeps.hostfsBroker,
     getTaskSharePath: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskSharePath(),
     getTaskBundle: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskBundle(),
-    runUserVisibleOperation: async ({ chatId, taskId, taskName, operation }) => {
-      await taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, operation);
+    runUserVisibleOperation: async ({ chatId, taskId, taskName, includesTaskContext, operation }) => {
+      await taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, includesTaskContext ?? false, operation);
     },
     markTaskFinished: (taskId) => taskLifecycle.markActiveTaskFinished(taskId),
   });

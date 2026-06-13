@@ -146,6 +146,8 @@ export const messages = {
     `Failed to ${operation} job "${jobId}": ${error}`,
   scheduledJobBlocked: (jobName: string, taskName: string): string =>
     `A scheduled job (${jobName}) is waiting to interact, but task "${taskName}" is still active.`,
+  scheduledJobBecameInteractive: (taskName: string): string =>
+    `Scheduled job "${normalizeScheduledJobTaskName(taskName)}" is now interactive. The next update or request comes from this task.`,
   jobRequestsInteraction: (taskName: string, message?: string): string =>
     message
       ? `Scheduled job "${taskName}" needs your attention: ${message}`
@@ -161,6 +163,10 @@ export const messages = {
   terminateTaskNotJobTask: (): string =>
     "This tool is only available for scheduled job tasks. User-launched tasks are already interactive and can be cancelled by the user.",
 } as const;
+
+function normalizeScheduledJobTaskName(taskName: string): string {
+  return taskName.startsWith("Scheduled job: ") ? taskName.slice("Scheduled job: ".length) : taskName;
+}
 
 function formatCommandForChannel(command: string, channelFormatting: ChannelFormatting | null): string {
   if (!channelFormatting) {
