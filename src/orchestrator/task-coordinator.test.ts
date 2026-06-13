@@ -165,7 +165,7 @@ test("TaskCoordinator notifies exactly once when a job task becomes interactive"
   assert.equal(store.getOrCreate("chat-job-notice").visibleTask?.interactionState, "interacting");
   assert.deepEqual(channel.taskUpdates, [{
     chatId: "chat-job-notice",
-    text: messages.scheduledJobBecameInteractive("Daily cleanup"),
+    text: messages.scheduledJobBecameInteractive("Scheduled job: Daily cleanup", "Daily cleanup"),
   }]);
 });
 
@@ -182,17 +182,20 @@ test("TaskCoordinator always sends a generic context message before the first pr
   session.backgroundJobTasks.push(createTask("job-task", "Scheduled job: Daily cleanup", { kind: "launchedByJob", jobId: "daily-cleanup", jobName: "Daily cleanup" }));
 
   await coordinator.runJobUserVisibleOperation("chat-job-context", "job-task", "Daily cleanup", async (taskChannel) => {
-    await taskChannel.sendTaskUpdate("chat-job-context", messages.jobRequestsInteraction("Daily cleanup", "Need confirmation."));
+    await taskChannel.sendTaskUpdate(
+      "chat-job-context",
+      messages.jobRequestsInteraction("Scheduled job: Daily cleanup", "Daily cleanup", "Need confirmation."),
+    );
   });
 
   assert.deepEqual(channel.taskUpdates, [
     {
       chatId: "chat-job-context",
-      text: messages.scheduledJobBecameInteractive("Daily cleanup"),
+      text: messages.scheduledJobBecameInteractive("Scheduled job: Daily cleanup", "Daily cleanup"),
     },
     {
       chatId: "chat-job-context",
-      text: messages.jobRequestsInteraction("Daily cleanup", "Need confirmation."),
+      text: messages.jobRequestsInteraction("Scheduled job: Daily cleanup", "Daily cleanup", "Need confirmation."),
     },
   ]);
 });

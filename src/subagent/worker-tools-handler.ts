@@ -82,7 +82,11 @@ export class WorkerToolsHandler {
       operation: async (channel) => {
         await channel.sendTaskUpdate(
           input.chatId,
-          messages.jobRequestsInteraction(input.task.origin.kind === "launchedByJob" ? input.task.origin.jobName : input.task.taskName, input.message),
+          messages.jobRequestsInteraction(
+            input.task.taskName,
+            input.task.origin.kind === "launchedByJob" ? input.task.origin.jobName : null,
+            input.message,
+          ),
         );
       },
     });

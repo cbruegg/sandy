@@ -219,7 +219,7 @@ test("request_interaction tool promotes a silent job task to interactive mode", 
   assert.equal(toolResult.isError, false);
   assert.match(toolResult.message, /promoted to interactive mode/i);
   assert.equal(channel.taskUpdates.length, 2);
-  assert.equal(channel.taskUpdates[0]?.text, messages.scheduledJobBecameInteractive("Daily report"));
+  assert.equal(channel.taskUpdates[0]?.text, messages.scheduledJobBecameInteractive("Scheduled job: Daily report", "Daily report"));
   assert.match(channel.taskUpdates[1]?.text ?? "", /needs your attention.*confirm the report format/);
 
   const updatedTask = session.findTask(taskId)?.task;
@@ -262,7 +262,7 @@ test("silent job privilege requests are preceded by task context when they make 
 
   assert.deepEqual(channel.taskUpdates, [{
     chatId: "chat-privilege-context",
-    text: messages.scheduledJobBecameInteractive("Shopping sync"),
+    text: messages.scheduledJobBecameInteractive("Scheduled job: Shopping sync", "Shopping sync"),
   }]);
 
   const requestId = channel.privilegeRequests[0]?.request.requestId;
@@ -402,11 +402,15 @@ test("request_interaction tool is a no-op for an already interactive job task", 
   assert.deepEqual(channel.taskUpdates, [
     {
       chatId: "chat-request-interaction-again",
-      text: messages.scheduledJobBecameInteractive("Daily report"),
+      text: messages.scheduledJobBecameInteractive("Scheduled job: Daily report", "Daily report"),
     },
     {
       chatId: "chat-request-interaction-again",
-      text: messages.jobRequestsInteraction("Daily report", "I need the user to confirm the report format."),
+      text: messages.jobRequestsInteraction(
+        "Scheduled job: Daily report",
+        "Daily report",
+        "I need the user to confirm the report format.",
+      ),
     },
   ]);
   assert.equal(runner.handles.get(taskId)?.interactiveNotices, 1);
