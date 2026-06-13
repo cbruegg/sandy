@@ -15,7 +15,7 @@ export function createSelfUpdateLayer(input: SelfUpdateLayerInput): SelfUpdateLa
     canInstallUpdate: () => {
       const sessions = sessionStore.listSessions();
       const blockingSessions = sessions.filter((session) =>
-        session.activeTask !== null
+        session.visibleTask !== null
         || session.backgroundJobTasks.length > 0
         || session.pendingShareDeletion !== null);
       if (blockingSessions.length > 0) {
@@ -24,7 +24,7 @@ export function createSelfUpdateLayer(input: SelfUpdateLayerInput): SelfUpdateLa
           totalCount: sessions.length,
           blockingSessions: blockingSessions.map((session) => ({
             chatId: session.chatId,
-            hasActiveTask: session.activeTask !== null,
+            hasVisibleTask: session.visibleTask !== null,
             backgroundJobTaskCount: session.backgroundJobTasks.length,
             hasPendingTaskSummary: session.pendingTaskSummary !== null,
             hasPendingShareDeletion: session.pendingShareDeletion !== null,

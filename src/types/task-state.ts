@@ -89,7 +89,7 @@ type PendingShareDeletion = {
 
 export class SessionState {
   chatId: ChatId;
-  activeTask: ActiveTaskState | null;
+  visibleTask: ActiveTaskState | null;
   backgroundJobTasks: ActiveTaskState[];
   pendingTaskSummary: {
     taskName: string;
@@ -99,17 +99,17 @@ export class SessionState {
 
   constructor(chatId: ChatId) {
     this.chatId = chatId;
-    this.activeTask = null;
+    this.visibleTask = null;
     this.backgroundJobTasks = [];
     this.pendingTaskSummary = null;
     this.pendingShareDeletion = null;
   }
 
-  findTask(taskId: string): { task: ActiveTaskState; location: "active" | "background"; } | null {
-    if (this.activeTask?.taskId === taskId) {
+  findTask(taskId: string): { task: ActiveTaskState; location: "visible" | "background"; } | null {
+    if (this.visibleTask?.taskId === taskId) {
       return {
-        task: this.activeTask,
-        location: "active",
+        task: this.visibleTask,
+        location: "visible",
       };
     }
 
@@ -130,9 +130,9 @@ export class SessionState {
   }
 
   removeTask(taskId: string): ActiveTaskState | null {
-    if (this.activeTask?.taskId === taskId) {
-      const task = this.activeTask;
-      this.activeTask = null;
+    if (this.visibleTask?.taskId === taskId) {
+      const task = this.visibleTask;
+      this.visibleTask = null;
       return task;
     }
 
@@ -146,7 +146,7 @@ export class SessionState {
   }
 
   promoteBackgroundJobTask(taskId: string): ActiveTaskState {
-    if (this.activeTask) {
+    if (this.visibleTask) {
       throw new Error(`Cannot promote task ${taskId} while another visible task is active.`);
     }
 
@@ -155,7 +155,7 @@ export class SessionState {
       throw new Error(`Task ${taskId} is no longer active.`);
     }
 
-    this.activeTask = task;
+    this.visibleTask = task;
     return task;
   }
 }

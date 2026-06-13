@@ -72,7 +72,7 @@ test("orchestrator reports top-level chat event failures back to the user", asyn
     channel.sentTexts.at(-1)?.text,
     messages.handlerFailed("You've hit your usage limit."),
   );
-  assert.equal(store.getOrCreate("chat-top-level-error").activeTask, null);
+  assert.equal(store.getOrCreate("chat-top-level-error").visibleTask, null);
 });
 
 test("user messages route to an interacting scheduled job after waiting behind a user task", async () => {
@@ -119,7 +119,7 @@ test("user messages route to an interacting scheduled job after waiting behind a
   await blockedInteraction;
 
   assert.match(channel.taskUpdates.at(-1)?.text ?? "", /needs your attention.*Waiting on the user task/);
-  assert.equal(store.getOrCreate("chat-job-routing").activeTask?.taskId, jobTaskId);
+  assert.equal(store.getOrCreate("chat-job-routing").visibleTask?.taskId, jobTaskId);
 
   await orchestrator.handleChatEvent({
     kind: "user_message",
