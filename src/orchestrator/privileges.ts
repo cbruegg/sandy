@@ -429,6 +429,13 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       return failedPrivilegeResult(input.request.requestId, messages.anotherPrivilegeRequestPendingForTask());
     }
 
+    if (input.activeTask.origin.kind === "launchedByJob" && input.activeTask.interactionState !== "interacting") {
+      return failedPrivilegeResult(
+        input.request.requestId,
+        messages.jobTaskMustRequestInteractionFirst("asking the user for privilege approval"),
+      );
+    }
+
     input.activeTask.pendingPrivilegeRequest = input.request;
     input.activeTask.status = "awaiting_privilege_decision";
     const resultPromise = new Promise<PrivilegeResolutionResult>((resolve) => {

@@ -226,6 +226,104 @@ test("request_interaction tool promotes a silent job task to interactive mode", 
   assert.equal(updatedTask.interactionState, "interacting");
 });
 
+test("silent job mcp approvals fail until the task requests interaction", async () => {
+  const persistentApprovalStore: PersistentApprovalStore = {
+    isAlwaysAllowed: (serverId, toolName) => serverId === "todoist" && toolName === "find-projects",
+    allowTool: async () => {},
+    isResourceReadAlwaysAllowed: () => false,
+    allowResourceRead: async () => {},
+    isHttpTokenAlwaysAllowed: () => false,
+    allowHttpToken: async () => {},
+    isHostDirectoryAlwaysAllowed: () => false,
+    allowHostDirectory: async () => {},
+  };
+  const { orchestrator, taskLifecycle, channel } = createTestOrchestrator({
+    persistentApprovalStore,
+    mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
+  });
+
+  const job: JobDefinition = {
+    id: "job-silent-mcp-approval",
+    name: "Shopping sync",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt: "2026-04-01T00:00:00.000Z" },
+    skillId: "shopping-sync",
+  };
+  const taskId = await taskLifecycle.launchJobTask(job, "chat-silent-mcp-approval", null);
+
+  const result = await orchestrator.authorizeMcpToolCall({
+    taskId,
+    serverId: "todoist",
+    toolName: "find-projects",
+    arguments: { searchText: "Alexa Shopping List", limit: 10 },
+  });
+
+  assert.equal(result.outcome, "failed");
+  assert.equal(result.message, messages.jobTaskMustRequestInteractionFirst("asking the user for privilege approval"));
+  assert.equal(channel.privilegeRequests.length, 0);
+});
+
+test("silent job native privilege requests fail until the task requests interaction", async () => {
+  const { orchestrator, taskLifecycle, channel } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
+  });
+
+  const job: JobDefinition = {
+    id: "job-silent-http-approval",
+    name: "Video sync",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt: "2026-04-01T00:00:00.000Z" },
+    skillId: "video-sync",
+  };
+  const taskId = await taskLifecycle.launchJobTask(job, "chat-silent-http-approval", null);
+
+  const result = await orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "request_http_token",
+    arguments: {
+      tokenId: "vid2text",
+      host: "api.example.com",
+      reason: "Need the transcript API.",
+    },
+  });
+
+  assert.deepEqual(result, {
+    isError: true,
+    message: messages.jobTaskMustRequestInteractionFirst("asking the user for privilege approval"),
+  });
+  assert.equal(channel.privilegeRequests.length, 0);
+});
+
+test("silent job send_file_to_channel fails until the task requests interaction", async () => {
+  const { orchestrator, taskLifecycle, channel } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
+  });
+
+  const job: JobDefinition = {
+    id: "job-silent-send-file",
+    name: "Daily report",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt: "2026-04-01T00:00:00.000Z" },
+    skillId: "report",
+  };
+  const taskId = await taskLifecycle.launchJobTask(job, "chat-silent-send-file", null);
+
+  const result = await orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "send_file_to_channel",
+    arguments: {
+      path: `${sharedWorkspaceMountPath}/result.txt`,
+      caption: "Result",
+    },
+  });
+
+  assert.deepEqual(result, {
+    isError: true,
+    message: messages.jobTaskMustRequestInteractionFirst("sending files to the user"),
+  });
+  assert.equal(channel.sentFiles.length, 0);
+});
+
 test("approved job mutation delegates execution through the worker tools handler", async () => {
   const { orchestrator, runner, channel } = createTestOrchestrator({
     mainAgent: new StubMainAgent({
@@ -950,6 +1048,11 @@ test("job-scoped persistent approvals apply only to later executions of the same
   };
 
   const firstTaskId = await taskLifecycle.launchJobTask(job, "chat-job-approval", null);
+  await orchestrator.executeNativeWorkerToolCall({
+    taskId: firstTaskId,
+    toolName: "request_interaction",
+    arguments: { message: "Need approval for Todoist access." },
+  });
   const firstApproval = orchestrator.authorizeMcpToolCall({
     taskId: firstTaskId,
     serverId: "todoist",
@@ -984,6 +1087,11 @@ test("job-scoped persistent approvals apply only to later executions of the same
   await runner.emit({ type: "task_done" }, secondTaskId);
 
   const thirdTaskId = await taskLifecycle.launchJobTask({ ...job, id: "weekly-cleanup", name: "Weekly cleanup" }, "chat-job-approval", null);
+  await orchestrator.executeNativeWorkerToolCall({
+    taskId: thirdTaskId,
+    toolName: "request_interaction",
+    arguments: { message: "Need approval for Todoist access." },
+  });
   const thirdApproval = orchestrator.authorizeMcpToolCall({
     taskId: thirdTaskId,
     serverId: "todoist",

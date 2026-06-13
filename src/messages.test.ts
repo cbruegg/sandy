@@ -110,3 +110,11 @@ test("privilegeRequestPrompt shows skill delete with only operation and skillId"
   assert.doesNotMatch(prompt, /Skill content:/);
   assert.match(prompt, /Approve or deny this request\./);
 });
+
+test("jobTaskMustRequestInteractionFirst tells scheduled jobs to wait for visibility", () => {
+  const message = messages.jobTaskMustRequestInteractionFirst("asking the user for privilege approval");
+
+  assert.match(message, /scheduled job task is not interactive yet/i);
+  assert.match(message, /call sandy\.request_interaction first/i);
+  assert.match(message, /wait until Sandy explicitly says the task became interactive/i);
+});

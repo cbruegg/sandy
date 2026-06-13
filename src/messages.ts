@@ -69,6 +69,8 @@ export const messages = {
   taskNotActive: (taskId: string): string => `Task ${taskId} is not active.`,
   taskNoLongerActive: (taskId: string): string => `Task ${taskId} is no longer active.`,
   sharedFileSentToUser: (path: string): string => `Sent ${path} to the user.`,
+  jobTaskMustRequestInteractionFirst: (action: string): string =>
+    `This scheduled job task is not interactive yet. Call sandy.request_interaction first, then wait until Sandy explicitly says the task became interactive before ${action}.`,
 
   anotherPrivilegeRequestPendingForTask: (): string => "Another privilege request is already pending for this task.",
   unsupportedMcpPrivilegeRequest: (serverId: string, toolName: string): string =>

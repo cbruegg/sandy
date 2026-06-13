@@ -5,9 +5,11 @@ import { join, resolve } from "node:path";
 import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import type { HostDirectoryAccessLevel } from "../hostfs/path-policy.js";
 import type { JobService } from "../jobs/job-service.js";
+import { messages } from "../messages.js";
 import type { SandboxTaskBundle } from "../sandbox/sandbox-runner.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 import type { SkillService } from "../skills.js";
+import { createActiveTaskState } from "../types.js";
 import { WorkerToolsHandler } from "./worker-tools-handler.js";
 
 function createWorkerToolsHandler(input?: {
@@ -67,6 +69,28 @@ test("applyFileCopy copies a host file into the task share", async () => {
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("sendFileToChannel rejects silent scheduled job tasks until they request interaction", async () => {
+  const handler = createWorkerToolsHandler();
+
+  const result = await handler.sendFileToChannel({
+    chatId: "chat-1",
+    task: createActiveTaskState({
+      taskId: "job-task",
+      taskName: "Scheduled job: Daily cleanup",
+      startedAt: new Date(0).toISOString(),
+      taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
+      origin: { kind: "launchedByJob", jobId: "job-1" },
+      interactionState: "silent",
+    }),
+    sharePath: `${sharedWorkspaceMountPath}/result.txt`,
+  });
+
+  assert.deepEqual(result, {
+    isError: true,
+    message: messages.jobTaskMustRequestInteractionFirst("sending files to the user"),
+  });
 });
 
 test("applyFileCopy copies a shared file out to the host", async () => {

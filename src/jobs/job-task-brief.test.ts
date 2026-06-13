@@ -12,7 +12,7 @@ test("buildJobTaskBrief explains silent output and visibility requests", () => {
   }, "/host/jobs/job-1");
 
   assert.match(brief, /assistant messages and progress updates.*dropped/i);
-  assert.match(brief, /privilege requests, and send_file_to_channel will ask Sandy to make this task visible/i);
+  assert.match(brief, /privilege requests and send_file_to_channel fail until Sandy has made this task interactive/i);
   assert.match(brief, /Wait for Sandy's explicit notice that the task became interactive/i);
   assert.match(brief, /sandy\.terminate_task/);
 });

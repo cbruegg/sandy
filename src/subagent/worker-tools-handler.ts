@@ -45,6 +45,13 @@ export class WorkerToolsHandler {
     sharePath: string;
     caption?: string;
   }): Promise<NativeWorkerToolCallResult> {
+    if (input.task.origin.kind === "launchedByJob" && input.task.interactionState !== "interacting") {
+      return {
+        isError: true,
+        message: messages.jobTaskMustRequestInteractionFirst("sending files to the user"),
+      };
+    }
+
     await this.deps.runUserVisibleOperation({
       chatId: input.chatId,
       taskId: input.task.taskId,
