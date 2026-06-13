@@ -79,6 +79,28 @@ export class JobStore {
     });
   }
 
+  /**
+   * Atomically claims a one-shot launch by setting `lastRunAt` to `runAt`
+   * only when the current `lastRunAt` is still null.
+   *
+   * Returns `true` when the launch was claimed; `false` when the one-shot was
+   * already consumed (lastRunAt is non-null).
+   */
+  async tryClaimOneShotLaunch(jobId: string, runAt: string): Promise<boolean> {
+    return this.updateJobsFile((data) => {
+      const state = data.runtimeState.find((candidate) => candidate.jobId === jobId);
+      if (state && state.lastRunAt !== null) {
+        return false;
+      }
+      if (!state) {
+        data.runtimeState.push({ jobId, lastRunAt: runAt });
+      } else {
+        state.lastRunAt = runAt;
+      }
+      return true;
+    });
+  }
+
   workspacePath(jobId: string): string {
     return jobWorkspace(this.configDirectory, jobId);
   }
