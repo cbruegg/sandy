@@ -166,7 +166,7 @@ test("HttpTokenAuthorizer applies global persistent approvals to job tasks only 
       taskName: "test",
       startedAt: new Date().toISOString(),
       taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
-      origin: { kind: "launchedByJob", jobId: "job-1" },
+      origin: { kind: "launchedByJob", jobId: "job-1", jobName: "Job 1" },
       interactionState: "silent",
     },
   );

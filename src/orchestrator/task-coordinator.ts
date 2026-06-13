@@ -18,6 +18,7 @@ type PendingShareDeletionPrompt = {
   requestId: string;
   taskId: string;
   taskName: string;
+  jobName: string;
   summary: string;
 };
 
@@ -158,8 +159,9 @@ export class TaskCoordinator {
     }
 
     if (session.visibleTask?.taskId === taskId) {
+      const jobName = task.origin.kind === "launchedByJob" ? task.origin.jobName : task.taskName;
       if (await this.transitionJobTaskToInteractive(task)) {
-        await this.deps.channel.sendTaskUpdate(chatId, messages.scheduledJobBecameInteractive(task.taskName));
+        await this.deps.channel.sendTaskUpdate(chatId, messages.scheduledJobBecameInteractive(jobName));
       }
       await operation(this.deps.channel);
       return;
@@ -227,8 +229,9 @@ export class TaskCoordinator {
       session.promoteBackgroundJobTask(taskId);
     }
     const task = session.visibleTask;
+    const jobName = task?.origin.kind === "launchedByJob" ? task.origin.jobName : task?.taskName;
     if (task && await this.transitionJobTaskToInteractive(task)) {
-      await this.deps.channel.sendTaskUpdate(session.chatId, messages.scheduledJobBecameInteractive(task.taskName));
+      await this.deps.channel.sendTaskUpdate(session.chatId, messages.scheduledJobBecameInteractive(jobName ?? task.taskName));
     }
     this.reminders.sync(session.chatId);
   }
@@ -329,7 +332,7 @@ export class TaskCoordinator {
     }
 
     const waitingTaskName = this.waitingJobInteractions.peek(chatId)?.jobName
-      ?? this.pendingShareDeletionPrompts.peek(chatId)?.taskName;
+      ?? this.pendingShareDeletionPrompts.peek(chatId)?.jobName;
     if (!waitingTaskName) {
       return null;
     }
@@ -339,11 +342,7 @@ export class TaskCoordinator {
       blockerTaskId: blocker.taskId,
       blockerTaskName: blocker.taskName,
       blockerStartedAt: blocker.startedAt,
-      waitingTaskName: normalizeJobName(waitingTaskName),
+      waitingTaskName,
     };
   }
-}
-
-function normalizeJobName(jobName: string): string {
-  return jobName.startsWith("Scheduled job: ") ? jobName.slice("Scheduled job: ".length) : jobName;
 }
