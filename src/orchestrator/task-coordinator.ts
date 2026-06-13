@@ -20,6 +20,14 @@ type PendingShareDeletionPrompt = {
   summary: string;
 };
 
+export type UserVisibleOperationMode = "request_interaction" | "requires_interactive" | "suppress_if_silent";
+
+export class JobTaskNotInteractiveError extends Error {
+  constructor(taskId: string) {
+    super(`Task ${taskId} must become interactive before this operation can run.`);
+  }
+}
+
 type TaskCoordinatorDependencies = {
   readonly sessionStore: SessionStore;
   readonly channel: ChannelAdapter;
@@ -137,43 +145,59 @@ export class TaskCoordinator {
    * task claims the slot when it is free; otherwise the operation is queued and
    * this promise settles once it eventually runs.
    */
-  async runJobUserVisibleOperation(
-    chatId: ChatId,
-    taskId: string,
-    jobName: string,
-    operation: (channel: ChannelAdapter) => Promise<void>,
-  ): Promise<void> {
-    const session = this.deps.sessionStore.getOrCreate(chatId);
-    const taskRecord = session.findTask(taskId);
+  async runJobUserVisibleOperation(input: {
+    chatId: ChatId;
+    taskId: string;
+    jobName: string;
+    mode: UserVisibleOperationMode;
+    operation: (channel: ChannelAdapter) => Promise<void>;
+  }): Promise<boolean> {
+    const session = this.deps.sessionStore.getOrCreate(input.chatId);
+    const taskRecord = session.findTask(input.taskId);
     if (!taskRecord) {
-      throw new Error(`Task ${taskId} is no longer active.`);
+      throw new Error(`Task ${input.taskId} is no longer active.`);
     }
 
     const task = taskRecord.task;
     if (task.origin.kind === "launchedByUser") {
       // User-launched tasks are already the visible task for their chat, so they never wait here.
-      await operation(this.deps.channel);
-      return;
+      await input.operation(this.deps.channel);
+      return true;
     }
 
-    if (session.visibleTask?.taskId === taskId) {
+    if (session.visibleTask?.taskId === input.taskId) {
       await this.transitionJobTaskToInteractive(task);
-      await operation(this.deps.channel);
-      return;
+      await input.operation(this.deps.channel);
+      return true;
+    }
+
+    if (input.mode === "suppress_if_silent" && task.interactionState === "silent") {
+      return false;
+    }
+
+    if (input.mode === "requires_interactive" && task.interactionState !== "interacting") {
+      throw new JobTaskNotInteractiveError(task.taskId);
     }
 
     if (this.isVisibleSlotAvailable(session)) {
-      await this.claimVisibleSlotForJobTask(session, taskId);
-      await operation(this.deps.channel);
-      await this.drainPendingOperationsForActiveTask(session, taskId);
-      return;
+      await this.claimVisibleSlotForJobTask(session, input.taskId);
+      await input.operation(this.deps.channel);
+      await this.drainPendingOperationsForActiveTask(session, input.taskId);
+      return true;
     }
 
     task.interactionState = "waitingToInteract";
     await new Promise<void>((resolve, reject) => {
-      this.waitingJobInteractions.enqueue(chatId, { taskId, jobName, run: operation, resolve, reject });
-      this.reminders.sync(chatId);
+      this.waitingJobInteractions.enqueue(input.chatId, {
+        taskId: input.taskId,
+        jobName: input.jobName,
+        run: input.operation,
+        resolve,
+        reject,
+      });
+      this.reminders.sync(input.chatId);
     });
+    return true;
   }
 
   /**

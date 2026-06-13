@@ -60,6 +60,9 @@ const enableJobToolName = "enable_job";
 const disableJobToolName = "disable_job";
 const runJobNowToolName = "run_job_now";
 
+const interactiveTaskGuidance = "User-launched tasks are already interactive.";
+const scheduledJobVisibilityGuidance = "Scheduled job tasks must call sandy.request_interaction and wait until Sandy says the task became interactive before using this tool.";
+
 const copyIntoShareSchema = z.object({
   type: z.literal(copyIntoShareToolName),
   sourcePath: z.string(),
@@ -164,19 +167,19 @@ export const workerToolEntries = [
   ),
   defineWorkerTool(
     sendFileToChannelToolName,
-    "Send a file from the shared workspace to the user as a chat attachment. Use this when the user asks you to send, share, or upload a file. Scheduled job tasks must call sandy.request_interaction and wait until Sandy says the task became interactive before using this tool.",
+    `Send a file from the shared workspace to the user as a chat attachment. Use this when the user asks you to send, share, or upload a file. ${interactiveTaskGuidance} ${scheduledJobVisibilityGuidance}`,
     false,
     sendFileToChannelSchema,
   ),
   defineWorkerTool(
     requestHttpTokenToolName,
-    "Ask the host for permission to use a preconfigured HTTP token. Emit this tool call directly instead of asking the user in plain text. You must request approval before making HTTP requests that use placeholder headers like 'Authorization: Bearer SANDY_TOKEN_<tokenId>'. The host will inject the real token value into proxied HTTP requests if approved. Scheduled job tasks must call sandy.request_interaction and wait until Sandy says the task became interactive before using this tool.",
+    `Ask the host for permission to use a preconfigured HTTP token. Emit this tool call directly instead of asking the user in plain text. You must request approval before making HTTP requests that use placeholder headers like 'Authorization: Bearer SANDY_TOKEN_<tokenId>'. The host will inject the real token value into proxied HTTP requests if approved. ${interactiveTaskGuidance} ${scheduledJobVisibilityGuidance}`,
     true,
     requestHttpTokenSchema,
   ),
   defineWorkerTool(
     requestHostDirectoryAccessToolName,
-    `Ask the host for permission to access a directory on the host filesystem. Emit this tool call directly instead of asking the user in plain text. The host will mount the approved directory inside ${hostGrantsPrefix}/ if approved. Scheduled job tasks must call sandy.request_interaction and wait until Sandy says the task became interactive before using this tool.`,
+    `Ask the host for permission to access a directory on the host filesystem. Emit this tool call directly instead of asking the user in plain text. The host will mount the approved directory inside ${hostGrantsPrefix}/ if approved. ${interactiveTaskGuidance} Scheduled job tasks may use this silently for pre-approved directories such as the job workspace, but must call sandy.request_interaction and wait until Sandy says the task became interactive before requesting directory access that still needs user approval.`,
     true,
     requestHostDirectoryAccessSchema,
   ),
@@ -194,30 +197,30 @@ export const workerToolEntries = [
   ),
   defineWorkerTool(
     createSkillToolName,
-    "Ask the host to create a new Sandy skill. Provide the skillId, name, description, and body. It is not necessary to write any files to disk. Scheduled job tasks must call sandy.request_interaction and wait until Sandy says the task became interactive before using this tool.",
+    `Ask the host to create a new Sandy skill. Provide the skillId, name, description, and body. It is not necessary to write any files to disk. ${interactiveTaskGuidance} ${scheduledJobVisibilityGuidance}`,
     true,
     createSkillSchema,
   ),
   defineWorkerTool(
     updateSkillToolName,
-    "Ask the host to update an existing Sandy skill. Provide the skillId, name, description, and body. It is not necessary to write any files to disk. Scheduled job tasks must call sandy.request_interaction and wait until Sandy says the task became interactive before using this tool.",
+    `Ask the host to update an existing Sandy skill. Provide the skillId, name, description, and body. It is not necessary to write any files to disk. ${interactiveTaskGuidance} ${scheduledJobVisibilityGuidance}`,
     true,
     updateSkillSchema,
   ),
   defineWorkerTool(
     deleteSkillToolName,
-    "Ask the host to delete an existing Sandy skill. Provide the skillId. Scheduled job tasks must call sandy.request_interaction and wait until Sandy says the task became interactive before using this tool.",
+    `Ask the host to delete an existing Sandy skill. Provide the skillId. ${interactiveTaskGuidance} ${scheduledJobVisibilityGuidance}`,
     true,
     deleteSkillSchema,
   ),
   defineWorkerTool(listJobsToolName, "List scheduled Sandy jobs.", false, listJobsSchema),
   defineWorkerTool(getJobToolName, "Inspect one scheduled Sandy job.", false, getJobSchema),
-  defineWorkerTool(createJobToolName, "Ask the host to create a scheduled Sandy job. Scheduled job tasks must call sandy.request_interaction and wait until Sandy says the task became interactive before using this tool.", true, createJobSchema),
-  defineWorkerTool(updateJobToolName, "Ask the host to replace a scheduled Sandy job definition. Scheduled job tasks must call sandy.request_interaction and wait until Sandy says the task became interactive before using this tool.", true, updateJobSchema),
-  defineWorkerTool(deleteJobToolName, "Ask the host to delete a scheduled Sandy job. Scheduled job tasks must call sandy.request_interaction and wait until Sandy says the task became interactive before using this tool.", true, deleteJobSchema),
-  defineWorkerTool(enableJobToolName, "Ask the host to enable a scheduled Sandy job. Scheduled job tasks must call sandy.request_interaction and wait until Sandy says the task became interactive before using this tool.", true, enableJobSchema),
-  defineWorkerTool(disableJobToolName, "Ask the host to disable a scheduled Sandy job. Scheduled job tasks must call sandy.request_interaction and wait until Sandy says the task became interactive before using this tool.", true, disableJobSchema),
-  defineWorkerTool(runJobNowToolName, "Ask the host to run a scheduled Sandy job now. Scheduled job tasks must call sandy.request_interaction and wait until Sandy says the task became interactive before using this tool.", true, runJobNowSchema),
+  defineWorkerTool(createJobToolName, `Ask the host to create a scheduled Sandy job. ${interactiveTaskGuidance} ${scheduledJobVisibilityGuidance}`, true, createJobSchema),
+  defineWorkerTool(updateJobToolName, `Ask the host to replace a scheduled Sandy job definition. ${interactiveTaskGuidance} ${scheduledJobVisibilityGuidance}`, true, updateJobSchema),
+  defineWorkerTool(deleteJobToolName, `Ask the host to delete a scheduled Sandy job. ${interactiveTaskGuidance} ${scheduledJobVisibilityGuidance}`, true, deleteJobSchema),
+  defineWorkerTool(enableJobToolName, `Ask the host to enable a scheduled Sandy job. ${interactiveTaskGuidance} ${scheduledJobVisibilityGuidance}`, true, enableJobSchema),
+  defineWorkerTool(disableJobToolName, `Ask the host to disable a scheduled Sandy job. ${interactiveTaskGuidance} ${scheduledJobVisibilityGuidance}`, true, disableJobSchema),
+  defineWorkerTool(runJobNowToolName, `Ask the host to run a scheduled Sandy job now. ${interactiveTaskGuidance} ${scheduledJobVisibilityGuidance}`, true, runJobNowSchema),
 ] as const satisfies readonly WorkerToolDefinition[];
 
 // Public API

@@ -89,35 +89,44 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
           await this.failTaskAfterWorkerDisconnect(session, taskId, event.message);
           break;
         case "progress": {
-          if (this.isSilentJobTask(session, taskId)) {
-            logger.debug("task.progress_ignored_silent_job", {
-              chatId,
-              taskId,
-            });
-            break;
-          }
           const message = event.message.trim();
           if (!message) {
             break;
           }
-          await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async (channel) => {
-            this.markTaskInteracting(session, taskId);
-            await channel.sendTaskUpdate(chatId, message);
+          const delivered = await this.deps.taskCoordinator.runJobUserVisibleOperation({
+            chatId,
+            taskId,
+            jobName: task.taskName,
+            mode: "suppress_if_silent",
+            operation: async (channel) => {
+              this.markTaskInteracting(session, taskId);
+              await channel.sendTaskUpdate(chatId, message);
+            },
           });
+          if (!delivered) {
+            logger.debug("task.progress_ignored_silent_job", {
+              chatId,
+              taskId,
+            });
+          }
           break;
         }
         case "assistant_output":
-          if (this.isSilentJobTask(session, taskId)) {
+          if (!await this.deps.taskCoordinator.runJobUserVisibleOperation({
+            chatId,
+            taskId,
+            jobName: task.taskName,
+            mode: "suppress_if_silent",
+            operation: async (channel) => {
+              this.markTaskInteracting(session, taskId);
+              await channel.sendTaskUpdate(chatId, event.text);
+            },
+          })) {
             logger.debug("task.assistant_output_ignored_silent_job", {
               chatId,
               taskId,
             });
-            break;
           }
-          await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async (channel) => {
-            this.markTaskInteracting(session, taskId);
-            await channel.sendTaskUpdate(chatId, event.text);
-          });
           break;
         case "task_summary":
           this.recordTaskSummary(session, taskId, event.summary);
@@ -146,8 +155,14 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
             taskId,
             message: event.message,
           });
-          await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async (channel) => {
-            await channel.sendText(chatId, messages.taskFailed(event.message));
+          await this.deps.taskCoordinator.runJobUserVisibleOperation({
+            chatId,
+            taskId,
+            jobName: task.taskName,
+            mode: "request_interaction",
+            operation: async (channel) => {
+              await channel.sendText(chatId, messages.taskFailed(event.message));
+            },
           });
           await this.finishTask(session, taskId, "failed");
           break;
@@ -353,12 +368,18 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     }
 
     const summary = activeTask.taskSummary ?? this.buildCompletedTaskFallbackSummary(activeTask);
-    await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, activeTask.taskName, async (channel) => {
-      session.pendingTaskSummary = {
-        taskName: activeTask.taskName,
-        summary,
-      };
-      await channel.sendReportableText(chatId, messages.taskSummaryReady(activeTask.taskName, summary));
+    await this.deps.taskCoordinator.runJobUserVisibleOperation({
+      chatId,
+      taskId,
+      jobName: activeTask.taskName,
+      mode: "request_interaction",
+      operation: async (channel) => {
+        session.pendingTaskSummary = {
+          taskName: activeTask.taskName,
+          summary,
+        };
+        await channel.sendReportableText(chatId, messages.taskSummaryReady(activeTask.taskName, summary));
+      },
     });
   }
 
@@ -400,8 +421,14 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
 
     task.status = "failed";
     try {
-      await this.deps.taskCoordinator.runJobUserVisibleOperation(session.chatId, taskId, task.taskName, async (channel) => {
-        await channel.sendText(session.chatId, messages.taskFailed(message));
+      await this.deps.taskCoordinator.runJobUserVisibleOperation({
+        chatId: session.chatId,
+        taskId,
+        jobName: task.taskName,
+        mode: "request_interaction",
+        operation: async (channel) => {
+          await channel.sendText(session.chatId, messages.taskFailed(message));
+        },
       });
     } catch (notifyError) {
       logger.error("task.event_failure_notification_failed", notifyError, "Unknown notification failure.", {
@@ -489,8 +516,14 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
 
     task.workerConnected = false;
     task.status = "failed";
-    await this.deps.taskCoordinator.runJobUserVisibleOperation(session.chatId, taskId, task.taskName, async (channel) => {
-      await channel.sendText(session.chatId, message);
+    await this.deps.taskCoordinator.runJobUserVisibleOperation({
+      chatId: session.chatId,
+      taskId,
+      jobName: task.taskName,
+      mode: "request_interaction",
+      operation: async (channel) => {
+        await channel.sendText(session.chatId, message);
+      },
     });
     await this.closeTask(session, taskId);
   }

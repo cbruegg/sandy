@@ -10,6 +10,7 @@ import type { SandboxTaskBundle } from "../sandbox/sandbox-runner.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 import type { SkillService } from "../skills.js";
 import { createActiveTaskState } from "../types.js";
+import { JobTaskNotInteractiveError } from "../orchestrator/task-coordinator.js";
 import { WorkerToolsHandler } from "./worker-tools-handler.js";
 
 function createWorkerToolsHandler(input?: {
@@ -34,7 +35,12 @@ function createWorkerToolsHandler(input?: {
     } as unknown as HostfsBroker,
     getTaskSharePath: input?.getTaskSharePath ?? ((taskId) => `/share/${taskId}`),
     getTaskBundle: input?.getTaskBundle ?? (() => ({ bundleId: "bundle-1", hostfsVolumeName: "hostfs-volume-1" })),
-    runUserVisibleOperation: async () => {},
+    runUserVisibleOperation: async ({ mode }) => {
+      if (mode === "requires_interactive") {
+        throw new JobTaskNotInteractiveError("test-task");
+      }
+      return true;
+    },
     markTaskFinished: async () => {},
   });
 }

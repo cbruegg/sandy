@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
 import { ActiveTaskRuntimeRegistry } from "./active-task-runtime-registry.js";
+import { JobTaskNotInteractiveError } from "./task-coordinator.js";
 import type { OrchestratorCoreDependencies, TaskFailureHandler } from "./shared.js";
 import { parseWorkerToolPayload } from "../subagent/worker-tools.js";
 import type { NativeWorkerToolCallResult, WorkerToolPayload } from "../subagent/worker-tools.js";
@@ -386,13 +387,25 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       case "approved":
         return;
       case "denied":
-        await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, async (channel) => {
-          await channel.sendText(chatId, messages.privilegeDenied(result.requestId));
+        await this.deps.taskCoordinator.runJobUserVisibleOperation({
+          chatId,
+          taskId,
+          jobName: taskName,
+          mode: "request_interaction",
+          operation: async (channel) => {
+            await channel.sendText(chatId, messages.privilegeDenied(result.requestId));
+          },
         });
         return;
       case "failed":
-        await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, async (channel) => {
-          await channel.sendText(chatId, messages.privilegeFailed(result.requestId, result.message));
+        await this.deps.taskCoordinator.runJobUserVisibleOperation({
+          chatId,
+          taskId,
+          jobName: taskName,
+          mode: "request_interaction",
+          operation: async (channel) => {
+            await channel.sendText(chatId, messages.privilegeFailed(result.requestId, result.message));
+          },
         });
         return;
       default:
@@ -429,26 +442,38 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       return failedPrivilegeResult(input.request.requestId, messages.anotherPrivilegeRequestPendingForTask());
     }
 
-    if (input.activeTask.origin.kind === "launchedByJob" && input.activeTask.interactionState !== "interacting") {
-      return failedPrivilegeResult(
-        input.request.requestId,
-        messages.jobTaskMustRequestInteractionFirst("asking the user for privilege approval"),
-      );
-    }
-
     input.activeTask.pendingPrivilegeRequest = input.request;
     input.activeTask.status = "awaiting_privilege_decision";
     const resultPromise = new Promise<PrivilegeResolutionResult>((resolve) => {
       input.registerResolver(input.request.requestId, resolve);
     });
-    await this.deps.taskCoordinator.runJobUserVisibleOperation(
-      input.chatId,
-      input.taskId,
-      input.activeTask.taskName,
-      async (channel) => {
-        await channel.sendPrivilegeRequest(input.chatId, input.request);
-      },
-    );
+
+    try {
+      await this.deps.taskCoordinator.runJobUserVisibleOperation({
+        chatId: input.chatId,
+        taskId: input.taskId,
+        jobName: input.activeTask.taskName,
+        mode: "requires_interactive",
+        operation: async (channel) => {
+          await channel.sendPrivilegeRequest(input.chatId, input.request);
+        },
+      });
+    } catch (error) {
+      if (!(error instanceof JobTaskNotInteractiveError)) {
+        throw error;
+      }
+      input.activeTask.pendingPrivilegeRequest = null;
+      input.activeTask.status = "running";
+      if (isMcpPrivilegeRequest(input.request)) {
+        this.activeTasks.deletePendingMcpPrivilegeResolver(input.request.requestId);
+      } else {
+        this.activeTasks.deletePendingNativeToolResolver(input.request.requestId);
+      }
+      return failedPrivilegeResult(
+        input.request.requestId,
+        messages.jobTaskMustRequestInteractionFirst("asking the user for privilege approval"),
+      );
+    }
 
     return await resultPromise;
   }

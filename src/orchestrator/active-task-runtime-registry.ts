@@ -36,6 +36,10 @@ export class ActiveTaskRuntimeRegistry {
     this.pendingMcpPrivilegeResolvers.set(requestId, resolve);
   }
 
+  deletePendingMcpPrivilegeResolver(requestId: string): void {
+    this.pendingMcpPrivilegeResolvers.delete(requestId);
+  }
+
   resolvePendingMcpPrivilege(requestId: string, result: PrivilegeResolutionResult): boolean {
     const resolver = this.pendingMcpPrivilegeResolvers.get(requestId);
     if (!resolver) {
@@ -48,6 +52,10 @@ export class ActiveTaskRuntimeRegistry {
 
   setPendingNativeToolResolver(requestId: string, resolve: PrivilegeResolver): void {
     this.pendingNativeToolResolvers.set(requestId, resolve);
+  }
+
+  deletePendingNativeToolResolver(requestId: string): void {
+    this.pendingNativeToolResolvers.delete(requestId);
   }
 
   takePendingNativeToolResolver(requestId: string): PrivilegeResolver | undefined {

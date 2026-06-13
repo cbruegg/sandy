@@ -13,13 +13,16 @@ import { resolveTaskShareHostPath } from "../shared-workspace.js";
 import type { ActiveTaskState } from "../types.js";
 import type { ChatId } from "../types.js";
 import type { FileCopyWorkerToolPayload, NativeWorkerToolCallResult } from "../subagent/worker-tools.js";
+import { JobTaskNotInteractiveError } from "../orchestrator/task-coordinator.js";
+import type { UserVisibleOperationMode } from "../orchestrator/task-coordinator.js";
 
 type UserVisibleOperationRunner = (input: {
   chatId: ChatId;
   taskId: string;
   taskName: string;
+  mode: UserVisibleOperationMode;
   operation: (channel: ChannelAdapter) => Promise<void>;
-}) => Promise<void>;
+}) => Promise<boolean>;
 
 export type WorkerToolsHandlerDependencies = {
   readonly jobService: JobService;
@@ -45,25 +48,30 @@ export class WorkerToolsHandler {
     sharePath: string;
     caption?: string;
   }): Promise<NativeWorkerToolCallResult> {
-    if (input.task.origin.kind === "launchedByJob" && input.task.interactionState !== "interacting") {
+    try {
+      await this.deps.runUserVisibleOperation({
+        chatId: input.chatId,
+        taskId: input.task.taskId,
+        taskName: input.task.taskName,
+        mode: "requires_interactive",
+        operation: async (channel) => {
+          await channel.sendFile(
+            input.chatId,
+            resolveTaskShareHostPath(this.deps.getTaskSharePath(input.task.taskId), input.sharePath, "send_file_to_channel path"),
+            input.caption,
+          );
+        },
+      });
+    } catch (error) {
+      if (!(error instanceof JobTaskNotInteractiveError)) {
+        throw error;
+      }
       return {
         isError: true,
         message: messages.jobTaskMustRequestInteractionFirst("sending files to the user"),
       };
     }
 
-    await this.deps.runUserVisibleOperation({
-      chatId: input.chatId,
-      taskId: input.task.taskId,
-      taskName: input.task.taskName,
-      operation: async (channel) => {
-        await channel.sendFile(
-          input.chatId,
-          resolveTaskShareHostPath(this.deps.getTaskSharePath(input.task.taskId), input.sharePath, "send_file_to_channel path"),
-          input.caption,
-        );
-      },
-    });
     return { isError: false, message: messages.sharedFileSentToUser(input.sharePath) };
   }
 
@@ -86,6 +94,7 @@ export class WorkerToolsHandler {
       chatId: input.chatId,
       taskId: input.task.taskId,
       taskName: input.task.taskName,
+      mode: "request_interaction",
       operation: async (channel) => {
         await channel.sendTaskUpdate(input.chatId, messages.jobRequestsInteraction(input.task.taskName, input.message));
       },
