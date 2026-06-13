@@ -39,6 +39,33 @@ test("JobStore separates definitions from runtime state", async () => {
   }
 });
 
+test("JobStore serializes concurrent writes so no update is lost", async () => {
+  const configDirectory = await makeTempConfigDirectory();
+  try {
+    const store = new JobStore(configDirectory);
+    await store.upsertDefinition({
+      id: "daily-cleanup",
+      name: "Daily cleanup",
+      enabled: true,
+      schedule: { kind: "cron", expression: "0 9 * * *" },
+      skillId: "cleanup",
+    });
+
+    await Promise.all([
+      store.recordLaunch("daily-cleanup", "2026-06-07T10:00:00.000Z"),
+      store.setEnabled("daily-cleanup", false),
+    ]);
+
+    const definition = await store.getDefinition("daily-cleanup");
+    const runtimeState = await store.getRuntimeState("daily-cleanup");
+
+    assert.equal(definition?.enabled, false);
+    assert.equal(runtimeState.lastRunAt, "2026-06-07T10:00:00.000Z");
+  } finally {
+    await rm(configDirectory, { recursive: true, force: true });
+  }
+});
+
 test("JobStore validates cron expressions during upsert", async () => {
   const configDirectory = await makeTempConfigDirectory();
   try {

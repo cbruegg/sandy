@@ -41,7 +41,22 @@ export class JobScheduler {
   async runNow(jobId: string): Promise<string> {
     const definition = await this.store.getDefinition(jobId);
     if (!definition) throw new Error(`Job ${jobId} does not exist.`);
+    // Stop the scheduled timer for a one-shot so the callback cannot
+    // race with the atomic claim inside launch(). Recurring cron timers
+    // are left alone: a manual runNow is an extra launch, not a
+    // rescheduling.
+    if (definition.schedule.kind === "one_shot") {
+      this.stopScheduledTimerIfPresent(jobId);
+    }
     return await this.launch(definition);
+  }
+
+  private stopScheduledTimerIfPresent(jobId: string): void {
+    const timer = this.scheduledJobs.get(jobId);
+    if (timer) {
+      void timer.stop();
+      this.scheduledJobs.delete(jobId);
+    }
   }
 
   private async register(definition: JobDefinition): Promise<void> {
@@ -87,10 +102,24 @@ export class JobScheduler {
     }
     this.launching.add(definition.id);
     try {
+      // One-shot jobs atomically claim the launch so a concurrent runNow or
+      // scheduled callback cannot start a second task.
+      if (definition.schedule.kind === "one_shot") {
+        const claimed = await this.store.tryClaimOneShotLaunch(definition.id, new Date().toISOString());
+        if (!claimed) {
+          throw new Error(`Job ${definition.id} was already launched.`);
+        }
+      }
+
       const workspacePath = definition.schedule.kind === "cron" ? this.store.workspacePath(definition.id) : null;
       if (workspacePath) await mkdir(workspacePath, { recursive: true });
       const taskId = await this.launcher(definition, workspacePath);
-      await this.store.recordLaunch(definition.id, new Date().toISOString());
+
+      // Cron jobs record launch timing for observability; one-shots are
+      // already recorded by tryClaimOneShotLaunch above.
+      if (definition.schedule.kind !== "one_shot") {
+        await this.store.recordLaunch(definition.id, new Date().toISOString());
+      }
       return taskId;
     } finally {
       this.launching.delete(definition.id);
