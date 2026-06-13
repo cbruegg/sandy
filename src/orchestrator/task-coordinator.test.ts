@@ -69,7 +69,7 @@ test("TaskCoordinator reminds and resets reminder timing on user-task activity",
 
   const session = store.getOrCreate("chat-reminder");
   const userTask = createTask("user-task", "User task", { kind: "launchedByUser" });
-  const jobTask = createTask("job-task", "Scheduled job: Daily cleanup", { kind: "launchedByJob", jobId: "daily-cleanup" });
+  const jobTask = createTask("job-task", "Scheduled job: Daily cleanup", { kind: "launchedByJob", jobId: "daily-cleanup", jobName: "Daily cleanup" });
   session.visibleTask = userTask;
   session.backgroundJobTasks.push(jobTask);
 
@@ -118,7 +118,7 @@ test("TaskCoordinator runs deferred interactions for the promoted job in order",
 
   const session = store.getOrCreate("chat-job-queue");
   const userTask = createTask("user-task", "User task", { kind: "launchedByUser" });
-  const jobTask = createTask("job-task", "Scheduled job: Daily cleanup", { kind: "launchedByJob", jobId: "daily-cleanup" });
+  const jobTask = createTask("job-task", "Scheduled job: Daily cleanup", { kind: "launchedByJob", jobId: "daily-cleanup", jobName: "Daily cleanup" });
   session.visibleTask = userTask;
   session.backgroundJobTasks.push(jobTask);
 
@@ -155,7 +155,7 @@ test("TaskCoordinator notifies exactly once when a job task becomes interactive"
   });
 
   const session = store.getOrCreate("chat-job-notice");
-  const jobTask = createTask("job-task", "Scheduled job: Daily cleanup", { kind: "launchedByJob", jobId: "daily-cleanup" });
+  const jobTask = createTask("job-task", "Scheduled job: Daily cleanup", { kind: "launchedByJob", jobId: "daily-cleanup", jobName: "Daily cleanup" });
   session.backgroundJobTasks.push(jobTask);
 
   await coordinator.runJobUserVisibleOperation("chat-job-notice", "job-task", "Daily cleanup", async (_channel) => {});
@@ -165,7 +165,7 @@ test("TaskCoordinator notifies exactly once when a job task becomes interactive"
   assert.equal(store.getOrCreate("chat-job-notice").visibleTask?.interactionState, "interacting");
   assert.deepEqual(channel.taskUpdates, [{
     chatId: "chat-job-notice",
-    text: messages.scheduledJobBecameInteractive("Scheduled job: Daily cleanup"),
+    text: messages.scheduledJobBecameInteractive("Daily cleanup"),
   }]);
 });
 
@@ -179,20 +179,20 @@ test("TaskCoordinator always sends a generic context message before the first pr
   });
 
   const session = store.getOrCreate("chat-job-context");
-  session.backgroundJobTasks.push(createTask("job-task", "Scheduled job: Daily cleanup", { kind: "launchedByJob", jobId: "daily-cleanup" }));
+  session.backgroundJobTasks.push(createTask("job-task", "Scheduled job: Daily cleanup", { kind: "launchedByJob", jobId: "daily-cleanup", jobName: "Daily cleanup" }));
 
   await coordinator.runJobUserVisibleOperation("chat-job-context", "job-task", "Daily cleanup", async (taskChannel) => {
-    await taskChannel.sendTaskUpdate("chat-job-context", messages.jobRequestsInteraction("Scheduled job: Daily cleanup", "Need confirmation."));
+    await taskChannel.sendTaskUpdate("chat-job-context", messages.jobRequestsInteraction("Daily cleanup", "Need confirmation."));
   });
 
   assert.deepEqual(channel.taskUpdates, [
     {
       chatId: "chat-job-context",
-      text: messages.scheduledJobBecameInteractive("Scheduled job: Daily cleanup"),
+      text: messages.scheduledJobBecameInteractive("Daily cleanup"),
     },
     {
       chatId: "chat-job-context",
-      text: messages.jobRequestsInteraction("Scheduled job: Daily cleanup", "Need confirmation."),
+      text: messages.jobRequestsInteraction("Daily cleanup", "Need confirmation."),
     },
   ]);
 });
@@ -220,6 +220,7 @@ test("TaskCoordinator defers share deletion prompt while a user task is active",
     requestId: "del-req-1",
     taskId: "job-task",
     taskName: "Scheduled job: Daily cleanup",
+    jobName: "Daily cleanup",
     summary: "report.txt",
   });
 
@@ -255,12 +256,14 @@ test("TaskCoordinator queues multiple deferred share deletion prompts behind an 
     requestId: "del-req-1",
     taskId: "job-task-1",
     taskName: "Scheduled job: Daily cleanup",
+    jobName: "Daily cleanup",
     summary: "report.txt",
   });
   coordinator.scheduleShareDeletionPrompt("chat-queue-shares", {
     requestId: "del-req-2",
     taskId: "job-task-2",
     taskName: "Scheduled job: Weekly report",
+    jobName: "Weekly report",
     summary: "data.csv",
   });
 
@@ -298,7 +301,7 @@ test("TaskCoordinator does not send blocked-job reminders after stop", async () 
 
   const session = store.getOrCreate("chat-stop");
   const userTask = createTask("user-task", "User task", { kind: "launchedByUser" });
-  const jobTask = createTask("job-task", "Scheduled job: Daily cleanup", { kind: "launchedByJob", jobId: "daily-cleanup" });
+  const jobTask = createTask("job-task", "Scheduled job: Daily cleanup", { kind: "launchedByJob", jobId: "daily-cleanup", jobName: "Daily cleanup" });
   session.visibleTask = userTask;
   session.backgroundJobTasks.push(jobTask);
 

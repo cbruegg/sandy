@@ -39,7 +39,7 @@ type TaskStatus =
 
 export type TaskOrigin =
   | { kind: "launchedByUser" }
-  | { kind: "launchedByJob"; jobId: string };
+  | { kind: "launchedByJob"; jobId: string; jobName: string };
 
 type JobTaskInteractionState = "silent" | "waitingToInteract" | "interacting";
 

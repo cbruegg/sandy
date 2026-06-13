@@ -80,7 +80,10 @@ export class WorkerToolsHandler {
       taskId: input.task.taskId,
       taskName: input.task.taskName,
       operation: async (channel) => {
-        await channel.sendTaskUpdate(input.chatId, messages.jobRequestsInteraction(input.task.taskName, input.message));
+        await channel.sendTaskUpdate(
+          input.chatId,
+          messages.jobRequestsInteraction(input.task.origin.kind === "launchedByJob" ? input.task.origin.jobName : input.task.taskName, input.message),
+        );
       },
     });
     return { isError: false, message: messages.requestInteractionApproved() };

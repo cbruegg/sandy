@@ -253,7 +253,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
         taskName,
         startedAt: now,
         taskPolicy,
-        origin: { kind: "launchedByJob", jobId: job.id },
+        origin: { kind: "launchedByJob", jobId: job.id, jobName: job.name },
         interactionState: "silent",
       },
       {
@@ -541,6 +541,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
         requestId,
         taskId,
         taskName,
+        jobName: origin.jobName,
         summary,
       });
       return;
