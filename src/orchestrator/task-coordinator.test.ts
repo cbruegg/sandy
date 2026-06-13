@@ -142,6 +142,31 @@ test("TaskCoordinator runs deferred interactions for the promoted job in order",
   assert.equal(store.getOrCreate("chat-job-queue").visibleTask?.taskId, "job-task");
 });
 
+test("TaskCoordinator rejects a queued interaction if the promotion context update fails", async () => {
+  const store = new InMemorySessionStore();
+  const channel = new RecordingChannel();
+  channel.sendTaskUpdateError = new Error("channel unavailable");
+  const coordinator = new TaskCoordinator({
+    sessionStore: store,
+    channel,
+    onJobTaskBecameInteractive: async () => {},
+  });
+
+  const session = store.getOrCreate("chat-job-queue-failure");
+  session.visibleTask = createTask("user-task", "User task", { kind: "launchedByUser" });
+  session.backgroundJobTasks.push(createTask("job-task", "Scheduled job: Daily cleanup", { kind: "launchedByJob", jobId: "daily-cleanup", jobName: "Daily cleanup" }));
+
+  const blockedOperation = coordinator.runJobUserVisibleOperation("chat-job-queue-failure", "job-task", "Daily cleanup", async () => {
+    throw new Error("operation should not run");
+  });
+  await Promise.resolve();
+
+  session.visibleTask = null;
+  await coordinator.onVisibleSlotAvailable("chat-job-queue-failure");
+
+  await assert.rejects(blockedOperation, /channel unavailable/);
+});
+
 test("TaskCoordinator notifies exactly once when a job task becomes interactive", async () => {
   const store = new InMemorySessionStore();
   const channel = new RecordingChannel();

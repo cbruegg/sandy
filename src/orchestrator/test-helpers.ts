@@ -61,6 +61,7 @@ export class RecordingChannel implements ChannelAdapter {
   public readonly shareDeletionRequests: Array<{ chatId: ChatId; requestId: string; taskName: string; summary: string }> = [];
   public readonly savedAttachments: Array<{ chatId: ChatId; attachments: MessageAttachment[]; targetDirectory: string }> = [];
   public sendFileError: Error | null = null;
+  public sendTaskUpdateError: Error | null = null;
 
   start(): Promise<void> {
     return Promise.resolve();
@@ -107,6 +108,9 @@ export class RecordingChannel implements ChannelAdapter {
   }
 
   sendTaskUpdate(chatId: ChatId, text: string): Promise<void> {
+    if (this.sendTaskUpdateError) {
+      return Promise.reject(this.sendTaskUpdateError);
+    }
     this.taskUpdates.push({ chatId, text });
     return Promise.resolve();
   }
