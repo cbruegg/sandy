@@ -9,6 +9,7 @@
 
 import type { SandyConfig } from "../config.js";
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
+import type { ChannelDestinationStore } from "../channel/channel-destination-store.js";
 import type { CertificateAuthority } from "../http/ca.js";
 import type { ChatGPTTokenBroker } from "../auth/chatgpt-token-broker.js";
 import type { CodexMainAgentController } from "../agent/main-agent-controller.js";
@@ -71,6 +72,7 @@ export type ChannelLayerResult = {
   readonly name: "channel";
   readonly rawChannel: ChannelAdapter;
   readonly channel: ChannelAdapter;
+  readonly destinationStore: ChannelDestinationStore;
   readonly channelFormatting: ReturnType<ChannelAdapter["getFormatting"]>;
   readonly triggerFatalChannelError: (error: unknown, source: string) => void;
   readonly fatalErrorPromise: Promise<never>;
@@ -198,6 +200,7 @@ export type MainAgentLayerResult = {
 export type OrchestratorLayerInput = {
   readonly config: SandyConfig;
   readonly channel: ChannelAdapter;
+  readonly destinationStore: ChannelDestinationStore;
   readonly channelFormatting: NonNullable<ReturnType<ChannelAdapter["getFormatting"]>>;
   readonly sessionStore: InMemorySessionStore;
   readonly persistentApprovalStore: TomlPersistentApprovalStore;

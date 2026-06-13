@@ -6,7 +6,7 @@ import { createRetryingChannelAdapter } from "../channel/retrying-channel-adapte
 export function createChannelLayer(input: ChannelLayerInput): ChannelLayerResult {
   const { config, transcriptionProvider, matrixAccessToken } = input;
 
-  const rawChannel = createChannelAdapter(config, transcriptionProvider, matrixAccessToken);
+  const { adapter: rawChannel, destinationStore } = createChannelAdapter(config, transcriptionProvider, matrixAccessToken);
 
   let rejectFatalError: ((error: Error) => void) | null = null;
   const fatalErrorPromise = new Promise<never>((_, reject) => {
@@ -46,6 +46,7 @@ export function createChannelLayer(input: ChannelLayerInput): ChannelLayerResult
     name: "channel",
     rawChannel,
     channel,
+    destinationStore,
     channelFormatting,
     triggerFatalChannelError,
     fatalErrorPromise,

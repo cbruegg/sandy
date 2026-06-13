@@ -11,7 +11,7 @@ import { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
 import { JobScheduler } from "../jobs/job-scheduler.js";
 import { ScheduledJobService } from "../jobs/job-service.js";
 import { logger } from "../logger.js";
-import type {OrchestratorCoreDependencies} from "../orchestrator/shared.ts";
+import type { OrchestratorCoreDependencies } from "../orchestrator/shared.ts";
 
 async function buildWorkerStartConfig(
   authMode: SandyAuthMode,
@@ -56,6 +56,7 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
   const {
     config,
     channel,
+    destinationStore,
     channelFormatting,
     sessionStore,
     persistentApprovalStore,
@@ -114,7 +115,7 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
   );
 
   const jobScheduler = new JobScheduler(jobStore, async (job, workspacePath) => {
-    const chatId = await channel.destinationStore.getDefaultChatId();
+    const chatId = await destinationStore.getDefaultChatId();
     if (!chatId) {
       throw new Error(`Cannot launch scheduled job ${job.id}: no default chat destination is known yet.`);
     }
@@ -145,6 +146,7 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
   const orchestrator = new SandyOrchestrator({
     ...orchestratorCoreDeps,
     channel,
+    destinationStore,
     channelFormatting,
     taskLifecycle,
     privileges,

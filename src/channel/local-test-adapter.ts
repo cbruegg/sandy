@@ -1,7 +1,6 @@
 import { copyFile, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
-import { type ChannelDestinationStore } from "./channel-destination-store.js";
 import { logger } from "../logger.js";
 import type { ChannelFormatting, MessageAttachment, PrivilegeRequest, SavedAttachment } from "../types.js";
 import type { ChatId } from "../types.js";
@@ -20,7 +19,6 @@ const localTestFormatting: ChannelFormatting = {
 
 type LocalTestChannelAdapterOptions = {
   spoolRoot: string;
-  destinationStore: ChannelDestinationStore;
 };
 
 export class LocalTestChannelAdapter implements ChannelAdapter {
@@ -33,10 +31,8 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
   private readonly lastUserInteractionTimestamps = new Map<ChatId, string>();
   private stopRequested = false;
   private loopPromise: Promise<void> | null = null;
-  readonly destinationStore: ChannelDestinationStore;
 
   constructor(options: LocalTestChannelAdapterOptions) {
-    this.destinationStore = options.destinationStore;
     this.spoolRoot = options.spoolRoot;
     this.inboxRoot = join(this.spoolRoot, "inbox");
     this.inboxProcessedRoot = join(this.spoolRoot, "inbox-processed");
