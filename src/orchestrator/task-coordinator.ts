@@ -9,7 +9,6 @@ import type { BlockedJobReminderContext, TimerControls } from "./blocked-job-rem
 type WaitingJobInteraction = {
   taskId: string;
   jobName: string;
-  includesTaskContext: boolean;
   run: (channel: ChannelAdapter) => Promise<void>;
   resolve: () => void;
   reject: (error: unknown) => void;
@@ -143,7 +142,6 @@ export class TaskCoordinator {
     chatId: ChatId,
     taskId: string,
     jobName: string,
-    includesTaskContext: boolean,
     operation: (channel: ChannelAdapter) => Promise<void>,
   ): Promise<void> {
     const session = this.deps.sessionStore.getOrCreate(chatId);
@@ -160,7 +158,7 @@ export class TaskCoordinator {
     }
 
     if (session.visibleTask?.taskId === taskId) {
-      if (await this.transitionJobTaskToInteractive(task) && !includesTaskContext) {
+      if (await this.transitionJobTaskToInteractive(task)) {
         await this.deps.channel.sendTaskUpdate(chatId, messages.scheduledJobBecameInteractive(task.taskName));
       }
       await operation(this.deps.channel);
@@ -168,7 +166,7 @@ export class TaskCoordinator {
     }
 
     if (this.isVisibleSlotAvailable(session)) {
-      await this.claimVisibleSlotForJobTask(session, taskId, includesTaskContext);
+      await this.claimVisibleSlotForJobTask(session, taskId);
       await operation(this.deps.channel);
       await this.drainPendingOperationsForActiveTask(session, taskId);
       return;
@@ -179,7 +177,6 @@ export class TaskCoordinator {
       this.waitingJobInteractions.enqueue(chatId, {
         taskId,
         jobName,
-        includesTaskContext,
         run: operation,
         resolve,
         reject,
@@ -225,12 +222,12 @@ export class TaskCoordinator {
   }
 
   /** Moves a background job task into the visible slot and marks it interacting. */
-  private async claimVisibleSlotForJobTask(session: SessionState, taskId: string, includesTaskContext: boolean): Promise<void> {
+  private async claimVisibleSlotForJobTask(session: SessionState, taskId: string): Promise<void> {
     if (session.visibleTask?.taskId !== taskId) {
       session.promoteBackgroundJobTask(taskId);
     }
     const task = session.visibleTask;
-    if (task && await this.transitionJobTaskToInteractive(task) && !includesTaskContext) {
+    if (task && await this.transitionJobTaskToInteractive(task)) {
       await this.deps.channel.sendTaskUpdate(session.chatId, messages.scheduledJobBecameInteractive(task.taskName));
     }
     this.reminders.sync(session.chatId);
@@ -275,7 +272,7 @@ export class TaskCoordinator {
         continue;
       }
 
-      await this.claimVisibleSlotForJobTask(session, next.taskId, next.includesTaskContext);
+      await this.claimVisibleSlotForJobTask(session, next.taskId);
       if (await this.executeWaitingInteraction(next)) {
         await this.drainPendingOperationsForActiveTask(session, next.taskId);
       }

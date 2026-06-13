@@ -100,7 +100,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
           if (!message) {
             break;
           }
-          await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, false, async (channel) => {
+          await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async (channel) => {
             this.markTaskInteracting(session, taskId);
             await channel.sendTaskUpdate(chatId, message);
           });
@@ -114,7 +114,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
             });
             break;
           }
-          await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, false, async (channel) => {
+          await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async (channel) => {
             this.markTaskInteracting(session, taskId);
             await channel.sendTaskUpdate(chatId, event.text);
           });
@@ -146,7 +146,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
             taskId,
             message: event.message,
           });
-          await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, true, async (channel) => {
+          await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async (channel) => {
             await channel.sendText(chatId, messages.taskFailed(event.message));
           });
           await this.finishTask(session, taskId, "failed");
@@ -353,7 +353,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     }
 
     const summary = activeTask.taskSummary ?? this.buildCompletedTaskFallbackSummary(activeTask);
-    await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, activeTask.taskName, true, async (channel) => {
+    await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, activeTask.taskName, async (channel) => {
       session.pendingTaskSummary = {
         taskName: activeTask.taskName,
         summary,
@@ -400,7 +400,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
 
     task.status = "failed";
     try {
-      await this.deps.taskCoordinator.runJobUserVisibleOperation(session.chatId, taskId, task.taskName, true, async (channel) => {
+      await this.deps.taskCoordinator.runJobUserVisibleOperation(session.chatId, taskId, task.taskName, async (channel) => {
         await channel.sendText(session.chatId, messages.taskFailed(message));
       });
     } catch (notifyError) {
@@ -489,7 +489,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
 
     task.workerConnected = false;
     task.status = "failed";
-    await this.deps.taskCoordinator.runJobUserVisibleOperation(session.chatId, taskId, task.taskName, true, async (channel) => {
+    await this.deps.taskCoordinator.runJobUserVisibleOperation(session.chatId, taskId, task.taskName, async (channel) => {
       await channel.sendText(session.chatId, message);
     });
     await this.closeTask(session, taskId);
