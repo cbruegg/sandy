@@ -159,9 +159,9 @@ export class TaskCoordinator {
     }
 
     if (session.visibleTask?.taskId === taskId) {
-      const jobName = task.origin.kind === "launchedByJob" ? task.origin.jobName : task.taskName;
+      const jobName = task.origin.kind === "launchedByJob" ? task.origin.jobName : null;
       if (await this.transitionJobTaskToInteractive(task)) {
-        await this.deps.channel.sendTaskUpdate(chatId, messages.scheduledJobBecameInteractive(jobName));
+        await this.deps.channel.sendTaskUpdate(chatId, messages.scheduledJobBecameInteractive(task.taskName, jobName));
       }
       await operation(this.deps.channel);
       return;
@@ -229,9 +229,9 @@ export class TaskCoordinator {
       session.promoteBackgroundJobTask(taskId);
     }
     const task = session.visibleTask;
-    const jobName = task?.origin.kind === "launchedByJob" ? task.origin.jobName : task?.taskName;
     if (task && await this.transitionJobTaskToInteractive(task)) {
-      await this.deps.channel.sendTaskUpdate(session.chatId, messages.scheduledJobBecameInteractive(jobName ?? task.taskName));
+      const jobName = task.origin.kind === "launchedByJob" ? task.origin.jobName : null;
+      await this.deps.channel.sendTaskUpdate(session.chatId, messages.scheduledJobBecameInteractive(task.taskName, jobName));
     }
     this.reminders.sync(session.chatId);
   }

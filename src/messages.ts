@@ -146,12 +146,16 @@ export const messages = {
     `Failed to ${operation} job "${jobId}": ${error}`,
   scheduledJobBlocked: (jobName: string, taskName: string): string =>
     `A scheduled job (${jobName}) is waiting to interact, but task "${taskName}" is still active.`,
-  scheduledJobBecameInteractive: (taskName: string): string =>
-    `Scheduled job "${taskName}" is now interactive. The next update or request comes from this task.`,
-  jobRequestsInteraction: (taskName: string, message?: string): string =>
-    message
-      ? `Scheduled job "${taskName}" needs your attention: ${message}`
-      : `Scheduled job "${taskName}" needs your attention.`,
+  scheduledJobBecameInteractive: (taskName: string, jobName: string | null): string => {
+    const label = describeInteractiveTask(taskName, jobName);
+    return `${label} is now interactive. The next update or request comes from this task.`;
+  },
+  jobRequestsInteraction: (taskName: string, jobName: string | null, message?: string): string => {
+    const label = describeInteractiveTask(taskName, jobName);
+    return message
+      ? `${label} needs your attention: ${message}`
+      : `${label} needs your attention.`;
+  },
   requestInteractionApproved: (): string =>
     "The task has been promoted to interactive mode. The user can now see your output and respond.",
   requestInteractionAlreadyInteractive: (): string =>
@@ -191,6 +195,10 @@ function wrapMarkdownCode(text: string): string {
   const needsPadding = text.startsWith("`") || text.endsWith("`");
   const paddedText = needsPadding ? ` ${text} ` : text;
   return `${fence}${paddedText}${fence}`;
+}
+
+function describeInteractiveTask(taskName: string, jobName: string | null): string {
+  return jobName ? `Scheduled job "${jobName}"` : `Task "${taskName}"`;
 }
 
 function assertNever(value: never): never {
