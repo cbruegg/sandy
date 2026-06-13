@@ -48,6 +48,9 @@ ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/sandy-http-proxy"]
 FROM opensuse/tumbleweed:latest AS network-guard-runtime
 WORKDIR /app
 
+RUN install -d /etc/zypp/zypp.conf.d \
+  && printf '[main]\ndownload.max_silent_tries = 5\n' > /etc/zypp/zypp.conf.d/99-sandy-ci-retries.conf
+
 RUN zypper --non-interactive refresh \
   && zypper --non-interactive dist-upgrade \
   && zypper --non-interactive install --no-recommends \
@@ -65,6 +68,9 @@ ENTRYPOINT ["/usr/local/bin/sandy-network-guard"]
 # Rootful worker runtime used for Codex task execution.
 FROM opensuse/tumbleweed:latest AS worker-runtime
 WORKDIR /workspace
+
+RUN install -d /etc/zypp/zypp.conf.d \
+  && printf '[main]\ndownload.max_silent_tries = 5\n' > /etc/zypp/zypp.conf.d/99-sandy-ci-retries.conf
 
 RUN zypper --non-interactive refresh \
   && zypper --non-interactive dist-upgrade \
