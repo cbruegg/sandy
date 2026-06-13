@@ -41,11 +41,6 @@ export class JobScheduler {
   async runNow(jobId: string): Promise<string> {
     const definition = await this.store.getDefinition(jobId);
     if (!definition) throw new Error(`Job ${jobId} does not exist.`);
-    // Stop any registered one-shot timer so it cannot fire and launch a second
-    // task after this manual launch completes (the timer's own lastRunAt check
-    // is a stale read by the time recordLaunch writes).
-    void this.scheduledJobs.get(jobId)?.stop();
-    this.scheduledJobs.delete(jobId);
     return await this.launch(definition);
   }
 
