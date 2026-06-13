@@ -37,7 +37,7 @@ type TaskStatus =
   | "cancelled"
   | "failed";
 
-type TaskOrigin =
+export type TaskOrigin =
   | { kind: "launchedByUser" }
   | { kind: "launchedByJob"; jobId: string };
 

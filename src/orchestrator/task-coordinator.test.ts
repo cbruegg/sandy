@@ -184,7 +184,7 @@ test("TaskCoordinator defers share deletion prompt while a user task is active",
   const userTask = createTask("user-task", "User task", { kind: "launchedByUser" });
   session.visibleTask = userTask;
 
-  await coordinator.enqueueShareDeletionPrompt("chat-defer-share", {
+  coordinator.scheduleShareDeletionPrompt("chat-defer-share", {
     requestId: "del-req-1",
     taskId: "job-task",
     taskName: "Scheduled job: Daily cleanup",
@@ -219,13 +219,13 @@ test("TaskCoordinator queues multiple deferred share deletion prompts behind an 
   const userTask = createTask("user-task", "User task", { kind: "launchedByUser" });
   session.visibleTask = userTask;
 
-  await coordinator.enqueueShareDeletionPrompt("chat-queue-shares", {
+  coordinator.scheduleShareDeletionPrompt("chat-queue-shares", {
     requestId: "del-req-1",
     taskId: "job-task-1",
     taskName: "Scheduled job: Daily cleanup",
     summary: "report.txt",
   });
-  await coordinator.enqueueShareDeletionPrompt("chat-queue-shares", {
+  coordinator.scheduleShareDeletionPrompt("chat-queue-shares", {
     requestId: "del-req-2",
     taskId: "job-task-2",
     taskName: "Scheduled job: Weekly report",

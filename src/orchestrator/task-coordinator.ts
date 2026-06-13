@@ -1,13 +1,11 @@
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
-import { messages } from "../messages.js";
 import type { SessionStore } from "../session/in-memory-session-store.js";
 import type { ActiveTaskState, SessionState } from "../types.js";
 import type { ChatId } from "../types.js";
 import { BlockedJobReminderScheduler } from "./blocked-job-reminder-scheduler.js";
 import type { BlockedJobReminderContext, TimerControls } from "./blocked-job-reminder-scheduler.js";
 
-type DeferredJobOperation = {
-  kind: "job_operation";
+type WaitingJobInteraction = {
   taskId: string;
   jobName: string;
   run: (channel: ChannelAdapter) => Promise<void>;
@@ -15,34 +13,8 @@ type DeferredJobOperation = {
   reject: (error: unknown) => void;
 };
 
-type DeferredShareDeletionPrompt = {
-  kind: "share_deletion_prompt";
+type PendingShareDeletionPrompt = {
   requestId: string;
-  taskId: string;
-  taskName: string;
-  summary: string;
-};
-
-type DeferredTaskSummaryReview = {
-  kind: "task_summary_review";
-  taskId: string;
-  taskName: string;
-  summary: string;
-};
-
-type DeferredVisibleItem =
-  | DeferredJobOperation
-  | DeferredShareDeletionPrompt
-  | DeferredTaskSummaryReview;
-
-export type EnqueuedShareDeletionPrompt = {
-  requestId: string;
-  taskId: string;
-  taskName: string;
-  summary: string;
-};
-
-export type EnqueuedTaskSummaryReview = {
   taskId: string;
   taskName: string;
   summary: string;
@@ -108,18 +80,22 @@ class PerChatQueue<T> {
 /**
  * Coordinates the single user-visible slot each chat exposes.
  *
- * At any moment a chat can present exactly one user-facing blocker: either a
+ * At any moment a chat can present exactly one user-facing blocker: either an
  * visible task (`session.visibleTask`) or a share-deletion prompt
  * (`session.pendingShareDeletion`). User-launched tasks own that slot directly.
  * Job-launched tasks run silently in the background and must acquire the slot
  * before they can talk to the user.
  *
- * All deferred user-visible work is held in one per-chat FIFO queue of
- * `DeferredVisibleItem`. When the slot frees (`onVisibleSlotAvailable`), items
- * are drained in strict enqueue order.
+ * Two per-chat FIFO queues hold work that is waiting for the slot:
+ * - `waitingJobInteractions`: job operations that need the user.
+ * - `pendingShareDeletionPrompts`: share-deletion prompts to show.
+ *
+ * When the slot frees (`onVisibleSlotAvailable`), pending share-deletion
+ * prompts take priority over waiting job interactions.
  */
 export class TaskCoordinator {
-  private readonly deferredVisibleItems = new PerChatQueue<DeferredVisibleItem>();
+  private readonly waitingJobInteractions = new PerChatQueue<WaitingJobInteraction>();
+  private readonly pendingShareDeletionPrompts = new PerChatQueue<PendingShareDeletionPrompt>();
   private readonly reminders: BlockedJobReminderScheduler;
 
   constructor(private readonly deps: TaskCoordinatorDependencies) {
@@ -146,34 +122,12 @@ export class TaskCoordinator {
   findTask(session: SessionState, taskId: string): ActiveTaskState | null {
     return session.findTask(taskId)?.task ?? null;
   }
-
   onUserInteraction(chatId: ChatId): void {
     this.reminders.resetAfterUserInteraction(chatId);
   }
 
-  async enqueueShareDeletionPrompt(chatId: ChatId, prompt: EnqueuedShareDeletionPrompt): Promise<void> {
-    const session = this.deps.sessionStore.getOrCreate(chatId);
-    const item: DeferredShareDeletionPrompt = { kind: "share_deletion_prompt", ...prompt };
-
-    if (this.isVisibleSlotAvailable(session) && this.deferredVisibleItems.peek(chatId) === undefined) {
-      await this.showShareDeletionPrompt(session, item);
-    } else {
-      this.deferredVisibleItems.enqueue(chatId, item);
-    }
-
-    this.reminders.sync(chatId);
-  }
-
-  async enqueueTaskSummaryReview(chatId: ChatId, review: EnqueuedTaskSummaryReview): Promise<void> {
-    const session = this.deps.sessionStore.getOrCreate(chatId);
-    const item: DeferredTaskSummaryReview = { kind: "task_summary_review", ...review };
-
-    if (this.isVisibleSlotAvailable(session) || session.visibleTask?.taskId === review.taskId) {
-      await this.showTaskSummaryReview(session, item);
-    } else {
-      this.deferredVisibleItems.enqueue(chatId, item);
-    }
-
+  scheduleShareDeletionPrompt(chatId: ChatId, prompt: PendingShareDeletionPrompt): void {
+    this.pendingShareDeletionPrompts.enqueue(chatId, prompt);
     this.reminders.sync(chatId);
   }
 
@@ -211,47 +165,41 @@ export class TaskCoordinator {
     if (this.isVisibleSlotAvailable(session)) {
       await this.claimVisibleSlotForJobTask(session, taskId);
       await operation(this.deps.channel);
-      await this.drainConsecutiveJobOperations(session, taskId);
+      await this.drainPendingOperationsForActiveTask(session, taskId);
       return;
     }
 
     task.interactionState = "waitingToInteract";
     await new Promise<void>((resolve, reject) => {
-      this.deferredVisibleItems.enqueue(chatId, { kind: "job_operation", taskId, jobName, run: operation, resolve, reject });
+      this.waitingJobInteractions.enqueue(chatId, { taskId, jobName, run: operation, resolve, reject });
       this.reminders.sync(chatId);
     });
   }
 
   /**
-   * Called when the visible slot may have just freed. Drains the unified FIFO
-   * queue, showing each deferred item in order until a slot-owning item is
-   * reached.
+   * Called when the visible slot may have just freed. Shows the next deferred
+   * share-deletion prompt if one is queued, otherwise promotes the next waiting
+   * job task into the slot.
    */
   async onVisibleSlotAvailable(chatId: ChatId): Promise<void> {
     const session = this.deps.sessionStore.getOrCreate(chatId);
-
-    while (this.isVisibleSlotAvailable(session)) {
-      const next = this.deferredVisibleItems.shift(session.chatId);
-      if (!next) {
-        break;
-      }
-
-      const shouldContinue = await this.executeDeferredItem(session, next);
-      if (!shouldContinue) {
-        break;
-      }
+    if (!this.isVisibleSlotAvailable(session)) {
+      this.reminders.sync(chatId);
+      return;
     }
 
-    this.reminders.sync(chatId);
+    if (await this.showNextDeferredShareDeletionPrompt(session)) {
+      return;
+    }
+
+    await this.promoteNextWaitingJobTask(session);
   }
 
   removeTask(chatId: ChatId, taskId: string): void {
-    this.deferredVisibleItems.removeWhere(
+    this.waitingJobInteractions.removeWhere(
       chatId,
-      (entry) => entry.kind === "job_operation" && entry.taskId === taskId,
-      (entry) => {
-        (entry as DeferredJobOperation).reject(new Error(`Task ${taskId} ended while waiting to interact.`));
-      },
+      (entry) => entry.taskId === taskId,
+      (entry) => entry.reject(new Error(`Task ${taskId} ended while waiting to interact.`)),
     );
     this.reminders.sync(chatId);
   }
@@ -284,61 +232,62 @@ export class TaskCoordinator {
     await this.deps.onJobTaskBecameInteractive(task.taskId);
   }
 
-  private async showShareDeletionPrompt(session: SessionState, prompt: DeferredShareDeletionPrompt): Promise<void> {
-    session.pendingShareDeletion = {
-      requestId: prompt.requestId,
-      taskId: prompt.taskId,
-      taskName: prompt.taskName,
-      summary: prompt.summary,
-    };
-    await this.deps.channel.sendShareDeletionRequest(session.chatId, prompt.requestId, prompt.taskName, prompt.summary);
-    this.reminders.sync(session.chatId);
-  }
-
-  private async showTaskSummaryReview(session: SessionState, review: DeferredTaskSummaryReview): Promise<void> {
-    session.pendingTaskSummary = {
-      taskName: review.taskName,
-      summary: review.summary,
-    };
-    await this.deps.channel.sendReportableText(session.chatId, messages.taskSummaryReady(review.taskName, review.summary));
-  }
-
-  private async executeDeferredItem(session: SessionState, item: DeferredVisibleItem): Promise<boolean> {
-    switch (item.kind) {
-      case "share_deletion_prompt":
-        await this.showShareDeletionPrompt(session, item);
-        return false;
-      case "task_summary_review":
-        await this.showTaskSummaryReview(session, item);
-        return true;
-      case "job_operation": {
-        if (!session.findTask(item.taskId)) {
-          item.reject(new Error(`Task ${item.taskId} is no longer active.`));
-          return true;
-        }
-
-        await this.claimVisibleSlotForJobTask(session, item.taskId);
-        if (await this.executeJobOperation(item)) {
-          await this.drainConsecutiveJobOperations(session, item.taskId);
-        }
-        return false;
-      }
+  private async showNextDeferredShareDeletionPrompt(session: SessionState): Promise<boolean> {
+    const next = this.pendingShareDeletionPrompts.shift(session.chatId);
+    if (!next) {
+      return false;
     }
+
+    session.pendingShareDeletion = {
+      requestId: next.requestId,
+      taskId: next.taskId,
+      taskName: next.taskName,
+      summary: next.summary,
+    };
+    await this.deps.channel.sendShareDeletionRequest(session.chatId, next.requestId, next.taskName, next.summary);
+    this.reminders.sync(session.chatId);
+    return true;
+  }
+
+  private async promoteNextWaitingJobTask(session: SessionState): Promise<void> {
+    while (this.isVisibleSlotAvailable(session)) {
+      const next = this.waitingJobInteractions.shift(session.chatId);
+      if (!next) {
+        this.reminders.sync(session.chatId);
+        return;
+      }
+
+      if (!session.findTask(next.taskId)) {
+        next.reject(new Error(`Task ${next.taskId} is no longer active.`));
+        continue;
+      }
+
+      await this.claimVisibleSlotForJobTask(session, next.taskId);
+      if (await this.executeWaitingInteraction(next)) {
+        await this.drainPendingOperationsForActiveTask(session, next.taskId);
+      }
+      return;
+    }
+
+    this.reminders.sync(session.chatId);
   }
 
   /**
    * Once `taskId` holds the slot, runs its remaining consecutive queued
-   * operations until the queue head belongs to a different item (or one fails).
+   * operations until the queue head belongs to a different task (or one fails).
    */
-  private async drainConsecutiveJobOperations(session: SessionState, taskId: string): Promise<void> {
+  private async drainPendingOperationsForActiveTask(session: SessionState, taskId: string): Promise<void> {
     while (session.visibleTask?.taskId === taskId) {
-      const next = this.deferredVisibleItems.peek(session.chatId);
-      if (!next || next.kind !== "job_operation" || next.taskId !== taskId) {
+      if (this.waitingJobInteractions.peek(session.chatId)?.taskId !== taskId) {
         break;
       }
 
-      this.deferredVisibleItems.shift(session.chatId);
-      if (!await this.executeJobOperation(next)) {
+      const next = this.waitingJobInteractions.shift(session.chatId);
+      if (!next) {
+        break;
+      }
+
+      if (!await this.executeWaitingInteraction(next)) {
         break;
       }
     }
@@ -347,7 +296,7 @@ export class TaskCoordinator {
   }
 
   /** Runs a single queued interaction and settles its waiting promise. */
-  private async executeJobOperation(interaction: DeferredJobOperation): Promise<boolean> {
+  private async executeWaitingInteraction(interaction: WaitingJobInteraction): Promise<boolean> {
     try {
       await interaction.run(this.deps.channel);
       interaction.resolve();
@@ -369,12 +318,12 @@ export class TaskCoordinator {
       return null;
     }
 
-    const next = this.deferredVisibleItems.peek(chatId);
-    if (!next) {
+    const waitingTaskName = this.waitingJobInteractions.peek(chatId)?.jobName
+      ?? this.pendingShareDeletionPrompts.peek(chatId)?.taskName;
+    if (!waitingTaskName) {
       return null;
     }
 
-    const waitingTaskName = next.kind === "job_operation" ? next.jobName : next.taskName;
     return {
       chatId,
       blockerTaskId: blocker.taskId,
