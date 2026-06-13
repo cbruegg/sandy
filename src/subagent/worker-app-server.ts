@@ -6,6 +6,8 @@ import { writeSubAgentEvent } from "./subagent-event-writer.js";
 import { buildTaskSummaryInput } from "./worker-prompt.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.ts";
 import type {ThreadStartParams} from "../codex-app-server-client/generated/v2";
+import { messages } from "../messages.js";
+import type { TurnError } from "../codex-app-server-client/generated/v2/TurnError.js";
 
 const WORKER_PROFILE: ThreadStartParams = {
   sandbox: "danger-full-access" as const,
@@ -25,6 +27,8 @@ type StreamAppServerSummaryResult = StreamTurnResult & {
   summaryText: string | null;
 };
 
+type ConsumeAuthRefreshFailureMessage = () => string | null;
+
 type AppServerTurnStreamer = Pick<CodexAppServerClient, "streamTurn">;
 
 type AuthRefreshCallback = (
@@ -40,6 +44,7 @@ type StreamAppServerTaskTurnOptions = {
   threadId: string;
   input: Input;
   onAuthRefresh: AuthRefreshCallback;
+  consumeAuthRefreshFailureMessage?: ConsumeAuthRefreshFailureMessage;
   abortSignal?: AbortSignal;
   sendEvent?: (event: SubAgentEvent) => void;
 };
@@ -55,6 +60,37 @@ type StreamAppServerSummaryOptions = {
 function normalizeSummaryText(chunks: string[]): string | null {
   const summary = chunks.map((chunk) => chunk.trim()).filter((chunk) => chunk.length > 0).join("\n\n").trim();
   return summary.length > 0 ? summary : null;
+}
+
+function isUnauthorizedStreamError(error: TurnError): boolean {
+  if (error.codexErrorInfo === "unauthorized") {
+    return true;
+  }
+  if (typeof error.codexErrorInfo !== "object" || error.codexErrorInfo === null) {
+    return false;
+  }
+
+  if ("responseStreamDisconnected" in error.codexErrorInfo) {
+    return error.codexErrorInfo.responseStreamDisconnected.httpStatusCode === 401;
+  }
+  if ("responseStreamConnectionFailed" in error.codexErrorInfo) {
+    return error.codexErrorInfo.responseStreamConnectionFailed.httpStatusCode === 401;
+  }
+  if ("responseTooManyFailedAttempts" in error.codexErrorInfo) {
+    return error.codexErrorInfo.responseTooManyFailedAttempts.httpStatusCode === 401;
+  }
+  return false;
+}
+
+function resolveTaskErrorMessage(
+  error: TurnError,
+  consumeAuthRefreshFailureMessage?: ConsumeAuthRefreshFailureMessage,
+): string {
+  const authRefreshFailureMessage = consumeAuthRefreshFailureMessage?.() ?? null;
+  if (authRefreshFailureMessage && isUnauthorizedStreamError(error)) {
+    return authRefreshFailureMessage;
+  }
+  return error.message || "Unknown app-server error.";
 }
 
 /**
@@ -90,14 +126,26 @@ export async function streamAppServerTurn(options: StreamAppServerTaskTurnOption
 
         case "turn/completed":
           if (event.params.turn?.status === "failed") {
-            sendEvent({ type: "task_error", message: event.params.turn.error?.message ?? "Unknown turn failure." });
+            const turnError = event.params.turn.error;
+            sendEvent({
+              type: "task_error",
+              message: turnError
+                ? resolveTaskErrorMessage(turnError, options.consumeAuthRefreshFailureMessage)
+                : "Unknown turn failure.",
+            });
             sawTerminalError = true;
             return { sawTerminalError };
           }
           break;
 
         case "error": {
-          sendEvent({ type: "task_error", message: event.params.error?.message ?? "Unknown app-server error." });
+          const error = event.params.error;
+          sendEvent({
+            type: "task_error",
+            message: error
+              ? resolveTaskErrorMessage(error, options.consumeAuthRefreshFailureMessage)
+              : "Unknown app-server error.",
+          });
           sawTerminalError = true;
           return { sawTerminalError };
         }
@@ -166,6 +214,7 @@ async function streamAppServerSummary(options: StreamAppServerSummaryOptions): P
 
 export class AppServerWorkerSession {
   private pendingAuthRefreshResolver: ((tokens: ChatGPTExternalTokens | null) => void) | null = null;
+  private authRefreshFailureMessage: string | null = null;
 
   constructor(
     private readonly appServer: Pick<CodexAppServerClient, "streamTurn" | "close">,
@@ -203,16 +252,11 @@ export class AppServerWorkerSession {
   }
 
   handleAuthRefreshResult(tokens: ChatGPTExternalTokens | null): void {
-    const resolve = this.pendingAuthRefreshResolver;
-    if (!resolve) {
-      return;
-    }
-    this.pendingAuthRefreshResolver = null;
-    resolve(tokens);
+    this.resolvePendingAuthRefresh(tokens, tokens ? null : messages.chatgptAuthRefreshFailed());
   }
 
   cancelPendingAuthRefresh(): void {
-    this.handleAuthRefreshResult(null);
+    this.resolvePendingAuthRefresh(null, null);
   }
 
   async streamTurn(input: Input, abortSignal?: AbortSignal): Promise<StreamTurnResult> {
@@ -221,6 +265,7 @@ export class AppServerWorkerSession {
       threadId: this.threadId,
       input,
       onAuthRefresh: async (previousAccountId) => await this.requestAuthRefresh(previousAccountId),
+      consumeAuthRefreshFailureMessage: () => this.consumeAuthRefreshFailureMessage(),
       abortSignal,
       sendEvent: this.sendEvent,
     });
@@ -277,7 +322,7 @@ export class AppServerWorkerSession {
 
     const tokens = await tokensPromise;
     if (!tokens) {
-      throw new Error("Auth refresh failed: host did not provide new tokens.");
+      throw new Error(messages.chatgptAuthRefreshFailed());
     }
 
     return {
@@ -285,5 +330,21 @@ export class AppServerWorkerSession {
       chatgptAccountId: tokens.chatgptAccountId,
       chatgptPlanType: tokens.chatgptPlanType,
     };
+  }
+
+  private consumeAuthRefreshFailureMessage(): string | null {
+    const message = this.authRefreshFailureMessage;
+    this.authRefreshFailureMessage = null;
+    return message;
+  }
+
+  private resolvePendingAuthRefresh(tokens: ChatGPTExternalTokens | null, failureMessage: string | null): void {
+    const resolve = this.pendingAuthRefreshResolver;
+    if (!resolve) {
+      return;
+    }
+    this.pendingAuthRefreshResolver = null;
+    this.authRefreshFailureMessage = failureMessage;
+    resolve(tokens);
   }
 }

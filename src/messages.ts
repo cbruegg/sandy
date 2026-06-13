@@ -28,6 +28,8 @@ export const messages = {
   taskSummaryReady: (taskName: string, summary: string): string =>
     `Task "${taskName}" completed.\n\n${summary}`,
   taskFailed: (message: string): string => `Task failed: ${message}`,
+  chatgptAuthRefreshFailed: (): string =>
+    "ChatGPT authentication expired on the host and could not be refreshed. Sign in again on the host, then retry the task.",
   handlerFailed: (message: string): string => `Something went wrong: ${message}`,
   noActiveTaskToCancel: (): string => "There is no active task to cancel.",
   noActiveTaskToFinish: (): string => "There is no active task to mark as finished.",

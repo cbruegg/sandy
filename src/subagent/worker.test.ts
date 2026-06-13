@@ -715,3 +715,65 @@ test("AppServerWorkerSession accepts a synchronous auth refresh response", async
     previousAccountId: "acct-123",
   }]);
 });
+
+test("AppServerWorkerSession reports a clear auth message after refresh failure leads to a 401 stream error", async () => {
+  const sentEvents: SubAgentEvent[] = [];
+
+  const appServer = {
+    close(): void {},
+    async *streamTurn(
+      _threadId: string,
+      _input: Input,
+      onAuthRefresh: (previousAccountId: string | null) => Promise<{
+        accessToken: string;
+        chatgptAccountId: string;
+        chatgptPlanType: string | null;
+      }>,
+    ) {
+      try {
+        await onAuthRefresh("acct-123");
+      } catch {
+        // The app-server converts the failed auth refresh into a later stream error.
+      }
+
+      yield {
+        method: "error" as const,
+        params: {
+          error: {
+            message: "Reconnecting... 2/5",
+            codexErrorInfo: {
+              responseStreamDisconnected: {
+                httpStatusCode: 401,
+              },
+            },
+            additionalDetails: "unexpected status 401 Unauthorized",
+          },
+          willRetry: true,
+          threadId: "thread-1",
+          turnId: "turn-1",
+        },
+      };
+    },
+  };
+
+  const session = new AppServerWorkerSession(appServer, "thread-1", (event) => {
+    sentEvents.push(event);
+    if (event.type === "chatgpt_auth_refresh_request") {
+      session.handleAuthRefreshResult(null);
+    }
+  }, true);
+
+  const result = await session.streamTurn("hello");
+
+  assert.equal(result.sawTerminalError, true);
+  assert.deepEqual(sentEvents, [
+    {
+      type: "chatgpt_auth_refresh_request",
+      previousAccountId: "acct-123",
+    },
+    {
+      type: "task_error",
+      message: "ChatGPT authentication expired on the host and could not be refreshed. Sign in again on the host, then retry the task.",
+    },
+  ]);
+});

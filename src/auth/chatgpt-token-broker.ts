@@ -42,22 +42,15 @@ function decodeJwtPayload(jwt: string): JwtClaims | null {
 }
 
 export class ChatGPTTokenBroker {
-  private authDotJson: AuthDotJson | null = null;
-  private refreshInFlight: Promise<ChatGPTExternalTokens> | null = null;
-  private cachedTokens: ChatGPTExternalTokens | null = null;
+  private refreshInFlight: Promise<ChatGPTExternalTokens | null> | null = null;
 
   constructor(private readonly authFilePath: string) {}
 
   async getInitialTokens(): Promise<ChatGPTExternalTokens> {
-    if (this.cachedTokens) {
-      return this.cachedTokens;
-    }
-    const tokens = await this.loadAndExtractTokens();
-    this.cachedTokens = tokens;
-    return tokens;
+    return await this.loadAndExtractTokens();
   }
 
-  async refreshTokens(_previousAccountId: string | null): Promise<ChatGPTExternalTokens> {
+  async refreshTokens(_previousAccountId: string | null): Promise<ChatGPTExternalTokens | null> {
     if (this.refreshInFlight) {
       return this.refreshInFlight;
     }
@@ -71,7 +64,7 @@ export class ChatGPTTokenBroker {
     }
   }
 
-  private async doRefreshTokens(_previousAccountId: string | null): Promise<ChatGPTExternalTokens> {
+  private async doRefreshTokens(_previousAccountId: string | null): Promise<ChatGPTExternalTokens | null> {
     const auth = await this.loadAuthFile();
 
     if (auth.auth_mode === "chatgpt" && auth.tokens?.refresh_token) {
@@ -79,16 +72,11 @@ export class ChatGPTTokenBroker {
       if (newTokens) {
         const updatedAuth = this.applyRefreshResponse(auth, newTokens);
         await this.persistAuthFile(updatedAuth);
-        this.authDotJson = updatedAuth;
-        const extracted = this.extractTokens(updatedAuth);
-        this.cachedTokens = extracted;
-        return extracted;
+        return this.extractTokens(updatedAuth);
       }
     }
 
-    const extracted = this.extractTokens(auth);
-    this.cachedTokens = extracted;
-    return extracted;
+    return null;
   }
 
   private async loadAndExtractTokens(): Promise<ChatGPTExternalTokens> {
@@ -97,13 +85,8 @@ export class ChatGPTTokenBroker {
   }
 
   private async loadAuthFile(): Promise<AuthDotJson> {
-    if (this.authDotJson) {
-      return this.authDotJson;
-    }
     const raw = await readFile(this.authFilePath, "utf8");
-    const parsed = JSON.parse(raw) as AuthDotJson;
-    this.authDotJson = parsed;
-    return parsed;
+    return JSON.parse(raw) as AuthDotJson;
   }
 
   private extractTokens(auth: AuthDotJson): ChatGPTExternalTokens {

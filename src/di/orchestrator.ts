@@ -11,6 +11,7 @@ import { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
 import { JobScheduler } from "../jobs/job-scheduler.js";
 import { ScheduledJobService } from "../jobs/job-service.js";
 import { logger } from "../logger.js";
+import type {OrchestratorCoreDependencies} from "../orchestrator/shared.ts";
 
 async function buildWorkerStartConfig(
   authMode: SandyAuthMode,
@@ -86,7 +87,7 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     },
   });
 
-  const orchestratorCoreDeps = {
+  const orchestratorCoreDeps: OrchestratorCoreDependencies = {
     mainAgent,
     sandboxRunner,
     buildWorkerStartConfig: () => buildWorkerStartConfig(
