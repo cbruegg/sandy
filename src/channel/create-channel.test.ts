@@ -51,7 +51,7 @@ function baseConfig(): Omit<SandyConfig, "channel"> {
 }
 
 test("createChannelAdapter returns the Telegram adapter for telegram configs", () => {
-  const adapter = createChannelAdapter({
+  const { adapter } = createChannelAdapter({
     ...baseConfig(),
     channel: {
       kind: "telegram",
@@ -66,7 +66,7 @@ test("createChannelAdapter returns the Telegram adapter for telegram configs", (
 });
 
 test("createChannelAdapter returns the local-test adapter for local_test configs", () => {
-  const adapter = createChannelAdapter({
+  const { adapter } = createChannelAdapter({
     ...baseConfig(),
     channel: {
       kind: "local_test",
@@ -80,7 +80,7 @@ test("createChannelAdapter returns the local-test adapter for local_test configs
 });
 
 test("createChannelAdapter returns the Matrix adapter for matrix configs", () => {
-  const adapter = createChannelAdapter({
+  const { adapter } = createChannelAdapter({
     ...baseConfig(),
     channel: {
       kind: "matrix",

@@ -25,7 +25,7 @@ export class SandyOrchestrator {
         kind: event.kind,
         hasActiveTask: session.activeTask !== null,
       });
-      await this.deps.channel.destinationStore.setDefaultChatId(event.chatId);
+      await this.deps.destinationStore.setDefaultChatId(event.chatId);
       this.deps.taskCoordinator.onUserInteraction(event.chatId);
       if (event.kind === "user_message") {
         logger.debugContent("chat.user_message", {

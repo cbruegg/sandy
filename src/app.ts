@@ -95,6 +95,7 @@ export async function startApp(): Promise<void> {
   const orchestration = createOrchestratorLayer({
     config,
     channel: channelLayer.channel,
+    destinationStore: channelLayer.destinationStore,
     channelFormatting: channelLayer.channelFormatting,
     sessionStore: coreStores.sessionStore,
     persistentApprovalStore: coreStores.persistentApprovalStore,
