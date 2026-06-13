@@ -6,12 +6,10 @@ import type {
   SavedAttachment,
 } from "../types.js";
 import type { ChatId } from "../types.js";
-import type { ChannelDestinationStore } from "./channel-destination-store.js";
 
 export type MessageHandler = (event: NormalizedChatEvent) => Promise<void>;
 
 export interface ChannelAdapter {
-  readonly destinationStore: ChannelDestinationStore;
   getLastUserInteractionTimestamp(chatId: ChatId): string | null;
   getFormatting(): ChannelFormatting;
   start(handler: MessageHandler): Promise<void>;

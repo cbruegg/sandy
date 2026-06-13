@@ -1,5 +1,6 @@
 import type { MainAgentController } from "../agent/main-agent-controller.js";
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
+import type { ChannelDestinationStore } from "../channel/channel-destination-store.js";
 import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 import type { SandboxRunner } from "../sandbox/sandbox-runner.js";
@@ -37,6 +38,7 @@ export type OrchestratorCoreDependencies = {
 
 export type SandyOrchestratorDependencies = OrchestratorCoreDependencies & {
   channel: ChannelAdapter;
+  destinationStore: ChannelDestinationStore;
   channelFormatting: ChannelFormatting;
   taskLifecycle: OrchestratorTaskLifecycle;
   privileges: OrchestratorPrivileges;

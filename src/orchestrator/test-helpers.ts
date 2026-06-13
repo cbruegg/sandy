@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MainAgentController } from "../agent/main-agent-controller.js";
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
-import { ImplicitChannelDestinationStore } from "../channel/channel-destination-store.js";
+import { ImplicitChannelDestinationStore, type ChannelDestinationStore } from "../channel/channel-destination-store.js";
 import { createNoopHostfsBroker } from "../hostfs/hostfs-broker.js";
 import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import { SandyOrchestrator } from "./index.js";
@@ -53,7 +53,6 @@ export function expectDefined<T>(value: T | null | undefined, message: string): 
 }
 
 export class RecordingChannel implements ChannelAdapter {
-  readonly destinationStore = new ImplicitChannelDestinationStore("test-chat");
   private readonly lastUserInteractionTimestamps = new Map<ChatId, string>();
   public readonly sentTexts: Array<{ chatId: ChatId; text: string }> = [];
   public readonly taskUpdates: Array<{ chatId: ChatId; text: string }> = [];
@@ -362,6 +361,7 @@ class FakeJobService implements JobService {
 
 export function createTestOrchestrator(options: {
   channel?: RecordingChannel;
+  destinationStore?: ChannelDestinationStore;
   mainAgent: MainAgentController;
   sandboxRunner?: FakeSandboxRunner;
   sessionStore?: InMemorySessionStore;
@@ -373,6 +373,7 @@ export function createTestOrchestrator(options: {
   fileCopySpy?: FileCopySpy;
 }) {
   const channel = options.channel ?? new RecordingChannel();
+  const destinationStore = options.destinationStore ?? new ImplicitChannelDestinationStore("test-chat");
   const runner = options.sandboxRunner ?? new FakeSandboxRunner();
   const store = options.sessionStore ?? new InMemorySessionStore();
   const fileCopySpy = options.fileCopySpy ?? new FileCopySpy();
@@ -422,6 +423,7 @@ export function createTestOrchestrator(options: {
   const orchestrator = new SandyOrchestrator({
     ...coreDeps,
     channel,
+    destinationStore,
     channelFormatting: channel.getFormatting(),
     taskLifecycle,
     privileges,

@@ -1,7 +1,6 @@
 import { basename } from "node:path";
 import { Bot, InputFile, type Context, type PollingOptions } from "grammy";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
-import { type ChannelDestinationStore } from "./channel-destination-store.js";
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
 import { renderTelegramMarkdownChunks } from "./telegram-html.js";
@@ -68,7 +67,6 @@ type TelegramAdapterOptions = {
   botFactory?: TelegramBotFactory;
   transcriptionProvider?: TranscriptionProvider;
   fileDownloader?: (api: TelegramFileApiLike, token: string, fileId: string) => Promise<ArrayBuffer>;
-  destinationStore: ChannelDestinationStore;
 };
 
 const telegramFormatting: ChannelFormatting = {
@@ -83,7 +81,6 @@ function defaultBotFactory(token: string): TelegramBotLike {
 }
 
 export class TelegramBotApiAdapter implements ChannelAdapter {
-  readonly destinationStore: ChannelDestinationStore;
   private readonly bot: TelegramBotLike;
   private readonly allowedUser: string;
   private readonly pollTimeoutSeconds: number;
@@ -94,7 +91,6 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
   private startPromise: Promise<void> | null = null;
 
   constructor(options: TelegramAdapterOptions) {
-    this.destinationStore = options.destinationStore;
     this.token = options.token;
     this.allowedUser = options.allowedUser.trim();
     this.bot = (options.botFactory ?? defaultBotFactory)(options.token);
