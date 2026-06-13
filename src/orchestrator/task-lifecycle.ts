@@ -27,7 +27,6 @@ import type {
   SessionState,
   SharedAttachment,
   SubAgentEvent,
-  TaskOrigin,
   TranscriptEntry,
 } from "../types.js";
 import type { ChatId } from "../types.js";
@@ -353,12 +352,10 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     }
 
     const summary = activeTask.taskSummary ?? this.buildCompletedTaskFallbackSummary(activeTask);
-    await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, activeTask.taskName, async (channel) => {
-      session.pendingTaskSummary = {
-        taskName: activeTask.taskName,
-        summary,
-      };
-      await channel.sendReportableText(chatId, messages.taskSummaryReady(activeTask.taskName, summary));
+    await this.deps.taskCoordinator.enqueueTaskSummaryReview(chatId, {
+      taskId: activeTask.taskId,
+      taskName: activeTask.taskName,
+      summary,
     });
   }
 
@@ -465,7 +462,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     session.removeTask(task.taskId);
     this.deps.taskCoordinator.removeTask(session.chatId, task.taskId);
     this.activeTasks.deleteHandle(task.taskId);
-    await this.promptForShareDeletionIfNeeded(session, task.taskId, task.taskName, task.origin);
+    await this.promptForShareDeletionIfNeeded(session, taskId, task.taskName);
     await this.deps.taskCoordinator.onVisibleSlotAvailable(session.chatId);
   }
 
@@ -526,7 +523,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     await this.activeTasks.getHandle(taskId)?.resolveAuthRefresh?.(tokens);
   }
 
-  private async promptForShareDeletionIfNeeded(session: SessionState, taskId: string, taskName: string, origin: TaskOrigin): Promise<void> {
+  private async promptForShareDeletionIfNeeded(session: SessionState, taskId: string, taskName: string): Promise<void> {
     const inspection = await this.deps.sandboxRunner.inspectTaskShare(taskId);
     if (inspection.isEmpty) {
       await this.deps.sandboxRunner.deleteTaskShare(taskId);
@@ -534,25 +531,12 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     }
 
     const requestId = randomUUID();
-    const summary = inspection.summary ?? "";
-
-    if (origin.kind === "launchedByJob" && session.visibleTask?.origin.kind === "launchedByUser") {
-      this.deps.taskCoordinator.scheduleShareDeletionPrompt(session.chatId, {
-        requestId,
-        taskId,
-        taskName,
-        summary,
-      });
-      return;
-    }
-
-    session.pendingShareDeletion = {
+    await this.deps.taskCoordinator.enqueueShareDeletionPrompt(session.chatId, {
       requestId,
       taskId,
       taskName,
-      summary,
-    };
-    await this.channel.sendShareDeletionRequest(session.chatId, requestId, taskName, summary);
+      summary: inspection.summary ?? "",
+    });
   }
 
 }
