@@ -81,7 +81,7 @@ class PerChatQueue<T> {
  * Coordinates the single user-visible slot each chat exposes.
  *
  * At any moment a chat can present exactly one user-facing blocker: either an
- * active task (`session.activeTask`) or a share-deletion prompt
+ * visible task (`session.visibleTask`) or a share-deletion prompt
  * (`session.pendingShareDeletion`). User-launched tasks own that slot directly.
  * Job-launched tasks run silently in the background and must acquire the slot
  * before they can talk to the user.
@@ -152,7 +152,7 @@ export class TaskCoordinator {
       return;
     }
 
-    if (session.activeTask?.taskId === taskId) {
+    if (session.visibleTask?.taskId === taskId) {
       await this.transitionJobTaskToInteractive(task);
       await operation(this.deps.channel);
       return;
@@ -205,15 +205,15 @@ export class TaskCoordinator {
   // ---------------------------------------------------------------------------
 
   private isVisibleSlotAvailable(session: SessionState): boolean {
-    return !session.activeTask && !session.pendingShareDeletion;
+    return !session.visibleTask && !session.pendingShareDeletion;
   }
 
   /** Moves a background job task into the visible slot and marks it interacting. */
   private async claimVisibleSlotForJobTask(session: SessionState, taskId: string): Promise<void> {
-    if (session.activeTask?.taskId !== taskId) {
+    if (session.visibleTask?.taskId !== taskId) {
       session.promoteBackgroundJobTask(taskId);
     }
-    const task = session.activeTask;
+    const task = session.visibleTask;
     if (task) {
       await this.transitionJobTaskToInteractive(task);
     }
@@ -273,7 +273,7 @@ export class TaskCoordinator {
    * operations until the queue head belongs to a different task (or one fails).
    */
   private async drainPendingOperationsForActiveTask(session: SessionState, taskId: string): Promise<void> {
-    while (session.activeTask?.taskId === taskId) {
+    while (session.visibleTask?.taskId === taskId) {
       if (this.waitingJobInteractions.peek(session.chatId)?.taskId !== taskId) {
         break;
       }
@@ -309,7 +309,7 @@ export class TaskCoordinator {
 
   private getBlockedJobReminderContext(chatId: ChatId): BlockedJobReminderContext | null {
     const session = this.deps.sessionStore.getOrCreate(chatId);
-    const blocker = session.activeTask;
+    const blocker = session.visibleTask;
     if (!blocker || blocker.origin.kind !== "launchedByUser") {
       return null;
     }

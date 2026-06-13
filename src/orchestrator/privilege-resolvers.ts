@@ -277,7 +277,7 @@ async function resolveApproveOnlyMutation(
     unknownFailureDetail: string;
   },
 ): Promise<PrivilegeResolutionResult> {
-  if (!session.activeTask) {
+  if (!session.visibleTask) {
     return failedPrivilegeResult(requestId, messages.taskNoLongerActive(session.chatId));
   }
 
@@ -315,13 +315,13 @@ function requireSessionActiveTask(
   session: SessionState,
   requestId: string,
 ): { activeTask: ActiveTaskState } | { result: PrivilegeResolutionResult } {
-  if (!session.activeTask) {
+  if (!session.visibleTask) {
     return {
       result: failedPrivilegeResult(requestId, messages.taskNoLongerActive(session.chatId)),
     };
   }
 
   return {
-    activeTask: session.activeTask,
+    activeTask: session.visibleTask,
   };
 }

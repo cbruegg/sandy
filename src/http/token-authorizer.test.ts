@@ -29,7 +29,7 @@ test("HttpTokenAuthorizer prefers worker_session grants over once grants", async
   const taskId = "task-1";
 
   const session = sessionStore.getOrCreate(chatId);
-  session.activeTask = createActiveTaskState(
+  session.visibleTask = createActiveTaskState(
     {
       taskId,
       taskName: "test",
@@ -59,7 +59,7 @@ test("HttpTokenAuthorizer prefers worker_session grants over once grants", async
   assert.equal(first.scope, "worker_session");
   assert.equal(second.outcome, "approved");
   assert.equal(second.scope, "worker_session");
-  assert.equal(session.activeTask.approvedHttpTokenOnceGrants[0]?.consumed, false);
+  assert.equal(session.visibleTask.approvedHttpTokenOnceGrants[0]?.consumed, false);
 });
 
 test("HttpTokenAuthorizer consumes once grants without affecting session grants", async () => {
@@ -70,7 +70,7 @@ test("HttpTokenAuthorizer consumes once grants without affecting session grants"
   const taskId = "task-1";
 
   const session = sessionStore.getOrCreate(chatId);
-  session.activeTask = createActiveTaskState(
+  session.visibleTask = createActiveTaskState(
     {
       taskId,
       taskName: "test",
@@ -97,7 +97,7 @@ test("HttpTokenAuthorizer consumes once grants without affecting session grants"
 
   assert.equal(first.outcome, "approved");
   assert.equal(first.scope, "once");
-  assert.equal(session.activeTask.approvedHttpTokenOnceGrants[0]?.consumed, true);
+  assert.equal(session.visibleTask.approvedHttpTokenOnceGrants[0]?.consumed, true);
   assert.equal(second.outcome, "denied");
 });
 
@@ -124,7 +124,7 @@ test("HttpTokenAuthorizer applies persistent approvals only when task policy ena
   const taskId = "task-1";
 
   const session = sessionStore.getOrCreate(chatId);
-  session.activeTask = createActiveTaskState(
+  session.visibleTask = createActiveTaskState(
     {
       taskId,
       taskName: "test",
@@ -140,7 +140,7 @@ test("HttpTokenAuthorizer applies persistent approvals only when task policy ena
     tokenId: "api-token",
     host: "api.example.com",
   });
-  session.activeTask.taskPolicy.autoApproveHttpTokens.push("api-token");
+  session.visibleTask.taskPolicy.autoApproveHttpTokens.push("api-token");
   const afterAccess = authorizer.authorizeHttpTokenUse({
     taskId,
     tokenId: "api-token",
@@ -160,7 +160,7 @@ test("HttpTokenAuthorizer applies global persistent approvals to job tasks only 
   );
 
   const session = sessionStore.getOrCreate("chat-1");
-  session.activeTask = createActiveTaskState(
+  session.visibleTask = createActiveTaskState(
     {
       taskId: "task-1",
       taskName: "test",
@@ -176,7 +176,7 @@ test("HttpTokenAuthorizer applies global persistent approvals to job tasks only 
     tokenId: "api-token",
     host: "api.example.com",
   });
-  session.activeTask.taskPolicy.autoApproveHttpTokens.push("api-token");
+  session.visibleTask.taskPolicy.autoApproveHttpTokens.push("api-token");
   const afterAccess = authorizer.authorizeHttpTokenUse({
     taskId: "task-1",
     tokenId: "api-token",

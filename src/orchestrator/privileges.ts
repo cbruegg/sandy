@@ -139,7 +139,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     request: PrivilegeRequest,
     decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
   ): Promise<void> {
-    const activeTask = session.activeTask;
+    const activeTask = session.visibleTask;
     if (!activeTask) {
       return;
     }

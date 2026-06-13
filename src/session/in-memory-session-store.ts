@@ -22,7 +22,7 @@ export class InMemorySessionStore implements SessionStore {
 
   getByTaskId(taskId: string): SessionState | undefined {
     for (const session of this.sessions.values()) {
-      if (session.activeTask?.taskId === taskId || session.backgroundJobTasks.some((task) => task.taskId === taskId)) {
+      if (session.visibleTask?.taskId === taskId || session.backgroundJobTasks.some((task) => task.taskId === taskId)) {
         return session;
       }
     }
