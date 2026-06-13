@@ -1,8 +1,31 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import type { ChatId } from "../types.js";
 import { messages } from "../messages.js";
 import { BlockedJobReminderScheduler, type BlockedJobReminderContext } from "./blocked-job-reminder-scheduler.js";
 import { RecordingChannel } from "./test-helpers.js";
+
+class PausingChannel extends RecordingChannel {
+  private sendTextResolve: (() => void) | null = null;
+  private sendTextPromise: Promise<void> | null = null;
+
+  pauseSendText(): void {
+    this.sendTextPromise = new Promise((resolve) => {
+      this.sendTextResolve = resolve;
+    });
+  }
+
+  resumeSendText(): void {
+    this.sendTextResolve?.();
+    this.sendTextResolve = null;
+    this.sendTextPromise = null;
+  }
+
+  override sendText(chatId: ChatId, text: string): Promise<void> {
+    this.sentTexts.push({ chatId, text });
+    return this.sendTextPromise ?? Promise.resolve();
+  }
+}
 
 class FakeTimers {
   public now = 0;
@@ -90,6 +113,32 @@ test("BlockedJobReminderScheduler.stop clears all scheduled reminders", async ()
 
   scheduler.sync("chat-reminder");
   scheduler.stop();
+
+  await timers.advanceBy(60 * 60 * 1000);
+  assert.equal(channel.sentTexts.length, 1);
+});
+
+test("BlockedJobReminderScheduler.stop prevents rescheduling while a reminder is in flight", async () => {
+  const timers = new FakeTimers();
+  const channel = new PausingChannel();
+  const scheduler = new BlockedJobReminderScheduler(
+    channel,
+    () => makeContext(),
+    {
+      now: () => timers.now,
+      setTimeoutImpl: timers.setTimeoutImpl,
+      clearTimeoutImpl: timers.clearTimeoutImpl,
+    },
+  );
+
+  channel.pauseSendText();
+  scheduler.sync("chat-reminder");
+  await timers.advanceBy(5 * 60 * 1000);
+  assert.equal(channel.sentTexts.length, 1);
+
+  scheduler.stop();
+  channel.resumeSendText();
+  await Promise.resolve();
 
   await timers.advanceBy(60 * 60 * 1000);
   assert.equal(channel.sentTexts.length, 1);
