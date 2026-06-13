@@ -65,7 +65,7 @@ function makeContext(): BlockedJobReminderContext {
     blockerTaskId: "blocker-task",
     blockerTaskName: "Blocker task",
     blockerStartedAt: new Date(0).toISOString(),
-    waitingTaskName: "Daily cleanup",
+    waitingJobName: "Daily cleanup",
   };
 }
 

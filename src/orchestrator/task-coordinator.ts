@@ -275,7 +275,13 @@ export class TaskCoordinator {
         continue;
       }
 
-      await this.claimVisibleSlotForJobTask(session, next.taskId);
+      try {
+        await this.claimVisibleSlotForJobTask(session, next.taskId);
+      } catch (error) {
+        next.reject(error);
+        this.reminders.sync(session.chatId);
+        return;
+      }
       if (await this.executeWaitingInteraction(next)) {
         await this.drainPendingOperationsForActiveTask(session, next.taskId);
       }
@@ -331,9 +337,9 @@ export class TaskCoordinator {
       return null;
     }
 
-    const waitingTaskName = this.waitingJobInteractions.peek(chatId)?.jobName
+    const waitingJobName = this.waitingJobInteractions.peek(chatId)?.jobName
       ?? this.pendingShareDeletionPrompts.peek(chatId)?.jobName;
-    if (!waitingTaskName) {
+    if (!waitingJobName) {
       return null;
     }
 
@@ -342,7 +348,7 @@ export class TaskCoordinator {
       blockerTaskId: blocker.taskId,
       blockerTaskName: blocker.taskName,
       blockerStartedAt: blocker.startedAt,
-      waitingTaskName,
+      waitingJobName,
     };
   }
 }
