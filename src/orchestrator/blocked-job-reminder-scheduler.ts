@@ -30,6 +30,7 @@ export class BlockedJobReminderScheduler {
   private readonly now: () => number;
   private readonly setTimeoutImpl: typeof setTimeout;
   private readonly clearTimeoutImpl: typeof clearTimeout;
+  private stopped = false;
 
   constructor(
     private readonly channel: ChannelAdapter,
@@ -42,12 +43,26 @@ export class BlockedJobReminderScheduler {
   }
 
   sync(chatId: ChatId): void {
+    if (this.stopped) {
+      return;
+    }
     const nextDelayMs = this.scheduledReminders.get(chatId)?.nextDelayMs ?? initialReminderDelayMs;
     this.scheduleOrClear(chatId, nextDelayMs);
   }
 
   resetAfterUserInteraction(chatId: ChatId): void {
+    if (this.stopped) {
+      return;
+    }
     this.scheduleOrClear(chatId, initialReminderDelayMs);
+  }
+
+  stop(): void {
+    this.stopped = true;
+    for (const scheduled of this.scheduledReminders.values()) {
+      this.clearTimeoutImpl(scheduled.timeout);
+    }
+    this.scheduledReminders.clear();
   }
 
   private scheduleOrClear(chatId: ChatId, nextDelayMs: number): void {
@@ -91,6 +106,10 @@ export class BlockedJobReminderScheduler {
       waitingTaskName: context.waitingTaskName,
     });
     await this.channel.sendText(chatId, messages.scheduledJobBlocked(context.waitingTaskName, context.blockerTaskName));
+
+    if (this.stopped) {
+      return;
+    }
 
     const nextDelayMs = Math.min(
       (this.scheduledReminders.get(chatId)?.nextDelayMs ?? initialReminderDelayMs) * 2,

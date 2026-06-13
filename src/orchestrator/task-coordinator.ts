@@ -110,6 +110,10 @@ export class TaskCoordinator {
   // Public API
   // ---------------------------------------------------------------------------
 
+  stop(): void {
+    this.reminders.stop();
+  }
+
   addBackgroundJobTask(session: SessionState, task: ActiveTaskState): void {
     session.backgroundJobTasks.push(task);
     this.reminders.sync(session.chatId);

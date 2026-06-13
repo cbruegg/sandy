@@ -153,6 +153,7 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
   });
 
   const stop = (): Promise<void> => {
+    taskCoordinator.stop();
     jobScheduler.stop();
     return Promise.resolve();
   };
