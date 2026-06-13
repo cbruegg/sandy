@@ -60,6 +60,8 @@ export class JobScheduler {
         cronTime: new Date(runAt),
         start: true,
         onTick: async () => {
+          const runtimeState = await this.store.getRuntimeState(definition.id);
+          if (runtimeState.lastRunAt !== null) return;
           await this.launch(definition);
         },
         errorHandler: (error) => this.logLaunchFailure(definition, error),
