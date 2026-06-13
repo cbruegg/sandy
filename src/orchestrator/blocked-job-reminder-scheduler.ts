@@ -50,6 +50,13 @@ export class BlockedJobReminderScheduler {
     this.scheduleOrClear(chatId, initialReminderDelayMs);
   }
 
+  stop(): void {
+    for (const scheduled of this.scheduledReminders.values()) {
+      this.clearTimeoutImpl(scheduled.timeout);
+    }
+    this.scheduledReminders.clear();
+  }
+
   private scheduleOrClear(chatId: ChatId, nextDelayMs: number): void {
     this.clearExistingTimeout(chatId);
 

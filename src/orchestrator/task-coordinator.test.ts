@@ -248,3 +248,37 @@ test("TaskCoordinator queues multiple deferred share deletion prompts behind an 
     assert.equal(channel.shareDeletionRequests.length, 2);
     assert.equal(channel.shareDeletionRequests[1]?.taskName, "Scheduled job: Weekly report");
 });
+
+test("TaskCoordinator does not send blocked-job reminders after stop", async () => {
+  const timers = new FakeTimers();
+  const store = new InMemorySessionStore();
+  const channel = new RecordingChannel();
+  const coordinator = new TaskCoordinator({
+    sessionStore: store,
+    channel,
+    timerControls: {
+      now: () => timers.now,
+      setTimeoutImpl: timers.setTimeoutImpl,
+      clearTimeoutImpl: timers.clearTimeoutImpl,
+    },
+    onJobTaskBecameInteractive: async () => {},
+  });
+
+  const session = store.getOrCreate("chat-stop");
+  const userTask = createTask("user-task", "User task", { kind: "launchedByUser" });
+  const jobTask = createTask("job-task", "Scheduled job: Daily cleanup", { kind: "launchedByJob", jobId: "daily-cleanup" });
+  session.visibleTask = userTask;
+  session.backgroundJobTasks.push(jobTask);
+
+  const blocked = coordinator.runJobUserVisibleOperation("chat-stop", "job-task", "Daily cleanup", async (_channel) => {});
+  await Promise.resolve();
+
+  coordinator.stop();
+
+  await timers.advanceBy(5 * 60 * 1000);
+  assert.equal(channel.sentTexts.length, 0);
+
+  session.visibleTask = null;
+  await coordinator.onVisibleSlotAvailable("chat-stop");
+  await blocked;
+});
