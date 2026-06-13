@@ -18,7 +18,6 @@ type UserVisibleOperationRunner = (input: {
   chatId: ChatId;
   taskId: string;
   taskName: string;
-  includesTaskContext?: boolean;
   operation: (channel: ChannelAdapter) => Promise<void>;
 }) => Promise<void>;
 
@@ -50,7 +49,6 @@ export class WorkerToolsHandler {
       chatId: input.chatId,
       taskId: input.task.taskId,
       taskName: input.task.taskName,
-      includesTaskContext: false,
       operation: async (channel) => {
         await channel.sendFile(
           input.chatId,
@@ -81,7 +79,6 @@ export class WorkerToolsHandler {
       chatId: input.chatId,
       taskId: input.task.taskId,
       taskName: input.task.taskName,
-      includesTaskContext: true,
       operation: async (channel) => {
         await channel.sendTaskUpdate(input.chatId, messages.jobRequestsInteraction(input.task.taskName, input.message));
       },

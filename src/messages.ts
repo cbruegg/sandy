@@ -150,8 +150,8 @@ export const messages = {
     `Scheduled job "${normalizeScheduledJobTaskName(taskName)}" is now interactive. The next update or request comes from this task.`,
   jobRequestsInteraction: (taskName: string, message?: string): string =>
     message
-      ? `Scheduled job "${taskName}" needs your attention: ${message}`
-      : `Scheduled job "${taskName}" needs your attention.`,
+      ? `Scheduled job "${normalizeScheduledJobTaskName(taskName)}" needs your attention: ${message}`
+      : `Scheduled job "${normalizeScheduledJobTaskName(taskName)}" needs your attention.`,
   requestInteractionApproved: (): string =>
     "The task has been promoted to interactive mode. The user can now see your output and respond.",
   requestInteractionAlreadyInteractive: (): string =>

@@ -386,12 +386,12 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       case "approved":
         return;
       case "denied":
-        await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, true, async (channel) => {
+        await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, async (channel) => {
           await channel.sendText(chatId, messages.privilegeDenied(result.requestId));
         });
         return;
       case "failed":
-        await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, true, async (channel) => {
+        await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, async (channel) => {
           await channel.sendText(chatId, messages.privilegeFailed(result.requestId, result.message));
         });
         return;
@@ -438,7 +438,6 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       input.chatId,
       input.taskId,
       input.activeTask.taskName,
-      false,
       async (channel) => {
         await channel.sendPrivilegeRequest(input.chatId, input.request);
       },

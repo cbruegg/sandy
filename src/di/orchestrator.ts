@@ -130,8 +130,8 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     hostfsBroker,
     getTaskSharePath: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskSharePath(),
     getTaskBundle: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskBundle(),
-    runUserVisibleOperation: async ({ chatId, taskId, taskName, includesTaskContext, operation }) => {
-      await taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, includesTaskContext ?? false, operation);
+    runUserVisibleOperation: async ({ chatId, taskId, taskName, operation }) => {
+      await taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, operation);
     },
     markTaskFinished: (taskId) => taskLifecycle.markActiveTaskFinished(taskId),
   });

@@ -74,7 +74,7 @@ test("TaskCoordinator reminds and resets reminder timing on user-task activity",
   session.backgroundJobTasks.push(jobTask);
 
   let released = false;
-  const blocked = coordinator.runJobUserVisibleOperation("chat-reminder", "job-task", "Daily cleanup", false, async (_channel) => {
+  const blocked = coordinator.runJobUserVisibleOperation("chat-reminder", "job-task", "Daily cleanup", async (_channel) => {
     released = true;
   });
   await Promise.resolve();
@@ -123,10 +123,10 @@ test("TaskCoordinator runs deferred interactions for the promoted job in order",
   session.backgroundJobTasks.push(jobTask);
 
   const visibleOperations: string[] = [];
-  const firstBlockedOperation = coordinator.runJobUserVisibleOperation("chat-job-queue", "job-task", "Daily cleanup", false, async (_channel) => {
+  const firstBlockedOperation = coordinator.runJobUserVisibleOperation("chat-job-queue", "job-task", "Daily cleanup", async (_channel) => {
     visibleOperations.push("first");
   });
-  const secondBlockedOperation = coordinator.runJobUserVisibleOperation("chat-job-queue", "job-task", "Daily cleanup", false, async (_channel) => {
+  const secondBlockedOperation = coordinator.runJobUserVisibleOperation("chat-job-queue", "job-task", "Daily cleanup", async (_channel) => {
     visibleOperations.push("second");
   });
   await Promise.resolve();
@@ -158,8 +158,8 @@ test("TaskCoordinator notifies exactly once when a job task becomes interactive"
   const jobTask = createTask("job-task", "Scheduled job: Daily cleanup", { kind: "launchedByJob", jobId: "daily-cleanup" });
   session.backgroundJobTasks.push(jobTask);
 
-  await coordinator.runJobUserVisibleOperation("chat-job-notice", "job-task", "Daily cleanup", false, async (_channel) => {});
-  await coordinator.runJobUserVisibleOperation("chat-job-notice", "job-task", "Daily cleanup", false, async (_channel) => {});
+  await coordinator.runJobUserVisibleOperation("chat-job-notice", "job-task", "Daily cleanup", async (_channel) => {});
+  await coordinator.runJobUserVisibleOperation("chat-job-notice", "job-task", "Daily cleanup", async (_channel) => {});
 
   assert.deepEqual(notifiedTaskIds, ["job-task"]);
   assert.equal(store.getOrCreate("chat-job-notice").visibleTask?.interactionState, "interacting");
@@ -169,7 +169,7 @@ test("TaskCoordinator notifies exactly once when a job task becomes interactive"
   }]);
 });
 
-test("TaskCoordinator skips the generic context message when the operation already includes task context", async () => {
+test("TaskCoordinator always sends a generic context message before the first promoted job update", async () => {
   const store = new InMemorySessionStore();
   const channel = new RecordingChannel();
   const coordinator = new TaskCoordinator({
@@ -181,14 +181,20 @@ test("TaskCoordinator skips the generic context message when the operation alrea
   const session = store.getOrCreate("chat-job-context");
   session.backgroundJobTasks.push(createTask("job-task", "Scheduled job: Daily cleanup", { kind: "launchedByJob", jobId: "daily-cleanup" }));
 
-  await coordinator.runJobUserVisibleOperation("chat-job-context", "job-task", "Daily cleanup", true, async (taskChannel) => {
+  await coordinator.runJobUserVisibleOperation("chat-job-context", "job-task", "Daily cleanup", async (taskChannel) => {
     await taskChannel.sendTaskUpdate("chat-job-context", messages.jobRequestsInteraction("Scheduled job: Daily cleanup", "Need confirmation."));
   });
 
-  assert.deepEqual(channel.taskUpdates, [{
-    chatId: "chat-job-context",
-    text: messages.jobRequestsInteraction("Scheduled job: Daily cleanup", "Need confirmation."),
-  }]);
+  assert.deepEqual(channel.taskUpdates, [
+    {
+      chatId: "chat-job-context",
+      text: messages.scheduledJobBecameInteractive("Scheduled job: Daily cleanup"),
+    },
+    {
+      chatId: "chat-job-context",
+      text: messages.jobRequestsInteraction("Scheduled job: Daily cleanup", "Need confirmation."),
+    },
+  ]);
 });
 
 test("TaskCoordinator defers share deletion prompt while a user task is active", async () => {
@@ -296,7 +302,7 @@ test("TaskCoordinator does not send blocked-job reminders after stop", async () 
   session.visibleTask = userTask;
   session.backgroundJobTasks.push(jobTask);
 
-  const blocked = coordinator.runJobUserVisibleOperation("chat-stop", "job-task", "Daily cleanup", false, async (_channel) => {});
+  const blocked = coordinator.runJobUserVisibleOperation("chat-stop", "job-task", "Daily cleanup", async (_channel) => {});
   await Promise.resolve();
 
   coordinator.stop();
