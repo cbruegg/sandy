@@ -120,3 +120,46 @@ test("JobScheduler runNow prevents future one-shot from launching again at sched
 
   scheduler.stop();
 });
+
+test("JobScheduler runNow races with one-shot timer firing at the same time", async () => {
+  const configDirectory = makeTempConfigDirectory();
+  const store = new JobStore(configDirectory);
+  // Timer fires immediately (scheduled in the past).
+  await store.upsertDefinition(createJob({
+    id: "one-shot",
+    name: "One shot",
+    schedule: { kind: "one_shot", runAt: new Date(Date.now() - 1000).toISOString() },
+  }));
+
+  let signalLaunchStarted!: () => void;
+  let releaseLaunch!: () => void;
+  const launchStarted = new Promise<void>((resolve) => { signalLaunchStarted = resolve; });
+
+  let launchCount = 0;
+  const scheduler = new JobScheduler(store, async () => {
+    signalLaunchStarted();
+    await new Promise<void>((resolve) => { releaseLaunch = resolve; });
+    launchCount++;
+    return "task-1";
+  });
+
+  await scheduler.start();
+
+  // Wait for the startup one-shot timer callback to enter its launcher.
+  await launchStarted;
+
+  // runNow → stops the timer (already fired, redundant but harmless) → hits
+  // the `launching` guard because the timer's launch is in progress.
+  await assert.rejects(
+    () => scheduler.runNow("one-shot"),
+    /already has a launch in progress/,
+  );
+
+  releaseLaunch();
+  // Wait for the slow launcher to finish.
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(launchCount, 1);
+
+  scheduler.stop();
+});
