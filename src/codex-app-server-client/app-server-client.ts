@@ -130,12 +130,15 @@ class JsonRpcRequestError extends Error {
   }
 }
 
-function isInvalidSteerError(error: unknown): boolean {
-  if (error instanceof JsonRpcRequestError && error.code === -32600) {
-    logger.info("codex.turn_steer_rejected", { code: error.code, message: error.rpcMessage });
-    return true;
-  }
-  return false;
+/**
+ * The app-server maps every `turn/steer` rejection that means "you cannot steer
+ * right now — use turn/start instead" to JSON-RPC error code -32600 (INVALID_REQUEST).
+ * Verified against codex-rs/app-server/src/request_processors/turn_processor.rs
+ * (turn_steer_inner) and error_code.rs. The only non-32600 steer error is input
+ * size exceeded (-32602 INVALID_PARAMS), which we let propagate as a real error.
+ */
+function isInvalidSteerError(error: unknown): error is JsonRpcRequestError {
+  return error instanceof JsonRpcRequestError && error.code === -32600;
 }
 
 /**
@@ -507,7 +510,11 @@ export class CodexAppServerClient implements AgentClient {
       });
       return result.turnId === activeTurn.turnId;
     } catch (error) {
-      if (this.activeTurn !== activeTurn || isInvalidSteerError(error)) {
+      if (this.activeTurn !== activeTurn) {
+        logger.info("codex.turn_steer_rejected", { error, message: `this.activeTurn (${this.activeTurn?.turnId}) != activeTurn (${activeTurn?.turnId})` });
+        return false;
+      } else if (isInvalidSteerError(error)) {
+        logger.info("codex.turn_steer_rejected", { code: error.code, message: error.rpcMessage });
         return false;
       }
       throw error;
