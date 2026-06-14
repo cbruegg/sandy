@@ -26,7 +26,8 @@ if [[ "${MODE}" != "local_test" ]]; then
   exit 1
 fi
 
-RUNTIME_ROOT="$(mktemp -d /tmp/sandy-local-test-XXXXXX)"
+mkdir -p "${REPO_ROOT}/tmp"
+RUNTIME_ROOT="$(mktemp -d "${REPO_ROOT}/tmp/sandy-local-test-XXXXXX")"
 SPOOL_ROOT="${RUNTIME_ROOT}/spool"
 RUNTIME_CONFIG_PATH="${RUNTIME_ROOT}/config.toml"
 DERIVED_CONFIG_PATH="${RUNTIME_ROOT}/config.local-test.toml"

@@ -335,6 +335,49 @@ test("CodexAppServerClient steers active turns with turn/steer", async () => {
   assert.deepEqual(await streamPromise, [{ method: "turn/completed", params: {} }]);
 });
 
+test("CodexAppServerClient falls back cleanly when turn/steer reports no active turn", async () => {
+  const child = new FakeChildProcess();
+  const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
+  const tokens: ChatGPTExternalTokens = {
+    accessToken: "access-token",
+    chatgptAccountId: "acct-123",
+    chatgptPlanType: "plus",
+  };
+  const client = await createExternalTokensClient(spawnImpl, child, tokens);
+
+  const startThreadPromise = client.startThread(TEST_WORKER_PROFILE);
+  await Promise.resolve();
+  respond(child, 3, { thread: { id: "thread-1" } });
+  const threadId = await startThreadPromise;
+
+  (client as unknown as { activeTurn: { threadId: string; turnId: string } | null }).activeTurn = {
+    threadId,
+    turnId: "turn-1",
+  };
+
+  const steerPromise = client.steerActiveTurn(threadId, [{ type: "text", text: "actually focus on tests" }]);
+  await Promise.resolve();
+
+  const messages = parseWrittenJsonLines(child);
+  assert.equal(messages[4]?.["method"], "turn/steer");
+  assert.deepEqual(messages[4]?.["params"], {
+    threadId: "thread-1",
+    input: [{ type: "text", text: "actually focus on tests" }],
+    expectedTurnId: "turn-1",
+  });
+
+  child.stdout.write(`${JSON.stringify({
+    jsonrpc: "2.0",
+    id: 4,
+    error: {
+      code: -32600,
+      message: "no active turn to steer",
+    },
+  })}\n`);
+
+  assert.equal(await steerPromise, false);
+});
+
 test("CodexAppServerClient handles auth refresh before turn-start RPC response", async () => {
   const child = new FakeChildProcess();
   const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;

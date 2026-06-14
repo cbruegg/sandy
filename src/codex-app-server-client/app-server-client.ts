@@ -30,10 +30,12 @@ type PendingRequest<T = unknown> = {
 type JsonRpcResponse = {
   id: RequestId;
   result?: unknown;
-  error?: {
-    code: number;
-    message: string;
-  };
+  error?: JsonRpcErrorPayload;
+};
+
+type JsonRpcErrorPayload = {
+  code: number;
+  message: string;
 };
 
 type AppServerMessage = JsonRpcResponse | ServerRequest | ServerNotification;
@@ -118,12 +120,25 @@ type ActiveTurn = {
   turnId: string;
 };
 
+class JsonRpcRequestError extends Error {
+  constructor(
+    readonly code: number,
+    readonly rpcMessage: string,
+  ) {
+    super(`RPC error ${code}: ${rpcMessage}`);
+    this.name = "JsonRpcRequestError";
+  }
+}
+
 function isTurnUnavailableSteerError(error: unknown): boolean {
-  if (!(error instanceof Error)) {
+  if (!(error instanceof JsonRpcRequestError) || error.code !== -32600) {
     return false;
   }
 
-  return /active turn|expected turn id|expectedturnid|invalid request/i.test(error.message);
+  const normalizedMessage = error.rpcMessage.trim().toLowerCase();
+  return normalizedMessage === "no active turn to steer"
+    || normalizedMessage.includes("expectedturnid")
+    || normalizedMessage.includes("expected turn id");
 }
 
 /**
@@ -346,7 +361,7 @@ export class CodexAppServerClient implements AgentClient {
         this.pendingRequests.delete(id);
         if (msg.error !== undefined) {
           const err = msg.error;
-          pending.reject(new Error(`RPC error ${err.code}: ${err.message}`));
+          pending.reject(new JsonRpcRequestError(err.code, err.message));
         } else {
           pending.resolve(msg.result);
         }
