@@ -520,8 +520,3 @@ Host directory access behavior:
 - A `read_write` approval satisfies later `read_only` requests for the same canonical path, but not vice versa.
 - Persisted approvals are stored in `approvals.host_directories` in the config file and survive restarts.
 - The host directory mount uses the `rclone/docker-volume-rclone` Docker volume plugin, which Sandy installs and manages automatically.
-
-## Testing
-
-Testing is crucial for ensuring the safety and reliability of Sandy. Every component must be testable, and
-non-deterministic components such as the LLM and TTS providers should be mocked in tests to ensure consistent results.
