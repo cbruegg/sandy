@@ -216,6 +216,14 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
     });
   };
 
+  const sendUserMessageToAppServer = async (input: Input): Promise<void> => {
+    const session = requireAppServerSession();
+    const steered = await session.steerActiveTurn(input);
+    if (!steered) {
+      enqueueAppServerTurn(input);
+    }
+  };
+
   const handleCommandLine = async (line: string): Promise<void> => {
     const trimmed = line.trim();
     if (!trimmed) {
@@ -274,7 +282,7 @@ function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): W
         }
         case "user_message":
           assertTaskStarted(taskStarted, command.type);
-          enqueueAppServerTurn(buildAppServerInputWithImages(command.input.text, command.input.images));
+          await sendUserMessageToAppServer(buildAppServerInputWithImages(command.input.text, command.input.images));
           break;
         case "task_became_interactive":
           assertTaskStarted(taskStarted, command.type);
