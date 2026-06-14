@@ -466,6 +466,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     this.deps.taskCoordinator.removeTask(session.chatId, task.taskId);
     this.activeTasks.deleteHandle(task.taskId);
     await this.promptForShareDeletionIfNeeded(session, task.taskId, task.taskName, task.origin);
+    await this.promptForSkillArchiveIfOrphan(session, task);
     await this.deps.taskCoordinator.onVisibleSlotAvailable(session.chatId);
   }
 
@@ -554,6 +555,36 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
       summary,
     };
     await this.channel.sendShareDeletionRequest(session.chatId, requestId, taskName, summary);
+  }
+
+  /**
+   * When a launched-by-job task completes and its one-shot job has been
+   * consumed (not rescheduled to the future), offers to archive the
+   * associated skill if no other job still uses it.
+   */
+  private async promptForSkillArchiveIfOrphan(session: SessionState, task: ActiveTaskState): Promise<void> {
+    if (task.status !== "completed") {
+      return;
+    }
+    if (task.origin.kind !== "launchedByJob") {
+      return;
+    }
+
+    const job = await this.deps.jobStore.getDefinition(task.origin.jobId);
+    if (!job || job.schedule.kind !== "one_shot") {
+      return;
+    }
+
+    const runtimeState = await this.deps.jobStore.getRuntimeState(job.id);
+    if (!runtimeState.lastRunAt) {
+      return;
+    }
+    if (Date.parse(runtimeState.lastRunAt) < Date.parse(job.schedule.runAt)) {
+      // Rescheduled to the future – the job will run again.
+      return;
+    }
+
+    await this.deps.skillArchiveCoordinator.offerArchiveForJobSkill(session.chatId, job.skillId, job.id);
   }
 
 }

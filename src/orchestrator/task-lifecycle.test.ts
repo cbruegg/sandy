@@ -706,4 +706,119 @@ test("silent job task progress updates are suppressed", async () => {
   assert.equal(task.interactionState, "silent");
 });
 
+test("one-shot job completion offers to archive skill when no other job uses it", async () => {
+  const mainAgent = new StubMainAgent({ action: "reply", replyText: "ok" });
+  const { channel, runner, jobStore, skillService, taskLifecycle } = createTestOrchestrator({ mainAgent });
+
+  // Create the skill on disk
+  await skillService.createSkill({ skillId: "cleanup-skill", name: "Cleanup", description: "Cleans up.", body: "body" });
+
+  // Create a one-shot job in the job store
+  const runAt = new Date(Date.now() - 60_000).toISOString(); // 1 minute ago
+  await jobStore.upsertDefinition({
+    id: "one-shot-cleanup",
+    name: "One-shot cleanup",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt },
+    skillId: "cleanup-skill",
+  });
+
+  const taskId = await taskLifecycle.launchJobTask(
+    { id: "one-shot-cleanup", name: "One-shot cleanup", enabled: true, schedule: { kind: "one_shot", runAt }, skillId: "cleanup-skill" },
+    "chat-one-shot-archive",
+    null,
+  );
+
+  // Simulate the scheduler recording the launch
+  await jobStore.recordLaunch("one-shot-cleanup", new Date().toISOString());
+
+  // Complete the task
+  await runner.emit({ type: "task_done" }, taskId);
+
+  // Archive privilege request should be sent (skill is orphaned)
+  const archiveRequests = channel.privilegeRequests.filter((r) => r.request.kind === "skill_archive");
+  assert.equal(archiveRequests.length, 1);
+  assert.equal((archiveRequests[0]!.request as { skillId: string }).skillId, "cleanup-skill");
+});
+
+test("one-shot job completion does not offer to archive when skill is used by another job", async () => {
+  const mainAgent = new StubMainAgent({ action: "reply", replyText: "ok" });
+  const { channel, runner, jobStore, skillService, taskLifecycle } = createTestOrchestrator({ mainAgent });
+
+  await skillService.createSkill({ skillId: "shared-skill", name: "Shared", description: "Used by multiple jobs.", body: "body" });
+
+  const runAt = new Date(Date.now() - 60_000).toISOString();
+  await jobStore.upsertDefinition({
+    id: "one-shot-shared",
+    name: "One-shot shared",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt },
+    skillId: "shared-skill",
+  });
+  // Another job also uses the same skill
+  await jobStore.upsertDefinition({
+    id: "cron-shared",
+    name: "Cron shared",
+    enabled: true,
+    schedule: { kind: "cron", expression: "0 9 * * *" },
+    skillId: "shared-skill",
+  });
+
+  const taskId = await taskLifecycle.launchJobTask(
+    { id: "one-shot-shared", name: "One-shot shared", enabled: true, schedule: { kind: "one_shot", runAt }, skillId: "shared-skill" },
+    "chat-one-shot-no-archive",
+    null,
+  );
+
+  // Simulate the scheduler recording the launch
+  await jobStore.recordLaunch("one-shot-shared", new Date().toISOString());
+
+  await runner.emit({ type: "task_done" }, taskId);
+
+  // No archive request should be sent
+  const archiveRequests = channel.privilegeRequests.filter((r) => r.request.kind === "skill_archive");
+  assert.equal(archiveRequests.length, 0);
+});
+
+test("one-shot job completion does not offer archive when job was rescheduled to future", async () => {
+  const mainAgent = new StubMainAgent({ action: "reply", replyText: "ok" });
+  const { channel, runner, jobStore, skillService, taskLifecycle } = createTestOrchestrator({ mainAgent });
+
+  await skillService.createSkill({ skillId: "future-skill", name: "Future", description: "Future run.", body: "body" });
+
+  const pastRunAt = new Date(Date.now() - 60_000).toISOString();
+  const futureRunAt = new Date(Date.now() + 600_000).toISOString();
+
+  // Create a one-shot that ran in the past
+  await jobStore.upsertDefinition({
+    id: "one-shot-future",
+    name: "One-shot future",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt: pastRunAt },
+    skillId: "future-skill",
+  });
+  await jobStore.recordLaunch("one-shot-future", pastRunAt);
+
+  // Reschedule to future (lastRunAt < runAt means not consumed)
+  await jobStore.upsertDefinition({
+    id: "one-shot-future",
+    name: "One-shot future",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt: futureRunAt },
+    skillId: "future-skill",
+  });
+
+  const taskId = await taskLifecycle.launchJobTask(
+    { id: "one-shot-future", name: "One-shot future", enabled: true, schedule: { kind: "one_shot", runAt: futureRunAt }, skillId: "future-skill" },
+    "chat-future-no-archive",
+    null,
+  );
+
+  await runner.emit({ type: "task_done" }, taskId);
+
+  // No archive request because the job was rescheduled (lastRunAt < runAt)
+  const archiveRequests = channel.privilegeRequests.filter((r) => r.request.kind === "skill_archive");
+  assert.equal(archiveRequests.length, 0);
+});
+
 

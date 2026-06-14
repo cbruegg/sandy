@@ -1,7 +1,7 @@
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
 import { messages } from "../messages.js";
 import type { SessionStore } from "../session/in-memory-session-store.js";
-import type { ActiveTaskState, SessionState } from "../types.js";
+import type { ActiveTaskState, PrivilegeRequest, SessionState } from "../types.js";
 import type { ChatId } from "../types.js";
 import { BlockedJobReminderScheduler } from "./blocked-job-reminder-scheduler.js";
 import type { BlockedJobReminderContext, TimerControls } from "./blocked-job-reminder-scheduler.js";
@@ -20,6 +20,12 @@ type PendingShareDeletionPrompt = {
   taskName: string;
   jobName: string;
   summary: string;
+};
+
+type PendingSkillArchivePrompt = {
+  requestId: string;
+  skillId: string;
+  request: PrivilegeRequest;
 };
 
 type TaskCoordinatorDependencies = {
@@ -98,6 +104,7 @@ class PerChatQueue<T> {
 export class TaskCoordinator {
   private readonly waitingJobInteractions = new PerChatQueue<WaitingJobInteraction>();
   private readonly pendingShareDeletionPrompts = new PerChatQueue<PendingShareDeletionPrompt>();
+  private readonly pendingSkillArchivePrompts = new PerChatQueue<PendingSkillArchivePrompt>();
   private readonly reminders: BlockedJobReminderScheduler;
 
   constructor(private readonly deps: TaskCoordinatorDependencies) {
@@ -131,6 +138,19 @@ export class TaskCoordinator {
   scheduleShareDeletionPrompt(chatId: ChatId, prompt: PendingShareDeletionPrompt): void {
     this.pendingShareDeletionPrompts.enqueue(chatId, prompt);
     this.reminders.sync(chatId);
+  }
+
+  scheduleSkillArchivePrompt(chatId: ChatId, prompt: PendingSkillArchivePrompt): void {
+    this.pendingSkillArchivePrompts.enqueue(chatId, prompt);
+    this.reminders.sync(chatId);
+  }
+
+  /**
+   * Returns true when the visible slot is free (no visible task, no pending
+   * share deletion, and no pending skill archive request).
+   */
+  isSlotAvailable(session: SessionState): boolean {
+    return this.isVisibleSlotAvailable(session);
   }
 
   /**
@@ -203,6 +223,10 @@ export class TaskCoordinator {
       return;
     }
 
+    if (await this.showNextDeferredSkillArchivePrompt(session)) {
+      return;
+    }
+
     await this.promoteNextWaitingJobTask(session);
   }
 
@@ -220,7 +244,7 @@ export class TaskCoordinator {
   // ---------------------------------------------------------------------------
 
   private isVisibleSlotAvailable(session: SessionState): boolean {
-    return !session.visibleTask && !session.pendingShareDeletion;
+    return !session.visibleTask && !session.pendingShareDeletion && !session.pendingSkillArchiveRequest;
   }
 
   /** Moves a background job task into the visible slot and marks it interacting. */
@@ -258,6 +282,21 @@ export class TaskCoordinator {
       summary: next.summary,
     };
     await this.deps.channel.sendShareDeletionRequest(session.chatId, next.requestId, next.taskName, next.summary);
+    this.reminders.sync(session.chatId);
+    return true;
+  }
+
+  private async showNextDeferredSkillArchivePrompt(session: SessionState): Promise<boolean> {
+    const next = this.pendingSkillArchivePrompts.shift(session.chatId);
+    if (!next) {
+      return false;
+    }
+
+    session.pendingSkillArchiveRequest = {
+      requestId: next.requestId,
+      skillId: next.skillId,
+    };
+    await this.deps.channel.sendPrivilegeRequest(session.chatId, next.request);
     this.reminders.sync(session.chatId);
     return true;
   }
