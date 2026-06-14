@@ -17,7 +17,7 @@ import type {
 import {
   createActiveTaskState,
 } from "../types.js";
-import { assertNever } from "./privilege-results.js";
+import { assertNever } from "../utils/assert-never.js";
 import type {
   ActiveTaskState,
   ChannelFormatting,

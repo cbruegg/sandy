@@ -8,8 +8,8 @@ import type { NativeWorkerToolCallResult, WorkerToolPayload } from "../subagent/
 import type { ActiveTaskState, NormalizedChatEvent, PrivilegeRequest, PrivilegeResolutionResult, SessionState } from "../types.js";
 import type { ChatId } from "../types.js";
 import type { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
+import { assertNever } from "../utils/assert-never.js";
 import {
-  assertNever,
   failedPrivilegeResult,
   isMcpPrivilegeRequest,
   isNativeToolPrivilegeRequest,

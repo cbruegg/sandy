@@ -9,9 +9,9 @@ import type {
   SessionState,
 } from "../types.js";
 import type { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
+import { assertNever } from "../utils/assert-never.js";
 import {
   approvedPrivilegeResult,
-  assertNever,
   deniedPrivilegeResult,
   failedPrivilegeResult,
   withHostDirectoryGrantMessage,

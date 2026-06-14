@@ -2,7 +2,7 @@ import type { JobDefinition } from "./job-validation.js";
 import type { JobMutationRequest } from "./job-types.js";
 import type { JobScheduler } from "./job-scheduler.js";
 import type { JobStore } from "./job-store.js";
-import { assertNever } from "../orchestrator/privilege-results.js";
+import { assertNever } from "../utils/assert-never.js";
 
 export interface JobService {
   listJobs(): Promise<JobDefinition[]>;

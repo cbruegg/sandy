@@ -1,5 +1,5 @@
 import type {ChannelFormatting, PrivilegeRequest} from "./types.js";
-import { assertNever } from "./orchestrator/privilege-results.js";
+import { assertNever } from "./utils/assert-never.js";
 
 export const buttonLabels = {
   reportDangerousOutput: "Report dangerous output",

@@ -3,7 +3,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import type { McpServerConfig } from "../config.js";
 import { logger } from "../logger.js";
 import type { McpUpstreamMethod } from "./sidecar-protocol.js";
-import { assertNever } from "../orchestrator/privilege-results.js";
+import { assertNever } from "../utils/assert-never.js";
 
 type ClientFactory = () => Client;
 type TransportFactory = (config: Extract<McpServerConfig, { transport: "stdio" }>) => StdioClientTransport;

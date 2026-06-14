@@ -13,7 +13,7 @@ import { resolveTaskShareHostPath } from "../shared-workspace.js";
 import type { ActiveTaskState } from "../types.js";
 import type { ChatId } from "../types.js";
 import type { FileCopyWorkerToolPayload, NativeWorkerToolCallResult } from "../subagent/worker-tools.js";
-import { assertNever } from "../orchestrator/privilege-results.js";
+import { assertNever } from "../utils/assert-never.js";
 
 type UserVisibleOperationRunner = (input: {
   chatId: ChatId;

@@ -2,7 +2,7 @@ import type { PersistentApprovalStore } from "../privilege/persistent-approval-s
 import type { SessionState } from "../types.js";
 import type { WorkerToolPayload } from "../subagent/worker-tools.js";
 import type { TaskCoordinator } from "./task-coordinator.js";
-import { assertNever } from "./privilege-results.js";
+import { assertNever } from "../utils/assert-never.js";
 import type { NativeToolPrivilegeRequest } from "./privilege-results.js";
 import { isHttpTokenAutoApprovalAllowed } from "./task-grants.js";
 
