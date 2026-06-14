@@ -27,12 +27,16 @@ const testFormatting: ChannelFormatting = {
 
 function createAppServerSessionStarter(session: {
   streamTurn: (input: Input, abortSignal?: AbortSignal) => Promise<StreamTurnResult>;
+  steerActiveTurn?: (input: Input) => Promise<boolean>;
   emitTaskSummary: () => Promise<void>;
   close: () => void;
   cancelPendingAuthRefresh: () => void;
   handleAuthRefreshResult: (tokens: unknown) => void;
 }): typeof AppServerWorkerSession.start {
-  return async () => session as unknown as AppServerWorkerSession;
+  return async () => ({
+    steerActiveTurn: async (input: Input) => await (session.steerActiveTurn?.(input) ?? false),
+    ...session,
+  }) as unknown as AppServerWorkerSession;
 }
 
 test("buildInitialTaskInput tells the sub-agent where the shared workspace is", () => {
@@ -204,6 +208,9 @@ test("worker processes follow-up commands after start_task initialization finish
         async streamTurn(input: Input) {
           turnInputs.push(input);
           return { sawTerminalError: false };
+        },
+        async steerActiveTurn() {
+          return false;
         },
         async emitTaskSummary() {},
         close() {},
@@ -383,6 +390,71 @@ test("worker passes image attachments through app-server user_message turns", as
     { type: "text", text: "Look at this image too" },
     { type: "local_image", path: "/workspace/share/photo.jpg" },
   ]);
+});
+
+test("worker steers user messages into the active app-server turn", async () => {
+  const turnInputs: Input[] = [];
+  const steerInputs: Input[] = [];
+  const { promise: releaseInitialTurn, resolve: resolveInitialTurn } = Promise.withResolvers<void>();
+  let activeTurnRunning = false;
+  const processor = createWorkerCommandProcessor({
+    sendEvent: () => {},
+    env: { SANDY_CODEX_PATH: "/usr/local/bin/codex" },
+    applyWorkerCodexConfigPatch: async () => {},
+    startAppServerWorkerSession: createAppServerSessionStarter({
+      async streamTurn(input) {
+        turnInputs.push(input);
+        activeTurnRunning = true;
+        await releaseInitialTurn;
+        activeTurnRunning = false;
+        return { sawTerminalError: false };
+      },
+      async steerActiveTurn(input) {
+        if (!activeTurnRunning) {
+          return false;
+        }
+        steerInputs.push(input);
+        return true;
+      },
+      async emitTaskSummary() {},
+      close() {},
+      cancelPendingAuthRefresh() {},
+      handleAuthRefreshResult() {},
+    }),
+    onShutdown: () => {},
+  });
+
+  await processor.handleLine(JSON.stringify({
+    type: "start_task",
+    taskId: "task-1",
+    taskBrief: "Inspect the collection.",
+    input: { text: "Initial request", images: [] },
+    taskLanguage: "English",
+    config: {
+      auth: { mode: "ambient_auth_file" },
+      codexModel: null,
+      channelFormatting: testFormatting,
+      httpTokens: [],
+      httpProxyWrapper: null,
+    },
+    environment: {},
+    codexConfigToml: null,
+    httpProxyUrl: null,
+  } satisfies Extract<HostCommand, { type: "start_task" }>));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  await processor.handleLine(JSON.stringify({
+    type: "user_message",
+    input: { text: "Focus on the failing test first.", images: [] },
+  } satisfies Extract<HostCommand, { type: "user_message" }>));
+
+  assert.equal(turnInputs.length, 1);
+  assert.deepEqual(steerInputs, [[{ type: "text", text: "Focus on the failing test first." }]]);
+
+  resolveInitialTurn();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(turnInputs.length, 1);
 });
 
 test("worker turns a task_became_interactive host command into follow-up input", async () => {
@@ -621,6 +693,9 @@ test("streamAppServerTurn emits completed assistant messages", async () => {
 
   try {
     const appServer = {
+      async steerActiveTurn() {
+        return false;
+      },
       async *streamTurn() {
         yield { method: "item/completed", params: { item: { type: "agentMessage", id: "item-1", text: "Using the Todoist skill.", phase: null, memoryCitation: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 } };
         yield { method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "full", status: "completed", error: null, startedAt: null, completedAt: null, durationMs: null } } };
@@ -664,6 +739,9 @@ test("streamAppServerTurn ignores blank completed assistant messages", async () 
 
   try {
     const appServer = {
+      async steerActiveTurn() {
+        return false;
+      },
       async *streamTurn() {
         yield { method: "item/completed", params: { item: { type: "agentMessage", id: "item-1", text: "   ", phase: null, memoryCitation: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 } };
         yield { method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "full", status: "completed", error: null, startedAt: null, completedAt: null, durationMs: null } } };
@@ -697,6 +775,9 @@ test("AppServerWorkerSession accepts a synchronous auth refresh response", async
 
   const appServer = {
     close(): void {},
+    async steerActiveTurn() {
+      return false;
+    },
     async *streamTurn(
       _threadId: string,
       _input: Input,
@@ -729,6 +810,9 @@ test("AppServerWorkerSession reports a clear auth message after refresh failure 
 
   const appServer = {
     close(): void {},
+    async steerActiveTurn() {
+      return false;
+    },
     async *streamTurn(
       _threadId: string,
       _input: Input,
