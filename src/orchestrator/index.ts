@@ -121,10 +121,15 @@ export class SandyOrchestrator {
             await this.deps.channel.sendText(event.chatId, staleMessage);
             return;
           }
-          if (session.pendingPrompt.kind === "share_deletion") {
-            await this.deps.taskLifecycle.resolvePendingShareDeletion(session, event.decision === "deny" ? "deny" : "approve");
-          } else {
-            await this.skillArchiveCoordinator.resolvePendingRequest(session, event.decision === "deny" ? "deny" : "approve");
+          switch (session.pendingPrompt.kind) {
+            case "share_deletion":
+              await this.deps.taskLifecycle.resolvePendingShareDeletion(session, event.decision === "deny" ? "deny" : "approve");
+              break;
+            case "skill_archive":
+              await this.skillArchiveCoordinator.resolvePendingRequest(session, event.decision === "deny" ? "deny" : "approve");
+              break;
+            default:
+              assertNever(session.pendingPrompt);
           }
           return;
         }
