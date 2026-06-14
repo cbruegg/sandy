@@ -187,6 +187,43 @@ test("JobStore.deleteDefinition leaves shared skills in place", async () => {
   }
 });
 
+test("JobStore.deleteDefinition keeps an owned skill when another job still references it", async () => {
+  const configDirectory = await makeTempConfigDirectory();
+  try {
+    const skillService = new SkillService(configDirectory);
+    const store = new JobStore(configDirectory, skillService);
+    await skillService.createSkill({
+      skillId: "shared-owned-skill",
+      name: "Shared owned skill",
+      description: "Starts owned, later shared.",
+      body: "Run shared cleanup.",
+    });
+    await store.upsertDefinition({
+      id: "original-owner",
+      name: "Original owner",
+      enabled: true,
+      schedule: { kind: "cron", expression: "0 9 * * *" },
+      skillId: "shared-owned-skill",
+      jobOwnsSkill: true,
+    });
+    await store.upsertDefinition({
+      id: "shared-follower",
+      name: "Shared follower",
+      enabled: true,
+      schedule: { kind: "cron", expression: "0 10 * * *" },
+      skillId: "shared-owned-skill",
+    });
+
+    await store.deleteDefinition("original-owner");
+
+    assert.equal((await store.getDefinition("shared-follower"))?.skillId, "shared-owned-skill");
+    assert.deepEqual(await readdir(skillService.getSkillsDirectory()), ["shared-owned-skill"]);
+    await assert.rejects(() => readdir(join(configDirectory, "archive", "skills")), /ENOENT/);
+  } finally {
+    await rm(configDirectory, { recursive: true, force: true });
+  }
+});
+
 test("JobStore.deleteOldOneShots archives skills owned by cleaned-up jobs", async () => {
   const configDirectory = await makeTempConfigDirectory();
   try {
@@ -213,6 +250,46 @@ test("JobStore.deleteOldOneShots archives skills owned by cleaned-up jobs", asyn
 
     assert.equal(deleted, 1);
     assert.equal((await readdir(join(configDirectory, "archive", "skills"))).length, 1);
+  } finally {
+    await rm(configDirectory, { recursive: true, force: true });
+  }
+});
+
+test("JobStore.deleteOldOneShots keeps an owned skill when another job still references it", async () => {
+  const configDirectory = await makeTempConfigDirectory();
+  try {
+    const skillService = new SkillService(configDirectory);
+    const store = new JobStore(configDirectory, skillService);
+    await skillService.createSkill({
+      skillId: "old-shared-skill",
+      name: "Old shared skill",
+      description: "Owned by a one-shot until reused.",
+      body: "Run once or later.",
+    });
+    const oldRunAt = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString();
+    await store.upsertDefinition({
+      id: "old-owned-shot",
+      name: "Old owned shot",
+      enabled: true,
+      schedule: { kind: "one_shot", runAt: oldRunAt },
+      skillId: "old-shared-skill",
+      jobOwnsSkill: true,
+    });
+    await store.recordLaunch("old-owned-shot", oldRunAt);
+    await store.upsertDefinition({
+      id: "surviving-shared-job",
+      name: "Surviving shared job",
+      enabled: true,
+      schedule: { kind: "cron", expression: "0 11 * * *" },
+      skillId: "old-shared-skill",
+    });
+
+    const deleted = await store.deleteOldOneShots(Date.now() - 14 * 24 * 60 * 60 * 1000);
+
+    assert.equal(deleted, 1);
+    assert.equal((await store.getDefinition("surviving-shared-job"))?.skillId, "old-shared-skill");
+    assert.deepEqual(await readdir(skillService.getSkillsDirectory()), ["old-shared-skill"]);
+    await assert.rejects(() => readdir(join(configDirectory, "archive", "skills")), /ENOENT/);
   } finally {
     await rm(configDirectory, { recursive: true, force: true });
   }

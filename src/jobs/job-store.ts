@@ -38,13 +38,13 @@ export class JobStore {
   }
 
   async deleteDefinition(jobId: string): Promise<void> {
-    const deletedDefinitions = await this.updateJobsFile((data) => {
+    const skillIdsToArchive = await this.updateJobsFile((data) => {
       const deletedDefinitions = data.definitions.filter((definition) => definition.id === jobId);
       data.definitions = data.definitions.filter((definition) => definition.id !== jobId);
       data.runtimeState = data.runtimeState.filter((state) => state.jobId !== jobId);
-      return deletedDefinitions;
+      return this.getOwnedSkillIdsToArchive(deletedDefinitions, data.definitions);
     });
-    await this.archiveOwnedSkills(deletedDefinitions);
+    await this.archiveOwnedSkills(skillIdsToArchive);
   }
 
   async setEnabled(jobId: string, enabled: boolean): Promise<void> {
@@ -113,7 +113,7 @@ export class JobStore {
    * (epoch ms). Returns the number of deleted jobs.
    */
   async deleteOldOneShots(cutoffTimestamp: number): Promise<number> {
-    const deletedDefinitions = await this.updateJobsFile((data) => {
+    const { deletedDefinitions, skillIdsToArchive } = await this.updateJobsFile((data) => {
       const toRemove = new Set<string>();
       for (const state of data.runtimeState) {
         if (!state.lastRunAt) continue;
@@ -124,13 +124,18 @@ export class JobStore {
         if (!hasOneShotRunForSchedule(state, def.schedule.runAt)) continue;
         toRemove.add(state.jobId);
       }
-      if (toRemove.size === 0) return [];
+      if (toRemove.size === 0) {
+        return { deletedDefinitions: [], skillIdsToArchive: [] };
+      }
       const deletedDefinitions = data.definitions.filter((d) => toRemove.has(d.id));
       data.definitions = data.definitions.filter((d) => !toRemove.has(d.id));
       data.runtimeState = data.runtimeState.filter((s) => !toRemove.has(s.jobId));
-      return deletedDefinitions;
+      return {
+        deletedDefinitions,
+        skillIdsToArchive: this.getOwnedSkillIdsToArchive(deletedDefinitions, data.definitions),
+      };
     });
-    await this.archiveOwnedSkills(deletedDefinitions);
+    await this.archiveOwnedSkills(skillIdsToArchive);
     return deletedDefinitions.length;
   }
 
@@ -167,10 +172,25 @@ export class JobStore {
     await writeFile(this.filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
   }
 
-  private async archiveOwnedSkills(deletedDefinitions: JobDefinition[]): Promise<void> {
+  private getOwnedSkillIdsToArchive(
+    deletedDefinitions: JobDefinition[],
+    remainingDefinitions: JobDefinition[],
+  ): string[] {
+    const remainingSkillIds = new Set(remainingDefinitions.map((definition) => definition.skillId));
+    const skillIdsToArchive = new Set<string>();
+
     for (const definition of deletedDefinitions) {
       if (!definition.jobOwnsSkill) continue;
-      await this.skillService.archiveSkill(definition.skillId);
+      if (remainingSkillIds.has(definition.skillId)) continue;
+      skillIdsToArchive.add(definition.skillId);
+    }
+
+    return [...skillIdsToArchive];
+  }
+
+  private async archiveOwnedSkills(skillIdsToArchive: string[]): Promise<void> {
+    for (const skillId of skillIdsToArchive) {
+      await this.skillService.archiveSkill(skillId);
     }
   }
 }
