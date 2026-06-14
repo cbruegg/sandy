@@ -130,15 +130,12 @@ class JsonRpcRequestError extends Error {
   }
 }
 
-function isTurnUnavailableSteerError(error: unknown): boolean {
-  if (!(error instanceof JsonRpcRequestError) || error.code !== -32600) {
-    return false;
+function isInvalidSteerError(error: unknown): boolean {
+  if (error instanceof JsonRpcRequestError && error.code === -32600) {
+    logger.info("codex.turn_steer_rejected", { code: error.code, message: error.rpcMessage });
+    return true;
   }
-
-  const normalizedMessage = error.rpcMessage.trim().toLowerCase();
-  return normalizedMessage === "no active turn to steer"
-    || normalizedMessage.includes("expectedturnid")
-    || normalizedMessage.includes("expected turn id");
+  return false;
 }
 
 /**
@@ -510,7 +507,7 @@ export class CodexAppServerClient implements AgentClient {
       });
       return result.turnId === activeTurn.turnId;
     } catch (error) {
-      if (this.activeTurn !== activeTurn || isTurnUnavailableSteerError(error)) {
+      if (this.activeTurn !== activeTurn || isInvalidSteerError(error)) {
         return false;
       }
       throw error;
