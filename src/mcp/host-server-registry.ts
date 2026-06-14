@@ -3,6 +3,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import type { McpServerConfig } from "../config.js";
 import { logger } from "../logger.js";
 import type { McpUpstreamMethod } from "./sidecar-protocol.js";
+import { assertNever } from "../orchestrator/privilege-results.js";
 
 type ClientFactory = () => Client;
 type TransportFactory = (config: Extract<McpServerConfig, { transport: "stdio" }>) => StdioClientTransport;
@@ -154,6 +155,4 @@ export class HostMcpServerRegistry {
   }
 }
 
-function assertNever(value: never): never {
-  throw new Error(`Unexpected MCP upstream method: ${String(value)}`);
-}
+

@@ -2,6 +2,7 @@ import type { JobDefinition } from "./job-validation.js";
 import type { JobMutationRequest } from "./job-types.js";
 import type { JobScheduler } from "./job-scheduler.js";
 import type { JobStore } from "./job-store.js";
+import { assertNever } from "../orchestrator/privilege-results.js";
 
 export interface JobService {
   listJobs(): Promise<JobDefinition[]>;
@@ -54,6 +55,4 @@ export class ScheduledJobService implements JobService {
 
 }
 
-function assertNever(value: never): never {
-  throw new Error(`Unexpected job mutation operation: ${String(value)}`);
-}
+

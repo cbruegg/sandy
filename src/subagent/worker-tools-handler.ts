@@ -13,6 +13,7 @@ import { resolveTaskShareHostPath } from "../shared-workspace.js";
 import type { ActiveTaskState } from "../types.js";
 import type { ChatId } from "../types.js";
 import type { FileCopyWorkerToolPayload, NativeWorkerToolCallResult } from "../subagent/worker-tools.js";
+import { assertNever } from "../orchestrator/privilege-results.js";
 
 type UserVisibleOperationRunner = (input: {
   chatId: ChatId;
@@ -238,6 +239,4 @@ export class WorkerToolsHandler {
   }
 }
 
-function assertNever(value: never): never {
-  throw new Error(`Unexpected worker tool handler case: ${String(value)}`);
-}
+

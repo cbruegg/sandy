@@ -17,6 +17,7 @@ import type {
 import {
   createActiveTaskState,
 } from "../types.js";
+import { assertNever } from "./privilege-results.js";
 import type {
   ActiveTaskState,
   ChannelFormatting,
@@ -563,10 +564,6 @@ function normalizeTaskPolicy(policy: MainAgentTaskPolicyInput | undefined): Main
     autoApproveMcpServers: [...new Set(policy?.autoApproveMcpServers ?? [])],
     autoApproveHttpTokens: [...new Set(policy?.autoApproveHttpTokens ?? [])],
   };
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled main agent decision: ${JSON.stringify(value)}`);
 }
 
 export { describeUserMessageForMainAgent };
