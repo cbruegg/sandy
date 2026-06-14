@@ -114,7 +114,6 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     jobApprovalStore,
     hostfsBroker,
     skillService,
-    jobStore,
     skillArchiveCoordinator,
     taskCoordinator,
   };

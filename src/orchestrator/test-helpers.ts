@@ -412,7 +412,6 @@ export function createTestOrchestrator(options: {
     jobApprovalStore: options.jobApprovalStore ?? new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
     hostfsBroker: options.hostfsBroker ?? createNoopHostfsBroker(),
     skillService,
-    jobStore,
     skillArchiveCoordinator,
     taskCoordinator,
   };
