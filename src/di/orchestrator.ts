@@ -7,7 +7,6 @@ import { OrchestratorPrivilegesImpl } from "../orchestrator/privileges.js";
 import { ActiveTaskRuntimeRegistry } from "../orchestrator/active-task-runtime-registry.js";
 import { OrchestratorTaskLifecycleImpl } from "../orchestrator/task-lifecycle.js";
 import { TaskCoordinator } from "../orchestrator/task-coordinator.js";
-import { SkillArchiveCoordinator } from "../orchestrator/skill-archive-coordinator.js";
 import { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
 import { JobCleanupService } from "../jobs/job-cleanup.js";
 import { JobScheduler } from "../jobs/job-scheduler.js";
@@ -90,14 +89,6 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     },
   });
 
-  const skillArchiveCoordinator = new SkillArchiveCoordinator(
-    skillService,
-    jobStore,
-    sessionStore,
-    channel,
-    taskCoordinator,
-  );
-
   const orchestratorCoreDeps: OrchestratorCoreDependencies = {
     mainAgent,
     sandboxRunner,
@@ -114,8 +105,6 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     jobApprovalStore,
     hostfsBroker,
     skillService,
-    jobStore,
-    skillArchiveCoordinator,
     taskCoordinator,
   };
 
@@ -162,7 +151,6 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     channelFormatting,
     taskLifecycle,
     privileges,
-    skillArchiveCoordinator,
   });
 
   const jobCleanupService = new JobCleanupService(jobStore);
@@ -186,7 +174,6 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     privileges,
     orchestrator,
     jobCleanupService,
-    skillArchiveCoordinator,
     stop,
   };
 }

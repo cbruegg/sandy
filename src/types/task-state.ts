@@ -87,11 +87,6 @@ type PendingShareDeletion = {
   summary: string;
 };
 
-type PendingSkillArchiveRequest = {
-  requestId: string;
-  skillId: string;
-};
-
 export class SessionState {
   chatId: ChatId;
   visibleTask: ActiveTaskState | null;
@@ -101,7 +96,6 @@ export class SessionState {
     summary: string;
   } | null;
   pendingShareDeletion: PendingShareDeletion | null;
-  pendingSkillArchiveRequest: PendingSkillArchiveRequest | null;
 
   constructor(chatId: ChatId) {
     this.chatId = chatId;
@@ -109,7 +103,6 @@ export class SessionState {
     this.backgroundJobTasks = [];
     this.pendingTaskSummary = null;
     this.pendingShareDeletion = null;
-    this.pendingSkillArchiveRequest = null;
   }
 
   findTask(taskId: string): { task: ActiveTaskState; location: "visible" | "background"; } | null {

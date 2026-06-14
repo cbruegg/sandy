@@ -1,8 +1,6 @@
-import { randomUUID } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, type Dirent } from "node:fs";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { skillArchiveRoot } from "./state-paths.js";
 
 export type SkillMetadata = {
   name: string;
@@ -139,11 +137,9 @@ async function parseExistingSkillFile(skillFilePath: string): Promise<ParsedSkil
 }
 
 export class SkillService {
-  private readonly configDirectory: string;
   private readonly skillsDirectory: string;
 
   constructor(configDirectory: string) {
-    this.configDirectory = configDirectory;
     this.skillsDirectory = join(configDirectory, "skills");
   }
 
@@ -212,26 +208,5 @@ export class SkillService {
       throw new Error(`Skill "${input.skillId}" does not exist.`);
     }
     await rm(skillDir, { recursive: true, force: true });
-  }
-
-  /**
-   * Moves the skill directory from `<config>/skills/<skillId>/` to
-   * `<config>/archive/skills/<skillId>-<uuid>/` so the live skill scanner
-   * no longer discovers it.
-   *
-   * Returns the absolute archive target path.
-   */
-  async archiveSkill(skillId: string): Promise<string> {
-    assertValidSkillId(skillId);
-    const sourceDir = join(this.skillsDirectory, skillId);
-    if (!existsSync(sourceDir)) {
-      throw new Error(`Skill "${skillId}" does not exist.`);
-    }
-    const archiveRoot = skillArchiveRoot(this.configDirectory);
-    await mkdir(archiveRoot, { recursive: true });
-    const uuid = randomUUID();
-    const targetDir = join(archiveRoot, `${skillId}-${uuid}`);
-    await rename(sourceDir, targetDir);
-    return targetDir;
   }
 }

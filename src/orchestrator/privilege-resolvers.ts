@@ -1,6 +1,5 @@
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 import type { JobApprovalStoreApi } from "../jobs/job-approval-store.js";
-import type { JobStore } from "../jobs/job-store.js";
 import { messages } from "../messages.js";
 import type {
   ActiveTaskState,
@@ -26,7 +25,6 @@ import {
   grantTaskResourceReadAccess,
   grantTaskToolAccess,
 } from "./task-grants.js";
-import type { SkillArchiveCoordinator } from "./skill-archive-coordinator.js";
 
 type ApprovalDecision = Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"];
 
@@ -37,9 +35,7 @@ type ApprovalDecision = Extract<NormalizedChatEvent, { kind: "approval_response"
 export interface PrivilegeContext {
   readonly persistentApprovalStore: PersistentApprovalStore;
   readonly jobApprovalStore: JobApprovalStoreApi;
-  readonly jobStore: JobStore;
   readonly workerToolsHandler: WorkerToolsHandler;
-  readonly skillArchiveCoordinator: SkillArchiveCoordinator;
 }
 
 export async function resolveMcpToolCallRequest(
@@ -256,35 +252,13 @@ export async function resolveJobMutationRequest(
   decision: ApprovalDecision,
 ): Promise<PrivilegeResolutionResult> {
   const { operation, jobId } = request.mutation;
-
-  if (decision !== "approve") {
-    if (!session.visibleTask) {
-      return failedPrivilegeResult(request.requestId, messages.taskNoLongerActive(session.chatId));
-    }
-    return deniedPrivilegeResult(request.requestId, messages.jobMutationDenied(operation, jobId));
-  }
-
-  // Snapshot the job before deletion so we can check whether to offer
-  // archiving the associated skill afterwards.
-  let jobBeforeDelete = null;
-  if (operation === "delete") {
-    jobBeforeDelete = await ctx.jobStore.getDefinition(jobId);
-  }
-
-  try {
-    const detail = await ctx.workerToolsHandler.applyJobMutation(request.mutation);
-
-    if (operation === "delete" && jobBeforeDelete && jobBeforeDelete.schedule.kind === "cron") {
-      // The job has already been deleted by applyMutation, so we can
-      // pass jobId as excluded (though it's already gone from the store).
-      await ctx.skillArchiveCoordinator.offerArchiveForJobSkill(session.chatId, jobBeforeDelete.skillId, jobBeforeDelete.id);
-    }
-
-    return approvedPrivilegeResult(request.requestId, `${messages.jobMutationApproved(operation, jobId)} ${detail}`);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : "Unknown job mutation failure.";
-    return failedPrivilegeResult(request.requestId, messages.jobMutationFailed(operation, jobId, detail));
-  }
+  return resolveApproveOnlyMutation(session, request.requestId, decision, {
+    deniedMessage: messages.jobMutationDenied(operation, jobId),
+    apply: () => ctx.workerToolsHandler.applyJobMutation(request.mutation),
+    approvedMessage: (detail) => `${messages.jobMutationApproved(operation, jobId)} ${detail}`,
+    failedMessage: (detail) => messages.jobMutationFailed(operation, jobId, detail),
+    unknownFailureDetail: "Unknown job mutation failure.",
+  });
 }
 
 /**

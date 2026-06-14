@@ -75,9 +75,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     this.privilegeContext = {
       persistentApprovalStore: deps.persistentApprovalStore,
       jobApprovalStore: deps.jobApprovalStore,
-      jobStore: deps.jobStore,
       workerToolsHandler,
-      skillArchiveCoordinator: deps.skillArchiveCoordinator,
     };
   }
 
@@ -165,10 +163,6 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
         break;
       case "job_mutation":
         result = await resolveJobMutationRequest(this.privilegeContext, session, request, decision);
-        break;
-      case "skill_archive":
-        // Skill archive requests are session-level, resolved by SkillArchiveCoordinator.
-        result = { requestId: request.requestId, outcome: "failed", message: "Unexpected session-level request in task-bound resolver." };
         break;
       case "file_copy":
         result = await resolveFileCopyRequest(this.privilegeContext, request, decision, activeTask.taskId);

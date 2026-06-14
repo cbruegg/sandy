@@ -144,9 +144,7 @@ export function formatPrivilegeRequestLogType(request: PrivilegeRequest): string
       return `host_directory_access:${request.path}:${request.level}`;
     case "skill_mutation":
       return `skill_mutation:${request.operation}:${request.skillId}`;
-      case "job_mutation":
-        return `job_mutation:${request.mutation.operation}:${request.mutation.jobId}`;
-      case "skill_archive":
-        return `skill_archive:${request.skillId}`;
-    }
+    case "job_mutation":
+      return `job_mutation:${request.mutation.operation}:${request.mutation.jobId}`;
+  }
 }

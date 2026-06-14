@@ -60,13 +60,7 @@ type JobMutationPrivilegeRequest = {
   mutation: JobMutationRequest;
 };
 
-type SkillArchivePrivilegeRequest = {
-  kind: "skill_archive";
-  requestId: string;
-  skillId: string;
-};
-
-export type PrivilegeRequest = FileCopyPrivilegeRequest | HostDirectoryAccessPrivilegeRequest | McpToolCallPrivilegeRequest | McpResourceReadPrivilegeRequest | HttpTokenUsePrivilegeRequest | SkillMutationPrivilegeRequest | JobMutationPrivilegeRequest | SkillArchivePrivilegeRequest;
+export type PrivilegeRequest = FileCopyPrivilegeRequest | HostDirectoryAccessPrivilegeRequest | McpToolCallPrivilegeRequest | McpResourceReadPrivilegeRequest | HttpTokenUsePrivilegeRequest | SkillMutationPrivilegeRequest | JobMutationPrivilegeRequest;
 
 export const privilegeResolutionResultSchema = z.object({
   requestId: z.string().min(1),

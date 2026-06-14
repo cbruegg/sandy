@@ -12,11 +12,9 @@ import type {
 
 export class SandyOrchestrator {
   private readonly channelFormatting: ChannelFormatting;
-  private readonly skillArchiveCoordinator: import("./skill-archive-coordinator.js").SkillArchiveCoordinator;
 
   constructor(private readonly deps: SandyOrchestratorDependencies) {
     this.channelFormatting = deps.channelFormatting;
-    this.skillArchiveCoordinator = deps.skillArchiveCoordinator;
   }
 
   async handleChatEvent(event: NormalizedChatEvent): Promise<void> {
@@ -117,14 +115,6 @@ export class SandyOrchestrator {
             return;
           }
           await this.deps.taskLifecycle.resolvePendingShareDeletion(session, event.decision === "deny" ? "deny" : "approve");
-          return;
-        }
-        if (session.pendingSkillArchiveRequest) {
-          if (event.requestId && event.requestId !== session.pendingSkillArchiveRequest.requestId) {
-            await this.deps.channel.sendText(event.chatId, messages.staleSkillArchiveRequest());
-            return;
-          }
-          await this.skillArchiveCoordinator.resolvePendingRequest(session, event.decision === "deny" ? "deny" : "approve");
           return;
         }
         await this.deps.channel.sendText(event.chatId, messages.noPendingPrivilegeRequest());

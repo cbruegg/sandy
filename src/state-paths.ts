@@ -34,7 +34,3 @@ export function jobWorkspace(configDirectory: string, jobId: string): string {
 export function channelStateFile(configDirectory: string): string {
   return join(sandyStateRoot(configDirectory), "channel.json");
 }
-
-export function skillArchiveRoot(configDirectory: string): string {
-  return join(configDirectory, "archive", "skills");
-}
