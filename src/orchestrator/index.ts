@@ -9,10 +9,11 @@ import type {
   NormalizedChatEvent,
   SessionState,
 } from "../types.js";
+import type {SkillArchiveCoordinator} from "./skill-archive-coordinator.ts";
 
 export class SandyOrchestrator {
   private readonly channelFormatting: ChannelFormatting;
-  private readonly skillArchiveCoordinator: import("./skill-archive-coordinator.js").SkillArchiveCoordinator;
+  private readonly skillArchiveCoordinator: SkillArchiveCoordinator;
 
   constructor(private readonly deps: SandyOrchestratorDependencies) {
     this.channelFormatting = deps.channelFormatting;
