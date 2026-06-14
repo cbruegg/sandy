@@ -167,6 +167,7 @@ export async function startApp(): Promise<void> {
 
   // ── Start remaining services ───────────────────────────────────────────
   await orchestration.jobScheduler.start();
+  orchestration.jobCleanupService.start();
 
   process.once("SIGINT", () => {
     shutdownRequested = true;

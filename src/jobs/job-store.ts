@@ -100,6 +100,30 @@ export class JobStore {
     });
   }
 
+  /**
+   * Deletes one-shot jobs whose scheduled run has been consumed
+   * (lastRunAt >= runAt) and whose lastRunAt is before `cutoffTimestamp`
+   * (epoch ms). Returns the number of deleted jobs.
+   */
+  async deleteOldOneShots(cutoffTimestamp: number): Promise<number> {
+    return this.updateJobsFile((data) => {
+      const toRemove = new Set<string>();
+      for (const state of data.runtimeState) {
+        if (!state.lastRunAt) continue;
+        if (Date.parse(state.lastRunAt) >= cutoffTimestamp) continue;
+        const def = data.definitions.find((d) => d.id === state.jobId);
+        if (!def) continue;
+        if (def.schedule.kind !== "one_shot") continue;
+        if (!hasOneShotRunForSchedule(state, def.schedule.runAt)) continue;
+        toRemove.add(state.jobId);
+      }
+      if (toRemove.size === 0) return 0;
+      data.definitions = data.definitions.filter((d) => !toRemove.has(d.id));
+      data.runtimeState = data.runtimeState.filter((s) => !toRemove.has(s.jobId));
+      return toRemove.size;
+    });
+  }
+
   workspacePath(jobId: string): string {
     return jobWorkspace(this.configDirectory, jobId);
   }

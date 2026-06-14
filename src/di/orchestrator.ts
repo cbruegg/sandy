@@ -8,6 +8,7 @@ import { ActiveTaskRuntimeRegistry } from "../orchestrator/active-task-runtime-r
 import { OrchestratorTaskLifecycleImpl } from "../orchestrator/task-lifecycle.js";
 import { TaskCoordinator } from "../orchestrator/task-coordinator.js";
 import { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
+import { JobCleanupService } from "../jobs/job-cleanup.js";
 import { JobScheduler } from "../jobs/job-scheduler.js";
 import { ScheduledJobService } from "../jobs/job-service.js";
 import { logger } from "../logger.js";
@@ -152,9 +153,12 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     privileges,
   });
 
+  const jobCleanupService = new JobCleanupService(jobStore);
+
   const stop = (): Promise<void> => {
     taskCoordinator.stop();
     jobScheduler.stop();
+    jobCleanupService.stop();
     return Promise.resolve();
   };
 
@@ -169,6 +173,7 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     workerToolsHandler,
     privileges,
     orchestrator,
+    jobCleanupService,
     stop,
   };
 }
