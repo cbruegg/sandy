@@ -17,8 +17,7 @@ export function createSelfUpdateLayer(input: SelfUpdateLayerInput): SelfUpdateLa
       const blockingSessions = sessions.filter((session) =>
         session.visibleTask !== null
         || session.backgroundJobTasks.length > 0
-        || session.pendingShareDeletion !== null
-        || session.pendingSkillArchiveRequest !== null);
+        || session.pendingPrompt !== null);
       if (blockingSessions.length > 0) {
         logger.debug("update.blocked_by_sessions", {
           blockingCount: blockingSessions.length,
@@ -28,8 +27,7 @@ export function createSelfUpdateLayer(input: SelfUpdateLayerInput): SelfUpdateLa
             hasVisibleTask: session.visibleTask !== null,
             backgroundJobTaskCount: session.backgroundJobTasks.length,
             hasPendingTaskSummary: session.pendingTaskSummary !== null,
-            hasPendingShareDeletion: session.pendingShareDeletion !== null,
-            hasPendingSkillArchiveRequest: session.pendingSkillArchiveRequest !== null,
+            hasPendingPrompt: session.pendingPrompt !== null,
           })),
         });
         return false;

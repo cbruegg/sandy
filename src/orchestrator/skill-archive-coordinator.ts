@@ -7,7 +7,7 @@ import type { SkillService } from "../skills.js";
 import type { JobStore } from "../jobs/job-store.js";
 import type { SessionStore } from "../session/in-memory-session-store.js";
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
-import type { SessionState } from "../types.js";
+import type { ActiveTaskState, SessionState } from "../types.js";
 import type { ChatId } from "../types.js";
 import type { PrivilegeRequest } from "../types.js";
 import type { TaskCoordinator } from "./task-coordinator.js";
@@ -56,14 +56,14 @@ export class SkillArchiveCoordinator {
       };
 
       const session = this.sessionStore.getOrCreate(chatId);
-      if (session.pendingSkillArchiveRequest) {
+      if (session.pendingPrompt?.kind === "skill_archive") {
         // Another archive request is already awaiting a decision for this chat.
         return;
       }
 
       if (this.taskCoordinator.isSlotAvailable(session)) {
         // Slot is free – send the request immediately.
-        session.pendingSkillArchiveRequest = { requestId, skillId };
+        session.pendingPrompt = { kind: "skill_archive", requestId, skillId };
         await this.channel.sendPrivilegeRequest(chatId, request);
       } else {
         // Defer the prompt until the visible slot frees.
@@ -79,19 +79,59 @@ export class SkillArchiveCoordinator {
   }
 
   /**
+   * Called after a launched-by-job task completes. Checks whether the one-shot
+   * job has been consumed (not rescheduled to the future) and, if so, offers
+   * to archive the associated skill when no other job still uses it.
+   */
+  async offerArchiveAfterTaskCompletion(session: SessionState, task: ActiveTaskState): Promise<void> {
+    if (task.status !== "completed") {
+      return;
+    }
+    if (task.origin.kind !== "launchedByJob") {
+      return;
+    }
+
+    const job = await this.jobStore.getDefinition(task.origin.jobId);
+    if (!job || job.schedule.kind !== "one_shot") {
+      return;
+    }
+
+    const runtimeState = await this.jobStore.getRuntimeState(job.id);
+    if (!runtimeState.lastRunAt) {
+      return;
+    }
+    if (Date.parse(runtimeState.lastRunAt) < Date.parse(job.schedule.runAt)) {
+      // Rescheduled to the future – the job will run again.
+      return;
+    }
+
+    await this.offerArchiveForJobSkill(session.chatId, job.skillId, job.id);
+  }
+
+  /**
    * Applies the user's decision to the pending archive request.
    * Called by the orchestrator when an approval_response arrives.
    */
   async resolvePendingRequest(session: SessionState, decision: "approve" | "deny"): Promise<void> {
-    const pending = session.pendingSkillArchiveRequest;
-    if (!pending) {
+    const pending = session.pendingPrompt;
+    if (!pending || pending.kind !== "skill_archive") {
       return;
     }
 
-    session.pendingSkillArchiveRequest = null;
+    session.pendingPrompt = null;
 
     if (decision === "deny") {
       await this.channel.sendText(session.chatId, messages.skillArchiveDenied(pending.skillId));
+      await this.taskCoordinator.onVisibleSlotAvailable(session.chatId);
+      return;
+    }
+
+    // Revalidate: another job may have started using the skill while the
+    // archive prompt was awaiting the user's decision.
+    const definitions = await this.jobStore.listDefinitions();
+    const stillUsed = definitions.some((d) => d.skillId === pending.skillId);
+    if (stillUsed) {
+      await this.channel.sendText(session.chatId, messages.skillArchiveNoLongerEligible(pending.skillId));
       await this.taskCoordinator.onVisibleSlotAvailable(session.chatId);
       return;
     }

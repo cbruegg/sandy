@@ -98,8 +98,9 @@ test("SkillArchiveCoordinator offers archive when skill is orphaned", async () =
 
   // Session should have a pending archive request
   const session = sessionStore.getOrCreate(chatId);
-  assert.notEqual(session.pendingSkillArchiveRequest, null);
-  assert.equal(session.pendingSkillArchiveRequest!.skillId, "test-skill");
+  assert.notEqual(session.pendingPrompt, null);
+  assert.equal(session.pendingPrompt?.kind, "skill_archive");
+  assert.equal((session.pendingPrompt as { skillId: string } | null)?.skillId, "test-skill");
 });
 
 test("SkillArchiveCoordinator approves archive and moves skill", async () => {
@@ -128,7 +129,7 @@ test("SkillArchiveCoordinator approves archive and moves skill", async () => {
   assert.equal(channel.privilegeRequests.length, 1);
 
   const session = sessionStore.getOrCreate(chatId);
-  assert.notEqual(session.pendingSkillArchiveRequest, null);
+  assert.notEqual(session.pendingPrompt, null);
 
   // Approve
   await coordinator.resolvePendingRequest(session, "approve");
@@ -142,7 +143,7 @@ test("SkillArchiveCoordinator approves archive and moves skill", async () => {
   assert.equal(confirmationTexts.length, 1);
 
   // Pending request should be cleared
-  assert.equal(session.pendingSkillArchiveRequest, null);
+  assert.equal(session.pendingPrompt, null);
 });
 
 test("SkillArchiveCoordinator denies archive and keeps skill", async () => {
@@ -183,7 +184,7 @@ test("SkillArchiveCoordinator denies archive and keeps skill", async () => {
   assert.equal(denialTexts.length, 1);
 
   // Pending request cleared
-  assert.equal(session.pendingSkillArchiveRequest, null);
+  assert.equal(session.pendingPrompt, null);
 });
 
 test("SkillArchiveCoordinator does not offer archive when skill directory does not exist", async () => {
@@ -231,7 +232,8 @@ test("SkillArchiveCoordinator defers archive prompt when visible slot is busy", 
 
   // Simulate a busy slot by setting a pending share deletion
   const session = sessionStore.getOrCreate(chatId);
-  session.pendingShareDeletion = {
+  session.pendingPrompt = {
+    kind: "share_deletion",
     requestId: "share-req-1",
     taskId: "task-1",
     taskName: "Some task",
@@ -242,6 +244,55 @@ test("SkillArchiveCoordinator defers archive prompt when visible slot is busy", 
 
   // No privilege request sent because slot is busy
   assert.equal(channel.privilegeRequests.length, 0);
-  // No pending archive request set directly (it is queued)
-  assert.equal(session.pendingSkillArchiveRequest, null);
+  // The original share_deletion prompt still occupies the slot
+  assert.equal(session.pendingPrompt?.kind, "share_deletion");
+});
+
+test("SkillArchiveCoordinator revalidates skill usage at approval time", async () => {
+  const configDir = makeTempDir();
+  const skillService = new SkillService(configDir);
+  const jobStore = new JobStore(configDir);
+  const sessionStore = new InMemorySessionStore();
+  const channel = new RecordingChannel();
+
+  await skillService.createSkill({ skillId: "test-skill", name: "Test", description: "Desc", body: "body" });
+
+  const taskCoordinator = new TaskCoordinator({
+    sessionStore,
+    channel,
+    onJobTaskBecameInteractive: async () => {},
+  });
+
+  const coordinator = new SkillArchiveCoordinator(skillService, jobStore, sessionStore, channel, taskCoordinator);
+
+  const chatId = "test-chat";
+
+  // Offer archive (skill is orphaned since no jobs reference it)
+  await coordinator.offerArchiveForJobSkill(chatId, "test-skill");
+  assert.equal(channel.privilegeRequests.length, 1);
+
+  // While prompt is pending, another job starts using the skill
+  await jobStore.upsertDefinition({
+    id: "new-job",
+    name: "New Job",
+    enabled: true,
+    schedule: { kind: "cron", expression: "0 9 * * *" },
+    skillId: "test-skill",
+  });
+
+  const session = sessionStore.getOrCreate(chatId);
+
+  // Approve — should not archive since the skill is no longer eligible
+  await coordinator.resolvePendingRequest(session, "approve");
+
+  // Skill should still exist
+  const skills = skillService.getSkills();
+  assert.equal(skills.length, 1, "Skill should not have been archived");
+
+  // No-longer-eligible message sent
+  const eligibilityTexts = channel.sentTexts.filter((t) => t.text.includes("no longer eligible"));
+  assert.equal(eligibilityTexts.length, 1);
+
+  // Pending request cleared
+  assert.equal(session.pendingPrompt, null);
 });

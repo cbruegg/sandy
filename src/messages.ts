@@ -47,6 +47,8 @@ export const messages = {
     "A privilege request is pending. Resolve it before sending more task input.",
   shareDeletionStillPending: (): string =>
     "A shared workspace deletion decision is pending. Reply with approve or deny before sending more input.",
+  promptStillPending: (): string =>
+    "A prompt is awaiting your decision. Reply with approve or deny before sending more input.",
   taskStarted: (taskName: string): string => `Started task "${taskName}".`,
   privilegeDenied: (requestId: string): string => `Denied privilege request ${requestId}.`,
   privilegeFailed: (requestId: string, detail: string): string => `Privilege request ${requestId} failed.\n${detail}`,
@@ -176,6 +178,8 @@ export const messages = {
     `Failed to archive skill "${skillId}": ${error}`,
   staleSkillArchiveRequest: (): string =>
     "That skill archive request is no longer pending.",
+  skillArchiveNoLongerEligible: (skillId: string): string =>
+    `Skill "${skillId}" is no longer eligible for archiving — it is now referenced by another scheduled job.`,
 } as const;
 
 function formatCommandForChannel(command: string, channelFormatting: ChannelFormatting | null): string {

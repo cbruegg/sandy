@@ -252,7 +252,7 @@ test("TaskCoordinator defers share deletion prompt while a user task is active",
     summary: "report.txt",
   });
 
-    const pendingBefore = session.pendingShareDeletion;
+    const pendingBefore = session.pendingPrompt;
     assert.equal(pendingBefore, null);
     assert.equal(channel.shareDeletionRequests.length, 0);
 
@@ -262,7 +262,8 @@ test("TaskCoordinator defers share deletion prompt while a user task is active",
     session.visibleTask = null;
     await coordinator.onVisibleSlotAvailable("chat-defer-share");
 
-    assert.equal(session.pendingShareDeletion!.requestId, "del-req-1");
+    assert.equal(session.pendingPrompt?.kind, "share_deletion");
+    assert.equal(session.pendingPrompt?.kind === "share_deletion" ? (session.pendingPrompt as { requestId: string }).requestId : "", "del-req-1");
     assert.equal(channel.shareDeletionRequests.length, 1);
     assert.equal(channel.shareDeletionRequests[0]?.taskName, "Scheduled job: Daily cleanup");
 });
@@ -300,16 +301,70 @@ test("TaskCoordinator queues multiple deferred share deletion prompts behind an 
   session.visibleTask = null;
   await coordinator.onVisibleSlotAvailable("chat-queue-shares");
 
-    assert.equal(session.pendingShareDeletion!.requestId, "del-req-1");
+    const prompt1 = session.pendingPrompt;
+    assert.ok(prompt1 && prompt1.kind === "share_deletion");
+    assert.equal(prompt1.requestId, "del-req-1");
     assert.equal(channel.shareDeletionRequests.length, 1);
     assert.equal(channel.shareDeletionRequests[0]?.taskName, "Scheduled job: Daily cleanup");
 
-    session.pendingShareDeletion = null;
+    session.pendingPrompt = null;
     await coordinator.onVisibleSlotAvailable("chat-queue-shares");
 
-    assert.equal(session.pendingShareDeletion!.requestId, "del-req-2");
+    const fresh = store.getOrCreate("chat-queue-shares");
+    const prompt2 = fresh.pendingPrompt;
+    assert.ok(prompt2 && prompt2.kind === "share_deletion");
+    assert.equal(prompt2.requestId, "del-req-2");
     assert.equal(channel.shareDeletionRequests.length, 2);
     assert.equal(channel.shareDeletionRequests[1]?.taskName, "Scheduled job: Weekly report");
+});
+
+test("TaskCoordinator dequeues mixed share-deletion and skill-archive prompts in FIFO order", async () => {
+  const store = new InMemorySessionStore();
+  const channel = new RecordingChannel();
+  const coordinator = new TaskCoordinator({
+    sessionStore: store,
+    channel,
+    onJobTaskBecameInteractive: async () => {},
+  });
+
+  const session = store.getOrCreate("chat-mixed-prompts");
+  const userTask = createTask("user-task", "User task", { kind: "launchedByUser" });
+  session.visibleTask = userTask;
+
+  // Enqueue a share-deletion prompt first, then a skill-archive prompt
+  coordinator.scheduleShareDeletionPrompt("chat-mixed-prompts", {
+    requestId: "del-req-1",
+    taskId: "job-task-1",
+    taskName: "Scheduled job: Daily cleanup",
+    jobName: "Daily cleanup",
+    summary: "report.txt",
+  });
+  coordinator.scheduleSkillArchivePrompt("chat-mixed-prompts", {
+    requestId: "archive-req-1",
+    skillId: "cleanup-skill",
+    request: { kind: "skill_archive", requestId: "archive-req-1", skillId: "cleanup-skill" },
+  });
+
+  assert.equal(channel.shareDeletionRequests.length, 0);
+  assert.equal(channel.privilegeRequests.length, 0);
+
+  // Free the slot — first prompt (share deletion) should appear
+  session.visibleTask = null;
+  await coordinator.onVisibleSlotAvailable("chat-mixed-prompts");
+
+  assert.equal(session.pendingPrompt?.kind, "share_deletion");
+  assert.equal(channel.shareDeletionRequests.length, 1);
+  assert.equal(channel.privilegeRequests.length, 0);
+
+  // Clear and free again — second prompt (skill archive) should appear
+  session.pendingPrompt = null;
+  await coordinator.onVisibleSlotAvailable("chat-mixed-prompts");
+
+  const fresh2 = store.getOrCreate("chat-mixed-prompts");
+  const promptAfter = fresh2.pendingPrompt;
+  assert.equal(promptAfter?.kind, "skill_archive");
+  assert.equal(channel.shareDeletionRequests.length, 1);
+  assert.equal(channel.privilegeRequests.length, 1);
 });
 
 test("TaskCoordinator does not send blocked-job reminders after stop", async () => {

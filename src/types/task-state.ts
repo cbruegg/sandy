@@ -81,16 +81,20 @@ export function createActiveTaskState(
 }
 
 type PendingShareDeletion = {
+  kind: "share_deletion";
   requestId: string;
   taskId: string;
   taskName: string;
   summary: string;
 };
 
-type PendingSkillArchiveRequest = {
+type PendingSkillArchive = {
+  kind: "skill_archive";
   requestId: string;
   skillId: string;
 };
+
+type PendingPrompt = PendingShareDeletion | PendingSkillArchive;
 
 export class SessionState {
   chatId: ChatId;
@@ -100,16 +104,14 @@ export class SessionState {
     taskName: string;
     summary: string;
   } | null;
-  pendingShareDeletion: PendingShareDeletion | null;
-  pendingSkillArchiveRequest: PendingSkillArchiveRequest | null;
+  pendingPrompt: PendingPrompt | null;
 
   constructor(chatId: ChatId) {
     this.chatId = chatId;
     this.visibleTask = null;
     this.backgroundJobTasks = [];
     this.pendingTaskSummary = null;
-    this.pendingShareDeletion = null;
-    this.pendingSkillArchiveRequest = null;
+    this.pendingPrompt = null;
   }
 
   findTask(taskId: string): { task: ActiveTaskState; location: "visible" | "background"; } | null {

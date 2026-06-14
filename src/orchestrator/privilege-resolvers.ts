@@ -274,7 +274,7 @@ export async function resolveJobMutationRequest(
   try {
     const detail = await ctx.workerToolsHandler.applyJobMutation(request.mutation);
 
-    if (operation === "delete" && jobBeforeDelete && jobBeforeDelete.schedule.kind === "cron") {
+    if (operation === "delete" && jobBeforeDelete) {
       // The job has already been deleted by applyMutation, so we can
       // pass jobId as excluded (though it's already gone from the store).
       await ctx.skillArchiveCoordinator.offerArchiveForJobSkill(session.chatId, jobBeforeDelete.skillId, jobBeforeDelete.id);

@@ -14,19 +14,9 @@ type WaitingJobInteraction = {
   reject: (error: unknown) => void;
 };
 
-type PendingShareDeletionPrompt = {
-  requestId: string;
-  taskId: string;
-  taskName: string;
-  jobName: string;
-  summary: string;
-};
-
-type PendingSkillArchivePrompt = {
-  requestId: string;
-  skillId: string;
-  request: PrivilegeRequest;
-};
+type DeferredPrompt =
+  | { kind: "share_deletion"; requestId: string; taskId: string; taskName: string; jobName: string; summary: string }
+  | { kind: "skill_archive"; requestId: string; skillId: string; request: PrivilegeRequest };
 
 type TaskCoordinatorDependencies = {
   readonly sessionStore: SessionStore;
@@ -88,23 +78,22 @@ class PerChatQueue<T> {
 /**
  * Coordinates the single user-visible slot each chat exposes.
  *
- * At any moment a chat can present exactly one user-facing blocker: either an
- * visible task (`session.visibleTask`) or a share-deletion prompt
- * (`session.pendingShareDeletion`). User-launched tasks own that slot directly.
+ * At any moment a chat can present exactly one user-facing blocker: either a
+ * visible task (`session.visibleTask`) or a pending prompt
+ * (`session.pendingPrompt`). User-launched tasks own that slot directly.
  * Job-launched tasks run silently in the background and must acquire the slot
  * before they can talk to the user.
  *
  * Two per-chat FIFO queues hold work that is waiting for the slot:
  * - `waitingJobInteractions`: job operations that need the user.
- * - `pendingShareDeletionPrompts`: share-deletion prompts to show.
+ * - `pendingPrompts`: share-deletion and skill-archive prompts to show.
  *
- * When the slot frees (`onVisibleSlotAvailable`), pending share-deletion
- * prompts take priority over waiting job interactions.
+ * When the slot frees (`onVisibleSlotAvailable`), pending prompts take
+ * priority over waiting job interactions.
  */
 export class TaskCoordinator {
   private readonly waitingJobInteractions = new PerChatQueue<WaitingJobInteraction>();
-  private readonly pendingShareDeletionPrompts = new PerChatQueue<PendingShareDeletionPrompt>();
-  private readonly pendingSkillArchivePrompts = new PerChatQueue<PendingSkillArchivePrompt>();
+  private readonly pendingPrompts = new PerChatQueue<DeferredPrompt>();
   private readonly reminders: BlockedJobReminderScheduler;
 
   constructor(private readonly deps: TaskCoordinatorDependencies) {
@@ -135,19 +124,19 @@ export class TaskCoordinator {
     this.reminders.resetAfterUserInteraction(chatId);
   }
 
-  scheduleShareDeletionPrompt(chatId: ChatId, prompt: PendingShareDeletionPrompt): void {
-    this.pendingShareDeletionPrompts.enqueue(chatId, prompt);
+  scheduleShareDeletionPrompt(chatId: ChatId, prompt: { requestId: string; taskId: string; taskName: string; jobName: string; summary: string }): void {
+    this.pendingPrompts.enqueue(chatId, { kind: "share_deletion", ...prompt });
     this.reminders.sync(chatId);
   }
 
-  scheduleSkillArchivePrompt(chatId: ChatId, prompt: PendingSkillArchivePrompt): void {
-    this.pendingSkillArchivePrompts.enqueue(chatId, prompt);
+  scheduleSkillArchivePrompt(chatId: ChatId, prompt: { requestId: string; skillId: string; request: PrivilegeRequest }): void {
+    this.pendingPrompts.enqueue(chatId, { kind: "skill_archive", ...prompt });
     this.reminders.sync(chatId);
   }
 
   /**
-   * Returns true when the visible slot is free (no visible task, no pending
-   * share deletion, and no pending skill archive request).
+   * Returns true when the visible slot is free (no visible task and no pending
+   * prompt).
    */
   isSlotAvailable(session: SessionState): boolean {
     return this.isVisibleSlotAvailable(session);
@@ -209,8 +198,8 @@ export class TaskCoordinator {
 
   /**
    * Called when the visible slot may have just freed. Shows the next deferred
-   * share-deletion prompt if one is queued, otherwise promotes the next waiting
-   * job task into the slot.
+   * prompt if one is queued, otherwise promotes the next waiting job task into
+   * the slot.
    */
   async onVisibleSlotAvailable(chatId: ChatId): Promise<void> {
     const session = this.deps.sessionStore.getOrCreate(chatId);
@@ -219,11 +208,7 @@ export class TaskCoordinator {
       return;
     }
 
-    if (await this.showNextDeferredShareDeletionPrompt(session)) {
-      return;
-    }
-
-    if (await this.showNextDeferredSkillArchivePrompt(session)) {
+    if (await this.showNextDeferredPrompt(session)) {
       return;
     }
 
@@ -244,7 +229,7 @@ export class TaskCoordinator {
   // ---------------------------------------------------------------------------
 
   private isVisibleSlotAvailable(session: SessionState): boolean {
-    return !session.visibleTask && !session.pendingShareDeletion && !session.pendingSkillArchiveRequest;
+    return !session.visibleTask && !session.pendingPrompt;
   }
 
   /** Moves a background job task into the visible slot and marks it interacting. */
@@ -269,34 +254,33 @@ export class TaskCoordinator {
     return true;
   }
 
-  private async showNextDeferredShareDeletionPrompt(session: SessionState): Promise<boolean> {
-    const next = this.pendingShareDeletionPrompts.shift(session.chatId);
+  private async showNextDeferredPrompt(session: SessionState): Promise<boolean> {
+    const next = this.pendingPrompts.shift(session.chatId);
     if (!next) {
       return false;
     }
 
-    session.pendingShareDeletion = {
-      requestId: next.requestId,
-      taskId: next.taskId,
-      taskName: next.taskName,
-      summary: next.summary,
-    };
-    await this.deps.channel.sendShareDeletionRequest(session.chatId, next.requestId, next.taskName, next.summary);
-    this.reminders.sync(session.chatId);
-    return true;
-  }
-
-  private async showNextDeferredSkillArchivePrompt(session: SessionState): Promise<boolean> {
-    const next = this.pendingSkillArchivePrompts.shift(session.chatId);
-    if (!next) {
-      return false;
+    switch (next.kind) {
+      case "share_deletion":
+        session.pendingPrompt = {
+          kind: "share_deletion",
+          requestId: next.requestId,
+          taskId: next.taskId,
+          taskName: next.taskName,
+          summary: next.summary,
+        };
+        await this.deps.channel.sendShareDeletionRequest(session.chatId, next.requestId, next.taskName, next.summary);
+        break;
+      case "skill_archive":
+        session.pendingPrompt = {
+          kind: "skill_archive",
+          requestId: next.requestId,
+          skillId: next.skillId,
+        };
+        await this.deps.channel.sendPrivilegeRequest(session.chatId, next.request);
+        break;
     }
 
-    session.pendingSkillArchiveRequest = {
-      requestId: next.requestId,
-      skillId: next.skillId,
-    };
-    await this.deps.channel.sendPrivilegeRequest(session.chatId, next.request);
     this.reminders.sync(session.chatId);
     return true;
   }
@@ -376,8 +360,9 @@ export class TaskCoordinator {
       return null;
     }
 
-    const waitingJobName = this.waitingJobInteractions.peek(chatId)?.jobName
-      ?? this.pendingShareDeletionPrompts.peek(chatId)?.jobName;
+    const deferredPrompt = this.pendingPrompts.peek(chatId);
+    const promptJobName = deferredPrompt?.kind === "share_deletion" ? deferredPrompt.jobName : null;
+    const waitingJobName = this.waitingJobInteractions.peek(chatId)?.jobName ?? promptJobName;
     if (!waitingJobName) {
       return null;
     }

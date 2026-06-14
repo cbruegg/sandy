@@ -593,7 +593,7 @@ test("orchestrator blocks new idle input while shared workspace deletion is pend
   });
 
   assert.equal(mainAgent.contexts.length, 1);
-  assert.equal(channel.sentTexts.at(-1)?.text, messages.shareDeletionStillPending());
+  assert.equal(channel.sentTexts.at(-1)?.text, messages.promptStillPending());
 });
 
 test("orchestrator prompts for share deletion from a silent job task", async () => {
@@ -819,6 +819,43 @@ test("one-shot job completion does not offer archive when job was rescheduled to
   // No archive request because the job was rescheduled (lastRunAt < runAt)
   const archiveRequests = channel.privilegeRequests.filter((r) => r.request.kind === "skill_archive");
   assert.equal(archiveRequests.length, 0);
+});
+
+test("user message is blocked while a skill archive prompt is pending", async () => {
+  const mainAgent = new StubMainAgent({ action: "reply", replyText: "ok" });
+  const { channel, store } = createTestOrchestrator({ mainAgent });
+
+  const chatId = "chat-archive-block";
+  const session = store.getOrCreate(chatId);
+  // Simulate a pending archive prompt on the session
+  session.pendingPrompt = {
+    kind: "skill_archive",
+    requestId: "req-1",
+    skillId: "test-skill",
+  };
+
+  const { orchestrator } = createTestOrchestrator({
+    mainAgent,
+    channel,
+    sessionStore: store,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId,
+    messageId: "msg-1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Do something",
+    rawText: "Do something",
+    attachments: [],
+  });
+
+  // Should have been blocked with the prompt-still-pending message
+  assert.equal(
+    channel.sentTexts.some((t) => t.text === messages.promptStillPending()),
+    true,
+    "Expected prompt-still-pending message to be sent",
+  );
 });
 
 

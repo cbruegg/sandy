@@ -111,20 +111,19 @@ export class SandyOrchestrator {
         await this.deps.channel.sendText(event.chatId, messages.noActiveTaskToFinish());
         return;
       case "approval_response":
-        if (session.pendingShareDeletion) {
-          if (event.requestId && event.requestId !== session.pendingShareDeletion.requestId) {
-            await this.deps.channel.sendText(event.chatId, messages.staleShareDeletionRequest());
+        if (session.pendingPrompt) {
+          if (event.requestId && event.requestId !== session.pendingPrompt.requestId) {
+            const staleMessage = session.pendingPrompt.kind === "share_deletion"
+              ? messages.staleShareDeletionRequest()
+              : messages.staleSkillArchiveRequest();
+            await this.deps.channel.sendText(event.chatId, staleMessage);
             return;
           }
-          await this.deps.taskLifecycle.resolvePendingShareDeletion(session, event.decision === "deny" ? "deny" : "approve");
-          return;
-        }
-        if (session.pendingSkillArchiveRequest) {
-          if (event.requestId && event.requestId !== session.pendingSkillArchiveRequest.requestId) {
-            await this.deps.channel.sendText(event.chatId, messages.staleSkillArchiveRequest());
-            return;
+          if (session.pendingPrompt.kind === "share_deletion") {
+            await this.deps.taskLifecycle.resolvePendingShareDeletion(session, event.decision === "deny" ? "deny" : "approve");
+          } else {
+            await this.skillArchiveCoordinator.resolvePendingRequest(session, event.decision === "deny" ? "deny" : "approve");
           }
-          await this.skillArchiveCoordinator.resolvePendingRequest(session, event.decision === "deny" ? "deny" : "approve");
           return;
         }
         await this.deps.channel.sendText(event.chatId, messages.noPendingPrivilegeRequest());
@@ -138,8 +137,8 @@ export class SandyOrchestrator {
         await this.deps.channel.sendText(event.chatId, messages.discardedPendingOutput());
         return;
       case "user_message": {
-        if (session.pendingShareDeletion) {
-          await this.deps.channel.sendText(event.chatId, messages.shareDeletionStillPending());
+        if (session.pendingPrompt) {
+          await this.deps.channel.sendText(event.chatId, messages.promptStillPending());
           return;
         }
 

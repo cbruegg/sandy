@@ -428,8 +428,8 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
   }
 
   async resolvePendingShareDeletion(session: SessionState, decision: "approve" | "deny"): Promise<void> {
-    const pending = session.pendingShareDeletion;
-    if (!pending) {
+    const pending = session.pendingPrompt;
+    if (!pending || pending.kind !== "share_deletion") {
       return;
     }
 
@@ -440,7 +440,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
       await this.channel.sendText(session.chatId, messages.sharePreserved(pending.taskName));
     }
 
-    session.pendingShareDeletion = null;
+    session.pendingPrompt = null;
     await this.deps.taskCoordinator.onVisibleSlotAvailable(session.chatId);
   }
 
@@ -548,7 +548,8 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
       return;
     }
 
-    session.pendingShareDeletion = {
+    session.pendingPrompt = {
+      kind: "share_deletion",
       requestId,
       taskId,
       taskName,
@@ -558,33 +559,12 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
   }
 
   /**
-   * When a launched-by-job task completes and its one-shot job has been
-   * consumed (not rescheduled to the future), offers to archive the
-   * associated skill if no other job still uses it.
+   * Delegates to the archive coordinator to check whether the skill associated
+   * with a completed one-shot job is orphaned and should be offered for
+   * archiving.
    */
   private async promptForSkillArchiveIfOrphan(session: SessionState, task: ActiveTaskState): Promise<void> {
-    if (task.status !== "completed") {
-      return;
-    }
-    if (task.origin.kind !== "launchedByJob") {
-      return;
-    }
-
-    const job = await this.deps.jobStore.getDefinition(task.origin.jobId);
-    if (!job || job.schedule.kind !== "one_shot") {
-      return;
-    }
-
-    const runtimeState = await this.deps.jobStore.getRuntimeState(job.id);
-    if (!runtimeState.lastRunAt) {
-      return;
-    }
-    if (Date.parse(runtimeState.lastRunAt) < Date.parse(job.schedule.runAt)) {
-      // Rescheduled to the future – the job will run again.
-      return;
-    }
-
-    await this.deps.skillArchiveCoordinator.offerArchiveForJobSkill(session.chatId, job.skillId, job.id);
+    await this.deps.skillArchiveCoordinator.offerArchiveAfterTaskCompletion(session, task);
   }
 
 }

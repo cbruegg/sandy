@@ -139,12 +139,12 @@ async function parseExistingSkillFile(skillFilePath: string): Promise<ParsedSkil
 }
 
 export class SkillService {
-  private readonly configDirectory: string;
   private readonly skillsDirectory: string;
+  private readonly skillArchiveDirectory: string;
 
   constructor(configDirectory: string) {
-    this.configDirectory = configDirectory;
     this.skillsDirectory = join(configDirectory, "skills");
+    this.skillArchiveDirectory = skillArchiveRoot(configDirectory);
   }
 
   getSkillsDirectory(): string {
@@ -227,7 +227,7 @@ export class SkillService {
     if (!existsSync(sourceDir)) {
       throw new Error(`Skill "${skillId}" does not exist.`);
     }
-    const archiveRoot = skillArchiveRoot(this.configDirectory);
+    const archiveRoot = this.skillArchiveDirectory;
     await mkdir(archiveRoot, { recursive: true });
     const uuid = randomUUID();
     const targetDir = join(archiveRoot, `${skillId}-${uuid}`);
