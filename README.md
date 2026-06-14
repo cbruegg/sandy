@@ -525,13 +525,3 @@ Host directory access behavior:
 
 Testing is crucial for ensuring the safety and reliability of Sandy. Every component must be testable, and
 non-deterministic components such as the LLM and TTS providers should be mocked in tests to ensure consistent results.
-
-## Future work
-
-- Add support for more channels, such as Discord, Slack, etc.
-- Add support for more LLM providers, such as Anthropic, etc.
-- Add support for more TTS providers, such as Google Cloud Speech-to-Text, AWS
-- Add support for scheduled tasks, allowing sub-agents to schedule tasks for later execution,
-  and notify the user when they are executed.
-- Add tools for audio and video transcription
-- Add support for sandboxed headless browser use
