@@ -195,7 +195,7 @@ test("CodexAppServerClient answers auth refresh requests during turns", async ()
     input: [{ type: "text", text: "hello" }],
   });
 
-  respond(child, 4, { turn: { id: "turn-1" } });
+  respond(child, 4, {});
   await new Promise((resolve) => setImmediate(resolve));
 
   child.stdout.write(`${JSON.stringify({
@@ -285,52 +285,7 @@ test("CodexAppServerClient converts SDK local_image inputs to app-server localIm
     ],
   });
 
-  respond(child, 4, { turn: { id: "turn-1" } });
-  child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method: "turn/completed", params: {} })}\n`);
-  assert.deepEqual(await streamPromise, [{ method: "turn/completed", params: {} }]);
-});
-
-test("CodexAppServerClient steers active turns with turn/steer", async () => {
-  const child = new FakeChildProcess();
-  const spawnImpl = ((() => child as unknown as ChildProcessWithoutNullStreams) as unknown) as typeof import("node:child_process").spawn;
-  const tokens: ChatGPTExternalTokens = {
-    accessToken: "access-token",
-    chatgptAccountId: "acct-123",
-    chatgptPlanType: "plus",
-  };
-  const client = await createExternalTokensClient(spawnImpl, child, tokens);
-
-  const startThreadPromise = client.startThread(TEST_WORKER_PROFILE);
-  await Promise.resolve();
-  respond(child, 3, { thread: { id: "thread-1" } });
-  const threadId = await startThreadPromise;
-
-  const streamPromise = (async () => {
-    const events: Array<{ method: string; params?: unknown }> = [];
-    for await (const event of client.streamTurn(threadId, [{ type: "text", text: "hello" }], async () => tokens)) {
-      events.push(event);
-    }
-    return events;
-  })();
-
-  await Promise.resolve();
-  respond(child, 4, { turn: { id: "turn-1" } });
-  await new Promise((resolve) => setImmediate(resolve));
-
-  const steerPromise = client.steerActiveTurn(threadId, [{ type: "text", text: "actually focus on tests" }]);
-  await Promise.resolve();
-
-  const messages = parseWrittenJsonLines(child);
-  assert.equal(messages[5]?.["method"], "turn/steer");
-  assert.deepEqual(messages[5]?.["params"], {
-    threadId: "thread-1",
-    input: [{ type: "text", text: "actually focus on tests" }],
-    expectedTurnId: "turn-1",
-  });
-
-  respond(child, 5, { turnId: "turn-1" });
-  assert.equal(await steerPromise, true);
-
+  respond(child, 4, {});
   child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method: "turn/completed", params: {} })}\n`);
   assert.deepEqual(await streamPromise, [{ method: "turn/completed", params: {} }]);
 });
@@ -388,7 +343,7 @@ test("CodexAppServerClient handles auth refresh before turn-start RPC response",
     },
   });
 
-  respond(child, 4, { turn: { id: "turn-1" } });
+  respond(child, 4, {});
   await new Promise((resolve) => setImmediate(resolve));
 
   child.stdout.write(`${JSON.stringify({
@@ -445,7 +400,7 @@ test("CodexAppServerClient ignores non-message item completions until turn compl
   })();
 
   await Promise.resolve();
-  respond(child, 4, { turn: { id: "turn-1" } });
+  respond(child, 4, {});
   await new Promise((resolve) => setImmediate(resolve));
 
   child.stdout.write(`${JSON.stringify({
@@ -495,7 +450,7 @@ test("CodexAppServerClient ignores agent message deltas until completion", async
   })();
 
   await Promise.resolve();
-  respond(child, 4, { turn: { id: "turn-1" } });
+  respond(child, 4, {});
   await new Promise((resolve) => setImmediate(resolve));
 
   child.stdout.write(`${JSON.stringify({
@@ -556,7 +511,7 @@ test("CodexAppServerClient ignores known benign notifications and item completio
     })();
 
     await Promise.resolve();
-    respond(child, 4, { turn: { id: "turn-1" } });
+    respond(child, 4, {});
     await new Promise((resolve) => setImmediate(resolve));
 
     child.stdout.write(`${JSON.stringify({ jsonrpc: "2.0", method: "thread/started", params: {} })}\n`);
@@ -640,7 +595,7 @@ test("CodexAppServerClient yields failed turn/completed notifications", async ()
   })();
 
   await Promise.resolve();
-  respond(child, 4, { turn: { id: "turn-1" } });
+  respond(child, 4, {});
   await new Promise((resolve) => setImmediate(resolve));
 
   child.stdout.write(`${JSON.stringify({
@@ -749,7 +704,7 @@ test("CodexAppServerClient sends JSON-RPC error when auth refresh handler reject
     })();
 
     await Promise.resolve();
-    respond(child, 4, { turn: { id: "turn-1" } });
+    respond(child, 4, {});
     await new Promise((resolve) => setImmediate(resolve));
 
     child.stdout.write(`${JSON.stringify({
@@ -823,7 +778,7 @@ test("CodexAppServerClient yields context_compaction on item/started with contex
   })();
 
   await Promise.resolve();
-  respond(child, 4, { turn: { id: "turn-1" } });
+  respond(child, 4, {});
   await new Promise((resolve) => setImmediate(resolve));
 
   child.stdout.write(`${JSON.stringify({
@@ -873,7 +828,7 @@ test("CodexAppServerClient yields context_compaction on item/completed with cont
   })();
 
   await Promise.resolve();
-  respond(child, 4, { turn: { id: "turn-1" } });
+  respond(child, 4, {});
   await new Promise((resolve) => setImmediate(resolve));
 
   child.stdout.write(`${JSON.stringify({
@@ -923,7 +878,7 @@ test("CodexAppServerClient yields item/started with non-compaction types", async
   })();
 
   await Promise.resolve();
-  respond(child, 4, { turn: { id: "turn-1" } });
+  respond(child, 4, {});
   await new Promise((resolve) => setImmediate(resolve));
 
   child.stdout.write(`${JSON.stringify({
@@ -988,7 +943,7 @@ test("CodexAppServerClient delegates mcpServer/elicitation/request to onServerRe
   })();
 
   await Promise.resolve();
-  respond(child, 4, { turn: { id: "turn-1" } });
+  respond(child, 4, {});
   await new Promise((resolve) => setImmediate(resolve));
 
   child.stdout.write(`${JSON.stringify({
@@ -1085,7 +1040,7 @@ test("CodexAppServerClient returns method-not-found when onServerRequest callbac
     })();
 
     await Promise.resolve();
-    respond(child, 4, { turn: { id: "turn-1" } });
+    respond(child, 4, {});
     await new Promise((resolve) => setImmediate(resolve));
 
     child.stdout.write(`${JSON.stringify({
@@ -1145,7 +1100,7 @@ test("CodexAppServerClient does not hardcode mempalace MCP elicitation response 
   })();
 
   await Promise.resolve();
-  respond(child, 4, { turn: { id: "turn-1" } });
+  respond(child, 4, {});
   await new Promise((resolve) => setImmediate(resolve));
 
   // Without callback, mempalace MCP elicitation should NOT be auto-accepted.

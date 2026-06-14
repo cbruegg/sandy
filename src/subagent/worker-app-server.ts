@@ -29,7 +29,7 @@ type StreamAppServerSummaryResult = StreamTurnResult & {
 
 type ConsumeAuthRefreshFailureMessage = () => string | null;
 
-type AppServerTurnStreamer = Pick<CodexAppServerClient, "streamTurn" | "steerActiveTurn">;
+type AppServerTurnStreamer = Pick<CodexAppServerClient, "streamTurn">;
 
 type AuthRefreshCallback = (
   previousAccountId: string | null,
@@ -217,7 +217,7 @@ export class AppServerWorkerSession {
   private authRefreshFailureMessage: string | null = null;
 
   constructor(
-    private readonly appServer: Pick<CodexAppServerClient, "streamTurn" | "steerActiveTurn" | "close">,
+    private readonly appServer: Pick<CodexAppServerClient, "streamTurn" | "close">,
     private readonly threadId: string,
     private readonly sendEvent: (event: SubAgentEvent) => void,
     private readonly supportsAuthRefresh: boolean = true,
@@ -269,10 +269,6 @@ export class AppServerWorkerSession {
       abortSignal,
       sendEvent: this.sendEvent,
     });
-  }
-
-  async steerActiveTurn(input: Input): Promise<boolean> {
-    return await this.appServer.steerActiveTurn(this.threadId, input);
   }
 
   async emitTaskSummary(): Promise<void> {
