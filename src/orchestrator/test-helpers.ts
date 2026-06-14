@@ -38,6 +38,8 @@ import { JobApprovalStore, type JobApprovalStoreApi } from "../jobs/job-approval
 import type { JobService } from "../jobs/job-service.js";
 import type { JobDefinition } from "../jobs/job-validation.js";
 import type { JobMutationRequest } from "../jobs/job-types.js";
+import { JobStore } from "../jobs/job-store.js";
+import { SkillArchiveCoordinator } from "./skill-archive-coordinator.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
@@ -372,6 +374,8 @@ export function createTestOrchestrator(options: {
   persistentApprovalStore?: PersistentApprovalStore;
   hostfsBroker?: HostfsBroker;
   skillService?: SkillService;
+  jobStore?: JobStore;
+  skillArchiveCoordinator?: SkillArchiveCoordinator;
   taskCoordinator?: TaskCoordinator;
   jobApprovalStore?: JobApprovalStoreApi;
   fileCopySpy?: FileCopySpy;
@@ -382,6 +386,7 @@ export function createTestOrchestrator(options: {
   const store = options.sessionStore ?? new InMemorySessionStore();
   const fileCopySpy = options.fileCopySpy ?? new FileCopySpy();
   const skillService = options.skillService ?? new SkillService(mkdtempSync(join(tmpdir(), "sandy-test-config-")));
+  const jobStore = options.jobStore ?? new JobStore(mkdtempSync(join(tmpdir(), "sandy-test-jobs-")));
   const activeTaskRuntimes = new ActiveTaskRuntimeRegistry();
   const taskCoordinator = options.taskCoordinator ?? new TaskCoordinator({
     sessionStore: store,
@@ -390,6 +395,13 @@ export function createTestOrchestrator(options: {
       await activeTaskRuntimes.notifyTaskBecameInteractive(taskId);
     },
   });
+  const skillArchiveCoordinator = options.skillArchiveCoordinator ?? new SkillArchiveCoordinator(
+    skillService,
+    jobStore,
+    store,
+    channel,
+    taskCoordinator,
+  );
   const coreDeps: OrchestratorCoreDependencies = {
     mainAgent: options.mainAgent,
     sandboxRunner: runner,
@@ -399,6 +411,8 @@ export function createTestOrchestrator(options: {
     jobApprovalStore: options.jobApprovalStore ?? new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
     hostfsBroker: options.hostfsBroker ?? createNoopHostfsBroker(),
     skillService,
+    jobStore,
+    skillArchiveCoordinator,
     taskCoordinator,
   };
   const taskLifecycle = new OrchestratorTaskLifecycleImpl(coreDeps, activeTaskRuntimes, channel.getFormatting(), channel);
@@ -441,6 +455,8 @@ export function createTestOrchestrator(options: {
     fileCopySpy,
     activeTaskRuntimes,
     skillService,
+    jobStore,
+    skillArchiveCoordinator,
     taskCoordinator,
     taskLifecycle,
     privileges,

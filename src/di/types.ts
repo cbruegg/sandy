@@ -25,6 +25,7 @@ import type { JobApprovalStore } from "../jobs/job-approval-store.js";
 import type { JobStore } from "../jobs/job-store.js";
 import type { SkillService } from "../skills.js";
 import type { SandyOrchestrator } from "../orchestrator/index.js";
+import type { SkillArchiveCoordinator } from "../orchestrator/skill-archive-coordinator.js";
 import type { OrchestratorPrivilegesImpl } from "../orchestrator/privileges.js";
 import type { OrchestratorTaskLifecycleImpl } from "../orchestrator/task-lifecycle.js";
 import type { TaskCoordinator } from "../orchestrator/task-coordinator.js";
@@ -226,6 +227,7 @@ export type OrchestratorLayerResult = {
   readonly privileges: OrchestratorPrivilegesImpl;
   readonly orchestrator: SandyOrchestrator;
   readonly jobCleanupService: JobCleanupService;
+  readonly skillArchiveCoordinator: SkillArchiveCoordinator;
   stop(): Promise<void>;
 };
 

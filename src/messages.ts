@@ -166,6 +166,16 @@ export const messages = {
     "This task has been marked for completion. Sandy will finalize it after the current turn.",
   terminateTaskNotJobTask: (): string =>
     "This tool is only available for scheduled job tasks. User-launched tasks are already interactive and can be cancelled by the user.",
+  skillArchivePrompt: (skillId: string): string =>
+    `Archive skill "${skillId}"?\n\nIt is no longer used by any scheduled job.\n\nApprove to move it into the archive, or deny to keep it.`,
+  skillArchiveApproved: (skillId: string): string =>
+    `Archived skill "${skillId}".`,
+  skillArchiveDenied: (skillId: string): string =>
+    `Kept skill "${skillId}".`,
+  skillArchiveFailed: (skillId: string, error: string): string =>
+    `Failed to archive skill "${skillId}": ${error}`,
+  staleSkillArchiveRequest: (): string =>
+    "That skill archive request is no longer pending.",
 } as const;
 
 function formatCommandForChannel(command: string, channelFormatting: ChannelFormatting | null): string {
@@ -370,6 +380,10 @@ function describePrivilegeRequest(request: PrivilegeRequest): string {
     return lines.join("\n");
   }
 
+  if (request.kind === "skill_archive") {
+    return messages.skillArchivePrompt(request.skillId);
+  }
+
   switch (request.payload.type) {
     case "copy_into_share":
       return `Copy file into the shared workspace: ${request.payload.sourcePath} -> ${request.payload.targetPath}\nReason: ${request.payload.reason}`;
@@ -390,7 +404,7 @@ function describeHostDirectoryAccessLevel(level: string): string {
 }
 
 function describePrivilegeActions(request: PrivilegeRequest): string | null {
-  if (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use" || request.kind === "host_directory_access") {
+  if (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use" || request.kind === "host_directory_access" || request.kind === "skill_archive") {
     // In this case, it's pretty clear to the user that approve/deny will approve/deny the request
     return null;
   }
