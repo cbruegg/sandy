@@ -151,6 +151,11 @@ export class SkillService {
     return this.skillsDirectory;
   }
 
+  skillExists(skillId: string): boolean {
+    assertValidSkillId(skillId);
+    return existsSync(join(this.skillsDirectory, skillId));
+  }
+
   getSkills(): SkillMetadata[] {
     if (!existsSync(this.skillsDirectory)) {
       return [];

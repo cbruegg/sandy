@@ -1,6 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
 import type { SkillService } from "../skills.js";
@@ -36,9 +34,8 @@ export class SkillArchiveCoordinator {
    */
   async offerArchiveForJobSkill(chatId: ChatId, skillId: string, excludeJobId?: string): Promise<void> {
     try {
-      // Skip if the skill directory does not exist (e.g. already deleted or never created).
-      const skillDir = join(this.skillService.getSkillsDirectory(), skillId);
-      if (!existsSync(skillDir)) {
+      // Skip if the skill does not exist (e.g. already deleted or never created).
+      if (!this.skillService.skillExists(skillId)) {
         return;
       }
 
