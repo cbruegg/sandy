@@ -138,6 +138,7 @@ const jobDefinitionInputSchema = z.object({
   enabled: z.boolean(),
   schedule: jobScheduleSchema,
   skillId: z.string(),
+  jobOwnsSkill: z.boolean().optional().describe("Set this to true when you created the skill specifically for this job, so Sandy can archive that skill when the job is deleted."),
 }).strict();
 
 const listJobsSchema = z.object({ type: z.literal(listJobsToolName) }).strict();
@@ -212,7 +213,7 @@ export const workerToolEntries = [
   ),
   defineWorkerTool(listJobsToolName, "List scheduled Sandy jobs.", false, listJobsSchema),
   defineWorkerTool(getJobToolName, "Inspect one scheduled Sandy job.", false, getJobSchema),
-  defineWorkerTool(createJobToolName, "Ask the host to create a scheduled Sandy job.", true, createJobSchema),
+  defineWorkerTool(createJobToolName, "Ask the host to create a scheduled Sandy job. Set definition.jobOwnsSkill to true if you created definition.skillId just for this job, so Sandy can archive that skill when the job is deleted.", true, createJobSchema),
   defineWorkerTool(updateJobToolName, "Ask the host to replace a scheduled Sandy job definition.", true, updateJobSchema),
   defineWorkerTool(deleteJobToolName, "Ask the host to delete a scheduled Sandy job.", true, deleteJobSchema),
   defineWorkerTool(enableJobToolName, "Ask the host to enable a scheduled Sandy job.", true, enableJobSchema),

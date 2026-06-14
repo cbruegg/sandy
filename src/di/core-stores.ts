@@ -18,7 +18,7 @@ export function createCoreStoresLayer(input: CoreStoresInput): CoreStoresResult 
   );
   const jobApprovalStore = new JobApprovalStore(config.configDirectory);
   const skillService = new SkillService(config.configDirectory);
-  const jobStore = new JobStore(config.configDirectory);
+  const jobStore = new JobStore(config.configDirectory, skillService);
 
   const stop = async (): Promise<void> => {
     // Core stores have no async teardown.

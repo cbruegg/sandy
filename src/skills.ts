@@ -1,6 +1,8 @@
 import { existsSync, readdirSync, readFileSync, type Dirent } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { archivedSkillsDirectory, skillsDirectory } from "./config-paths.js";
 
 export type SkillMetadata = {
   name: string;
@@ -138,9 +140,11 @@ async function parseExistingSkillFile(skillFilePath: string): Promise<ParsedSkil
 
 export class SkillService {
   private readonly skillsDirectory: string;
+  private readonly archivedSkillsDir: string;
 
   constructor(configDirectory: string) {
-    this.skillsDirectory = join(configDirectory, "skills");
+    this.skillsDirectory = skillsDirectory(configDirectory);
+    this.archivedSkillsDir = archivedSkillsDirectory(configDirectory);
   }
 
   getSkillsDirectory(): string {
@@ -208,5 +212,20 @@ export class SkillService {
       throw new Error(`Skill "${input.skillId}" does not exist.`);
     }
     await rm(skillDir, { recursive: true, force: true });
+  }
+
+  async archiveSkill(skillId: string): Promise<void> {
+    assertValidSkillId(skillId);
+
+    const sourceDirectory = join(this.skillsDirectory, skillId);
+    await mkdir(this.archivedSkillsDir, { recursive: true });
+    try {
+      await rename(sourceDirectory, join(this.archivedSkillsDir, `${skillId}-${randomUUID()}`));
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+        return;
+      }
+      throw error;
+    }
   }
 }

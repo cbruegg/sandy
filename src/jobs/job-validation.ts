@@ -14,6 +14,7 @@ const jobDefinitionSchema = z.object({
   enabled: z.boolean(),
   schedule: jobScheduleSchema,
   skillId: z.string().trim().min(1),
+  jobOwnsSkill: z.boolean().optional(),
 }).strict();
 
 const jobRuntimeStateSchema = z.object({

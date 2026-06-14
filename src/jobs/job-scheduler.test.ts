@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { JobStore } from "./job-store.js";
 import { JobScheduler } from "./job-scheduler.js";
+import { SkillService } from "../skills.js";
 import type { JobDefinition } from "./job-validation.js";
 
 function makeTempConfigDirectory(): string {
@@ -25,7 +26,7 @@ function createJob(overrides?: Partial<JobDefinition>): JobDefinition {
 
 test("JobScheduler runNow records launches", async () => {
   const configDirectory = makeTempConfigDirectory();
-  const store = new JobStore(configDirectory);
+  const store = new JobStore(configDirectory, new SkillService(configDirectory));
   await store.upsertDefinition(createJob());
 
   const launches: Array<{ jobId: string; workspacePath: string | null }> = [];
@@ -45,7 +46,7 @@ test("JobScheduler runNow records launches", async () => {
 
 test("JobScheduler prevents duplicate launches while one is in progress", async () => {
   const configDirectory = makeTempConfigDirectory();
-  const store = new JobStore(configDirectory);
+  const store = new JobStore(configDirectory, new SkillService(configDirectory));
   await store.upsertDefinition(createJob());
 
   let releaseLaunch!: () => void;
@@ -72,7 +73,7 @@ test("JobScheduler prevents duplicate launches while one is in progress", async 
 
 test("JobScheduler launches past one-shot jobs once at startup", async () => {
   const configDirectory = makeTempConfigDirectory();
-  const store = new JobStore(configDirectory);
+  const store = new JobStore(configDirectory, new SkillService(configDirectory));
   await store.upsertDefinition(createJob({
     id: "one-shot",
     name: "One shot",
@@ -97,7 +98,7 @@ test("JobScheduler launches past one-shot jobs once at startup", async () => {
 
 test("JobScheduler runNow prevents future one-shot from launching again at scheduled time", async () => {
   const configDirectory = makeTempConfigDirectory();
-  const store = new JobStore(configDirectory);
+  const store = new JobStore(configDirectory, new SkillService(configDirectory));
   const runAt = new Date(Date.now() + 300);
   await store.upsertDefinition(createJob({
     id: "one-shot",
@@ -123,7 +124,7 @@ test("JobScheduler runNow prevents future one-shot from launching again at sched
 
 test("JobScheduler runNow races with one-shot timer firing at the same time", async () => {
   const configDirectory = makeTempConfigDirectory();
-  const store = new JobStore(configDirectory);
+  const store = new JobStore(configDirectory, new SkillService(configDirectory));
   // Timer fires immediately (scheduled in the past).
   await store.upsertDefinition(createJob({
     id: "one-shot",
@@ -166,7 +167,7 @@ test("JobScheduler runNow races with one-shot timer firing at the same time", as
 
 test("JobScheduler allows a one-shot job to be rescheduled to a later run", async () => {
   const configDirectory = makeTempConfigDirectory();
-  const store = new JobStore(configDirectory);
+  const store = new JobStore(configDirectory, new SkillService(configDirectory));
   await store.upsertDefinition(createJob({
     id: "one-shot",
     name: "One shot",
