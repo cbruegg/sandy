@@ -14,7 +14,7 @@ async function makeTempConfigDirectory(): Promise<string> {
 test("JobStore separates definitions from runtime state", async () => {
   const configDirectory = await makeTempConfigDirectory();
   try {
-    const store = new JobStore(configDirectory);
+    const store = new JobStore(configDirectory, new SkillService(configDirectory));
     await store.upsertDefinition({
       id: "daily-cleanup",
       name: "Daily cleanup",
@@ -43,7 +43,7 @@ test("JobStore separates definitions from runtime state", async () => {
 test("JobStore serializes concurrent writes so no update is lost", async () => {
   const configDirectory = await makeTempConfigDirectory();
   try {
-    const store = new JobStore(configDirectory);
+    const store = new JobStore(configDirectory, new SkillService(configDirectory));
     await store.upsertDefinition({
       id: "daily-cleanup",
       name: "Daily cleanup",
@@ -70,7 +70,7 @@ test("JobStore serializes concurrent writes so no update is lost", async () => {
 test("JobStore validates cron expressions during upsert", async () => {
   const configDirectory = await makeTempConfigDirectory();
   try {
-    const store = new JobStore(configDirectory);
+    const store = new JobStore(configDirectory, new SkillService(configDirectory));
     await assert.rejects(async () => await store.upsertDefinition({
       id: "bad-job",
       name: "Bad job",
@@ -86,7 +86,7 @@ test("JobStore validates cron expressions during upsert", async () => {
 test("JobStore.deleteOldOneShots removes consumed one-shot jobs with stale lastRunAt", async () => {
   const configDirectory = await makeTempConfigDirectory();
   try {
-    const store = new JobStore(configDirectory);
+    const store = new JobStore(configDirectory, new SkillService(configDirectory));
 
     // A consumed one-shot with an old lastRunAt
     const oldRunAt = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString();
@@ -129,8 +129,8 @@ test("JobStore.deleteOldOneShots removes consumed one-shot jobs with stale lastR
 test("JobStore.deleteDefinition archives skills owned by deleted jobs", async () => {
   const configDirectory = await makeTempConfigDirectory();
   try {
-    const store = new JobStore(configDirectory);
     const skillService = new SkillService(configDirectory);
+    const store = new JobStore(configDirectory, skillService);
     await skillService.createSkill({
       skillId: "owned-cleanup",
       name: "Owned cleanup",
@@ -150,10 +150,10 @@ test("JobStore.deleteDefinition archives skills owned by deleted jobs", async ()
 
     assert.equal(await store.getDefinition("owned-job"), null);
     assert.deepEqual(await readdir(skillService.getSkillsDirectory()), []);
-    const archivedEntries = await readdir(join(configDirectory, "archived-skills"));
+    const archivedEntries = await readdir(join(configDirectory, "archive", "skills"));
     assert.equal(archivedEntries.length, 1);
     assert.match(archivedEntries[0]!, /^owned-cleanup-[0-9a-f-]{36}$/);
-    assert.deepEqual(await readdir(join(configDirectory, "archived-skills", archivedEntries[0]!)), ["SKILL.md"]);
+    assert.deepEqual(await readdir(join(configDirectory, "archive", "skills", archivedEntries[0]!)), ["SKILL.md"]);
   } finally {
     await rm(configDirectory, { recursive: true, force: true });
   }
@@ -162,8 +162,8 @@ test("JobStore.deleteDefinition archives skills owned by deleted jobs", async ()
 test("JobStore.deleteDefinition leaves shared skills in place", async () => {
   const configDirectory = await makeTempConfigDirectory();
   try {
-    const store = new JobStore(configDirectory);
     const skillService = new SkillService(configDirectory);
+    const store = new JobStore(configDirectory, skillService);
     await skillService.createSkill({
       skillId: "shared-cleanup",
       name: "Shared cleanup",
@@ -181,7 +181,7 @@ test("JobStore.deleteDefinition leaves shared skills in place", async () => {
     await store.deleteDefinition("shared-job");
 
     assert.deepEqual(await readdir(skillService.getSkillsDirectory()), ["shared-cleanup"]);
-    await assert.rejects(() => readdir(join(configDirectory, "archived-skills")), /ENOENT/);
+    await assert.rejects(() => readdir(join(configDirectory, "archive", "skills")), /ENOENT/);
   } finally {
     await rm(configDirectory, { recursive: true, force: true });
   }
@@ -190,8 +190,8 @@ test("JobStore.deleteDefinition leaves shared skills in place", async () => {
 test("JobStore.deleteOldOneShots archives skills owned by cleaned-up jobs", async () => {
   const configDirectory = await makeTempConfigDirectory();
   try {
-    const store = new JobStore(configDirectory);
     const skillService = new SkillService(configDirectory);
+    const store = new JobStore(configDirectory, skillService);
     await skillService.createSkill({
       skillId: "old-shot-skill",
       name: "Old shot skill",
@@ -212,7 +212,7 @@ test("JobStore.deleteOldOneShots archives skills owned by cleaned-up jobs", asyn
     const deleted = await store.deleteOldOneShots(Date.now() - 14 * 24 * 60 * 60 * 1000);
 
     assert.equal(deleted, 1);
-    assert.equal((await readdir(join(configDirectory, "archived-skills"))).length, 1);
+    assert.equal((await readdir(join(configDirectory, "archive", "skills"))).length, 1);
   } finally {
     await rm(configDirectory, { recursive: true, force: true });
   }

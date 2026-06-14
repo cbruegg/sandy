@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { JobCleanupService } from "./job-cleanup.js";
 import { JobStore } from "./job-store.js";
+import { SkillService } from "../skills.js";
 
 async function makeTempConfigDirectory(): Promise<string> {
   const tmpRoot = join(process.cwd(), "tmp");
@@ -14,7 +15,7 @@ async function makeTempConfigDirectory(): Promise<string> {
 test("JobCleanupService deletes consumed one-shot jobs older than retention", async () => {
   const configDirectory = await makeTempConfigDirectory();
   try {
-    const store = new JobStore(configDirectory);
+    const store = new JobStore(configDirectory, new SkillService(configDirectory));
 
     // Add a one-shot job that ran 20 days ago (older than 14-day retention)
     const twentyDaysAgo = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString();
@@ -82,7 +83,7 @@ test("JobCleanupService deletes consumed one-shot jobs older than retention", as
 test("JobCleanupService does not delete a one-shot that was rescheduled to the future after running", async () => {
   const configDirectory = await makeTempConfigDirectory();
   try {
-    const store = new JobStore(configDirectory);
+    const store = new JobStore(configDirectory, new SkillService(configDirectory));
 
     const twentyDaysAgo = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString();
     const futureDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();

@@ -1,15 +1,18 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { jobWorkspace, jobsFile } from "../state-paths.js";
 import { jobsFileSchema, validateJobDefinition, hasOneShotRunForSchedule } from "./job-validation.js";
 import type { JobDefinition, JobRuntimeState, JobsFile } from "./job-validation.js";
+import type { SkillService } from "../skills.js";
 
 export class JobStore {
   private readonly filePath: string;
   private writeQueue: Promise<unknown> = Promise.resolve();
 
-  constructor(private readonly configDirectory: string) {
+  constructor(
+    private readonly configDirectory: string,
+    private readonly skillService: SkillService,
+  ) {
     this.filePath = jobsFile(configDirectory);
   }
 
@@ -167,25 +170,7 @@ export class JobStore {
   private async archiveOwnedSkills(deletedDefinitions: JobDefinition[]): Promise<void> {
     for (const definition of deletedDefinitions) {
       if (!definition.jobOwnsSkill) continue;
-      await this.archiveSkill(definition.skillId);
-    }
-  }
-
-  private async archiveSkill(skillId: string): Promise<void> {
-    if (!skillId || /[\\/]/.test(skillId) || skillId === "." || skillId === "..") {
-      throw new Error(`Invalid skillId "${skillId}".`);
-    }
-
-    const sourceDirectory = join(this.configDirectory, "skills", skillId);
-    const archiveDirectory = join(this.configDirectory, "archived-skills");
-    await mkdir(archiveDirectory, { recursive: true });
-    try {
-      await rename(sourceDirectory, join(archiveDirectory, `${skillId}-${randomUUID()}`));
-    } catch (error) {
-      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-        return;
-      }
-      throw error;
+      await this.skillService.archiveSkill(definition.skillId);
     }
   }
 }
