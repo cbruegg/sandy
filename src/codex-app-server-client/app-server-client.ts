@@ -12,6 +12,8 @@ import type { ThreadStartParams } from "./generated/v2/ThreadStartParams.js";
 import type { ThreadStartResponse } from "./generated/v2/ThreadStartResponse.js";
 import type { TurnStartParams } from "./generated/v2/TurnStartParams.js";
 import type { TurnStartResponse } from "./generated/v2/TurnStartResponse.js";
+import type { TurnSteerParams } from "./generated/v2/TurnSteerParams.js";
+import type { TurnSteerResponse } from "./generated/v2/TurnSteerResponse.js";
 import type { TurnInterruptParams } from "./generated/v2/TurnInterruptParams.js";
 import type { ChatgptAuthTokensRefreshResponse } from "./generated/v2/ChatgptAuthTokensRefreshResponse.js";
 
@@ -111,6 +113,19 @@ type JsonRpcInitializedNotification = {
   params: Record<string, never>;
 };
 
+type ActiveTurn = {
+  threadId: string;
+  turnId: string;
+};
+
+function isTurnUnavailableSteerError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  return /active turn|expected turn id|expectedturnid|invalid request/i.test(error.message);
+}
+
 /**
  * Thin typed wrapper around Codex app-server JSON-RPC calls.
  *
@@ -154,6 +169,10 @@ class AppServerTypedRpc {
    */
   async turnStart(params: Omit<TurnStartParams, "input"> & { input: AppServerInput }): Promise<TurnStartResponse> {
     return await this.host.requestRaw<TurnStartResponse>("turn/start", params);
+  }
+
+  async turnSteer(params: Omit<TurnSteerParams, "input"> & { input: AppServerInput }): Promise<TurnSteerResponse> {
+    return await this.host.requestRaw<TurnSteerResponse>("turn/steer", params);
   }
 
   async turnInterrupt(params: TurnInterruptParams): Promise<void> {
@@ -240,6 +259,7 @@ export class CodexAppServerClient implements AgentClient {
   private activeNotificationHandler: ((notification: ServerNotification) => void) | null = null;
   private activeAuthRefreshHandler: ((id: RequestId, previousAccountId: string | null) => Promise<void>) | null = null;
   private activeServerRequestHandler: ServerRequestHandler | null = null;
+  private activeTurn: ActiveTurn | null = null;
   private nextId = 1;
   private pendingRequests = new Map<number, PendingRequest>();
   private initialized = false;
@@ -459,6 +479,29 @@ export class CodexAppServerClient implements AgentClient {
     return result.thread.id;
   }
 
+  async steerActiveTurn(threadId: string, input: Input): Promise<boolean> {
+    this.ensureReady("steerActiveTurn");
+
+    const activeTurn = this.activeTurn;
+    if (!activeTurn || activeTurn.threadId !== threadId) {
+      return false;
+    }
+
+    try {
+      const result = await this.rpc.turnSteer({
+        threadId,
+        input: normalizeInputForAppServer(input),
+        expectedTurnId: activeTurn.turnId,
+      });
+      return result.turnId === activeTurn.turnId;
+    } catch (error) {
+      if (this.activeTurn !== activeTurn || isTurnUnavailableSteerError(error)) {
+        return false;
+      }
+      throw error;
+    }
+  }
+
   async *streamTurn(
     threadId: string,
     input: Input,
@@ -504,6 +547,10 @@ export class CodexAppServerClient implements AgentClient {
     this.activeServerRequestHandler = onServerRequest ?? null;
 
     const turnStartResponse = await this.rpc.turnStart({ threadId, input: normalizeInputForAppServer(input) });
+    this.activeTurn = {
+      threadId,
+      turnId: turnStartResponse.turn.id,
+    };
 
     try {
       let done = false;
@@ -554,6 +601,9 @@ export class CodexAppServerClient implements AgentClient {
       this.activeNotificationHandler = null;
       this.activeAuthRefreshHandler = null;
       this.activeServerRequestHandler = null;
+      if (this.activeTurn?.turnId === turnStartResponse.turn.id) {
+        this.activeTurn = null;
+      }
     }
   }
 
@@ -609,6 +659,7 @@ export class CodexAppServerClient implements AgentClient {
     this.activeNotificationHandler = null;
     this.activeAuthRefreshHandler = null;
     this.activeServerRequestHandler = null;
+    this.activeTurn = null;
     if (this.child) {
       this.child.stdin.end();
       this.child.kill("SIGTERM");
