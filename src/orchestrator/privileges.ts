@@ -75,9 +75,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     this.privilegeContext = {
       persistentApprovalStore: deps.persistentApprovalStore,
       jobApprovalStore: deps.jobApprovalStore,
-      jobStore: deps.jobStore,
       workerToolsHandler,
-      skillArchiveCoordinator: deps.skillArchiveCoordinator,
     };
   }
 

@@ -1,5 +1,6 @@
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
+import { assertNever } from "../assert-never.js";
 import type { SandyOrchestratorDependencies, SupportedChatEvent } from "./shared.js";
 import { describeUserMessageForMainAgent } from "./task-lifecycle.js";
 import { buildWorkerFollowUpInput } from "./worker-input.js";
@@ -9,7 +10,7 @@ import type {
   NormalizedChatEvent,
   SessionState,
 } from "../types.js";
-import type {SkillArchiveCoordinator} from "./skill-archive-coordinator.ts";
+import type { SkillArchiveCoordinator } from "./skill-archive-coordinator.js";
 
 export class SandyOrchestrator {
   private readonly channelFormatting: ChannelFormatting;
@@ -165,6 +166,8 @@ export class SandyOrchestrator {
         await this.deps.taskLifecycle.executeMainAgentDecision(session, event, decision);
         return;
       }
+      default:
+        assertNever(event);
     }
   }
 
@@ -218,6 +221,8 @@ export class SandyOrchestrator {
         );
         return;
       }
+      default:
+        assertNever(event);
     }
   }
 }

@@ -3,6 +3,7 @@ import type {
   PrivilegeResolutionResult,
 } from "../types.js";
 import type { NativeWorkerToolCallResult } from "../subagent/worker-tools.js";
+export { assertNever } from "../assert-never.js";
 
 export type McpPrivilegeRequest = Extract<PrivilegeRequest, {
   kind: "mcp_tool_call" | "mcp_resource_read";
@@ -82,8 +83,4 @@ export function withHostDirectoryGrantMessage(
     message: `${message} ${result.message}`,
     scope,
   };
-}
-
-export function assertNever(value: never): never {
-  throw new Error(`Unhandled privilege value: ${JSON.stringify(value)}`);
 }

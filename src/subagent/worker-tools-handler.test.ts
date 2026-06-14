@@ -4,25 +4,30 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import type { HostDirectoryAccessLevel } from "../hostfs/path-policy.js";
-import type { JobService } from "../jobs/job-service.js";
+import type { JobMutationResult, JobService } from "../jobs/job-service.js";
+import type { JobDefinition } from "../jobs/job-validation.js";
 import type { SandboxTaskBundle } from "../sandbox/sandbox-runner.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 import type { SkillService } from "../skills.js";
+import type { SkillArchiveCoordinator } from "../orchestrator/skill-archive-coordinator.js";
 import { WorkerToolsHandler } from "./worker-tools-handler.js";
 
 function createWorkerToolsHandler(input?: {
   hostfsBroker?: HostfsBroker;
+  jobService?: JobService;
+  skillArchiveCoordinator?: SkillArchiveCoordinator;
   getTaskSharePath?: (taskId: string) => string;
   getTaskBundle?: (taskId: string) => SandboxTaskBundle;
 }): WorkerToolsHandler {
-  const jobService: JobService = {
+  const jobService: JobService = input?.jobService ?? {
     listJobs: async () => [],
     getJob: async () => null,
-    applyMutation: async () => "",
+    applyMutation: async (): Promise<JobMutationResult> => ({ message: "", deletedJob: null }),
   };
 
   return new WorkerToolsHandler({
     jobService,
+    skillArchiveCoordinator: input?.skillArchiveCoordinator ?? { offerArchiveForJobSkill: async () => {} } as unknown as SkillArchiveCoordinator,
     skillService: {} as SkillService,
     hostfsBroker: input?.hostfsBroker ?? {
       registerBundle: () => {},
@@ -36,6 +41,34 @@ function createWorkerToolsHandler(input?: {
     markTaskFinished: async () => {},
   });
 }
+
+test("applyJobMutation offers to archive a deleted job skill", async () => {
+  const deletedJob: JobDefinition = {
+    id: "job-1",
+    name: "Daily cleanup",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt: "2026-04-01T00:00:00.000Z" },
+    skillId: "cleanup-skill",
+  };
+  const archiveOffers: Array<{ chatId: string; skillId: string; excludeJobId?: string }> = [];
+  const handler = createWorkerToolsHandler({
+    jobService: {
+      listJobs: async () => [],
+      getJob: async () => null,
+      applyMutation: async () => ({ message: "Deleted job job-1.", deletedJob }),
+    },
+    skillArchiveCoordinator: {
+      offerArchiveForJobSkill: async (chatId: string, skillId: string, excludeJobId?: string) => {
+        archiveOffers.push({ chatId, skillId, excludeJobId });
+      },
+    } as unknown as SkillArchiveCoordinator,
+  });
+
+  const message = await handler.applyJobMutation({ operation: "delete", jobId: "job-1" }, { chatId: "chat-1" });
+
+  assert.equal(message, "Deleted job job-1.");
+  assert.deepEqual(archiveOffers, [{ chatId: "chat-1", skillId: "cleanup-skill", excludeJobId: "job-1" }]);
+});
 
 test("applyFileCopy copies a host file into the task share", async () => {
   const tmpRoot = resolve(import.meta.dirname, "../../tmp");

@@ -248,6 +248,42 @@ test("SkillArchiveCoordinator defers archive prompt when visible slot is busy", 
   assert.equal(session.pendingPrompt?.kind, "share_deletion");
 });
 
+test("SkillArchiveCoordinator does not queue duplicate archive prompts for the same skill", async () => {
+  const configDir = makeTempDir();
+  const skillService = new SkillService(configDir);
+  const jobStore = new JobStore(configDir);
+  const sessionStore = new InMemorySessionStore();
+  const channel = new RecordingChannel();
+
+  await skillService.createSkill({ skillId: "test-skill", name: "Test", description: "Desc", body: "body" });
+
+  const taskCoordinator = new TaskCoordinator({
+    sessionStore,
+    channel,
+    onJobTaskBecameInteractive: async () => {},
+  });
+  const coordinator = new SkillArchiveCoordinator(skillService, jobStore, sessionStore, channel, taskCoordinator);
+
+  const chatId = "test-chat";
+  const session = sessionStore.getOrCreate(chatId);
+  session.pendingPrompt = {
+    kind: "share_deletion",
+    requestId: "share-req-1",
+    taskId: "task-1",
+    taskName: "Some task",
+    summary: "summary",
+  };
+
+  await coordinator.offerArchiveForJobSkill(chatId, "test-skill");
+  await coordinator.offerArchiveForJobSkill(chatId, "test-skill");
+
+  session.pendingPrompt = null;
+  await taskCoordinator.onVisibleSlotAvailable(chatId);
+
+  assert.equal(channel.privilegeRequests.length, 1);
+  assert.equal(sessionStore.getOrCreate(chatId).pendingPrompt?.kind, "skill_archive");
+});
+
 test("SkillArchiveCoordinator revalidates skill usage at approval time", async () => {
   const configDir = makeTempDir();
   const skillService = new SkillService(configDir);

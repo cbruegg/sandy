@@ -56,23 +56,18 @@ export class SkillArchiveCoordinator {
       };
 
       const session = this.sessionStore.getOrCreate(chatId);
-      if (session.pendingPrompt?.kind === "skill_archive") {
-        // Another archive request is already awaiting a decision for this chat.
+      if (session.pendingPrompt?.kind === "skill_archive" && session.pendingPrompt.skillId === skillId) {
+        return;
+      }
+      if (this.taskCoordinator.hasQueuedSkillArchivePrompt(chatId, skillId)) {
         return;
       }
 
-      if (this.taskCoordinator.isSlotAvailable(session)) {
-        // Slot is free – send the request immediately.
-        session.pendingPrompt = { kind: "skill_archive", requestId, skillId };
-        await this.channel.sendPrivilegeRequest(chatId, request);
-      } else {
-        // Defer the prompt until the visible slot frees.
-        this.taskCoordinator.scheduleSkillArchivePrompt(chatId, {
-          requestId,
-          skillId,
-          request,
-        });
-      }
+      await this.taskCoordinator.showOrQueueSkillArchivePrompt(chatId, {
+        requestId,
+        skillId,
+        request,
+      });
     } catch (error) {
       logger.error("skill_archive.offer_failed", error);
     }
@@ -113,38 +108,33 @@ export class SkillArchiveCoordinator {
    * Called by the orchestrator when an approval_response arrives.
    */
   async resolvePendingRequest(session: SessionState, decision: "approve" | "deny"): Promise<void> {
-    const pending = session.pendingPrompt;
-    if (!pending || pending.kind !== "skill_archive") {
-      return;
-    }
+    await this.taskCoordinator.resolvePendingPrompt(session, "skill_archive", async (pending) => {
+      if (pending.kind !== "skill_archive") {
+        return;
+      }
 
-    session.pendingPrompt = null;
+      if (decision === "deny") {
+        await this.channel.sendText(session.chatId, messages.skillArchiveDenied(pending.skillId));
+        return;
+      }
 
-    if (decision === "deny") {
-      await this.channel.sendText(session.chatId, messages.skillArchiveDenied(pending.skillId));
-      await this.taskCoordinator.onVisibleSlotAvailable(session.chatId);
-      return;
-    }
+      // Revalidate: another job may have started using the skill while the
+      // archive prompt was awaiting the user's decision.
+      const definitions = await this.jobStore.listDefinitions();
+      const stillUsed = definitions.some((d) => d.skillId === pending.skillId);
+      if (stillUsed) {
+        await this.channel.sendText(session.chatId, messages.skillArchiveNoLongerEligible(pending.skillId));
+        return;
+      }
 
-    // Revalidate: another job may have started using the skill while the
-    // archive prompt was awaiting the user's decision.
-    const definitions = await this.jobStore.listDefinitions();
-    const stillUsed = definitions.some((d) => d.skillId === pending.skillId);
-    if (stillUsed) {
-      await this.channel.sendText(session.chatId, messages.skillArchiveNoLongerEligible(pending.skillId));
-      await this.taskCoordinator.onVisibleSlotAvailable(session.chatId);
-      return;
-    }
-
-    try {
-      await this.skillService.archiveSkill(pending.skillId);
-      await this.channel.sendText(session.chatId, messages.skillArchiveApproved(pending.skillId));
-    } catch (error) {
-      const detail = error instanceof Error ? error.message : "Unknown archive failure.";
-      logger.error("skill_archive.resolve_failed", error);
-      await this.channel.sendText(session.chatId, messages.skillArchiveFailed(pending.skillId, detail));
-    }
-
-    await this.taskCoordinator.onVisibleSlotAvailable(session.chatId);
+      try {
+        await this.skillService.archiveSkill(pending.skillId);
+        await this.channel.sendText(session.chatId, messages.skillArchiveApproved(pending.skillId));
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "Unknown archive failure.";
+        logger.error("skill_archive.resolve_failed", error);
+        await this.channel.sendText(session.chatId, messages.skillArchiveFailed(pending.skillId, detail));
+      }
+    });
   }
 }

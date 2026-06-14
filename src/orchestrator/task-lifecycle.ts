@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { logger } from "../logger.js";
 import { messages } from "../messages.js";
+import { assertNever } from "../assert-never.js";
 import {
   buildTaskBriefWithAttachments,
   buildTaskInputPayload,
@@ -428,20 +429,18 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
   }
 
   async resolvePendingShareDeletion(session: SessionState, decision: "approve" | "deny"): Promise<void> {
-    const pending = session.pendingPrompt;
-    if (!pending || pending.kind !== "share_deletion") {
-      return;
-    }
+    await this.deps.taskCoordinator.resolvePendingPrompt(session, "share_deletion", async (pending) => {
+      if (pending.kind !== "share_deletion") {
+        return;
+      }
 
-    if (decision === "approve") {
-      await this.deps.sandboxRunner.deleteTaskShare(pending.taskId);
-      await this.channel.sendText(session.chatId, messages.shareDeleted(pending.taskName));
-    } else {
-      await this.channel.sendText(session.chatId, messages.sharePreserved(pending.taskName));
-    }
-
-    session.pendingPrompt = null;
-    await this.deps.taskCoordinator.onVisibleSlotAvailable(session.chatId);
+      if (decision === "approve") {
+        await this.deps.sandboxRunner.deleteTaskShare(pending.taskId);
+        await this.channel.sendText(session.chatId, messages.shareDeleted(pending.taskName));
+      } else {
+        await this.channel.sendText(session.chatId, messages.sharePreserved(pending.taskName));
+      }
+    });
   }
 
   private async closeTask(session: SessionState, taskId: string, options?: { discardSummary?: boolean }): Promise<void> {
@@ -564,10 +563,6 @@ function normalizeTaskPolicy(policy: MainAgentTaskPolicyInput | undefined): Main
     autoApproveMcpServers: [...new Set(policy?.autoApproveMcpServers ?? [])],
     autoApproveHttpTokens: [...new Set(policy?.autoApproveHttpTokens ?? [])],
   };
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unhandled main agent decision: ${JSON.stringify(value)}`);
 }
 
 export { describeUserMessageForMainAgent };

@@ -1,6 +1,7 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { McpServerConfig } from "../config.js";
+import { assertNever } from "../assert-never.js";
 import { logger } from "../logger.js";
 import type { McpUpstreamMethod } from "./sidecar-protocol.js";
 
@@ -152,8 +153,4 @@ export class HostMcpServerRegistry {
 
     return client;
   }
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unexpected MCP upstream method: ${String(value)}`);
 }

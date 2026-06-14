@@ -138,6 +138,7 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
 
   const workerToolsHandler = new WorkerToolsHandler({
     jobService,
+    skillArchiveCoordinator,
     skillService: orchestratorCoreDeps.skillService,
     hostfsBroker,
     getTaskSharePath: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskSharePath(),

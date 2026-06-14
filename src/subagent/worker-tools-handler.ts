@@ -13,6 +13,8 @@ import { resolveTaskShareHostPath } from "../shared-workspace.js";
 import type { ActiveTaskState } from "../types.js";
 import type { ChatId } from "../types.js";
 import type { FileCopyWorkerToolPayload, NativeWorkerToolCallResult } from "../subagent/worker-tools.js";
+import type { SkillArchiveCoordinator } from "../orchestrator/skill-archive-coordinator.js";
+import { assertNever } from "../assert-never.js";
 
 type UserVisibleOperationRunner = (input: {
   chatId: ChatId;
@@ -23,6 +25,7 @@ type UserVisibleOperationRunner = (input: {
 
 export type WorkerToolsHandlerDependencies = {
   readonly jobService: JobService;
+  readonly skillArchiveCoordinator: SkillArchiveCoordinator;
   readonly skillService: SkillService;
   readonly hostfsBroker: HostfsBroker;
   readonly getTaskSharePath: (taskId: string) => string;
@@ -149,8 +152,16 @@ export class WorkerToolsHandler {
     }
   }
 
-  async applyJobMutation(mutation: JobMutationRequest): Promise<string> {
-    return await this.deps.jobService.applyMutation(mutation);
+  async applyJobMutation(mutation: JobMutationRequest, input: { chatId: ChatId }): Promise<string> {
+    const result = await this.deps.jobService.applyMutation(mutation);
+    if (mutation.operation === "delete" && result.deletedJob) {
+      await this.deps.skillArchiveCoordinator.offerArchiveForJobSkill(
+        input.chatId,
+        result.deletedJob.skillId,
+        result.deletedJob.id,
+      );
+    }
+    return result.message;
   }
 
   async applyFileCopy(
@@ -236,8 +247,4 @@ export class WorkerToolsHandler {
       message: `Copied ${request.sourcePath} out of the shared workspace to ${targetPath}.`,
     };
   }
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unexpected worker tool handler case: ${String(value)}`);
 }

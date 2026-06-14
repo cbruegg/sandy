@@ -35,7 +35,7 @@ import { SkillService } from "../skills.js";
 import { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
 import type { FileCopyWorkerToolPayload } from "../subagent/worker-tools.js";
 import { JobApprovalStore, type JobApprovalStoreApi } from "../jobs/job-approval-store.js";
-import type { JobService } from "../jobs/job-service.js";
+import type { JobMutationResult, JobService } from "../jobs/job-service.js";
 import type { JobDefinition } from "../jobs/job-validation.js";
 import type { JobMutationRequest } from "../jobs/job-types.js";
 import { JobStore } from "../jobs/job-store.js";
@@ -335,30 +335,31 @@ class FakeJobService implements JobService {
     return Promise.resolve(this.jobs.get(jobId) ?? null);
   }
 
-  applyMutation(mutation: JobMutationRequest): Promise<string> {
+  applyMutation(mutation: JobMutationRequest): Promise<JobMutationResult> {
     switch (mutation.operation) {
       case "create":
       case "update": {
         if (!mutation.definition) throw new Error("Job definition is required.");
         this.jobs.set(mutation.jobId, mutation.definition);
-        return Promise.resolve(`Updated job ${mutation.jobId}.`);
+        return Promise.resolve({ message: `Updated job ${mutation.jobId}.`, deletedJob: null });
       }
       case "delete": {
+        const deletedJob = this.jobs.get(mutation.jobId) ?? null;
         this.jobs.delete(mutation.jobId);
-        return Promise.resolve(`Deleted job ${mutation.jobId}.`);
+        return Promise.resolve({ message: `Deleted job ${mutation.jobId}.`, deletedJob });
       }
       case "enable": {
         const job = this.jobs.get(mutation.jobId);
         if (job) job.enabled = true;
-        return Promise.resolve(`Enabled job ${mutation.jobId}.`);
+        return Promise.resolve({ message: `Enabled job ${mutation.jobId}.`, deletedJob: null });
       }
       case "disable": {
         const job = this.jobs.get(mutation.jobId);
         if (job) job.enabled = false;
-        return Promise.resolve(`Disabled job ${mutation.jobId}.`);
+        return Promise.resolve({ message: `Disabled job ${mutation.jobId}.`, deletedJob: null });
       }
       case "run_now":
-        return Promise.resolve(`Launched task for job ${mutation.jobId}.`);
+        return Promise.resolve({ message: `Launched task for job ${mutation.jobId}.`, deletedJob: null });
       default:
         throw new Error(`Unexpected job mutation operation: ${String(mutation.operation)}`);
     }
@@ -419,6 +420,7 @@ export function createTestOrchestrator(options: {
   const jobService = new FakeJobService();
   const workerToolsHandler = new WorkerToolsHandler({
     jobService,
+    skillArchiveCoordinator,
     skillService,
     hostfsBroker: coreDeps.hostfsBroker,
     getTaskSharePath: (taskId) => activeTaskRuntimes.requireHandle(taskId).getTaskSharePath(),

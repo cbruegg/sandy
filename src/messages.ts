@@ -1,4 +1,5 @@
 import type {ChannelFormatting, PrivilegeRequest} from "./types.js";
+import { assertNever } from "./assert-never.js";
 
 export const buttonLabels = {
   reportDangerousOutput: "Report dangerous output",
@@ -213,10 +214,6 @@ function wrapMarkdownCode(text: string): string {
 
 function describeInteractiveTask(taskName: string, jobName: string | null): string {
   return jobName ? `Scheduled job "${jobName}"` : `Task "${taskName}"`;
-}
-
-function assertNever(value: never): never {
-  throw new Error(`Unexpected channel markup: ${String(value)}`);
 }
 
 export const mcpAdminMessages = {

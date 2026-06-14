@@ -18,6 +18,8 @@ type DeferredPrompt =
   | { kind: "share_deletion"; requestId: string; taskId: string; taskName: string; jobName: string; summary: string }
   | { kind: "skill_archive"; requestId: string; skillId: string; request: PrivilegeRequest };
 
+type PendingPrompt = NonNullable<SessionState["pendingPrompt"]>;
+
 type TaskCoordinatorDependencies = {
   readonly sessionStore: SessionStore;
   readonly channel: ChannelAdapter;
@@ -40,6 +42,10 @@ class PerChatQueue<T> {
 
   peek(chatId: ChatId): T | undefined {
     return this.byChat.get(chatId)?.[0];
+  }
+
+  some(chatId: ChatId, predicate: (entry: T) => boolean): boolean {
+    return this.byChat.get(chatId)?.some(predicate) ?? false;
   }
 
   shift(chatId: ChatId): T | null {
@@ -132,6 +138,39 @@ export class TaskCoordinator {
   scheduleSkillArchivePrompt(chatId: ChatId, prompt: { requestId: string; skillId: string; request: PrivilegeRequest }): void {
     this.pendingPrompts.enqueue(chatId, { kind: "skill_archive", ...prompt });
     this.reminders.sync(chatId);
+  }
+
+  hasQueuedSkillArchivePrompt(chatId: ChatId, skillId: string): boolean {
+    return this.pendingPrompts.some(chatId, (prompt) => prompt.kind === "skill_archive" && prompt.skillId === skillId);
+  }
+
+  async showOrQueueSkillArchivePrompt(chatId: ChatId, prompt: { requestId: string; skillId: string; request: PrivilegeRequest }): Promise<void> {
+    const session = this.deps.sessionStore.getOrCreate(chatId);
+    if (this.isVisibleSlotAvailable(session)) {
+      await this.showSkillArchivePrompt(session, { kind: "skill_archive", ...prompt });
+      return;
+    }
+
+    this.scheduleSkillArchivePrompt(chatId, prompt);
+  }
+
+  async resolvePendingPrompt(
+    session: SessionState,
+    kind: PendingPrompt["kind"],
+    resolve: (prompt: PendingPrompt) => Promise<void>,
+  ): Promise<boolean> {
+    const pending = session.pendingPrompt;
+    if (!pending || pending.kind !== kind) {
+      return false;
+    }
+
+    session.pendingPrompt = null;
+    try {
+      await resolve(pending);
+    } finally {
+      await this.onVisibleSlotAvailable(session.chatId);
+    }
+    return true;
   }
 
   /**
@@ -262,27 +301,49 @@ export class TaskCoordinator {
 
     switch (next.kind) {
       case "share_deletion":
-        session.pendingPrompt = {
-          kind: "share_deletion",
-          requestId: next.requestId,
-          taskId: next.taskId,
-          taskName: next.taskName,
-          summary: next.summary,
-        };
-        await this.deps.channel.sendShareDeletionRequest(session.chatId, next.requestId, next.taskName, next.summary);
+        await this.showShareDeletionPrompt(session, next);
         break;
       case "skill_archive":
-        session.pendingPrompt = {
-          kind: "skill_archive",
-          requestId: next.requestId,
-          skillId: next.skillId,
-        };
-        await this.deps.channel.sendPrivilegeRequest(session.chatId, next.request);
+        await this.showSkillArchivePrompt(session, next);
         break;
     }
 
     this.reminders.sync(session.chatId);
     return true;
+  }
+
+  private async showShareDeletionPrompt(session: SessionState, prompt: Extract<DeferredPrompt, { kind: "share_deletion" }>): Promise<void> {
+    session.pendingPrompt = {
+      kind: "share_deletion",
+      requestId: prompt.requestId,
+      taskId: prompt.taskId,
+      taskName: prompt.taskName,
+      summary: prompt.summary,
+    };
+    try {
+      await this.deps.channel.sendShareDeletionRequest(session.chatId, prompt.requestId, prompt.taskName, prompt.summary);
+    } catch (error) {
+      if (session.pendingPrompt?.requestId === prompt.requestId) {
+        session.pendingPrompt = null;
+      }
+      throw error;
+    }
+  }
+
+  private async showSkillArchivePrompt(session: SessionState, prompt: Extract<DeferredPrompt, { kind: "skill_archive" }>): Promise<void> {
+    session.pendingPrompt = {
+      kind: "skill_archive",
+      requestId: prompt.requestId,
+      skillId: prompt.skillId,
+    };
+    try {
+      await this.deps.channel.sendPrivilegeRequest(session.chatId, prompt.request);
+    } catch (error) {
+      if (session.pendingPrompt?.requestId === prompt.requestId) {
+        session.pendingPrompt = null;
+      }
+      throw error;
+    }
   }
 
   private async promoteNextWaitingJobTask(session: SessionState): Promise<void> {
