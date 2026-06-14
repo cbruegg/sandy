@@ -466,7 +466,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     this.deps.taskCoordinator.removeTask(session.chatId, task.taskId);
     this.activeTasks.deleteHandle(task.taskId);
     await this.promptForShareDeletionIfNeeded(session, task.taskId, task.taskName, task.origin);
-    await this.promptForSkillArchiveIfOrphan(session, task);
+    await this.deps.skillArchiveCoordinator.offerArchiveAfterTaskCompletion(session, task);
     await this.deps.taskCoordinator.onVisibleSlotAvailable(session.chatId);
   }
 
@@ -557,16 +557,6 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     };
     await this.channel.sendShareDeletionRequest(session.chatId, requestId, taskName, summary);
   }
-
-  /**
-   * Delegates to the archive coordinator to check whether the skill associated
-   * with a completed one-shot job is orphaned and should be offered for
-   * archiving.
-   */
-  private async promptForSkillArchiveIfOrphan(session: SessionState, task: ActiveTaskState): Promise<void> {
-    await this.deps.skillArchiveCoordinator.offerArchiveAfterTaskCompletion(session, task);
-  }
-
 }
 
 function normalizeTaskPolicy(policy: MainAgentTaskPolicyInput | undefined): MainAgentTaskPolicy {
