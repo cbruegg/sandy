@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { jobWorkspace, jobsFile } from "../state-paths.js";
-import { jobsFileSchema, validateJobDefinition } from "./job-validation.js";
+import { jobsFileSchema, validateJobDefinition, hasOneShotRunForSchedule } from "./job-validation.js";
 import type { JobDefinition, JobRuntimeState, JobsFile } from "./job-validation.js";
 
 export class JobStore {
@@ -29,10 +29,6 @@ export class JobStore {
       const existingState = data.runtimeState.find((state) => state.jobId === validDefinition.id);
       if (!existingState) {
         data.runtimeState.push({ jobId: validDefinition.id, lastRunAt: null });
-      } else if (validDefinition.schedule.kind === "one_shot") {
-        // When a one-shot job definition is replaced, reset its lastRunAt so the
-        // scheduler picks up the new run time instead of skipping it.
-        existingState.lastRunAt = null;
       }
     });
   }
@@ -80,22 +76,25 @@ export class JobStore {
   }
 
   /**
-   * Atomically claims a one-shot launch by setting `lastRunAt` to `runAt`
-   * only when the current `lastRunAt` is still null.
+   * Atomically claims a one-shot launch for `scheduledRunAt` by setting
+   * `lastRunAt` to `launchedAt`. The claim is denied when the stored
+   * `lastRunAt` is already at or after `scheduledRunAt`, which prevents
+   * duplicate launches for the same scheduled run while still allowing a
+   * rescheduled future run to execute.
    *
-   * Returns `true` when the launch was claimed; `false` when the one-shot was
-   * already consumed (lastRunAt is non-null).
+   * Returns `true` when the launch was claimed; `false` when the scheduled
+   * run was already consumed.
    */
-  async tryClaimOneShotLaunch(jobId: string, runAt: string): Promise<boolean> {
+  async tryClaimOneShotLaunch(jobId: string, scheduledRunAt: string, launchedAt: string): Promise<boolean> {
     return this.updateJobsFile((data) => {
       const state = data.runtimeState.find((candidate) => candidate.jobId === jobId);
-      if (state && state.lastRunAt !== null) {
+      if (state && hasOneShotRunForSchedule(state, scheduledRunAt)) {
         return false;
       }
       if (!state) {
-        data.runtimeState.push({ jobId, lastRunAt: runAt });
+        data.runtimeState.push({ jobId, lastRunAt: launchedAt });
       } else {
-        state.lastRunAt = runAt;
+        state.lastRunAt = launchedAt;
       }
       return true;
     });

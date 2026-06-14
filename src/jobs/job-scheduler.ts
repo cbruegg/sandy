@@ -1,7 +1,7 @@
 import { mkdir } from "node:fs/promises";
 import { CronJob } from "cron";
 import { logger } from "../logger.js";
-import { validateSchedule } from "./job-validation.js";
+import { validateSchedule, hasOneShotRunForSchedule } from "./job-validation.js";
 import type { JobDefinition } from "./job-validation.js";
 import { JobStore } from "./job-store.js";
 
@@ -63,7 +63,7 @@ export class JobScheduler {
     validateSchedule(definition.schedule);
     if (definition.schedule.kind === "one_shot") {
       const runtimeState = await this.store.getRuntimeState(definition.id);
-      if (runtimeState.lastRunAt !== null) return;
+      if (hasOneShotRunForSchedule(runtimeState, definition.schedule.runAt)) return;
       const runAt = Date.parse(definition.schedule.runAt);
       if (runAt <= Date.now()) {
         queueMicrotask(() => {
@@ -105,7 +105,7 @@ export class JobScheduler {
       // One-shot jobs atomically claim the launch so a concurrent runNow or
       // scheduled callback cannot start a second task.
       if (definition.schedule.kind === "one_shot") {
-        const claimed = await this.store.tryClaimOneShotLaunch(definition.id, new Date().toISOString());
+        const claimed = await this.store.tryClaimOneShotLaunch(definition.id, definition.schedule.runAt, new Date().toISOString());
         if (!claimed) {
           throw new Error(`Job ${definition.id} was already launched.`);
         }

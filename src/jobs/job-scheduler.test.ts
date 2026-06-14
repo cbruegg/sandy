@@ -163,3 +163,38 @@ test("JobScheduler runNow races with one-shot timer firing at the same time", as
 
   scheduler.stop();
 });
+
+test("JobScheduler allows a one-shot job to be rescheduled to a later run", async () => {
+  const configDirectory = makeTempConfigDirectory();
+  const store = new JobStore(configDirectory);
+  await store.upsertDefinition(createJob({
+    id: "one-shot",
+    name: "One shot",
+    schedule: { kind: "one_shot", runAt: new Date(Date.now() - 1000).toISOString() },
+  }));
+
+  const launches: string[] = [];
+  const scheduler = new JobScheduler(store, async (job) => {
+    launches.push(job.id);
+    return "task-one-shot";
+  });
+
+  await scheduler.start();
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(launches, ["one-shot"]);
+
+  // Reschedule the same job to a new future time.
+  const newRunAt = new Date(Date.now() + 300);
+  await store.upsertDefinition(createJob({
+    id: "one-shot",
+    name: "One shot",
+    schedule: { kind: "one_shot", runAt: newRunAt.toISOString() },
+  }));
+  await scheduler.refresh();
+
+  // The new scheduled timer should fire exactly once.
+  await new Promise<void>((resolve) => setTimeout(resolve, 600));
+  assert.deepEqual(launches, ["one-shot", "one-shot"]);
+
+  scheduler.stop();
+});

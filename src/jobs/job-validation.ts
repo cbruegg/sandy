@@ -53,3 +53,15 @@ export function validateSchedule(schedule: JobSchedule): void {
     throw new Error(`Invalid cron schedule: ${message}`, { cause: error });
   }
 }
+
+/**
+ * Returns true when a one-shot job has already been launched for the given
+ * scheduled run time. A later scheduled run time (e.g. after rescheduling)
+ * should not be skipped.
+ */
+export function hasOneShotRunForSchedule(state: JobRuntimeState, scheduledRunAt: string): boolean {
+  if (state.lastRunAt === null) {
+    return false;
+  }
+  return Date.parse(state.lastRunAt) >= Date.parse(scheduledRunAt);
+}

@@ -1,4 +1,9 @@
 import type { JobDefinition } from "./job-validation.js";
+import {
+  requestInteractionToolName,
+  updateJobToolName,
+  terminateTaskToolName,
+} from "../subagent/worker-tools.js";
 
 export function buildJobTaskBrief(job: JobDefinition, workspacePath: string | null): string {
   return [
@@ -12,5 +17,15 @@ export function buildJobTaskBrief(job: JobDefinition, workspacePath: string | nu
     "Other user-visible operations such as sandy.request_interaction, privilege requests, and send_file_to_channel will ask Sandy to make this task visible immediately or once the visible slot becomes available.",
     "If you need the user's attention or input, call the sandy.request_interaction MCP tool with an optional message explaining what you need. Wait for Sandy's explicit notice that the task became interactive before assuming the user can see later output or respond.",
     "If the job is complete and you want to finalize it explicitly, call sandy.terminate_task. Sandy will ask the worker to emit its final summary and complete the task.",
+    job.schedule.kind === "one_shot"
+      ? [
+        "This is a one-off job. After you finish, you may reschedule it for another run if that makes sense based on what you learned.",
+        "To reschedule:",
+        `1. Call sandy.${requestInteractionToolName} with a message explaining why you think the job should be re-executed and what schedule you propose.`,
+        "2. Wait for Sandy to tell you this task is interactive.",
+        `3. Call sandy.${updateJobToolName} with the new one-shot schedule. The user will be asked to approve the schedule change.`,
+        `If you do not want to reschedule, call sandy.${terminateTaskToolName} to finalize the task.`,
+      ].join("\n")
+      : null,
   ].filter((line): line is string => line !== null).join("\n\n");
 }
