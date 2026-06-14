@@ -186,7 +186,6 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     privileges,
     orchestrator,
     jobCleanupService,
-    skillArchiveCoordinator,
     stop,
   };
 }
