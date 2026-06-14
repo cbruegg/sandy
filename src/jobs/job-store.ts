@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { jobWorkspace, jobsFile } from "../state-paths.js";
 import { jobsFileSchema, validateJobDefinition, hasOneShotRunForSchedule } from "./job-validation.js";
 import type { JobDefinition, JobRuntimeState, JobsFile } from "./job-validation.js";
@@ -34,10 +35,13 @@ export class JobStore {
   }
 
   async deleteDefinition(jobId: string): Promise<void> {
-    await this.updateJobsFile((data) => {
+    const deletedDefinitions = await this.updateJobsFile((data) => {
+      const deletedDefinitions = data.definitions.filter((definition) => definition.id === jobId);
       data.definitions = data.definitions.filter((definition) => definition.id !== jobId);
       data.runtimeState = data.runtimeState.filter((state) => state.jobId !== jobId);
+      return deletedDefinitions;
     });
+    await this.archiveOwnedSkills(deletedDefinitions);
   }
 
   async setEnabled(jobId: string, enabled: boolean): Promise<void> {
@@ -106,7 +110,7 @@ export class JobStore {
    * (epoch ms). Returns the number of deleted jobs.
    */
   async deleteOldOneShots(cutoffTimestamp: number): Promise<number> {
-    return this.updateJobsFile((data) => {
+    const deletedDefinitions = await this.updateJobsFile((data) => {
       const toRemove = new Set<string>();
       for (const state of data.runtimeState) {
         if (!state.lastRunAt) continue;
@@ -117,11 +121,14 @@ export class JobStore {
         if (!hasOneShotRunForSchedule(state, def.schedule.runAt)) continue;
         toRemove.add(state.jobId);
       }
-      if (toRemove.size === 0) return 0;
+      if (toRemove.size === 0) return [];
+      const deletedDefinitions = data.definitions.filter((d) => toRemove.has(d.id));
       data.definitions = data.definitions.filter((d) => !toRemove.has(d.id));
       data.runtimeState = data.runtimeState.filter((s) => !toRemove.has(s.jobId));
-      return toRemove.size;
+      return deletedDefinitions;
     });
+    await this.archiveOwnedSkills(deletedDefinitions);
+    return deletedDefinitions.length;
   }
 
   workspacePath(jobId: string): string {
@@ -155,5 +162,30 @@ export class JobStore {
   private async save(data: JobsFile): Promise<void> {
     await mkdir(dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  }
+
+  private async archiveOwnedSkills(deletedDefinitions: JobDefinition[]): Promise<void> {
+    for (const definition of deletedDefinitions) {
+      if (!definition.jobOwnsSkill) continue;
+      await this.archiveSkill(definition.skillId);
+    }
+  }
+
+  private async archiveSkill(skillId: string): Promise<void> {
+    if (!skillId || /[\\/]/.test(skillId) || skillId === "." || skillId === "..") {
+      throw new Error(`Invalid skillId "${skillId}".`);
+    }
+
+    const sourceDirectory = join(this.configDirectory, "skills", skillId);
+    const archiveDirectory = join(this.configDirectory, "archived-skills");
+    await mkdir(archiveDirectory, { recursive: true });
+    try {
+      await rename(sourceDirectory, join(archiveDirectory, `${skillId}-${randomUUID()}`));
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+        return;
+      }
+      throw error;
+    }
   }
 }

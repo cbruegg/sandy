@@ -1,8 +1,9 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { JobStore } from "./job-store.js";
+import { SkillService } from "../skills.js";
 
 async function makeTempConfigDirectory(): Promise<string> {
   const tmpRoot = join(process.cwd(), "tmp");
@@ -120,6 +121,98 @@ test("JobStore.deleteOldOneShots removes consumed one-shot jobs with stale lastR
     const oldState = await store.getRuntimeState("old-shot");
     // getRuntimeState creates a default if missing, so we check lastRunAt
     assert.equal(oldState.lastRunAt, null);
+  } finally {
+    await rm(configDirectory, { recursive: true, force: true });
+  }
+});
+
+test("JobStore.deleteDefinition archives skills owned by deleted jobs", async () => {
+  const configDirectory = await makeTempConfigDirectory();
+  try {
+    const store = new JobStore(configDirectory);
+    const skillService = new SkillService(configDirectory);
+    await skillService.createSkill({
+      skillId: "owned-cleanup",
+      name: "Owned cleanup",
+      description: "Runs cleanup for one job.",
+      body: "Clean up.",
+    });
+    await store.upsertDefinition({
+      id: "owned-job",
+      name: "Owned job",
+      enabled: true,
+      schedule: { kind: "cron", expression: "0 9 * * *" },
+      skillId: "owned-cleanup",
+      jobOwnsSkill: true,
+    });
+
+    await store.deleteDefinition("owned-job");
+
+    assert.equal(await store.getDefinition("owned-job"), null);
+    assert.deepEqual(await readdir(skillService.getSkillsDirectory()), []);
+    const archivedEntries = await readdir(join(configDirectory, "archived-skills"));
+    assert.equal(archivedEntries.length, 1);
+    assert.match(archivedEntries[0]!, /^owned-cleanup-[0-9a-f-]{36}$/);
+    assert.deepEqual(await readdir(join(configDirectory, "archived-skills", archivedEntries[0]!)), ["SKILL.md"]);
+  } finally {
+    await rm(configDirectory, { recursive: true, force: true });
+  }
+});
+
+test("JobStore.deleteDefinition leaves shared skills in place", async () => {
+  const configDirectory = await makeTempConfigDirectory();
+  try {
+    const store = new JobStore(configDirectory);
+    const skillService = new SkillService(configDirectory);
+    await skillService.createSkill({
+      skillId: "shared-cleanup",
+      name: "Shared cleanup",
+      description: "Runs cleanup for many jobs.",
+      body: "Clean up.",
+    });
+    await store.upsertDefinition({
+      id: "shared-job",
+      name: "Shared job",
+      enabled: true,
+      schedule: { kind: "cron", expression: "0 9 * * *" },
+      skillId: "shared-cleanup",
+    });
+
+    await store.deleteDefinition("shared-job");
+
+    assert.deepEqual(await readdir(skillService.getSkillsDirectory()), ["shared-cleanup"]);
+    await assert.rejects(() => readdir(join(configDirectory, "archived-skills")), /ENOENT/);
+  } finally {
+    await rm(configDirectory, { recursive: true, force: true });
+  }
+});
+
+test("JobStore.deleteOldOneShots archives skills owned by cleaned-up jobs", async () => {
+  const configDirectory = await makeTempConfigDirectory();
+  try {
+    const store = new JobStore(configDirectory);
+    const skillService = new SkillService(configDirectory);
+    await skillService.createSkill({
+      skillId: "old-shot-skill",
+      name: "Old shot skill",
+      description: "Runs one old shot.",
+      body: "Run once.",
+    });
+    const oldRunAt = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString();
+    await store.upsertDefinition({
+      id: "old-owned-shot",
+      name: "Old owned shot",
+      enabled: true,
+      schedule: { kind: "one_shot", runAt: oldRunAt },
+      skillId: "old-shot-skill",
+      jobOwnsSkill: true,
+    });
+    await store.recordLaunch("old-owned-shot", oldRunAt);
+
+    const deleted = await store.deleteOldOneShots(Date.now() - 14 * 24 * 60 * 60 * 1000);
+
+    assert.equal(deleted, 1);
+    assert.equal((await readdir(join(configDirectory, "archived-skills"))).length, 1);
   } finally {
     await rm(configDirectory, { recursive: true, force: true });
   }
