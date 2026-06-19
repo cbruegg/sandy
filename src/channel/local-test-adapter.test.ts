@@ -137,6 +137,35 @@ test("LocalTestChannelAdapter writes privilege requests and file sends to the ou
   }
 });
 
+test("LocalTestChannelAdapter writes a denial reason prompt event to the outbox", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sandy-local-test-"));
+  const adapter = new LocalTestChannelAdapter({
+    spoolRoot: root,
+  });
+
+  try {
+    await adapter.start(async () => {});
+    const request: PrivilegeRequest = {
+      kind: "mcp_tool_call",
+      requestId: "req-1",
+      serverId: "todoist",
+      toolName: "addTask",
+      arguments: {},
+    };
+
+    await adapter.askForDenialReason("local-test", request);
+
+    const events = await waitFor(
+      async () => (await readdirJson(join(root, "outbox"))).map((raw) => parseLocalTestOutboundEvent(raw)),
+      (items) => items.length === 1,
+    );
+    assert.equal(events[0]?.type, "send_denial_reason_prompt");
+  } finally {
+    await adapter.stop();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("LocalTestChannelAdapter quarantines failing inbox entries and continues processing later files", async () => {
   const root = await mkdtemp(join(tmpdir(), "sandy-local-test-"));
   const adapter = new LocalTestChannelAdapter({

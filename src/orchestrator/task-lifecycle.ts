@@ -14,12 +14,11 @@ import type {
   OrchestratorCoreDependencies,
   UserMessageEvent
 } from "./shared.js";
-import {
-  createActiveTaskState,
-} from "../types.js";
 import { assertNever } from "../utils/assert-never.js";
-import type {
+import {
   ActiveTaskState,
+} from "../types.js";
+import type {
   ChannelFormatting,
   MainAgentDecision,
   MainAgentTaskPolicy,
@@ -193,16 +192,14 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
             taskName: decision.taskName,
           });
           const taskPolicy = normalizeTaskPolicy(decision.taskPolicy);
-          session.visibleTask = createActiveTaskState(
-            {
-              taskId,
-              taskName: decision.taskName,
-              startedAt: now,
-              taskPolicy,
-              origin: { kind: "launchedByUser" },
-              interactionState: "interacting",
-            },
-          );
+          session.visibleTask = new ActiveTaskState({
+            taskId,
+            taskName: decision.taskName,
+            startedAt: now,
+            taskPolicy,
+            origin: { kind: "launchedByUser" },
+            interactionState: "interacting",
+          });
 
           await this.launchTaskInSandbox(
             event.chatId,
@@ -248,19 +245,15 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     const now = new Date().toISOString();
     const taskName = `Scheduled job: ${job.name}`;
     const taskPolicy = await this.deps.jobApprovalStore.getTaskPolicy(job.id);
-    const taskState = createActiveTaskState(
-      {
-        taskId,
-        taskName,
-        startedAt: now,
-        taskPolicy,
-        origin: { kind: "launchedByJob", jobId: job.id, jobName: job.name },
-        interactionState: "silent",
-      },
-      {
-        approvedHostDirectories: workspacePath ? [{ path: workspacePath, level: "read_write" }] : [],
-      },
-    );
+    const taskState = new ActiveTaskState({
+      taskId,
+      taskName,
+      startedAt: now,
+      taskPolicy,
+      origin: { kind: "launchedByJob", jobId: job.id, jobName: job.name },
+      interactionState: "silent",
+      approvedHostDirectories: workspacePath ? [{ path: workspacePath, level: "read_write" }] : [],
+    });
     this.deps.taskCoordinator.addBackgroundJobTask(session, taskState);
 
     try {
@@ -389,7 +382,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
       return;
     }
 
-    task.status = status;
+    task.moveToState(status);
     await this.closeTask(session, taskId, options);
   }
 
@@ -399,7 +392,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
       return;
     }
 
-    task.status = "failed";
+    task.moveToState("failed");
     try {
       await this.deps.taskCoordinator.runJobUserVisibleOperation(session.chatId, taskId, task.taskName, async (channel) => {
         await channel.sendText(session.chatId, messages.taskFailed(message));
@@ -489,7 +482,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     }
 
     task.workerConnected = false;
-    task.status = "failed";
+    task.moveToState("failed");
     await this.deps.taskCoordinator.runJobUserVisibleOperation(session.chatId, taskId, task.taskName, async (channel) => {
       await channel.sendText(session.chatId, message);
     });

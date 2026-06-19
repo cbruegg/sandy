@@ -18,6 +18,7 @@ import { hostGrantsPrefix } from "../paths.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 import type { JobDefinition } from "../jobs/job-validation.js";
+import { ActiveTaskState } from "../types.js";
 
 async function waitFor(check: () => boolean, attempts = 20): Promise<void> {
   for (let index = 0; index < attempts; index += 1) {
@@ -279,8 +280,11 @@ test("silent job privilege requests are preceded by task context when they make 
     timestamp: "2026-04-01T00:00:10.000Z",
     decision: "deny",
     requestId,
+    reason: "Not needed for this job.",
   });
-  assert.equal((await privilegePromise).outcome, "denied");
+  const denied = await privilegePromise;
+  assert.equal(denied.outcome, "denied");
+  assert.match(denied.message, /Reason: Not needed for this job\./);
 });
 
 test("approved job mutation delegates execution through the worker tools handler", async () => {
@@ -1073,6 +1077,240 @@ test("job-scoped persistent approvals apply only to later executions of the same
     timestamp: "2026-04-01T00:00:30.000Z",
     decision: "deny",
     requestId: thirdRequest?.requestId,
+    reason: "Wrong job scope.",
   });
-  assert.equal((await thirdApproval).outcome, "denied");
+  const thirdResult = await thirdApproval;
+  assert.equal(thirdResult.outcome, "denied");
+  assert.match(thirdResult.message, /Reason: Wrong job scope\./);
+});
+
+test("denial without an inline reason prompts for a reason and routes it back to the agent", async () => {
+  const { orchestrator, runner, channel, store } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Add a Todoist task.",
+      taskName: "todoist-deny-reason",
+      taskLanguage: "English",
+    }),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-deny-reason",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Add a Todoist task",
+    rawText: "Add a Todoist task",
+    attachments: [],
+  });
+
+  const taskId = runner.launches[0]?.taskId;
+  assert.ok(taskId);
+
+  const promise = orchestrator.authorizeMcpToolCall({
+    taskId,
+    serverId: "todoist",
+    toolName: "addTask",
+    arguments: { content: "Buy milk" },
+  });
+  await waitFor(() => channel.privilegeRequests.length === 1);
+  const request = channel.privilegeRequests[0]?.request;
+
+  // Deny without a reason: the orchestrator must ask for a reason before resolving.
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-deny-reason",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    decision: "deny",
+    requestId: request?.requestId,
+  });
+
+  await waitFor(() => channel.denialReasonPrompts.length === 1);
+  assert.equal(channel.denialReasonPrompts[0]?.request.requestId, request?.requestId);
+  const session = store.getOrCreate("chat-deny-reason");
+  assert.equal(session.visibleTask?.status, "awaiting_denial_reason");
+
+  // While awaiting a reason, free text is consumed as the reason rather than
+  // forwarded to the agent, and a second approval/deny is rejected.
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-deny-reason",
+    messageId: "3",
+    timestamp: "2026-04-01T00:00:11.000Z",
+    decision: "approve",
+    requestId: request?.requestId,
+  });
+  assert.match(channel.sentTexts.at(-1)?.text ?? "", /denial reason is still pending/i);
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-deny-reason",
+    messageId: "4",
+    timestamp: "2026-04-01T00:00:12.000Z",
+    text: "Too risky for now",
+    rawText: "Too risky for now",
+    attachments: [],
+  });
+
+  const result = await promise;
+  assert.equal(result.outcome, "denied");
+  assert.equal(result.reason, "Too risky for now");
+  assert.match(result.message, /Reason: Too risky for now/);
+  assert.equal(session.visibleTask?.status, "running");
+  assert.equal(session.visibleTask?.pendingPrivilegeRequest, null);
+});
+
+test("denial reason can be skipped and the agent still receives the canned denial", async () => {
+  const { orchestrator, runner, channel, store } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Copy a file.",
+      taskName: "file-copy-deny-skip",
+      taskLanguage: "English",
+    }),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-deny-skip",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Copy a file",
+    rawText: "Copy a file",
+    attachments: [],
+  });
+
+  const taskId = runner.launches[0]?.taskId;
+  assert.ok(taskId);
+
+  const toolCallPromise = orchestrator.executeNativeWorkerToolCall({
+    taskId,
+    toolName: "copy_into_share",
+    arguments: {
+      sourcePath: "/tmp/missing.txt",
+      targetPath: `${sharedWorkspaceMountPath}/missing.txt`,
+      reason: "Need the file.",
+    },
+  });
+
+  await waitFor(() => channel.privilegeRequests.length === 1);
+  const request = channel.privilegeRequests[0]?.request;
+
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-deny-skip",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    decision: "deny",
+    requestId: request?.requestId,
+  });
+  await waitFor(() => channel.denialReasonPrompts.length === 1);
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-deny-skip",
+    messageId: "3",
+    timestamp: "2026-04-01T00:00:11.000Z",
+    text: "/skip",
+    rawText: "/skip",
+    attachments: [],
+  });
+
+  const result = await toolCallPromise;
+  assert.equal(result.isError, true);
+  assert.doesNotMatch(result.message, /Reason:/);
+  const session = store.getOrCreate("chat-deny-skip");
+  assert.equal(session.visibleTask?.status, "running");
+});
+
+test("cancelling a task while awaiting a denial reason fails the pending privilege request", async () => {
+  const { orchestrator, runner, channel, store } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Add a Todoist task.",
+      taskName: "todoist-deny-cancel",
+      taskLanguage: "English",
+    }),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-deny-cancel",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Add a Todoist task",
+    rawText: "Add a Todoist task",
+    attachments: [],
+  });
+
+  const taskId = runner.launches[0]?.taskId;
+  assert.ok(taskId);
+
+  const promise = orchestrator.authorizeMcpToolCall({
+    taskId,
+    serverId: "todoist",
+    toolName: "addTask",
+    arguments: { content: "Buy milk" },
+  });
+  await waitFor(() => channel.privilegeRequests.length === 1);
+  const request = channel.privilegeRequests[0]?.request;
+
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-deny-cancel",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    decision: "deny",
+    requestId: request?.requestId,
+  });
+  await waitFor(() => channel.denialReasonPrompts.length === 1);
+  assert.equal(store.getOrCreate("chat-deny-cancel").visibleTask?.status, "awaiting_denial_reason");
+
+  await orchestrator.handleChatEvent({
+    kind: "cancel_request",
+    chatId: "chat-deny-cancel",
+    messageId: "3",
+    timestamp: "2026-04-01T00:00:11.000Z",
+  });
+
+  const result = await promise;
+  assert.equal(result.outcome, "failed");
+  assert.equal(store.getOrCreate("chat-deny-cancel").visibleTask, null);
+});
+
+test("moveToState rejects invalid task state transitions", () => {
+  const task = new ActiveTaskState({
+    taskId: "task-1",
+    taskName: "test",
+    startedAt: new Date(0).toISOString(),
+    taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
+    origin: { kind: "launchedByUser" },
+    interactionState: "interacting",
+  });
+  assert.equal(task.status, "running");
+  task.moveToState("awaiting_privilege_decision");
+  task.moveToState("awaiting_denial_reason");
+  task.moveToState("running");
+  task.moveToState("completed");
+  assert.throws(() => task.moveToState("running"), /Invalid task state transition: completed -> running/);
+});
+
+test("task status field is not directly assignable", () => {
+  const task = new ActiveTaskState({
+    taskId: "task-1",
+    taskName: "test",
+    startedAt: new Date(0).toISOString(),
+    taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
+    origin: { kind: "launchedByUser" },
+    interactionState: "interacting",
+  });
+  // The status getter has no setter, so direct assignment is both a type error
+  // (suppressed below) and a runtime TypeError. The backing field is private,
+  // so moveToState is the only way to mutate status.
+  assert.throws(() => {
+    // @ts-expect-error -- status is private and only mutable via moveToState.
+    task.status = "failed";
+  }, /readonly property|only a getter|Cannot set property status/);
+  assert.equal(task.status, "running");
 });

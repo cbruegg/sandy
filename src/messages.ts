@@ -51,7 +51,10 @@ export const messages = {
   taskStarted: (taskName: string): string => `Started task "${taskName}".`,
   privilegeDenied: (requestId: string): string => `Denied privilege request ${requestId}.`,
   privilegeFailed: (requestId: string, detail: string): string => `Privilege request ${requestId} failed.\n${detail}`,
-  userDeniedPrivilegeRequest: (requestId: string): string => `The user denied privilege request ${requestId}.`,
+  userDeniedPrivilegeRequest: (requestId: string, reason?: string): string =>
+    reason
+      ? `The user denied privilege request ${requestId}.\nReason: ${reason}`
+      : `The user denied privilege request ${requestId}.`,
   unsupportedPrivilegeRequestType: (requestType: string): string =>
     `Privilege request type "${requestType}" is not supported by this runtime.`,
   staleShareDeletionRequest: (): string => "That shared workspace deletion request is no longer pending.",
@@ -72,10 +75,16 @@ export const messages = {
   sharedFileSentToUser: (path: string): string => `Sent ${path} to the user.`,
 
   anotherPrivilegeRequestPendingForTask: (): string => "Another privilege request is already pending for this task.",
+  denialReasonPrompt: (request: PrivilegeRequest): string =>
+    `You denied the following privilege request. Reply with a short reason, or send "skip" to deny without a reason.\n\n${describePrivilegeRequest(request)}`,
+  denialReasonStillPending: (): string =>
+    "A denial reason is still pending. Reply with a short reason, or send \"skip\" to deny without a reason.",
   unsupportedMcpPrivilegeRequest: (serverId: string, toolName: string): string =>
     `Unsupported MCP privilege request ${serverId}.${toolName}.`,
-  userDeniedMcpToolCall: (serverId: string, toolName: string): string =>
-    `The user denied MCP tool call ${serverId}.${toolName}.`,
+  userDeniedMcpToolCall: (serverId: string, toolName: string, reason?: string): string =>
+    reason
+      ? `The user denied MCP tool call ${serverId}.${toolName}.\nReason: ${reason}`
+      : `The user denied MCP tool call ${serverId}.${toolName}.`,
   mcpToolAllowedOnce: (serverId: string, toolName: string): string =>
     `Allowed ${serverId}.${toolName} once.`,
   mcpToolAllowedForWorkerSession: (serverId: string, toolName: string): string =>
@@ -90,8 +99,10 @@ export const messages = {
       : `MCP ${status}: ${serverId}.${toolName}`,
   unsupportedMcpResourceReadPrivilegeRequest: (serverId: string, uri: string): string =>
     `Unsupported MCP resource read privilege request ${serverId} ${uri}.`,
-  userDeniedMcpResourceRead: (serverId: string, uri: string): string =>
-    `The user denied MCP resource read ${serverId} ${uri}.`,
+  userDeniedMcpResourceRead: (serverId: string, uri: string, reason?: string): string =>
+    reason
+      ? `The user denied MCP resource read ${serverId} ${uri}.\nReason: ${reason}`
+      : `The user denied MCP resource read ${serverId} ${uri}.`,
   mcpResourceReadAllowedOnce: (serverId: string, uri: string): string =>
     `Allowed ${serverId} ${uri} once.`,
   mcpResourceReadAllowedForWorkerSession: (serverId: string, uri: string): string =>
@@ -102,8 +113,10 @@ export const messages = {
     `Allowed ${serverId} ${uri} and updated Sandy's config file for future suitable tasks.`,
   mcpResourceReadProgress: (status: string, serverId: string, uri: string): string =>
     `MCP ${status}: ${serverId} ${uri}`,
-  httpTokenDenied: (tokenId: string, host: string): string =>
-    `The user denied HTTP token use ${tokenId} for host ${host}.`,
+  httpTokenDenied: (tokenId: string, host: string, reason?: string): string =>
+    reason
+      ? `The user denied HTTP token use ${tokenId} for host ${host}.\nReason: ${reason}`
+      : `The user denied HTTP token use ${tokenId} for host ${host}.`,
   httpTokenAllowedOnce: (tokenId: string, host: string): string =>
     `Allowed HTTP token ${tokenId} for host ${host} once.`,
   httpTokenAllowedForWorkerSession: (tokenId: string, host: string): string =>
@@ -120,8 +133,10 @@ export const messages = {
     `HTTP token "${tokenId}" is not configured in Sandy's config file.`,
   httpTokenHostNotAllowed: (tokenId: string, host: string): string =>
     `Host "${host}" is not in the configured allowed_hosts for token ${tokenId}.`,
-  hostDirectoryAccessDenied: (path: string, level: string): string =>
-    `The user denied host directory access to ${path} (${level}).`,
+  hostDirectoryAccessDenied: (path: string, level: string, reason?: string): string =>
+    reason
+      ? `The user denied host directory access to ${path} (${level}).\nReason: ${reason}`
+      : `The user denied host directory access to ${path} (${level}).`,
   hostDirectoryAccessAllowedForWorkerSession: (path: string, level: string): string =>
     `Allowed host directory access to ${path} (${level}) for this worker session.`,
   hostDirectoryAccessAllowedFromPersistentConfig: (path: string, level: string): string =>
@@ -132,14 +147,18 @@ export const messages = {
     `Host directory access request for ${path} failed: ${error}`,
   hostDirectoryNotFound: (path: string): string =>
     `Host directory not found or not accessible: ${path}`,
-  skillMutationDenied: (operation: string, skillId: string): string =>
-    `Denied ${operation} skill "${skillId}".`,
+  skillMutationDenied: (operation: string, skillId: string, reason?: string): string =>
+    reason
+      ? `Denied ${operation} skill "${skillId}".\nReason: ${reason}`
+      : `Denied ${operation} skill "${skillId}".`,
   skillMutationApproved: (operation: string, skillId: string): string =>
     `Approved ${operation} skill "${skillId}".`,
   skillMutationFailed: (operation: string, skillId: string, error: string): string =>
     `Failed to ${operation} skill "${skillId}": ${error}`,
-  jobMutationDenied: (operation: string, jobId: string): string =>
-    `Denied ${operation} job "${jobId}".`,
+  jobMutationDenied: (operation: string, jobId: string, reason?: string): string =>
+    reason
+      ? `Denied ${operation} job "${jobId}".\nReason: ${reason}`
+      : `Denied ${operation} job "${jobId}".`,
   jobDoesNotExist: (jobId: string): string => `Job ${jobId} does not exist.`,
   jobMutationApproved: (operation: string, jobId: string): string =>
     `Approved ${operation} job "${jobId}".`,

@@ -54,6 +54,7 @@ export interface OrchestratorPrivileges {
     session: SessionState,
     request: PrivilegeRequest,
     decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
+    reason?: string,
   ): Promise<void>;
 }
 
@@ -138,6 +139,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     session: SessionState,
     request: PrivilegeRequest,
     decision: Extract<NormalizedChatEvent, { kind: "approval_response" }>["decision"],
+    reason?: string,
   ): Promise<void> {
     const activeTask = session.visibleTask;
     if (!activeTask) {
@@ -147,25 +149,25 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     let result: PrivilegeResolutionResult;
     switch (request.kind) {
       case "mcp_tool_call":
-        result = await resolveMcpToolCallRequest(this.privilegeContext, session, request, decision);
+        result = await resolveMcpToolCallRequest(this.privilegeContext, session, request, decision, reason);
         break;
       case "mcp_resource_read":
-        result = await resolveMcpResourceReadRequest(this.privilegeContext, session, request, decision);
+        result = await resolveMcpResourceReadRequest(this.privilegeContext, session, request, decision, reason);
         break;
       case "http_token_use":
-        result = await resolveHttpTokenRequest(this.privilegeContext, session, request, decision);
+        result = await resolveHttpTokenRequest(this.privilegeContext, session, request, decision, reason);
         break;
       case "host_directory_access":
-        result = await resolveHostDirectoryRequest(this.privilegeContext, session, request, decision);
+        result = await resolveHostDirectoryRequest(this.privilegeContext, session, request, decision, reason);
         break;
       case "skill_mutation":
-        result = await resolveSkillMutationRequest(this.privilegeContext, session, request, decision);
+        result = await resolveSkillMutationRequest(this.privilegeContext, session, request, decision, reason);
         break;
       case "job_mutation":
-        result = await resolveJobMutationRequest(this.privilegeContext, session, request, decision);
+        result = await resolveJobMutationRequest(this.privilegeContext, session, request, decision, reason);
         break;
       case "file_copy":
-        result = await resolveFileCopyRequest(this.privilegeContext, request, decision, activeTask.taskId);
+        result = await resolveFileCopyRequest(this.privilegeContext, request, decision, activeTask.taskId, reason);
         break;
       default:
         assertNever(request);
@@ -181,7 +183,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     await this.sendPrivilegeResolutionMessage(session.chatId, activeTask.taskId, activeTask.taskName, result);
 
     activeTask.pendingPrivilegeRequest = null;
-    activeTask.status = "running";
+    activeTask.moveToState("running");
   }
 
   async authorizeMcpToolCall(input: {
@@ -430,7 +432,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     }
 
     input.activeTask.pendingPrivilegeRequest = input.request;
-    input.activeTask.status = "awaiting_privilege_decision";
+    input.activeTask.moveToState("awaiting_privilege_decision");
     const resultPromise = new Promise<PrivilegeResolutionResult>((resolve) => {
       input.registerResolver(input.request.requestId, resolve);
     });

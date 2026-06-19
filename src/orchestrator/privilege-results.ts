@@ -33,12 +33,20 @@ export function approvedPrivilegeResult(
   };
 }
 
-export function deniedPrivilegeResult(requestId: string, message: string): PrivilegeResolutionResult {
-  return {
+export function deniedPrivilegeResult(
+  requestId: string,
+  message: string,
+  reason?: string,
+): PrivilegeResolutionResult {
+  const result: PrivilegeResolutionResult = {
     requestId,
     outcome: "denied",
     message,
   };
+  if (reason) {
+    result.reason = reason;
+  }
+  return result;
 }
 
 export function failedPrivilegeResult(requestId: string, message: string): PrivilegeResolutionResult {

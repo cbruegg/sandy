@@ -236,6 +236,18 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     });
   }
 
+  async askForDenialReason(chatId: ChatId, request: PrivilegeRequest): Promise<void> {
+    logger.info("telegram.ask_for_denial_reason", {
+      chatId,
+      requestId: request.requestId,
+    });
+    // force_reply prompts the user to reply to this specific message; selective
+    // scopes the reply hint to the user who triggered the privilege prompt.
+    await this.sendFormattedMessage(chatId, messages.denialReasonPrompt(request), {
+      reply_markup: { force_reply: true, selective: true },
+    });
+  }
+
   async sendShareDeletionRequest(chatId: ChatId, requestId: string, taskName: string, summary: string): Promise<void> {
     logger.info("telegram.send_share_deletion_request", {
       chatId,

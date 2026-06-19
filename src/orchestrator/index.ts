@@ -4,11 +4,15 @@ import type { SandyOrchestratorDependencies, SupportedChatEvent } from "./shared
 import { describeUserMessageForMainAgent } from "./task-lifecycle.js";
 import { buildWorkerFollowUpInput } from "./worker-input.js";
 import type {
+  ActiveTaskState,
   ChannelFormatting,
   MainAgentDecision,
   NormalizedChatEvent,
+  PrivilegeRequest,
   SessionState,
 } from "../types.js";
+
+const DENIAL_REASON_SKIP_TOKENS = new Set(["/skip", "skip"]);
 
 export class SandyOrchestrator {
   private readonly channelFormatting: ChannelFormatting;
@@ -192,9 +196,40 @@ export class SandyOrchestrator {
           await this.deps.channel.sendText(event.chatId, messages.stalePrivilegeRequest());
           return;
         }
-        await this.deps.privileges.resolvePendingPrivilegeRequest(session, activeTask.pendingPrivilegeRequest, event.decision);
+        if (activeTask.status === "awaiting_denial_reason") {
+          await this.deps.channel.sendText(event.chatId, messages.denialReasonStillPending());
+          return;
+        }
+        if (event.decision === "deny") {
+          if (event.reason) {
+            await this.deps.privileges.resolvePendingPrivilegeRequest(
+              session,
+              activeTask.pendingPrivilegeRequest,
+              "deny",
+              event.reason,
+            );
+          } else {
+            await this.beginDenialReasonCollection(session, activeTask, activeTask.pendingPrivilegeRequest);
+          }
+          return;
+        }
+        await this.deps.privileges.resolvePendingPrivilegeRequest(
+          session,
+          activeTask.pendingPrivilegeRequest,
+          event.decision,
+        );
         return;
       case "user_message": {
+        if (activeTask.status === "awaiting_denial_reason") {
+          const request = activeTask.pendingPrivilegeRequest;
+          if (!request) {
+            await this.deps.channel.sendText(event.chatId, messages.noPendingPrivilegeRequest());
+            return;
+          }
+          const reason = parseDenialReason(event.text);
+          await this.deps.privileges.resolvePendingPrivilegeRequest(session, request, "deny", reason);
+          return;
+        }
         if (activeTask.pendingPrivilegeRequest) {
           await this.deps.channel.sendText(event.chatId, messages.privilegeRequestStillPending());
           return;
@@ -210,4 +245,33 @@ export class SandyOrchestrator {
       }
     }
   }
+
+  private async beginDenialReasonCollection(
+    session: SessionState,
+    activeTask: ActiveTaskState,
+    request: PrivilegeRequest,
+  ): Promise<void> {
+    activeTask.moveToState("awaiting_denial_reason");
+    await this.deps.taskCoordinator.runJobUserVisibleOperation(
+      session.chatId,
+      activeTask.taskId,
+      activeTask.taskName,
+      async (channel) => {
+        await channel.askForDenialReason(session.chatId, request);
+      },
+    );
+  }
+}
+
+/**
+ * Normalizes user-supplied denial reason text. Returns `undefined` when the user
+ * skipped (e.g. "/skip" or "skip") or sent only whitespace, so the denial
+ * proceeds without a reason and the agent sees the canned message.
+ */
+function parseDenialReason(text: string): string | undefined {
+  const trimmed = text.trim();
+  if (!trimmed || DENIAL_REASON_SKIP_TOKENS.has(trimmed.toLowerCase())) {
+    return undefined;
+  }
+  return trimmed;
 }

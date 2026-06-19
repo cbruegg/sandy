@@ -58,6 +58,8 @@ class RetryTestChannelAdapter implements ChannelAdapter {
 
   async sendPrivilegeRequest(_chatId: ChatId, _request: PrivilegeRequest): Promise<void> {}
 
+  async askForDenialReason(_chatId: ChatId, _request: PrivilegeRequest): Promise<void> {}
+
   async sendShareDeletionRequest(
     _chatId: ChatId,
     _requestId: string,

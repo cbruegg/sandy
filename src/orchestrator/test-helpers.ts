@@ -58,6 +58,7 @@ export class RecordingChannel implements ChannelAdapter {
   public readonly taskUpdates: Array<{ chatId: ChatId; text: string }> = [];
   public readonly sentFiles: Array<{ chatId: ChatId; filePath: string; caption?: string }> = [];
   public readonly privilegeRequests: Array<{ chatId: ChatId; request: PrivilegeRequest }> = [];
+  public readonly denialReasonPrompts: Array<{ chatId: ChatId; request: PrivilegeRequest }> = [];
   public readonly shareDeletionRequests: Array<{ chatId: ChatId; requestId: string; taskName: string; summary: string }> = [];
   public readonly savedAttachments: Array<{ chatId: ChatId; attachments: MessageAttachment[]; targetDirectory: string }> = [];
   public sendFileError: Error | null = null;
@@ -122,6 +123,11 @@ export class RecordingChannel implements ChannelAdapter {
 
   sendPrivilegeRequest(chatId: ChatId, request: PrivilegeRequest): Promise<void> {
     this.privilegeRequests.push({ chatId, request });
+    return Promise.resolve();
+  }
+
+  askForDenialReason(chatId: ChatId, request: PrivilegeRequest): Promise<void> {
+    this.denialReasonPrompts.push({ chatId, request });
     return Promise.resolve();
   }
 

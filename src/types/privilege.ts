@@ -67,5 +67,6 @@ export const privilegeResolutionResultSchema = z.object({
   outcome: z.enum(["approved", "denied", "failed"]),
   message: z.string(),
   scope: privilegeApprovalScopeSchema.optional(),
+  reason: z.string().optional(),
 });
 export type PrivilegeResolutionResult = z.infer<typeof privilegeResolutionResultSchema>;

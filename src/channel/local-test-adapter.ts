@@ -131,6 +131,16 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
     });
   }
 
+  async askForDenialReason(chatId: ChatId, request: PrivilegeRequest): Promise<void> {
+    await this.writeOutbound({
+      type: "send_denial_reason_prompt",
+      eventId: createIdentifier("outbound"),
+      chatId,
+      timestamp: new Date().toISOString(),
+      request,
+    });
+  }
+
   async sendShareDeletionRequest(chatId: ChatId, requestId: string, taskName: string, summary: string): Promise<void> {
     await this.writeOutbound({
       type: "send_share_deletion_request",

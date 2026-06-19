@@ -11,6 +11,7 @@ const inboxEventSchema = z.object({
   chatId: z.string().optional(),
   text: z.string().optional(),
   decision: z.string().optional(),
+  reason: z.string().optional(),
 }).passthrough();
 
 test("local-test CLI writes conformant user_message events", async () => {
@@ -42,6 +43,20 @@ test("local-test CLI writes approval and denial events", async () => {
       }),
     );
     assert.deepEqual(decisions.sort(), ["approve_worker_session", "deny"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("local-test CLI deny --reason embeds the reason in the approval_response", async () => {
+  const root = await mkdtemp(join(tmpdir(), "sandy-local-cli-"));
+  try {
+    await runLocalTestCli(["deny", "--spool-root", root, "--request-id", "req-2", "--reason", "Too risky"]);
+    const files = await readdir(join(root, "inbox"));
+    assert.equal(files.length, 1);
+    const event = inboxEventSchema.parse(JSON.parse(await readFile(join(root, "inbox", files[0]!), "utf8")) as unknown);
+    assert.equal(event.decision, "deny");
+    assert.equal(event.reason, "Too risky");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
