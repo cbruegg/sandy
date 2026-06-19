@@ -103,6 +103,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
           }
           await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async (channel) => {
             this.markTaskInteracting(session, taskId);
+            // For transparency, we show not just the final output, but also the reasoning
             const buffered = this.deps.commentaryBuffer.takeBuffer(taskId);
             if (buffered) {
               await channel.sendTaskUpdate(chatId, buffered);
@@ -125,6 +126,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
           }
           await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async (channel) => {
             this.markTaskInteracting(session, taskId);
+            // For transparency, we show not just the final output, but also the reasoning
             const buffered = this.deps.commentaryBuffer.takeBuffer(taskId);
             if (buffered) {
               await channel.sendTaskUpdate(chatId, buffered);

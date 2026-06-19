@@ -442,6 +442,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       input.taskId,
       input.activeTask.taskName,
       async (channel) => {
+        // Before showing a permissions prompt to the user, it's worth showing the reasoning until then
         const buffered = this.deps.commentaryBuffer.takeBuffer(input.taskId);
         if (buffered) {
           await channel.sendTaskUpdate(input.chatId, buffered);
