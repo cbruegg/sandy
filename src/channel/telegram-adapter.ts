@@ -2,7 +2,7 @@ import { basename } from "node:path";
 import { Bot, InputFile, type Context, type PollingOptions } from "grammy";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
-import { messages } from "../messages.js";
+import { messages } from "../messages-to-user.js";
 import { renderTelegramMarkdownChunks } from "./telegram-html.js";
 import {
   buildPrivilegeControls,

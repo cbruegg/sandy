@@ -6,7 +6,7 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { CODEX_API_KEY_ENV, SANDY_CODEX_PATH_ENV } from "../codex-client.js";
 import { configureLogger, logger } from "../logger.js";
-import { messages } from "../messages.js";
+import { messages } from "../messages-to-user.js";
 import { type HostCommand, type SubAgentEvent } from "../types.js";
 import {
   buildInitialTaskInput,

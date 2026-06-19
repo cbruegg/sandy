@@ -1,6 +1,6 @@
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 import type { JobApprovalStoreApi } from "../jobs/job-approval-store.js";
-import { messages } from "../messages.js";
+import { messages } from "../messages-to-agent.js";
 import type {
   ActiveTaskState,
   NormalizedChatEvent,

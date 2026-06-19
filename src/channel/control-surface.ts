@@ -1,5 +1,5 @@
 import type { NormalizedChatEvent, PrivilegeRequest } from "../types.js";
-import { buttonLabels } from "../messages.js";
+import { buttonLabels } from "../messages-to-user.js";
 
 export type ControlActionEvent =
   | { kind: "cancel_request" }

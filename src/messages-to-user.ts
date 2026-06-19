@@ -51,10 +51,6 @@ export const messages = {
   taskStarted: (taskName: string): string => `Started task "${taskName}".`,
   privilegeDenied: (requestId: string): string => `Denied privilege request ${requestId}.`,
   privilegeFailed: (requestId: string, detail: string): string => `Privilege request ${requestId} failed.\n${detail}`,
-  userDeniedPrivilegeRequest: (requestId: string, reason?: string): string =>
-    reason
-      ? `The user denied privilege request ${requestId}.\nReason: ${reason}`
-      : `The user denied privilege request ${requestId}.`,
   unsupportedPrivilegeRequestType: (requestType: string): string =>
     `Privilege request type "${requestType}" is not supported by this runtime.`,
   staleShareDeletionRequest: (): string => "That shared workspace deletion request is no longer pending.",
@@ -68,102 +64,20 @@ export const messages = {
       ? `Privilege request:\n${describePrivilegeRequest(request)}\n\n${actions}`
       : `Privilege request:\n${describePrivilegeRequest(request)}`;
   },
-  taskEndedBeforePrivilegeRequestResolved: (taskId: string, requestId: string): string =>
-    `Task ${taskId} ended before privilege request ${requestId} could be resolved.`,
-  taskNotActive: (taskId: string): string => `Task ${taskId} is not active.`,
-  taskNoLongerActive: (taskId: string): string => `Task ${taskId} is no longer active.`,
-  sharedFileSentToUser: (path: string): string => `Sent ${path} to the user.`,
-
-  anotherPrivilegeRequestPendingForTask: (): string => "Another privilege request is already pending for this task.",
   denialReasonPrompt: (request: PrivilegeRequest): string =>
     `You denied the following privilege request. Reply with a short reason, or send "skip" to deny without a reason.\n\n${describePrivilegeRequest(request)}`,
   denialReasonStillPending: (): string =>
     "A denial reason is still pending. Reply with a short reason, or send \"skip\" to deny without a reason.",
   unsupportedMcpPrivilegeRequest: (serverId: string, toolName: string): string =>
     `Unsupported MCP privilege request ${serverId}.${toolName}.`,
-  userDeniedMcpToolCall: (serverId: string, toolName: string, reason?: string): string =>
-    reason
-      ? `The user denied MCP tool call ${serverId}.${toolName}.\nReason: ${reason}`
-      : `The user denied MCP tool call ${serverId}.${toolName}.`,
-  mcpToolAllowedOnce: (serverId: string, toolName: string): string =>
-    `Allowed ${serverId}.${toolName} once.`,
-  mcpToolAllowedForWorkerSession: (serverId: string, toolName: string): string =>
-    `Allowed ${serverId}.${toolName} for this worker session.`,
-  mcpToolAllowedFromPersistentConfig: (serverId: string, toolName: string): string =>
-    `Allowed ${serverId}.${toolName} from persistent config for this task.`,
-  mcpToolAllowedAndPersisted: (serverId: string, toolName: string): string =>
-    `Allowed ${serverId}.${toolName} and updated Sandy's config file for future suitable tasks.`,
   mcpToolProgress: (status: string, serverId: string, toolName: string, payload: unknown): string =>
     status === "completed"
       ? `MCP ${status}: ${serverId}.${toolName} ${describeMcpToolPayload(payload)}`
       : `MCP ${status}: ${serverId}.${toolName}`,
   unsupportedMcpResourceReadPrivilegeRequest: (serverId: string, uri: string): string =>
     `Unsupported MCP resource read privilege request ${serverId} ${uri}.`,
-  userDeniedMcpResourceRead: (serverId: string, uri: string, reason?: string): string =>
-    reason
-      ? `The user denied MCP resource read ${serverId} ${uri}.\nReason: ${reason}`
-      : `The user denied MCP resource read ${serverId} ${uri}.`,
-  mcpResourceReadAllowedOnce: (serverId: string, uri: string): string =>
-    `Allowed ${serverId} ${uri} once.`,
-  mcpResourceReadAllowedForWorkerSession: (serverId: string, uri: string): string =>
-    `Allowed ${serverId} ${uri} for this worker session.`,
-  mcpResourceReadAllowedFromPersistentConfig: (serverId: string, uri: string): string =>
-    `Allowed ${serverId} ${uri} from persistent config for this task.`,
-  mcpResourceReadAllowedAndPersisted: (serverId: string, uri: string): string =>
-    `Allowed ${serverId} ${uri} and updated Sandy's config file for future suitable tasks.`,
   mcpResourceReadProgress: (status: string, serverId: string, uri: string): string =>
     `MCP ${status}: ${serverId} ${uri}`,
-  httpTokenDenied: (tokenId: string, host: string, reason?: string): string =>
-    reason
-      ? `The user denied HTTP token use ${tokenId} for host ${host}.\nReason: ${reason}`
-      : `The user denied HTTP token use ${tokenId} for host ${host}.`,
-  httpTokenAllowedOnce: (tokenId: string, host: string): string =>
-    `Allowed HTTP token ${tokenId} for host ${host} once.`,
-  httpTokenAllowedForWorkerSession: (tokenId: string, host: string): string =>
-    `Allowed HTTP token ${tokenId} for host ${host} for this worker session.`,
-  httpTokenAllowedFromPersistentConfig: (tokenId: string, host: string): string =>
-    `Allowed HTTP token ${tokenId} for host ${host} from persistent config for this task.`,
-  httpTokenAllowedAndPersisted: (tokenId: string, host: string): string =>
-    `Allowed HTTP token ${tokenId} for host ${host} and updated Sandy's config file for future suitable tasks.`,
-  httpTokenAlreadyConsumed: (tokenId: string, host: string): string =>
-    `One-shot HTTP token grant ${tokenId} for host ${host} has already been consumed.`,
-  httpTokenProxyRejected: (tokenId: string): string =>
-    `HTTP proxy rejected request for token ${tokenId} because no approval is active. Emit SANDY_REQUEST_HTTP_TOKEN for that token and wait for host approval before retrying.`,
-  httpTokenNotConfigured: (tokenId: string): string =>
-    `HTTP token "${tokenId}" is not configured in Sandy's config file.`,
-  httpTokenHostNotAllowed: (tokenId: string, host: string): string =>
-    `Host "${host}" is not in the configured allowed_hosts for token ${tokenId}.`,
-  hostDirectoryAccessDenied: (path: string, level: string, reason?: string): string =>
-    reason
-      ? `The user denied host directory access to ${path} (${level}).\nReason: ${reason}`
-      : `The user denied host directory access to ${path} (${level}).`,
-  hostDirectoryAccessAllowedForWorkerSession: (path: string, level: string): string =>
-    `Allowed host directory access to ${path} (${level}) for this worker session.`,
-  hostDirectoryAccessAllowedFromPersistentConfig: (path: string, level: string): string =>
-    `Allowed host directory access to ${path} (${level}) from persistent config for this task.`,
-  hostDirectoryAccessAllowedAndPersisted: (path: string, level: string): string =>
-    `Allowed host directory access to ${path} (${level}) and updated Sandy's config file for future suitable tasks.`,
-  hostDirectoryAccessFailed: (path: string, error: string): string =>
-    `Host directory access request for ${path} failed: ${error}`,
-  hostDirectoryNotFound: (path: string): string =>
-    `Host directory not found or not accessible: ${path}`,
-  skillMutationDenied: (operation: string, skillId: string, reason?: string): string =>
-    reason
-      ? `Denied ${operation} skill "${skillId}".\nReason: ${reason}`
-      : `Denied ${operation} skill "${skillId}".`,
-  skillMutationApproved: (operation: string, skillId: string): string =>
-    `Approved ${operation} skill "${skillId}".`,
-  skillMutationFailed: (operation: string, skillId: string, error: string): string =>
-    `Failed to ${operation} skill "${skillId}": ${error}`,
-  jobMutationDenied: (operation: string, jobId: string, reason?: string): string =>
-    reason
-      ? `Denied ${operation} job "${jobId}".\nReason: ${reason}`
-      : `Denied ${operation} job "${jobId}".`,
-  jobDoesNotExist: (jobId: string): string => `Job ${jobId} does not exist.`,
-  jobMutationApproved: (operation: string, jobId: string): string =>
-    `Approved ${operation} job "${jobId}".`,
-  jobMutationFailed: (operation: string, jobId: string, error: string): string =>
-    `Failed to ${operation} job "${jobId}": ${error}`,
   scheduledJobBlocked: (jobName: string, taskName: string): string =>
     `A scheduled job (${jobName}) is waiting to interact, but task "${taskName}" is still active.`,
   scheduledJobBecameInteractive: (taskName: string, jobName: string | null): string => {
@@ -176,52 +90,7 @@ export const messages = {
       ? `${label} needs your attention: ${message}`
       : `${label} needs your attention.`;
   },
-  requestInteractionApproved: (): string =>
-    "The task has been promoted to interactive mode. The user can now see your output and respond.",
-  requestInteractionAlreadyInteractive: (): string =>
-    "This task is already in interactive mode. No promotion is needed.",
-  requestInteractionAlreadyRequested: (): string =>
-    "This task is already waiting to become interactive. Sandy will notify you once the user can see your output.",
-  terminateTaskApproved: (): string =>
-    "This task has been marked for completion. Sandy will finalize it after the current turn.",
-  terminateTaskNotJobTask: (): string =>
-    "This tool is only available for scheduled job tasks. User-launched tasks are already interactive and can be cancelled by the user.",
 } as const;
-
-function formatCommandForChannel(command: string, channelFormatting: ChannelFormatting | null): string {
-  if (!channelFormatting) {
-    return command;
-  }
-
-  switch (channelFormatting.markup) {
-    case "plain_text":
-      return command;
-
-    case "telegram_markdown":
-      return wrapMarkdownCode(command);
-
-    case "matrix_html":
-      return `<code>${command}</code>`;
-
-    default:
-      return assertNever(channelFormatting.markup);
-  }
-}
-
-function wrapMarkdownCode(text: string): string {
-  const backtickRuns = text.match(/`+/g) ?? [];
-  const longestRun = backtickRuns.reduce((max, run) => Math.max(max, run.length), 0);
-  const fence = "`".repeat(longestRun + 1);
-  const needsPadding = text.startsWith("`") || text.endsWith("`");
-  const paddedText = needsPadding ? ` ${text} ` : text;
-  return `${fence}${paddedText}${fence}`;
-}
-
-function describeInteractiveTask(taskName: string, jobName: string | null): string {
-  return jobName ? `Scheduled job "${jobName}"` : `Task "${taskName}"`;
-}
-
-
 
 export const mcpAdminMessages = {
   oauthLoginUnsupported: (serverId: string): string =>
@@ -308,6 +177,39 @@ export const matrixAdminMessages = {
   alreadyVerified: (): string =>
     "This device is already verified.",
 } as const;
+
+function formatCommandForChannel(command: string, channelFormatting: ChannelFormatting | null): string {
+  if (!channelFormatting) {
+    return command;
+  }
+
+  switch (channelFormatting.markup) {
+    case "plain_text":
+      return command;
+
+    case "telegram_markdown":
+      return wrapMarkdownCode(command);
+
+    case "matrix_html":
+      return `<code>${command}</code>`;
+
+    default:
+      return assertNever(channelFormatting.markup);
+  }
+}
+
+function wrapMarkdownCode(text: string): string {
+  const backtickRuns = text.match(/`+/g) ?? [];
+  const longestRun = backtickRuns.reduce((max, run) => Math.max(max, run.length), 0);
+  const fence = "`".repeat(longestRun + 1);
+  const needsPadding = text.startsWith("`") || text.endsWith("`");
+  const paddedText = needsPadding ? ` ${text} ` : text;
+  return `${fence}${paddedText}${fence}`;
+}
+
+function describeInteractiveTask(taskName: string, jobName: string | null): string {
+  return jobName ? `Scheduled job "${jobName}"` : `Task "${taskName}"`;
+}
 
 function describePrivilegeRequest(request: PrivilegeRequest): string {
   if (request.kind === "mcp_tool_call") {
