@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { builtInSkillsRuntimeDirectory } from "./state-paths.js";
 
 export type BuiltInSkillDefinition = {
@@ -68,7 +68,6 @@ export function getBuiltInSkillDefinitions(): readonly BuiltInSkillDefinition[] 
 
 export function materializeBuiltInSkillsDirectory(configDirectory: string): string {
   const runtimeDirectory = builtInSkillsRuntimeDirectory(configDirectory);
-  rmSync(runtimeDirectory, { recursive: true, force: true });
   mkdirSync(runtimeDirectory, { recursive: true });
 
   for (const skill of builtInSkills) {
