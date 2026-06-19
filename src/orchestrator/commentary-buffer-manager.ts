@@ -1,4 +1,5 @@
 import type { ChatId } from "../types.js";
+import { logger } from "../logger.js";
 import type { TimerControls } from "./blocked-job-reminder-scheduler.js";
 
 const COMMENTARY_FLUSH_DELAY_MS = 60_000;
@@ -98,7 +99,14 @@ export class CommentaryBufferManager {
     }
     this.clearTimer(taskId);
     const timeout = this.setTimeoutImpl(() => {
-      void this.flushOnTimeout(taskId, buffer.chatId);
+      void this.flushOnTimeout(taskId, buffer.chatId).catch((error) => {
+        logger.error(
+          "task.commentary_timeout_flush_failed",
+          error,
+          "Unknown commentary timeout flush failure.",
+          { taskId, chatId: buffer.chatId },
+        );
+      });
     }, COMMENTARY_FLUSH_DELAY_MS);
     this.timers.set(taskId, timeout);
   }

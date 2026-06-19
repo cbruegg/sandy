@@ -1,5 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { configureLogger } from "../logger.js";
 import { InMemorySessionStore } from "../session/in-memory-session-store.js";
 import { ActiveTaskState } from "../types.js";
 import type { TaskOrigin } from "../types.js";
@@ -128,4 +129,45 @@ test("commentary timeout flush waits for the visible slot", async () => {
   assert.equal(channel.taskUpdates.length, 2);
   assert.equal(channel.taskUpdates[0]?.text, 'Scheduled job "Daily cleanup" is now interactive. The next update or request comes from this task.');
   assert.equal(channel.taskUpdates[1]?.text, "Buffered commentary");
+});
+
+test("commentary timeout flush logs rejected flushes instead of leaking unhandled rejections", async () => {
+  const timers = new FakeTimers();
+  const logs: Array<{ event: string; data?: Record<string, unknown> }> = [];
+
+  configureLogger({
+    minLevel: "debug",
+    forwardLog: (payload) => {
+      logs.push({ event: payload.event, data: payload.data });
+    },
+  });
+
+  try {
+    const commentaryBuffer = new CommentaryBufferManager(
+      async () => {
+        throw new Error("slot no longer available");
+      },
+      {
+        now: () => timers.now,
+        setTimeoutImpl: timers.setTimeoutImpl,
+        clearTimeoutImpl: timers.clearTimeoutImpl,
+      },
+    );
+
+    commentaryBuffer.bufferCommentary("job-task", "chat-slot", "Buffered commentary");
+
+    await timers.advanceBy(60_001);
+
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0]?.event, "task.commentary_timeout_flush_failed");
+    assert.equal(logs[0]?.data?.["taskId"], "job-task");
+    assert.equal(logs[0]?.data?.["chatId"], "chat-slot");
+    assert.equal(logs[0]?.data?.["message"], "slot no longer available");
+  } finally {
+    configureLogger({
+      minLevel: "info",
+      outputMode: "split",
+      forwardLog: undefined,
+    });
+  }
 });
