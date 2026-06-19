@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import type { ChatId } from "../types.js";
-import { messages } from "../messages.js";
+import { messages } from "../messages-to-user.js";
 import { BlockedJobReminderScheduler, type BlockedJobReminderContext } from "./blocked-job-reminder-scheduler.js";
 import { RecordingChannel } from "./test-helpers.js";
 

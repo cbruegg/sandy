@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { messages } from "../messages.js";
+import { messages } from "../messages-to-user.js";
 import {
   contextTexts,
   createTestOrchestrator,

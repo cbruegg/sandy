@@ -4,7 +4,8 @@ import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import type { HostDirectoryAccessLevel } from "../hostfs/path-policy.js";
 import type { JobMutationRequest } from "../jobs/job-types.js";
 import type { JobService } from "../jobs/job-service.js";
-import { messages } from "../messages.js";
+import { messages } from "../messages-to-agent.js";
+import { messages as userMessages } from "../messages-to-user.js";
 import { dirname } from "node:path";
 import { resolveAbsoluteHostPath } from "../host-paths.js";
 import type { SandboxTaskBundle } from "../sandbox/sandbox-runner.js";
@@ -83,7 +84,7 @@ export class WorkerToolsHandler {
       operation: async (channel) => {
         await channel.sendTaskUpdate(
           input.chatId,
-          messages.jobRequestsInteraction(
+          userMessages.jobRequestsInteraction(
             input.task.taskName,
             input.task.origin.kind === "launchedByJob" ? input.task.origin.jobName : null,
             input.message,

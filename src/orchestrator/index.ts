@@ -1,5 +1,5 @@
 import { logger } from "../logger.js";
-import { messages } from "../messages.js";
+import { messages } from "../messages-to-user.js";
 import type { SandyOrchestratorDependencies, SupportedChatEvent } from "./shared.js";
 import { describeUserMessageForMainAgent } from "./task-lifecycle.js";
 import { buildWorkerFollowUpInput } from "./worker-input.js";

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { messages } from "../messages.js";
+import { messages } from "../messages-to-agent.js";
 import type { ActiveTaskState, PrivilegeRequest, PrivilegeResolutionResult } from "../types.js";
 import { approvedPrivilegeResult } from "./privilege-results.js";
 import { grantHostDirectoryWithMessage } from "./privilege-resolvers.js";

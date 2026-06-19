@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { SessionStore } from "../session/in-memory-session-store.js";
 import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
 import type { PrivilegeResolutionResult } from "../types.js";
-import { messages } from "../messages.js";
+import { messages } from "../messages-to-agent.js";
 import type { ActiveTaskState } from "../types/task-state.js";
 
 

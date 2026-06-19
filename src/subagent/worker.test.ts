@@ -1,7 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { type Input, type Thread } from "@openai/codex-sdk";
-import { messages } from "../messages.js";
+import { messages } from "../messages-to-user.js";
 import { AppServerWorkerSession, type StreamTurnResult } from "./worker-app-server.js";
 import {
   buildTaskBecameInteractiveInput,
