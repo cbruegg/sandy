@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { type Input, type Thread } from "@openai/codex-sdk";
+import { type Input } from "@openai/codex-sdk";
 import { messages } from "../messages.js";
 import { AppServerWorkerSession, type StreamTurnResult } from "./worker-app-server.js";
 import {
@@ -11,7 +11,6 @@ import {
   buildTaskSummaryInput,
   createWorkerCommandProcessor,
   streamAppServerTurn,
-  streamTurn,
 } from "./worker.js";
 import type { ChannelFormatting, HostCommand, PrivilegeResolutionResult, SubAgentEvent } from "../types.js";
 import { parseSubAgentEvent } from "../types.js";
@@ -567,50 +566,6 @@ test("parseSubAgentEvent accepts task-summary events", () => {
     type: "task_summary",
     summary: "Task completed successfully",
   });
-});
-
-test("streamTurn ignores empty assistant messages", async () => {
-  const writes: string[] = [];
-  const originalWrite = process.stdout.write.bind(process.stdout);
-  const mockWrite: typeof process.stdout.write = (
-    chunk,
-    encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
-    callback?: (err?: Error | null) => void,
-  ) => {
-    writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
-    if (typeof encodingOrCallback === "function") {
-      encodingOrCallback();
-    } else {
-      callback?.();
-    }
-    return true;
-  };
-  process.stdout.write = mockWrite;
-
-  try {
-    const thread = {
-      async runStreamed() {
-        return {
-          events: (async function* () {
-            yield {
-              type: "item.completed",
-              item: {
-                type: "agent_message",
-                text: "",
-              },
-            };
-          })(),
-        };
-      },
-    } as unknown as Thread;
-
-    const sawTerminalError = await streamTurn(thread, "Inspect the reel.");
-
-    assert.equal(sawTerminalError.sawTerminalError, false);
-    assert.deepEqual(writes, []);
-  } finally {
-    process.stdout.write = originalWrite;
-  }
 });
 
 test("worker emits task_done only after mark_finished", async () => {
