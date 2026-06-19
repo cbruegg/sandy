@@ -40,6 +40,16 @@ import type { JobService } from "../jobs/job-service.js";
 import type { JobDefinition } from "../jobs/job-validation.js";
 import type { JobMutationRequest } from "../jobs/job-types.js";
 
+/**
+ * A CommentaryBufferManager that silently discards all buffered commentary.
+ * Use when the test does not care about commentary flushes (e.g. routing,
+ * privileges, or task-lifecycle tests that aren't specifically testing
+ * commentary buffer behavior).
+ */
+export function createNoopCommentaryBuffer(): CommentaryBufferManager {
+  return new CommentaryBufferManager(async () => {});
+}
+
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
   markup: "telegram_markdown",
@@ -386,7 +396,7 @@ export function createTestOrchestrator(options: {
   hostfsBroker?: HostfsBroker;
   skillService?: SkillService;
   taskCoordinator?: TaskCoordinator;
-  commentaryBuffer?: CommentaryBufferManager;
+  commentaryBuffer: CommentaryBufferManager;
   jobApprovalStore?: JobApprovalStoreApi;
   fileCopySpy?: FileCopySpy;
 }) {
@@ -404,17 +414,7 @@ export function createTestOrchestrator(options: {
       await activeTaskRuntimes.notifyTaskBecameInteractive(taskId);
     },
   });
-  const commentaryBuffer = options.commentaryBuffer ?? new CommentaryBufferManager(
-    async (taskId, chatId, text) => {
-      const task = store.getOrCreate(chatId).findTask(taskId)?.task;
-      if (!task) {
-        return;
-      }
-      await taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async (taskChannel) => {
-        await taskChannel.sendTaskUpdate(chatId, text);
-      });
-    },
-  );
+  const commentaryBuffer = options.commentaryBuffer;
   const coreDeps: OrchestratorCoreDependencies = {
     mainAgent: options.mainAgent,
     sandboxRunner: runner,

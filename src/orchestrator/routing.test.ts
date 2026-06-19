@@ -2,6 +2,7 @@ import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { messages } from "../messages.js";
 import {
+  createNoopCommentaryBuffer,
   createTestOrchestrator,
   expectDefined,
   StubMainAgent,
@@ -16,7 +17,7 @@ test("orchestrator accepts active-task output without storing host-side history"
     taskName: "issue-investigation",
     taskLanguage: "English",
   });
-  const { orchestrator, runner, store } = createTestOrchestrator({ mainAgent });
+  const { orchestrator, runner, store } = createTestOrchestrator({ mainAgent, commentaryBuffer: createNoopCommentaryBuffer() });
 
   await orchestrator.handleChatEvent({
     kind: "user_message",
@@ -56,6 +57,7 @@ test("orchestrator reports top-level chat event failures back to the user", asyn
         throw new Error("You've hit your usage limit.");
       },
     },
+    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -83,6 +85,7 @@ test("user messages route to an interacting scheduled job after waiting behind a
       taskName: "user-task",
       taskLanguage: "English",
     }),
+    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
