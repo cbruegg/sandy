@@ -1161,6 +1161,96 @@ test("denial without an inline reason prompts for a reason and routes it back to
   assert.equal(session.visibleTask?.pendingPrivilegeRequest, null);
 });
 
+test("resolved denial restores task state before sending the channel notification", async () => {
+  class SlowDenialNotificationChannel extends RecordingChannel {
+    public pauseDenialNotification = false;
+    public denialNotificationStarted = false;
+    private resumeDenialNotification: (() => void) | null = null;
+
+    override async sendText(chatId: string, text: string): Promise<void> {
+      if (this.pauseDenialNotification && /denied/i.test(text)) {
+        this.denialNotificationStarted = true;
+        await new Promise<void>((resolve) => {
+          this.resumeDenialNotification = resolve;
+        });
+      }
+      await super.sendText(chatId, text);
+    }
+
+    resume(): void {
+      const resume = this.resumeDenialNotification;
+      assert.ok(resume);
+      this.resumeDenialNotification = null;
+      resume();
+    }
+  }
+
+  const channel = new SlowDenialNotificationChannel();
+  const { orchestrator, runner, store } = createTestOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Add a Todoist task.",
+      taskName: "todoist-deny-race",
+      taskLanguage: "English",
+    }),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-deny-race",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Add a Todoist task",
+    rawText: "Add a Todoist task",
+    attachments: [],
+  });
+
+  const taskId = expectDefined(runner.launches[0]?.taskId, "Expected launched task.");
+  const approval = orchestrator.authorizeMcpToolCall({
+    taskId,
+    serverId: "todoist",
+    toolName: "addTask",
+    arguments: { content: "Buy milk" },
+  });
+  await waitFor(() => channel.privilegeRequests.length === 1);
+  const request = expectDefined(channel.privilegeRequests[0]?.request, "Expected privilege request.");
+
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-deny-race",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    decision: "deny",
+    requestId: request.requestId,
+  });
+  await waitFor(() => channel.denialReasonPrompts.length === 1);
+
+  channel.pauseDenialNotification = true;
+  const responseHandling = orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-deny-race",
+    messageId: "3",
+    timestamp: "2026-04-01T00:00:11.000Z",
+    text: "Too risky for now",
+    rawText: "Too risky for now",
+    attachments: [],
+  });
+
+  const result = await approval;
+  assert.equal(result.outcome, "denied");
+  await waitFor(() => channel.denialNotificationStarted);
+  const session = store.getOrCreate("chat-deny-race");
+  assert.equal(session.visibleTask?.status, "running");
+  assert.equal(session.visibleTask?.pendingPrivilegeRequest, null);
+
+  await runner.emit({ type: "task_done" }, taskId);
+  assert.equal(session.visibleTask, null);
+
+  channel.resume();
+  await responseHandling;
+});
+
 test("denial reason can be skipped and the agent still receives the canned denial", async () => {
   const { orchestrator, runner, channel, store } = createTestOrchestrator({
     mainAgent: new StubMainAgent({

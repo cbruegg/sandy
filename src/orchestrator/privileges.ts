@@ -180,10 +180,10 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     } else if (isMcpPrivilegeRequest(request)) {
       this.activeTasks.resolvePendingMcpPrivilege(request.requestId, result);
     }
-    await this.sendPrivilegeResolutionMessage(session.chatId, activeTask.taskId, activeTask.taskName, result);
-
     activeTask.pendingPrivilegeRequest = null;
     activeTask.moveToState("running");
+
+    await this.sendPrivilegeResolutionMessage(session.chatId, activeTask.taskId, activeTask.taskName, result);
   }
 
   async authorizeMcpToolCall(input: {
