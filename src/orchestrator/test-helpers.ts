@@ -188,6 +188,7 @@ class FakeSandboxHandle implements SandboxHandle {
   public markFinishedCalls = 0;
   public closeCalls = 0;
   public readonly cancellations: string[] = [];
+  public closeError: Error | null = null;
 
   getTaskSharePath(): string {
     if (!this.taskSharePath) {
@@ -222,6 +223,11 @@ class FakeSandboxHandle implements SandboxHandle {
 
   close(): Promise<void> {
     this.closeCalls += 1;
+    if (this.closeError) {
+      const error = this.closeError;
+      this.closeError = null;
+      return Promise.reject(error);
+    }
     return Promise.resolve();
   }
 
