@@ -136,7 +136,7 @@ test("orchestrator keeps completed-task summary pending until the user sends ano
     attachments: [],
   });
 
-  await runner.emit({ type: "assistant_output", text: "The environment has 8 CPUs." });
+  await runner.emit({ type: "assistant_output", text: "The environment has 8 CPUs.", phase: null });
   await runner.emit({
     type: "task_summary",
     summary: [
@@ -324,7 +324,7 @@ test("orchestrator releases completed-task output only when the user continues n
     attachments: [],
   });
 
-  await runner.emit({ type: "assistant_output", text: "The environment has 8 CPUs." });
+  await runner.emit({ type: "assistant_output", text: "The environment has 8 CPUs.", phase: null });
   await runner.emit({
     type: "task_summary",
     summary: [
@@ -372,7 +372,7 @@ test("orchestrator discards completed-task output when the user sends a danger r
     attachments: [],
   });
 
-  await runner.emit({ type: "assistant_output", text: "Potentially unsafe filesystem output" });
+  await runner.emit({ type: "assistant_output", text: "Potentially unsafe filesystem output", phase: null });
   await runner.emit({
     type: "task_summary",
     summary: [
@@ -758,7 +758,7 @@ test("silent job task progress updates are suppressed", async () => {
   const taskId = await taskLifecycle.launchJobTask(job, "chat-silent-progress", null);
 
   await runner.emit({ type: "progress", message: "Cleaning up old files." }, taskId);
-  await runner.emit({ type: "assistant_output", text: "I'm working on the cleanup." }, taskId);
+  await runner.emit({ type: "assistant_output", text: "I'm working on the cleanup.", phase: null }, taskId);
 
   // Progress and assistant_output should be suppressed for a silent job task.
   assert.equal(channel.taskUpdates.length, 0);
@@ -1098,4 +1098,3 @@ test("privilege prompt flushes commentary buffer before showing the request", as
   });
   await mcpPromise;
 });
-

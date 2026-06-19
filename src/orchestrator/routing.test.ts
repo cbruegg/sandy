@@ -31,6 +31,7 @@ test("orchestrator accepts active-task output without storing host-side history"
   await runner.emit({
     type: "assistant_output",
     text: "Need clarification about the target branch.",
+    phase: null,
   });
 
   await orchestrator.handleChatEvent({

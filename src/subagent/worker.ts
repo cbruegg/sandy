@@ -129,6 +129,7 @@ function handleTaskTurnEvent(event: ThreadEvent): ThreadEventDisposition {
         writeSubAgentEvent({
           type: "assistant_output",
           text: event.item.text,
+          phase: null,
         });
       }
 

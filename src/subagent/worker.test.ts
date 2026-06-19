@@ -697,7 +697,8 @@ test("streamAppServerTurn emits completed assistant messages", async () => {
         return false;
       },
       async *streamTurn() {
-        yield { method: "item/completed", params: { item: { type: "agentMessage", id: "item-1", text: "Using the Todoist skill.", phase: null, memoryCitation: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 } };
+        yield { method: "item/completed", params: { item: { type: "agentMessage", id: "item-1", text: "Checking the Todoist skill.", phase: "commentary", memoryCitation: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 } };
+        yield { method: "item/completed", params: { item: { type: "agentMessage", id: "item-2", text: "Using the Todoist skill.", phase: null, memoryCitation: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 } };
         yield { method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "full", status: "completed", error: null, startedAt: null, completedAt: null, durationMs: null } } };
       },
     };
@@ -713,7 +714,10 @@ test("streamAppServerTurn emits completed assistant messages", async () => {
 
     const events = writes.map((entry) => JSON.parse(entry.trim()) as SubAgentEvent);
     assert.equal(sawTerminalError.sawTerminalError, false);
-    assert.deepEqual(events, [{ type: "assistant_output", text: "Using the Todoist skill." }]);
+    assert.deepEqual(events, [
+      { type: "assistant_output", text: "Checking the Todoist skill.", phase: "commentary" },
+      { type: "assistant_output", text: "Using the Todoist skill.", phase: null },
+    ]);
   } finally {
     process.stdout.write = originalWrite;
   }
