@@ -5,6 +5,11 @@ const COMMENTARY_FLUSH_DELAY_MS = 60_000;
 
 type CommentaryFlushCallback = (taskId: string, chatId: ChatId, text: string) => Promise<void>;
 
+type BufferedCommentary = {
+  readonly chatId: ChatId;
+  readonly lines: string[];
+};
+
 /**
  * Buffers commentary-phase assistant output per task and flushes it after a
  * configurable idle delay unless non-commentary output arrives first.
@@ -13,7 +18,7 @@ type CommentaryFlushCallback = (taskId: string, chatId: ChatId, text: string) =>
  * deterministically.
  */
 export class CommentaryBufferManager {
-  private readonly buffers = new Map<string, string[]>();
+  private readonly buffers = new Map<string, BufferedCommentary>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly setTimeoutImpl: typeof setTimeout;
   private readonly clearTimeoutImpl: typeof clearTimeout;
@@ -32,10 +37,10 @@ export class CommentaryBufferManager {
     if (this.stopped) {
       return;
     }
-    const buffer = this.buffers.get(taskId) ?? [];
-    buffer.push(text.trim());
+    const buffer = this.buffers.get(taskId) ?? { chatId, lines: [] };
+    buffer.lines.push(text.trim());
     this.buffers.set(taskId, buffer);
-    this.scheduleFlush(taskId, chatId);
+    this.scheduleFlush(taskId);
   }
 
   /**
@@ -46,12 +51,12 @@ export class CommentaryBufferManager {
   takeBuffer(taskId: string): string | null {
     this.clearTimer(taskId);
     const buffer = this.buffers.get(taskId);
-    if (!buffer || buffer.length === 0) {
+    if (!buffer || buffer.lines.length === 0) {
       this.buffers.delete(taskId);
       return null;
     }
     this.buffers.delete(taskId);
-    return buffer.join("\n\n");
+    return buffer.lines.join("\n\n");
   }
 
   /** Restart the fallback timer for any buffered tasks in this chat. */
@@ -59,8 +64,10 @@ export class CommentaryBufferManager {
     if (this.stopped) {
       return;
     }
-    for (const [taskId] of this.buffers) {
-      this.scheduleFlush(taskId, chatId);
+    for (const [taskId, buffer] of this.buffers) {
+      if (buffer.chatId === chatId) {
+        this.scheduleFlush(taskId);
+      }
     }
   }
 
@@ -84,10 +91,14 @@ export class CommentaryBufferManager {
   // Internals
   // ---------------------------------------------------------------------------
 
-  private scheduleFlush(taskId: string, chatId: ChatId): void {
+  private scheduleFlush(taskId: string): void {
+    const buffer = this.buffers.get(taskId);
+    if (!buffer) {
+      return;
+    }
     this.clearTimer(taskId);
     const timeout = this.setTimeoutImpl(() => {
-      void this.flushOnTimeout(taskId, chatId);
+      void this.flushOnTimeout(taskId, buffer.chatId);
     }, COMMENTARY_FLUSH_DELAY_MS);
     this.timers.set(taskId, timeout);
   }

@@ -405,8 +405,14 @@ export function createTestOrchestrator(options: {
     },
   });
   const commentaryBuffer = options.commentaryBuffer ?? new CommentaryBufferManager(
-    async (_taskId, chatId, text) => {
-      await channel.sendTaskUpdate(chatId, text);
+    async (taskId, chatId, text) => {
+      const task = store.getOrCreate(chatId).findTask(taskId)?.task;
+      if (!task) {
+        return;
+      }
+      await taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async (taskChannel) => {
+        await taskChannel.sendTaskUpdate(chatId, text);
+      });
     },
   );
   const coreDeps: OrchestratorCoreDependencies = {
