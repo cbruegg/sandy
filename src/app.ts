@@ -44,6 +44,7 @@ export async function startApp(): Promise<void> {
 
   // ── 3. Core stores ────────────────────────────────────────────────────
   const coreStores = createCoreStoresLayer({ config });
+  coreStores.skillService.materializeBuiltInSkillsDirectory();
 
   // ── 4. Main agent ──────────────────────────────────────────────────────
   const mempalaceAvailable = config.memory.enabled && isMemPalaceAvailable();

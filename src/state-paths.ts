@@ -12,6 +12,10 @@ export function jobsRoot(configDirectory: string): string {
   return join(sandyStateRoot(configDirectory), "jobs");
 }
 
+export function builtInSkillsRuntimeDirectory(configDirectory: string): string {
+  return join(sandyStateRoot(configDirectory), "skills", "builtins");
+}
+
 export function jobsFile(configDirectory: string): string {
   return join(jobsRoot(configDirectory), "jobs.json");
 }

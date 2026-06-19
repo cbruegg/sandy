@@ -7,7 +7,7 @@ import type {WorkerNetworkConfig} from "../config.js";
 import {logger, type LogLevel} from "../logger.js";
 import {hostMountPath} from "../paths.js";
 import {sharedWorkspaceMountPath} from "../shared-workspace.js";
-import {workerSkillsPath} from "../subagent/worker-codex-config.js";
+import {workerBuiltInSkillsPath, workerUserSkillsPath} from "../worker-skills-paths.js";
 import {
   parseHttpProxyContainerMessage,
   serializeHttpProxyHostMessage,
@@ -62,7 +62,8 @@ export type TaskBundleLauncherOptions = {
   /** Host-side controller control directory shared across this Sandy instance. */
   controllerControlDir: string;
   codexAuthFile: string | null;
-  getSkillsDirectory: () => string | null;
+  getUserSkillsDirectory: () => string | null;
+  getBuiltInSkillsDirectory: () => string | null;
   workerCodexBinaryPath: string;
   workerNetworkName?: string | null;
   workerNetwork: WorkerNetworkConfig;
@@ -239,9 +240,14 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
 
     dockerArgs.push("-v", `${this.options.workerCodexBinaryPath}:${workerCodexContainerPath}:ro`);
 
-    const skillsDirectory = this.options.getSkillsDirectory();
-    if (skillsDirectory) {
-      dockerArgs.push("-v", `${skillsDirectory}:${workerSkillsPath}:ro`);
+    const userSkillsDirectory = this.options.getUserSkillsDirectory();
+    if (userSkillsDirectory) {
+      dockerArgs.push("-v", `${userSkillsDirectory}:${workerUserSkillsPath}:ro`);
+    }
+
+    const builtInSkillsDirectory = this.options.getBuiltInSkillsDirectory();
+    if (builtInSkillsDirectory) {
+      dockerArgs.push("-v", `${builtInSkillsDirectory}:${workerBuiltInSkillsPath}:ro`);
     }
 
     if (networkGuard) {

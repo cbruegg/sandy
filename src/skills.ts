@@ -3,6 +3,8 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { archivedSkillsDirectory, skillsDirectory } from "./config-paths.js";
+import { getBuiltInSkillDefinitions, isBuiltInSkillId, materializeBuiltInSkillsDirectory } from "./built-in-skills.js";
+import { builtInSkillsRuntimeDirectory } from "./state-paths.js";
 
 export type SkillMetadata = {
   name: string;
@@ -141,8 +143,10 @@ async function parseExistingSkillFile(skillFilePath: string): Promise<ParsedSkil
 export class SkillService {
   private readonly skillsDirectory: string;
   private readonly archivedSkillsDir: string;
+  private readonly configDirectory: string;
 
   constructor(configDirectory: string) {
+    this.configDirectory = configDirectory;
     this.skillsDirectory = skillsDirectory(configDirectory);
     this.archivedSkillsDir = archivedSkillsDirectory(configDirectory);
   }
@@ -151,9 +155,22 @@ export class SkillService {
     return this.skillsDirectory;
   }
 
+  getBuiltInSkillsDirectory(): string {
+    return builtInSkillsRuntimeDirectory(this.configDirectory);
+  }
+
+  materializeBuiltInSkillsDirectory(): string {
+    return materializeBuiltInSkillsDirectory(this.configDirectory);
+  }
+
   getSkills(): SkillMetadata[] {
+    const builtInMetadata = getBuiltInSkillDefinitions().map((skill) => ({
+      name: skill.name,
+      description: skill.description,
+    }));
+
     if (!existsSync(this.skillsDirectory)) {
-      return [];
+      return builtInMetadata;
     }
 
     let entries: Dirent[];
@@ -166,9 +183,13 @@ export class SkillService {
       throw new Error(`Failed to read Sandy skills directory at ${this.skillsDirectory}: ${detail}`, { cause: error });
     }
 
-    return entries
+    const userMetadata = entries
       .filter((entry) => entry.isDirectory())
       .flatMap((entry) => {
+        if (isBuiltInSkillId(entry.name)) {
+          return [];
+        }
+
         const skillFilePath = join(this.skillsDirectory, entry.name, "SKILL.md");
         if (!existsSync(skillFilePath)) {
           return [];
@@ -176,10 +197,13 @@ export class SkillService {
 
         return [parseSkillMetadata(readSkillFile(skillFilePath), skillFilePath)];
       });
+
+    return [...builtInMetadata, ...userMetadata];
   }
 
   async createSkill(input: CreateSkillInput): Promise<void> {
     assertValidSkillId(input.skillId);
+    this.assertMutableSkillId(input.skillId);
     const skillDir = join(this.skillsDirectory, input.skillId);
     if (existsSync(skillDir)) {
       throw new Error(`Skill "${input.skillId}" already exists.`);
@@ -191,6 +215,7 @@ export class SkillService {
 
   async updateSkill(input: UpdateSkillInput): Promise<void> {
     assertValidSkillId(input.skillId);
+    this.assertMutableSkillId(input.skillId);
     const skillDir = join(this.skillsDirectory, input.skillId);
     if (!existsSync(skillDir)) {
       throw new Error(`Skill "${input.skillId}" does not exist.`);
@@ -207,6 +232,7 @@ export class SkillService {
 
   async deleteSkill(input: DeleteSkillInput): Promise<void> {
     assertValidSkillId(input.skillId);
+    this.assertMutableSkillId(input.skillId);
     const skillDir = join(this.skillsDirectory, input.skillId);
     if (!existsSync(skillDir)) {
       throw new Error(`Skill "${input.skillId}" does not exist.`);
@@ -216,6 +242,7 @@ export class SkillService {
 
   async archiveSkill(skillId: string): Promise<void> {
     assertValidSkillId(skillId);
+    this.assertMutableSkillId(skillId);
 
     const sourceDirectory = join(this.skillsDirectory, skillId);
     await mkdir(this.archivedSkillsDir, { recursive: true });
@@ -226,6 +253,12 @@ export class SkillService {
         return;
       }
       throw error;
+    }
+  }
+
+  private assertMutableSkillId(skillId: string): void {
+    if (isBuiltInSkillId(skillId)) {
+      throw new Error(`Skill "${skillId}" is built in and cannot be modified.`);
     }
   }
 }

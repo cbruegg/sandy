@@ -14,6 +14,7 @@ import { TaskBundlePoolImpl } from "./task-bundle-pool.js";
 import type { ReservedTaskBundle } from "./task-bundle-types.js";
 import { SANDY_MANAGED_CONTAINER_LABEL } from "./container-label.js";
 import type { ChannelFormatting, HostCommand, SubAgentEvent, TaskInputPayload, WorkerStartConfig } from "../types.js";
+import { workerBuiltInSkillsPath, workerUserSkillsPath } from "../worker-skills-paths.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
@@ -185,7 +186,8 @@ async function launchRunnerWithChild(
     handshakeTimeoutMs?: number;
     shareRoot?: string;
     builtWorkerCodexConfigToml?: string | null;
-    getSkillsDirectory?: () => string | null;
+    getUserSkillsDirectory?: () => string | null;
+    getBuiltInSkillsDirectory?: () => string | null;
     workerCodexBinaryPath?: string;
     workerNetworkName?: string | null;
     resolveWorkerImage?: () => string;
@@ -202,7 +204,8 @@ async function launchRunnerWithChild(
     shareRoot: options?.shareRoot ?? "/tmp/sandy-test-shares",
     controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
-    getSkillsDirectory: options?.getSkillsDirectory ?? (() => null),
+    getUserSkillsDirectory: options?.getUserSkillsDirectory ?? (() => null),
+    getBuiltInSkillsDirectory: options?.getBuiltInSkillsDirectory ?? (() => null),
     workerCodexBinaryPath: options?.workerCodexBinaryPath ?? defaultWorkerCodexBinaryPath,
     workerNetworkName: options?.workerNetworkName,
     workerNetwork: {
@@ -316,7 +319,8 @@ test("DockerSandboxRunner passes the configured Codex model in the start_task pa
     shareRoot: "/tmp/sandy-test-shares",
     controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
-    getSkillsDirectory: () => null,
+    getUserSkillsDirectory: () => null,
+    getBuiltInSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetwork: {
       mode: "unrestricted",
@@ -578,7 +582,8 @@ test("DockerSandboxRunner shutdown terminates every active container it started"
     shareRoot: "/tmp/sandy-test-shares",
     controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
-    getSkillsDirectory: () => null,
+    getUserSkillsDirectory: () => null,
+    getBuiltInSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetwork: {
       mode: "unrestricted",
@@ -627,7 +632,8 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
     shareRoot,
     controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
-    getSkillsDirectory: () => null,
+    getUserSkillsDirectory: () => null,
+    getBuiltInSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetwork: {
       mode: "unrestricted",
@@ -691,7 +697,8 @@ test("DockerSandboxRunner falls back to a root Docker container when host rm fai
     shareRoot,
     controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
-    getSkillsDirectory: () => null,
+    getUserSkillsDirectory: () => null,
+    getBuiltInSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetwork: {
       mode: "unrestricted",
@@ -765,29 +772,44 @@ test("DockerSandboxRunner sends codex config TOML in start_task instead of mount
   await rm(shareRoot, { recursive: true, force: true });
 });
 
-test("DockerSandboxRunner mounts configured skills read-only into the worker", async () => {
+test("DockerSandboxRunner mounts configured user skills read-only into the worker home", async () => {
   const taskChild = new FakeChildProcess();
   const skillsDirectory = "/tmp/sandy-config/skills";
 
   const { invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
-    getSkillsDirectory: () => skillsDirectory,
+    getUserSkillsDirectory: () => skillsDirectory,
   });
 
   const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
   assert.ok(dockerRunInvocation);
-  assert.ok(dockerRunInvocation.args.includes(`${skillsDirectory}:/root/.agents/skills:ro`));
+  assert.ok(dockerRunInvocation.args.includes(`${skillsDirectory}:${workerUserSkillsPath}:ro`));
 });
 
-test("DockerSandboxRunner does not mount skills when no skills directory is configured", async () => {
+test("DockerSandboxRunner mounts built-in skills read-only into the worker cwd", async () => {
+  const taskChild = new FakeChildProcess();
+  const builtInSkillsDirectory = "/tmp/sandy-state/skills/builtins";
+
+  const { invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
+    getBuiltInSkillsDirectory: () => builtInSkillsDirectory,
+  });
+
+  const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
+  assert.ok(dockerRunInvocation);
+  assert.ok(dockerRunInvocation.args.includes(`${builtInSkillsDirectory}:${workerBuiltInSkillsPath}:ro`));
+});
+
+test("DockerSandboxRunner does not mount skills when no skills directories are configured", async () => {
   const taskChild = new FakeChildProcess();
 
   const { invocations } = await launchRunnerWithChild(taskChild, async () => {}, {
-    getSkillsDirectory: () => null,
+    getUserSkillsDirectory: () => null,
+    getBuiltInSkillsDirectory: () => null,
   });
 
   const dockerRunInvocation = invocations.find((invocation) => invocation.args[0] === "run");
   assert.ok(dockerRunInvocation);
-  assert.ok(!dockerRunInvocation.args.includes("/root/.agents/skills:ro"));
+  assert.ok(!dockerRunInvocation.args.includes(`${workerUserSkillsPath}:ro`));
+  assert.ok(!dockerRunInvocation.args.includes(`${workerBuiltInSkillsPath}:ro`));
 });
 
 test("DockerSandboxRunner mounts the host-managed worker Codex binary read-only", async () => {
@@ -849,7 +871,8 @@ test("DockerSandboxRunner launches a network guard and shares its network namesp
     shareRoot: "/tmp/sandy-test-shares",
     controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
-    getSkillsDirectory: () => null,
+    getUserSkillsDirectory: () => null,
+    getBuiltInSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetworkName: "sandy-mcp-net",
     workerNetwork: {
@@ -939,7 +962,8 @@ test("DockerSandboxRunner reports a disconnect when the network guard exits mid-
     shareRoot: "/tmp/sandy-test-shares",
     controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
-    getSkillsDirectory: () => null,
+    getUserSkillsDirectory: () => null,
+    getBuiltInSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetwork: {
       mode: "public_internet_only",
@@ -993,7 +1017,8 @@ test("DockerSandboxRunner rejects share inspection for unknown tasks", async () 
     shareRoot,
     controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
-    getSkillsDirectory: () => null,
+    getUserSkillsDirectory: () => null,
+    getBuiltInSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetwork: {
       mode: "unrestricted",
@@ -1031,7 +1056,8 @@ test("DockerSandboxRunner rejects share deletion for unknown tasks", async () =>
     shareRoot,
     controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
-    getSkillsDirectory: () => null,
+    getUserSkillsDirectory: () => null,
+    getBuiltInSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetwork: {
       mode: "unrestricted",
@@ -1100,7 +1126,8 @@ test("DockerSandboxRunner launches HTTP proxy container alongside worker", async
     shareRoot: "/tmp/sandy-test-shares",
     controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
-    getSkillsDirectory: () => null,
+    getUserSkillsDirectory: () => null,
+    getBuiltInSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetworkName: "sandy-mcp-net",
     workerNetwork: {
@@ -1219,7 +1246,8 @@ test("DockerSandboxRunner launches a namespace holder for unrestricted workers w
     shareRoot: "/tmp/sandy-test-shares",
     controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
-    getSkillsDirectory: () => null,
+    getUserSkillsDirectory: () => null,
+    getBuiltInSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetwork: {
       mode: "unrestricted",
@@ -1314,7 +1342,8 @@ test("DockerSandboxRunner adds managed label to worker, guard and proxy containe
     shareRoot: "/tmp/sandy-test-shares",
     controllerControlDir: "/tmp/sandy-controller",
     codexAuthFile: null,
-    getSkillsDirectory: () => null,
+    getUserSkillsDirectory: () => null,
+    getBuiltInSkillsDirectory: () => null,
     workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
     workerNetwork: {
       mode: "unrestricted",
