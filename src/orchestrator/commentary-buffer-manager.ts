@@ -15,7 +15,6 @@ type CommentaryFlushCallback = (taskId: string, chatId: ChatId, text: string) =>
 export class CommentaryBufferManager {
   private readonly buffers = new Map<string, string[]>();
   private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
-  private readonly now: () => number;
   private readonly setTimeoutImpl: typeof setTimeout;
   private readonly clearTimeoutImpl: typeof clearTimeout;
   private stopped = false;
@@ -24,7 +23,6 @@ export class CommentaryBufferManager {
     private readonly onFlush: CommentaryFlushCallback,
     timerControls?: TimerControls,
   ) {
-    this.now = timerControls?.now ?? (() => Date.now());
     this.setTimeoutImpl = timerControls?.setTimeoutImpl ?? setTimeout;
     this.clearTimeoutImpl = timerControls?.clearTimeoutImpl ?? clearTimeout;
   }
