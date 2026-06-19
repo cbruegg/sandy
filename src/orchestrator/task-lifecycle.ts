@@ -102,6 +102,10 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
           }
           await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async (channel) => {
             this.markTaskInteracting(session, taskId);
+            const buffered = this.deps.commentaryBuffer.takeBuffer(taskId);
+            if (buffered) {
+              await channel.sendTaskUpdate(chatId, buffered);
+            }
             await channel.sendTaskUpdate(chatId, message);
           });
           break;
@@ -114,8 +118,16 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
             });
             break;
           }
+          if (event.phase === "commentary") {
+            this.deps.commentaryBuffer.bufferCommentary(taskId, chatId, event.text);
+            break;
+          }
           await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async (channel) => {
             this.markTaskInteracting(session, taskId);
+            const buffered = this.deps.commentaryBuffer.takeBuffer(taskId);
+            if (buffered) {
+              await channel.sendTaskUpdate(chatId, buffered);
+            }
             await channel.sendTaskUpdate(chatId, event.text);
           });
           break;
@@ -447,6 +459,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     if (!task) {
       return;
     }
+    this.deps.commentaryBuffer.clear(taskId);
     const handle = this.activeTasks.getHandle(task.taskId);
     if (handle) {
       await handle.close();

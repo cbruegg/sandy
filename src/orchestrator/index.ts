@@ -32,6 +32,7 @@ export class SandyOrchestrator {
       await this.deps.destinationStore.setDefaultChatId(event.chatId);
       this.deps.taskCoordinator.onUserInteraction(event.chatId);
       if (event.kind === "user_message") {
+        this.deps.commentaryBuffer.onUserInteraction(event.chatId);
         logger.debugContent("chat.user_message", {
           chatId: event.chatId,
           messageId: event.messageId,
@@ -257,6 +258,10 @@ export class SandyOrchestrator {
       activeTask.taskId,
       activeTask.taskName,
       async (channel) => {
+        const buffered = this.deps.commentaryBuffer.takeBuffer(activeTask.taskId);
+        if (buffered) {
+          await channel.sendTaskUpdate(session.chatId, buffered);
+        }
         await channel.askForDenialReason(session.chatId, request);
       },
     );

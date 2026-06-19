@@ -441,6 +441,10 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       input.taskId,
       input.activeTask.taskName,
       async (channel) => {
+        const buffered = this.deps.commentaryBuffer.takeBuffer(input.taskId);
+        if (buffered) {
+          await channel.sendTaskUpdate(input.chatId, buffered);
+        }
         await channel.sendPrivilegeRequest(input.chatId, input.request);
       },
     );

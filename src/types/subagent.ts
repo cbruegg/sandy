@@ -11,6 +11,7 @@ const progressEventSchema = z.object({
 const assistantOutputEventSchema = z.object({
   type: z.literal("assistant_output"),
   text: z.string(),
+  phase: z.string().nullable().optional(),
 }).strict();
 
 const finalResultEventSchema = z.object({

@@ -18,6 +18,7 @@ import { ActiveTaskRuntimeRegistry } from "./active-task-runtime-registry.js";
 import type { OrchestratorCoreDependencies } from "./shared.js";
 import { OrchestratorTaskLifecycleImpl } from "./task-lifecycle.js";
 import { TaskCoordinator } from "./task-coordinator.js";
+import { CommentaryBufferManager } from "./commentary-buffer-manager.js";
 import type {
   ChannelFormatting,
   DecideContext,
@@ -385,6 +386,7 @@ export function createTestOrchestrator(options: {
   hostfsBroker?: HostfsBroker;
   skillService?: SkillService;
   taskCoordinator?: TaskCoordinator;
+  commentaryBuffer?: CommentaryBufferManager;
   jobApprovalStore?: JobApprovalStoreApi;
   fileCopySpy?: FileCopySpy;
 }) {
@@ -402,6 +404,11 @@ export function createTestOrchestrator(options: {
       await activeTaskRuntimes.notifyTaskBecameInteractive(taskId);
     },
   });
+  const commentaryBuffer = options.commentaryBuffer ?? new CommentaryBufferManager(
+    async (_taskId, chatId, text) => {
+      await channel.sendTaskUpdate(chatId, text);
+    },
+  );
   const coreDeps: OrchestratorCoreDependencies = {
     mainAgent: options.mainAgent,
     sandboxRunner: runner,
@@ -412,6 +419,7 @@ export function createTestOrchestrator(options: {
     hostfsBroker: options.hostfsBroker ?? createNoopHostfsBroker(),
     skillService,
     taskCoordinator,
+    commentaryBuffer,
   };
   const taskLifecycle = new OrchestratorTaskLifecycleImpl(coreDeps, activeTaskRuntimes, channel.getFormatting(), channel);
   const jobService = new FakeJobService();
@@ -454,6 +462,7 @@ export function createTestOrchestrator(options: {
     activeTaskRuntimes,
     skillService,
     taskCoordinator,
+    commentaryBuffer,
     taskLifecycle,
     privileges,
   };

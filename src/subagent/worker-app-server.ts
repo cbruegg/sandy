@@ -117,7 +117,8 @@ export async function streamAppServerTurn(options: StreamAppServerTaskTurnOption
       switch (event.method) {
         case "item/completed":
           if (event.params.item.type === "agentMessage" && event.params.item.text.trim()) {
-            sendEvent({ type: "assistant_output", text: event.params.item.text });
+            const phase: string | null | undefined = (event.params.item as Record<string, unknown>).phase as string | null | undefined;
+            sendEvent({ type: "assistant_output", text: event.params.item.text, ...(phase ? { phase } : {}) });
           }
           break;
 
