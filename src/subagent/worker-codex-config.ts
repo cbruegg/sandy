@@ -1,13 +1,11 @@
 import * as toml from "@iarna/toml";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 // The worker image composes PATH in Dockerfile. Patch that exact runtime PATH
 // into Codex config here so Codex command execution sees the same toolchain
 // while preserving any seeded MCP config copied into /root/.codex.
 export const workerCodexHomePath = "/root/.codex";
-const workerHomePath = dirname(workerCodexHomePath);
-export const workerSkillsPath = join(workerHomePath, ".agents", "skills");
 
 export function buildWorkerCodexConfigPatch(
   env: NodeJS.ProcessEnv = process.env,

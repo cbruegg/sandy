@@ -184,10 +184,16 @@ test("approved skill mutation delegates execution through the worker tools handl
     isError: false,
     message: messages.skillMutationApproved("create", "daily-report"),
   });
-  assert.deepEqual(skillService.getSkills(), [{
-    name: "Daily report",
-    description: "Generate a daily report.",
-  }]);
+  assert.deepEqual(skillService.getSkills(), [
+    {
+      name: "Notify me when X",
+      description: "Use this when the user wants Sandy to monitor a condition and notify them when it becomes true.",
+    },
+    {
+      name: "Daily report",
+      description: "Generate a daily report.",
+    },
+  ]);
 });
 
 test("request_interaction tool promotes a silent job task to interactive mode", async () => {

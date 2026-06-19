@@ -5,6 +5,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SkillService } from "./skills.js";
+import { builtInSkillsRuntimeDirectory } from "./state-paths.js";
 
 async function createTempConfigDirectory(): Promise<string> {
   return mkdtemp(join(tmpdir(), "sandy-skills-"));
@@ -25,7 +26,12 @@ test("getSkills returns no skills when the config directory has no skills folder
 
   try {
     const service = new SkillService(configDirectory);
-    assert.deepEqual(service.getSkills(), []);
+    assert.deepEqual(service.getSkills(), [
+      {
+        name: "Notify me when X",
+        description: "Use this when the user wants Sandy to monitor a condition and notify them when it becomes true.",
+      },
+    ]);
   } finally {
     await rm(configDirectory, { recursive: true, force: true });
   }
@@ -46,11 +52,16 @@ Use the Todoist MCP.
 `);
 
     const service = new SkillService(configDirectory);
-    assert.deepEqual(service.getSkills(), [{
+    assert.deepEqual(service.getSkills(), [
+      {
+        name: "Notify me when X",
+        description: "Use this when the user wants Sandy to monitor a condition and notify them when it becomes true.",
+      },
+      {
         name: "Adding task to Todoist",
         description: "When the user asks you to add a task to their Todoist, use this skill.",
-      }],
-    );
+      },
+    ]);
   } finally {
     await rm(configDirectory, { recursive: true, force: true });
   }
@@ -72,6 +83,10 @@ description: This skill should be discovered.
 
     const service = new SkillService(configDirectory);
     assert.deepEqual(service.getSkills(), [
+      {
+        name: "Notify me when X",
+        description: "Use this when the user wants Sandy to monitor a condition and notify them when it becomes true.",
+      },
       {
         name: "Alpha skill",
         description: "This skill should be discovered.",
@@ -152,6 +167,23 @@ test("getSkillsDirectory returns the skills subdirectory of the config directory
   }
 });
 
+test("getBuiltInSkillsDirectory materializes built-in skills into Sandy state", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  try {
+    const service = new SkillService(configDirectory);
+    const builtInDirectory = service.getBuiltInSkillsDirectory();
+    assert.equal(builtInDirectory, builtInSkillsRuntimeDirectory(configDirectory));
+
+    const skillFile = await readFile(join(builtInDirectory, "notify-me-when", "SKILL.md"), "utf8");
+    assert.match(skillFile, /name: Notify me when X/);
+    assert.match(skillFile, /do not invent one and do not use a default/);
+    assert.match(skillFile, /call sandy\.delete_job/);
+    assert.match(skillFile, /call sandy\.terminate_task/);
+  } finally {
+    await rm(configDirectory, { recursive: true, force: true });
+  }
+});
+
 test("getSkills discovers skills from the config directory", async () => {
   const configDirectory = await createTempConfigDirectory();
   try {
@@ -166,6 +198,10 @@ Use the Todoist MCP.
     const service = new SkillService(configDirectory);
     assert.deepEqual(service.getSkills(), [
       {
+        name: "Notify me when X",
+        description: "Use this when the user wants Sandy to monitor a condition and notify them when it becomes true.",
+      },
+      {
         name: "Adding task to Todoist",
         description: "When the user asks you to add a task to their Todoist, use this skill.",
       },
@@ -179,7 +215,12 @@ test("getSkills returns an empty array when no skills exist", async () => {
   const configDirectory = await createTempConfigDirectory();
   try {
     const service = new SkillService(configDirectory);
-    assert.deepEqual(service.getSkills(), []);
+    assert.deepEqual(service.getSkills(), [
+      {
+        name: "Notify me when X",
+        description: "Use this when the user wants Sandy to monitor a condition and notify them when it becomes true.",
+      },
+    ]);
   } finally {
     await rm(configDirectory, { recursive: true, force: true });
   }
@@ -249,6 +290,25 @@ test("createSkill rejects invalid skillIds", async () => {
     await assert.rejects(
       service.createSkill({ skillId: ".", name: "Name", description: "Description.", body: "Body" }),
       /Invalid skillId/,
+    );
+  } finally {
+    await rm(configDirectory, { recursive: true, force: true });
+  }
+});
+
+test("createSkill rejects built-in skillIds", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  try {
+    const service = new SkillService(configDirectory);
+
+    await assert.rejects(
+      service.createSkill({
+        skillId: "notify-me-when",
+        name: "Name",
+        description: "Description.",
+        body: "Body",
+      }),
+      /built in and cannot be modified/,
     );
   } finally {
     await rm(configDirectory, { recursive: true, force: true });
@@ -358,6 +418,20 @@ test("updateSkill rejects missing skills", async () => {
   }
 });
 
+test("updateSkill rejects built-in skillIds", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  try {
+    const service = new SkillService(configDirectory);
+
+    await assert.rejects(
+      service.updateSkill({ skillId: "notify-me-when", description: "Updated description." }),
+      /built in and cannot be modified/,
+    );
+  } finally {
+    await rm(configDirectory, { recursive: true, force: true });
+  }
+});
+
 test("updateSkill rejects invalid skillIds", async () => {
   const configDirectory = await createTempConfigDirectory();
   try {
@@ -421,6 +495,20 @@ test("deleteSkill rejects invalid skillIds", async () => {
     await assert.rejects(
       service.deleteSkill({ skillId: ".." }),
       /Invalid skillId/,
+    );
+  } finally {
+    await rm(configDirectory, { recursive: true, force: true });
+  }
+});
+
+test("deleteSkill rejects built-in skillIds", async () => {
+  const configDirectory = await createTempConfigDirectory();
+  try {
+    const service = new SkillService(configDirectory);
+
+    await assert.rejects(
+      service.deleteSkill({ skillId: "notify-me-when" }),
+      /built in and cannot be modified/,
     );
   } finally {
     await rm(configDirectory, { recursive: true, force: true });

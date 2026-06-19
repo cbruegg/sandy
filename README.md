@@ -29,6 +29,8 @@ The only environment variable still used for configuration is:
 If the config directory contains a sibling `skills/` folder, Sandy loads
 [skills](https://developers.openai.com/codex/skills) from there at startup.
 For the default config path, that means `~/.config/sandy/skills/`.
+Sandy also ships with built-in skills that it materializes into an internal
+state directory at runtime.
 
 Sandy also attempts to enable host-side memory via [MemPalace](https://github.com/MemPalace/mempalace).
 To make MemPalace available, install [uv](https://docs.astral.sh/uv/getting-started/installation/). When memory is enabled, Sandy runs MemPalace via `uv run --with mempalace python3 -m mempalace.mcp_server`, which automatically downloads MemPalace if needed.
@@ -218,6 +220,7 @@ Scheduled jobs:
 - Jobs reference a Sandy skill by `skillId`; worker executions are still normal Sandy sub-agent tasks and use the same sandbox and approval flow, but may have to wait for active user-invoked tasks to complete.
 - Recurring jobs have a persistent workspace directory for durable notes, caches, generated files, and job state.
 - Workers manage jobs through Sandy worker tools: `list_jobs`, `get_job`, `create_job`, `update_job`, `delete_job`, `enable_job`, `disable_job`, and `run_job_now`.
+- Sandy includes a built-in skill for requests like "notify me when X". It creates a dedicated monitoring skill plus a recurring job, but only after the user provides an explicit schedule.
 
 Codex auth behavior:
 
@@ -281,9 +284,11 @@ Worker network behavior:
 
 [Skills](https://github.com/anthropics/skills) behavior:
 
-- Sandy looks for skills only in a `skills/` directory next to the active `config.toml`.
+- Sandy loads user-authored skills from a `skills/` directory next to the active `config.toml`.
+- Sandy also includes built-in skills that it stores in an internal state directory at runtime.
 - Sandy parses only the skill `name` and `description` from the leading frontmatter block in `SKILL.md`.
 - The main agent receives only that metadata and is instructed to delegate requests that require one of those skills to a sub-agent.
+- Sandy mounts user skills for sub-agents at `$HOME/.agents/skills` and mounts built-in skills separately as repo-scoped skills at `$CWD/.agents/skills` inside the launched worker workspace.
 - Skills can be updated while Sandy is running.
 
 You can ask Sandy to create, edit, or delete skills in natural language — for example
