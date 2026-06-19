@@ -1,6 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { type Input, type Thread } from "@openai/codex-sdk";
+import { type Input } from "@openai/codex-sdk";
 import { messages } from "../messages-to-user.js";
 import { AppServerWorkerSession, type StreamTurnResult } from "./worker-app-server.js";
 import {
@@ -11,7 +11,6 @@ import {
   buildTaskSummaryInput,
   createWorkerCommandProcessor,
   streamAppServerTurn,
-  streamTurn,
 } from "./worker.js";
 import type { ChannelFormatting, HostCommand, PrivilegeResolutionResult, SubAgentEvent } from "../types.js";
 import { parseSubAgentEvent } from "../types.js";
@@ -569,50 +568,6 @@ test("parseSubAgentEvent accepts task-summary events", () => {
   });
 });
 
-test("streamTurn ignores empty assistant messages", async () => {
-  const writes: string[] = [];
-  const originalWrite = process.stdout.write.bind(process.stdout);
-  const mockWrite: typeof process.stdout.write = (
-    chunk,
-    encodingOrCallback?: BufferEncoding | ((err?: Error | null) => void),
-    callback?: (err?: Error | null) => void,
-  ) => {
-    writes.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"));
-    if (typeof encodingOrCallback === "function") {
-      encodingOrCallback();
-    } else {
-      callback?.();
-    }
-    return true;
-  };
-  process.stdout.write = mockWrite;
-
-  try {
-    const thread = {
-      async runStreamed() {
-        return {
-          events: (async function* () {
-            yield {
-              type: "item.completed",
-              item: {
-                type: "agent_message",
-                text: "",
-              },
-            };
-          })(),
-        };
-      },
-    } as unknown as Thread;
-
-    const sawTerminalError = await streamTurn(thread, "Inspect the reel.");
-
-    assert.equal(sawTerminalError.sawTerminalError, false);
-    assert.deepEqual(writes, []);
-  } finally {
-    process.stdout.write = originalWrite;
-  }
-});
-
 test("worker emits task_done only after mark_finished", async () => {
   const sentEvents: SubAgentEvent[] = [];
   const processor = createWorkerCommandProcessor({
@@ -697,7 +652,8 @@ test("streamAppServerTurn emits completed assistant messages", async () => {
         return false;
       },
       async *streamTurn() {
-        yield { method: "item/completed", params: { item: { type: "agentMessage", id: "item-1", text: "Using the Todoist skill.", phase: null, memoryCitation: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 } };
+        yield { method: "item/completed", params: { item: { type: "agentMessage", id: "item-1", text: "Checking the Todoist skill.", phase: "commentary", memoryCitation: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 } };
+        yield { method: "item/completed", params: { item: { type: "agentMessage", id: "item-2", text: "Using the Todoist skill.", phase: null, memoryCitation: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 } };
         yield { method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "full", status: "completed", error: null, startedAt: null, completedAt: null, durationMs: null } } };
       },
     };
@@ -713,7 +669,10 @@ test("streamAppServerTurn emits completed assistant messages", async () => {
 
     const events = writes.map((entry) => JSON.parse(entry.trim()) as SubAgentEvent);
     assert.equal(sawTerminalError.sawTerminalError, false);
-    assert.deepEqual(events, [{ type: "assistant_output", text: "Using the Todoist skill." }]);
+    assert.deepEqual(events, [
+      { type: "assistant_output", text: "Checking the Todoist skill.", phase: "commentary" },
+      { type: "assistant_output", text: "Using the Todoist skill.", phase: null },
+    ]);
   } finally {
     process.stdout.write = originalWrite;
   }

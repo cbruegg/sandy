@@ -5,10 +5,44 @@ import {
   contextTexts,
   createTestOrchestrator,
   expectDefined,
+  RecordingChannel,
   SequenceMainAgent,
   StubMainAgent,
 } from "./test-helpers.js";
 import type { JobDefinition } from "../jobs/job-validation.js";
+import { CommentaryBufferManager } from "./commentary-buffer-manager.js";
+
+class FakeTimers {
+  public now = 0;
+  private nextId = 1;
+  private readonly entries = new Map<number, { at: number; callback: () => void }>();
+
+  readonly setTimeoutImpl = ((callback: () => void, delay?: number) => {
+    const id = this.nextId += 1;
+    this.entries.set(id, { at: this.now + (delay ?? 0), callback });
+    return id as unknown as ReturnType<typeof setTimeout>;
+  }) as typeof setTimeout;
+
+  readonly clearTimeoutImpl = ((handle: ReturnType<typeof setTimeout>) => {
+    this.entries.delete(handle as unknown as number);
+  }) as typeof clearTimeout;
+
+  async advanceBy(ms: number): Promise<void> {
+    const target = this.now + ms;
+    while (true) {
+      const next = Array.from(this.entries.entries())
+        .sort((left, right) => left[1].at - right[1].at)[0];
+      if (!next || next[1].at > target) {
+        break;
+      }
+      this.entries.delete(next[0]);
+      this.now = next[1].at;
+      next[1].callback();
+      await Promise.resolve();
+    }
+    this.now = target;
+  }
+}
 
 test("orchestrator stages attached files into the task share before launching the worker", async () => {
   const mainAgent = new StubMainAgent({
@@ -102,7 +136,7 @@ test("orchestrator keeps completed-task summary pending until the user sends ano
     attachments: [],
   });
 
-  await runner.emit({ type: "assistant_output", text: "The environment has 8 CPUs." });
+  await runner.emit({ type: "assistant_output", text: "The environment has 8 CPUs.", phase: null });
   await runner.emit({
     type: "task_summary",
     summary: [
@@ -290,7 +324,7 @@ test("orchestrator releases completed-task output only when the user continues n
     attachments: [],
   });
 
-  await runner.emit({ type: "assistant_output", text: "The environment has 8 CPUs." });
+  await runner.emit({ type: "assistant_output", text: "The environment has 8 CPUs.", phase: null });
   await runner.emit({
     type: "task_summary",
     summary: [
@@ -338,7 +372,7 @@ test("orchestrator discards completed-task output when the user sends a danger r
     attachments: [],
   });
 
-  await runner.emit({ type: "assistant_output", text: "Potentially unsafe filesystem output" });
+  await runner.emit({ type: "assistant_output", text: "Potentially unsafe filesystem output", phase: null });
   await runner.emit({
     type: "task_summary",
     summary: [
@@ -724,7 +758,7 @@ test("silent job task progress updates are suppressed", async () => {
   const taskId = await taskLifecycle.launchJobTask(job, "chat-silent-progress", null);
 
   await runner.emit({ type: "progress", message: "Cleaning up old files." }, taskId);
-  await runner.emit({ type: "assistant_output", text: "I'm working on the cleanup." }, taskId);
+  await runner.emit({ type: "assistant_output", text: "I'm working on the cleanup.", phase: null }, taskId);
 
   // Progress and assistant_output should be suppressed for a silent job task.
   assert.equal(channel.taskUpdates.length, 0);
@@ -736,3 +770,331 @@ test("silent job task progress updates are suppressed", async () => {
   assert.equal(task.interactionState, "silent");
 });
 
+test("commentary-phase assistant_output is buffered instead of sent immediately", async () => {
+  const { orchestrator, runner, channel } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Do the thing.",
+      taskName: "commentary-task",
+      taskLanguage: "English",
+    }),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-commentary-buffer",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Do the thing",
+    rawText: "Do the thing",
+    attachments: [],
+  });
+
+  // Commentary output — should be buffered, not sent.
+  await runner.emit({ type: "assistant_output", text: "Checking prerequisites...", phase: "commentary" });
+  await runner.emit({ type: "assistant_output", text: "Still checking...", phase: "commentary" });
+
+  assert.equal(channel.taskUpdates.length, 0);
+});
+
+test("non-commentary assistant_output flushes buffered commentary first", async () => {
+  const { orchestrator, runner, channel } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Do the thing.",
+      taskName: "flush-task",
+      taskLanguage: "English",
+    }),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-flush",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Do the thing",
+    rawText: "Do the thing",
+    attachments: [],
+  });
+
+  await runner.emit({ type: "assistant_output", text: "Buffered commentary A", phase: "commentary" });
+  await runner.emit({ type: "assistant_output", text: "Buffered commentary B", phase: "commentary" });
+
+  // Non-commentary output — should flush the buffer first.
+  await runner.emit({ type: "assistant_output", text: "Real output", phase: null });
+
+  assert.equal(channel.taskUpdates.length, 2);
+  assert.equal(channel.taskUpdates[0]?.text, "Buffered commentary A\n\nBuffered commentary B");
+  assert.equal(channel.taskUpdates[1]?.text, "Real output");
+});
+
+test("progress output flushes buffered commentary first", async () => {
+  const { orchestrator, runner, channel } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Do the thing.",
+      taskName: "progress-flush-task",
+      taskLanguage: "English",
+    }),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-progress-flush",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Do the thing",
+    rawText: "Do the thing",
+    attachments: [],
+  });
+
+  await runner.emit({ type: "assistant_output", text: "Buffered commentary", phase: "commentary" });
+  await runner.emit({ type: "progress", message: "Next planned step: Deploy" });
+
+  assert.equal(channel.taskUpdates.length, 2);
+  assert.equal(channel.taskUpdates[0]?.text, "Buffered commentary");
+  assert.equal(channel.taskUpdates[1]?.text, "Next planned step: Deploy");
+});
+
+test("commentary buffer is flushed after 60s idle timeout", async () => {
+  const timers = new FakeTimers();
+  const channel = new RecordingChannel();
+
+  const commentaryBuffer = new CommentaryBufferManager(
+    async (_taskId, chatId, text) => {
+      await channel.sendTaskUpdate(chatId, text);
+    },
+    {
+      now: () => timers.now,
+      setTimeoutImpl: timers.setTimeoutImpl,
+      clearTimeoutImpl: timers.clearTimeoutImpl,
+    },
+  );
+
+  const { orchestrator, runner } = createTestOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Do the thing.",
+      taskName: "timeout-task",
+      taskLanguage: "English",
+    }),
+    commentaryBuffer,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-timeout",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Do the thing",
+    rawText: "Do the thing",
+    attachments: [],
+  });
+
+  await runner.emit({ type: "assistant_output", text: "Checking...", phase: "commentary" });
+  assert.equal(channel.taskUpdates.length, 0);
+
+  // Advance just under 60s — still no flush.
+  await timers.advanceBy(59_999);
+  assert.equal(channel.taskUpdates.length, 0);
+
+  // Advance past 60s — buffer should flush.
+  await timers.advanceBy(2);
+  assert.equal(channel.taskUpdates.length, 1);
+  assert.equal(channel.taskUpdates[0]?.text, "Checking...");
+});
+
+test("commentary timer resets on user message", async () => {
+  const timers = new FakeTimers();
+  const channel = new RecordingChannel();
+
+  const commentaryBuffer = new CommentaryBufferManager(
+    async (_taskId, chatId, text) => {
+      await channel.sendTaskUpdate(chatId, text);
+    },
+    {
+      now: () => timers.now,
+      setTimeoutImpl: timers.setTimeoutImpl,
+      clearTimeoutImpl: timers.clearTimeoutImpl,
+    },
+  );
+
+  const { orchestrator, runner } = createTestOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Do the thing.",
+      taskName: "reset-task",
+      taskLanguage: "English",
+    }),
+    commentaryBuffer,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-reset",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Do the thing",
+    rawText: "Do the thing",
+    attachments: [],
+  });
+
+  await runner.emit({ type: "assistant_output", text: "Buffered", phase: "commentary" });
+
+  // Advance 30s, then user sends another message — timer should reset.
+  await timers.advanceBy(30_000);
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-reset",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:30.000Z",
+    text: "Keep going",
+    rawText: "Keep going",
+    attachments: [],
+  });
+
+  // Advance 30s more (total 60s from first event, but only 30s from user message) — no flush yet.
+  await timers.advanceBy(30_000);
+  assert.equal(channel.taskUpdates.length, 0);
+
+  // Advance to 60s from user message — flush.
+  await timers.advanceBy(30_000);
+  assert.equal(channel.taskUpdates.length, 1);
+  assert.equal(channel.taskUpdates[0]?.text, "Buffered");
+});
+
+test("task completion clears the commentary buffer without flushing", async () => {
+  const timers = new FakeTimers();
+  const channel = new RecordingChannel();
+
+  const commentaryBuffer = new CommentaryBufferManager(
+    async (_taskId, chatId, text) => {
+      await channel.sendTaskUpdate(chatId, text);
+    },
+    {
+      now: () => timers.now,
+      setTimeoutImpl: timers.setTimeoutImpl,
+      clearTimeoutImpl: timers.clearTimeoutImpl,
+    },
+  );
+
+  const { orchestrator, runner } = createTestOrchestrator({
+    channel,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Do the thing.",
+      taskName: "clear-task",
+      taskLanguage: "English",
+    }),
+    commentaryBuffer,
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-clear",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Do the thing",
+    rawText: "Do the thing",
+    attachments: [],
+  });
+
+  await runner.emit({ type: "assistant_output", text: "Buffered commentary", phase: "commentary" });
+
+  // Task completes — buffer should be cleared, not flushed.
+  await runner.emit({ type: "task_done" });
+
+  assert.equal(channel.taskUpdates.length, 0);
+
+  // Advance past 60s — still nothing because buffer was cleared.
+  await timers.advanceBy(60_001);
+  assert.equal(channel.taskUpdates.length, 0);
+});
+
+test("task error does not flush the commentary buffer", async () => {
+  const { orchestrator, runner, channel } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Do the thing.",
+      taskName: "error-task",
+      taskLanguage: "English",
+    }),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-error",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Do the thing",
+    rawText: "Do the thing",
+    attachments: [],
+  });
+
+  await runner.emit({ type: "assistant_output", text: "Buffered commentary", phase: "commentary" });
+
+  // Task error — should NOT flush buffer, just send the error.
+  await runner.emit({ type: "task_error", message: "Something broke" });
+
+  assert.equal(channel.taskUpdates.length, 0);
+  assert.equal(channel.sentTexts.length, 2); // "Started task" + error message
+  assert.match(channel.sentTexts[1]?.text ?? "", /Something broke/);
+});
+
+test("privilege prompt flushes commentary buffer before showing the request", async () => {
+  const { orchestrator, runner, channel } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Do the thing.",
+      taskName: "privilege-task",
+      taskLanguage: "English",
+      taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
+    }),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-privilege",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Do the thing",
+    rawText: "Do the thing",
+    attachments: [],
+  });
+
+  await runner.emit({ type: "assistant_output", text: "Buffered before privilege", phase: "commentary" });
+
+  // Fire a privilege request — the flush should happen within the
+  // runJobUserVisibleOperation callback before the result promise is awaited.
+  // We don't await the result so the test doesn't block on the pending privilege resolution.
+  const taskId = expectDefined(runner.launches[0], "Expected launch.").taskId;
+  const mcpPromise = orchestrator.authorizeMcpToolCall({
+    taskId,
+    serverId: "test-server",
+    toolName: "getStuff",
+    arguments: { key: "val" },
+  });
+
+  // Let microtasks run so the enqueuePrivilegeRequest callback executes.
+  await new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+
+  // Buffer should have been flushed BEFORE the privilege request was sent.
+  assert.equal(channel.taskUpdates.length, 1);
+  assert.equal(channel.taskUpdates[0]?.text, "Buffered before privilege");
+  assert.equal(channel.privilegeRequests.length, 1);
+  assert.equal(channel.privilegeRequests[0]?.request.kind, "mcp_tool_call");
+
+  // Resolve the pending privilege to clean up.
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-privilege",
+    messageId: "approve:1",
+    timestamp: "2026-04-01T00:00:05.000Z",
+    decision: "approve_once",
+    requestId: channel.privilegeRequests[0]?.request.requestId,
+  });
+  await mcpPromise;
+});

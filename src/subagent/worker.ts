@@ -1,4 +1,4 @@
-import { type Input, type Thread, type ThreadEvent, type TodoListItem } from "@openai/codex-sdk";
+import { type Input } from "@openai/codex-sdk";
 import { isHeartbeatFreshSync } from "../sandbox/heartbeat.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -6,7 +6,6 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import { CODEX_API_KEY_ENV, SANDY_CODEX_PATH_ENV } from "../codex-client.js";
 import { configureLogger, logger } from "../logger.js";
-import { messages } from "../messages-to-user.js";
 import { type HostCommand, type SubAgentEvent } from "../types.js";
 import {
   buildInitialTaskInput,
@@ -14,22 +13,13 @@ import {
   buildTaskBecameInteractiveInput,
   type ImageAttachment,
 } from "./worker-prompt.js";
-import { AppServerWorkerSession, streamAppServerTurn, type StreamTurnResult } from "./worker-app-server.js";
+import { AppServerWorkerSession, streamAppServerTurn } from "./worker-app-server.js";
 import {
   applyWorkerCodexConfigPatch,
   workerCodexHomePath,
 } from "./worker-codex-config.js";
 import { writeSubAgentEvent } from "./subagent-event-writer.js";
 
-type ThreadEventDisposition = "none" | "terminal_error";
-
-function parseHostCommand(raw: string): HostCommand {
-  const parsed = JSON.parse(raw) as HostCommand;
-  if (!parsed || typeof parsed !== "object" || typeof parsed.type !== "string") {
-    throw new Error("Invalid host command.");
-  }
-  return parsed;
-}
 
 type WorkerCommandProcessorOptions = {
   sendEvent: (event: SubAgentEvent) => void;
@@ -50,33 +40,12 @@ function assertTaskStarted(taskStarted: boolean, commandType: HostCommand["type"
   }
 }
 
-function progressFromTodoList(item: TodoListItem): string | null {
-  const next = item.items.find((entry) => !entry.completed);
-  if (!next) {
-    return null;
+function parseHostCommand(raw: string): HostCommand {
+  const parsed = JSON.parse(raw) as HostCommand;
+  if (!parsed || typeof parsed !== "object" || typeof parsed.type !== "string") {
+    throw new Error("Invalid host command.");
   }
-  return messages.nextPlannedStep(next.text);
-}
-
-function truncateEventForLogging(event: ThreadEvent): ThreadEvent {
-  if (event.type !== "item.started" && event.type !== "item.updated" && event.type !== "item.completed") {
-    return event;
-  }
-  if (event.item.type !== "command_execution") {
-    return event;
-  }
-  const { aggregated_output } = event.item;
-  if (aggregated_output.length <= 1000) {
-    return event;
-  }
-  const cloned = structuredClone(event) as ThreadEvent;
-  if (cloned.type === "item.started" || cloned.type === "item.updated" || cloned.type === "item.completed") {
-    const item = cloned.item;
-    if (item.type === "command_execution") {
-      item.aggregated_output = aggregated_output.slice(0, 1000) + "... (truncated)";
-    }
-  }
-  return cloned;
+  return parsed;
 }
 
 function joinTaskSections(taskBrief: string, text: string): string {
@@ -99,75 +68,7 @@ function requireConfiguredCodexPath(env: NodeJS.ProcessEnv): string {
   return codexPath;
 }
 
-// ---- codex exec helpers ----
 
-async function streamTurn(thread: Thread, input: Input): Promise<StreamTurnResult> {
-  let sawTerminalError = false;
-  const { events } = await thread.runStreamed(input);
-
-  for await (const event of events) {
-    logger.debug("thread.event_received", { eventType: event.type, event: truncateEventForLogging(event) });
-    const disposition = handleTaskTurnEvent(event);
-    sawTerminalError = disposition === "terminal_error" || sawTerminalError;
-
-    if (disposition === "terminal_error") {
-      break;
-    }
-  }
-
-  return { sawTerminalError };
-}
-
-function handleTaskTurnEvent(event: ThreadEvent): ThreadEventDisposition {
-  switch (event.type) {
-    case "item.completed":
-    case "item.updated":
-      if (event.item.type === "agent_message" && event.type === "item.completed") {
-        if (!event.item.text.trim()) {
-          return "none";
-        }
-        writeSubAgentEvent({
-          type: "assistant_output",
-          text: event.item.text,
-        });
-      }
-
-      if (event.item.type === "todo_list") {
-        const message = progressFromTodoList(event.item);
-        if (message) {
-          writeSubAgentEvent({
-            type: "progress",
-            message,
-          });
-        }
-      }
-      if (event.item.type === "mcp_tool_call") {
-        writeSubAgentEvent({
-          type: "progress",
-          message: messages.mcpToolProgress(event.item.status, event.item.server, event.item.tool, event.item.arguments),
-        });
-      }
-      return "none";
-    case "turn.completed":
-      return "none";
-    case "turn.failed":
-      writeSubAgentEvent({
-        type: "task_error",
-        message: event.error.message,
-      });
-      return "terminal_error";
-    case "error":
-      writeSubAgentEvent({
-        type: "task_error",
-        message: event.message,
-      });
-      return "terminal_error";
-    case "thread.started":
-    case "turn.started":
-    case "item.started":
-      return "none";
-  }
-}
 
 function createWorkerCommandProcessor(options: WorkerCommandProcessorOptions): WorkerCommandProcessor {
   let appServerSession: AppServerWorkerSession | null = null;
@@ -426,7 +327,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 
 export {
   createWorkerCommandProcessor,
-  streamTurn,
   streamAppServerTurn,
 };
 export {

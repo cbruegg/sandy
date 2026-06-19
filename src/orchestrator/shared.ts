@@ -17,6 +17,7 @@ import type {
 import type { SkillService } from "../skills.js";
 import type { OrchestratorTaskLifecycle } from "./task-lifecycle.js";
 import type { OrchestratorPrivileges } from "./privileges.js";
+import type { CommentaryBufferManager } from "./commentary-buffer-manager.js";
 import type { TaskCoordinator } from "./task-coordinator.js";
 
 export type SupportedChatEvent = Exclude<NormalizedChatEvent, { kind: "unsupported_input" }>;
@@ -34,6 +35,7 @@ export type OrchestratorCoreDependencies = {
   hostfsBroker: HostfsBroker;
   skillService: SkillService;
   taskCoordinator: TaskCoordinator;
+  commentaryBuffer: CommentaryBufferManager;
 };
 
 export type SandyOrchestratorDependencies = OrchestratorCoreDependencies & {

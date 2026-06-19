@@ -7,6 +7,7 @@ import { OrchestratorPrivilegesImpl } from "../orchestrator/privileges.js";
 import { ActiveTaskRuntimeRegistry } from "../orchestrator/active-task-runtime-registry.js";
 import { OrchestratorTaskLifecycleImpl } from "../orchestrator/task-lifecycle.js";
 import { TaskCoordinator } from "../orchestrator/task-coordinator.js";
+import { CommentaryBufferManager } from "../orchestrator/commentary-buffer-manager.js";
 import { WorkerToolsHandler } from "../subagent/worker-tools-handler.js";
 import { JobCleanupService } from "../jobs/job-cleanup.js";
 import { JobScheduler } from "../jobs/job-scheduler.js";
@@ -89,6 +90,18 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     },
   });
 
+  const commentaryBuffer = new CommentaryBufferManager(
+    async (taskId, chatId, text) => {
+      const task = sessionStore.getOrCreate(chatId).findTask(taskId)?.task;
+      if (!task) {
+        return;
+      }
+      await taskCoordinator.runJobUserVisibleOperation(chatId, taskId, task.taskName, async (taskChannel) => {
+        await taskChannel.sendTaskUpdate(chatId, text);
+      });
+    },
+  );
+
   const orchestratorCoreDeps: OrchestratorCoreDependencies = {
     mainAgent,
     sandboxRunner,
@@ -106,6 +119,7 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     hostfsBroker,
     skillService,
     taskCoordinator,
+    commentaryBuffer,
   };
 
   const taskLifecycle = new OrchestratorTaskLifecycleImpl(
@@ -157,6 +171,7 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
 
   const stop = (): Promise<void> => {
     taskCoordinator.stop();
+    commentaryBuffer.stop();
     jobScheduler.stop();
     jobCleanupService.stop();
     return Promise.resolve();
