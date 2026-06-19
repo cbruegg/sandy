@@ -39,10 +39,6 @@ export const messages = {
   discardedPendingOutput: (): string => "Discarded the pending sub-agent output.",
   taskCancelled: (taskName: string): string => `Cancelled task "${taskName}".`,
   noPendingOutputToReport: (): string => "There is no pending sub-agent output to report.",
-  taskTerminatedAndDiscarded: (taskName: string): string =>
-    `Terminated task "${taskName}" and discarded the pending sub-agent output.`,
-  taskTerminatedAfterDangerousPrivilegeRequest: (taskName: string): string =>
-    `Terminated task "${taskName}" after a dangerous privilege request report.`,
   stalePrivilegeRequest: (): string => "That privilege request is no longer pending.",
   privilegeRequestStillPending: (): string =>
     "A privilege request is pending. Resolve it before sending more task input.",
@@ -51,8 +47,6 @@ export const messages = {
   taskStarted: (taskName: string): string => `Started task "${taskName}".`,
   privilegeDenied: (requestId: string): string => `Denied privilege request ${requestId}.`,
   privilegeFailed: (requestId: string, detail: string): string => `Privilege request ${requestId} failed.\n${detail}`,
-  unsupportedPrivilegeRequestType: (requestType: string): string =>
-    `Privilege request type "${requestType}" is not supported by this runtime.`,
   staleShareDeletionRequest: (): string => "That shared workspace deletion request is no longer pending.",
   shareDeletionRequestPrompt: (taskName: string, summary: string): string =>
     `Task "${taskName}" left files in its shared workspace.\n\n${summary}\n\nApprove to delete this workspace, or deny to keep it.`,
@@ -68,16 +62,10 @@ export const messages = {
     `You denied the following privilege request. Reply with a short reason, or send "skip" to deny without a reason.\n\n${describePrivilegeRequest(request)}`,
   denialReasonStillPending: (): string =>
     "A denial reason is still pending. Reply with a short reason, or send \"skip\" to deny without a reason.",
-  unsupportedMcpPrivilegeRequest: (serverId: string, toolName: string): string =>
-    `Unsupported MCP privilege request ${serverId}.${toolName}.`,
   mcpToolProgress: (status: string, serverId: string, toolName: string, payload: unknown): string =>
     status === "completed"
       ? `MCP ${status}: ${serverId}.${toolName} ${describeMcpToolPayload(payload)}`
       : `MCP ${status}: ${serverId}.${toolName}`,
-  unsupportedMcpResourceReadPrivilegeRequest: (serverId: string, uri: string): string =>
-    `Unsupported MCP resource read privilege request ${serverId} ${uri}.`,
-  mcpResourceReadProgress: (status: string, serverId: string, uri: string): string =>
-    `MCP ${status}: ${serverId} ${uri}`,
   scheduledJobBlocked: (jobName: string, taskName: string): string =>
     `A scheduled job (${jobName}) is waiting to interact, but task "${taskName}" is still active.`,
   scheduledJobBecameInteractive: (taskName: string, jobName: string | null): string => {

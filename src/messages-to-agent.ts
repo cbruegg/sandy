@@ -48,15 +48,8 @@ export const messages = {
     `Allowed HTTP token ${tokenId} for host ${host} from persistent config for this task.`,
   httpTokenAllowedAndPersisted: (tokenId: string, host: string): string =>
     `Allowed HTTP token ${tokenId} for host ${host} and updated Sandy's config file for future suitable tasks.`,
-  httpTokenAlreadyConsumed: (tokenId: string, host: string): string =>
-    `One-shot HTTP token grant ${tokenId} for host ${host} has already been consumed.`,
   httpTokenProxyRejected: (tokenId: string): string =>
     `HTTP proxy rejected request for token ${tokenId} because no approval is active. Emit SANDY_REQUEST_HTTP_TOKEN for that token and wait for host approval before retrying.`,
-  httpTokenNotConfigured: (tokenId: string): string =>
-    `HTTP token "${tokenId}" is not configured in Sandy's config file.`,
-  httpTokenHostNotAllowed: (tokenId: string, host: string): string =>
-    `Host "${host}" is not in the configured allowed_hosts for token ${tokenId}.`,
-
   hostDirectoryAccessDenied: (path: string, level: string, reason?: string): string =>
     reason
       ? `The user denied host directory access to ${path} (${level}).\nReason: ${reason}`
@@ -69,8 +62,6 @@ export const messages = {
     `Allowed host directory access to ${path} (${level}) and updated Sandy's config file for future suitable tasks.`,
   hostDirectoryAccessFailed: (path: string, error: string): string =>
     `Host directory access request for ${path} failed: ${error}`,
-  hostDirectoryNotFound: (path: string): string =>
-    `Host directory not found or not accessible: ${path}`,
 
   skillMutationDenied: (operation: string, skillId: string, reason?: string): string =>
     reason
