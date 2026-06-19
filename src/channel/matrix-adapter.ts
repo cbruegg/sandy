@@ -346,6 +346,18 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     await this.sendPoll(chatId, "Privilege request", controls.rows.flat().map((a) => ({ answerId: a.actionId, label: a.label, event: a.event })));
   }
 
+  async askForDenialReason(chatId: ChatId, request: PrivilegeRequest): Promise<void> {
+    logger.info("matrix.ask_for_denial_reason", {
+      chatId,
+      requestId: request.requestId,
+    });
+    // Matrix has no force-reply primitive. In the 1:1 encrypted rooms Sandy
+    // requires, the next text message is unambiguously the user's reply, so a
+    // notice inviting a reply is sufficient; the orchestrator binds the next
+    // inbound text to this denial via its awaiting_denial_reason state.
+    await this.sendNotice(chatId, messages.denialReasonPrompt(request));
+  }
+
   async sendShareDeletionRequest(chatId: ChatId, requestId: string, taskName: string, summary: string): Promise<void> {
     logger.info("matrix.send_share_deletion_request", {
       chatId,

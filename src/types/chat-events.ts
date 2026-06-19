@@ -27,6 +27,7 @@ type ApprovalResponseEvent = ChatEventBase & {
   kind: "approval_response";
   decision: "approve" | "approve_once" | "approve_worker_session" | "approve_always" | "deny";
   requestId?: string;
+  reason?: string;
 };
 
 type DangerReportEvent = ChatEventBase & {

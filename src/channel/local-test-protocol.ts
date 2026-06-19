@@ -30,6 +30,7 @@ const localTestApprovalInputSchema = localTestSimpleInputSchema.extend({
   kind: z.literal("approval_response"),
   decision: approvalDecisionSchema,
   requestId: z.string().min(1).optional(),
+  reason: z.string().optional(),
 }).strict();
 
 const localTestInboundEventSchema = z.discriminatedUnion("kind", [
@@ -59,6 +60,10 @@ type LocalTestOutboundEvent =
     })
   | (OutboundBase & {
       type: "send_privilege_request";
+      request: PrivilegeRequest;
+    })
+  | (OutboundBase & {
+      type: "send_denial_reason_prompt";
       request: PrivilegeRequest;
     })
   | (OutboundBase & {
@@ -100,6 +105,13 @@ const localTestOutboundEventSchema = z.discriminatedUnion("type", [
     chatId: z.string().min(1),
     timestamp: z.string().min(1),
     type: z.literal("send_privilege_request"),
+    request: z.unknown(),
+  }).strict(),
+  z.object({
+    eventId: z.string().min(1),
+    chatId: z.string().min(1),
+    timestamp: z.string().min(1),
+    type: z.literal("send_denial_reason_prompt"),
     request: z.unknown(),
   }).strict(),
   z.object({
@@ -166,6 +178,7 @@ export function parseLocalTestInboundEvent(raw: string): {
         timestamp,
         decision: parsed.decision,
         requestId: parsed.requestId,
+        reason: parsed.reason,
       },
       attachmentsById,
     };

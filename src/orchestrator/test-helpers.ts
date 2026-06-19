@@ -58,6 +58,7 @@ export class RecordingChannel implements ChannelAdapter {
   public readonly taskUpdates: Array<{ chatId: ChatId; text: string }> = [];
   public readonly sentFiles: Array<{ chatId: ChatId; filePath: string; caption?: string }> = [];
   public readonly privilegeRequests: Array<{ chatId: ChatId; request: PrivilegeRequest }> = [];
+  public readonly denialReasonPrompts: Array<{ chatId: ChatId; request: PrivilegeRequest }> = [];
   public readonly shareDeletionRequests: Array<{ chatId: ChatId; requestId: string; taskName: string; summary: string }> = [];
   public readonly savedAttachments: Array<{ chatId: ChatId; attachments: MessageAttachment[]; targetDirectory: string }> = [];
   public sendFileError: Error | null = null;
@@ -125,6 +126,11 @@ export class RecordingChannel implements ChannelAdapter {
     return Promise.resolve();
   }
 
+  askForDenialReason(chatId: ChatId, request: PrivilegeRequest): Promise<void> {
+    this.denialReasonPrompts.push({ chatId, request });
+    return Promise.resolve();
+  }
+
   sendShareDeletionRequest(chatId: ChatId, requestId: string, taskName: string, summary: string): Promise<void> {
     this.shareDeletionRequests.push({ chatId, requestId, taskName, summary });
     return Promise.resolve();
@@ -182,6 +188,7 @@ class FakeSandboxHandle implements SandboxHandle {
   public markFinishedCalls = 0;
   public closeCalls = 0;
   public readonly cancellations: string[] = [];
+  public closeError: Error | null = null;
 
   getTaskSharePath(): string {
     if (!this.taskSharePath) {
@@ -216,6 +223,11 @@ class FakeSandboxHandle implements SandboxHandle {
 
   close(): Promise<void> {
     this.closeCalls += 1;
+    if (this.closeError) {
+      const error = this.closeError;
+      this.closeError = null;
+      return Promise.reject(error);
+    }
     return Promise.resolve();
   }
 

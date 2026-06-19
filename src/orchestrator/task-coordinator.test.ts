@@ -2,7 +2,8 @@ import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { messages } from "../messages.js";
 import { InMemorySessionStore } from "../session/in-memory-session-store.js";
-import { createActiveTaskState } from "../types.js";
+import { ActiveTaskState } from "../types.js";
+import type { TaskOrigin } from "../types.js";
 import { RecordingChannel } from "./test-helpers.js";
 import { TaskCoordinator } from "./task-coordinator.js";
 
@@ -38,18 +39,16 @@ class FakeTimers {
   }
 }
 
-function createTask(taskId: string, taskName: string, origin: Parameters<typeof createActiveTaskState>[0]["origin"]) {
-  return createActiveTaskState(
-    {
-      taskId,
-      taskName,
-      startedAt: new Date(0).toISOString(),
-      taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
-      origin,
-      interactionState: origin.kind === "launchedByJob" ? "silent" : "interacting",
-    },
-    { workerConnected: true },
-  );
+function createTask(taskId: string, taskName: string, origin: TaskOrigin) {
+  return new ActiveTaskState({
+    taskId,
+    taskName,
+    startedAt: new Date(0).toISOString(),
+    taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
+    origin,
+    interactionState: origin.kind === "launchedByJob" ? "silent" : "interacting",
+    workerConnected: true,
+  });
 }
 
 test("TaskCoordinator reminds and resets reminder timing on user-task activity", async () => {

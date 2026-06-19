@@ -150,6 +150,36 @@ test("orchestrator closes the sandbox handle on normal task completion", async (
   assert.equal(runner.handle.closeCalls, 1);
 });
 
+test("orchestrator retries cleanup through event-failure handling when normal completion cleanup fails once", async () => {
+  const { orchestrator, runner, store, channel } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Inspect the environment.",
+      taskName: "env-inspection",
+      taskLanguage: "English",
+    }),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-close-retry",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Inspect the environment",
+    rawText: "Inspect the environment",
+    attachments: [],
+  });
+
+  runner.handle.closeError = new Error("close failed once");
+
+  await runner.emit({ type: "task_done" });
+
+  const session = store.getOrCreate("chat-close-retry");
+  assert.equal(session.visibleTask, null);
+  assert.equal(runner.handle.closeCalls, 2);
+  assert.equal(channel.sentTexts.at(-1)?.text, messages.taskFailed("close failed once"));
+});
+
 test("orchestrator asks the worker to finalize when the user marks the task as finished", async () => {
   const { orchestrator, runner, store } = createTestOrchestrator({
     mainAgent: new StubMainAgent({
@@ -705,5 +735,4 @@ test("silent job task progress updates are suppressed", async () => {
   assert.ok(task);
   assert.equal(task.interactionState, "silent");
 });
-
 

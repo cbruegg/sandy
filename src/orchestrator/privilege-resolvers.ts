@@ -43,9 +43,10 @@ export async function resolveMcpToolCallRequest(
   session: SessionState,
   request: Extract<PrivilegeRequest, { kind: "mcp_tool_call" }>,
   decision: ApprovalDecision,
+  reason?: string,
 ): Promise<PrivilegeResolutionResult> {
   return resolveScopedApprovalRequest(session, request, decision, {
-    deniedMessage: messages.userDeniedMcpToolCall(request.serverId, request.toolName),
+    deniedMessage: messages.userDeniedMcpToolCall(request.serverId, request.toolName, reason),
     onceMessage: messages.mcpToolAllowedOnce(request.serverId, request.toolName),
     sessionMessage: messages.mcpToolAllowedForWorkerSession(request.serverId, request.toolName),
     alwaysMessage: messages.mcpToolAllowedAndPersisted(request.serverId, request.toolName),
@@ -53,6 +54,7 @@ export async function resolveMcpToolCallRequest(
     grantAutoApprovalForTask: (task) => grantMcpAutoApprovalForTask(ctx.jobApprovalStore, task, request.serverId),
     grantAccess: (task) => grantTaskToolAccess(task, request.serverId, request.toolName),
     persist: () => ctx.persistentApprovalStore.allowTool(request.serverId, request.toolName),
+    reason,
   });
 }
 
@@ -61,9 +63,10 @@ export async function resolveMcpResourceReadRequest(
   session: SessionState,
   request: Extract<PrivilegeRequest, { kind: "mcp_resource_read" }>,
   decision: ApprovalDecision,
+  reason?: string,
 ): Promise<PrivilegeResolutionResult> {
   return resolveScopedApprovalRequest(session, request, decision, {
-    deniedMessage: messages.userDeniedMcpResourceRead(request.serverId, request.uri),
+    deniedMessage: messages.userDeniedMcpResourceRead(request.serverId, request.uri, reason),
     onceMessage: messages.mcpResourceReadAllowedOnce(request.serverId, request.uri),
     sessionMessage: messages.mcpResourceReadAllowedForWorkerSession(request.serverId, request.uri),
     alwaysMessage: messages.mcpResourceReadAllowedAndPersisted(request.serverId, request.uri),
@@ -71,6 +74,7 @@ export async function resolveMcpResourceReadRequest(
     grantAutoApprovalForTask: (task) => grantMcpAutoApprovalForTask(ctx.jobApprovalStore, task, request.serverId),
     grantAccess: (task) => grantTaskResourceReadAccess(task, request.serverId, request.uri),
     persist: () => ctx.persistentApprovalStore.allowResourceRead(request.serverId, request.uri),
+    reason,
   });
 }
 
@@ -79,9 +83,10 @@ export async function resolveHttpTokenRequest(
   session: SessionState,
   request: Extract<PrivilegeRequest, { kind: "http_token_use" }>,
   decision: ApprovalDecision,
+  reason?: string,
 ): Promise<PrivilegeResolutionResult> {
   return resolveScopedApprovalRequest(session, request, decision, {
-    deniedMessage: messages.httpTokenDenied(request.tokenId, request.host),
+    deniedMessage: messages.httpTokenDenied(request.tokenId, request.host, reason),
     onceMessage: messages.httpTokenAllowedOnce(request.tokenId, request.host),
     sessionMessage: messages.httpTokenAllowedForWorkerSession(request.tokenId, request.host),
     alwaysMessage: messages.httpTokenAllowedAndPersisted(request.tokenId, request.host),
@@ -90,6 +95,7 @@ export async function resolveHttpTokenRequest(
     grantOnce: (task) => grantHttpTokenOnce(task, request.tokenId, request.host),
     grantAccess: (task) => grantHttpTokenSessionAccess(task, request.tokenId, request.host),
     persist: () => ctx.persistentApprovalStore.allowHttpToken(request.tokenId, request.host),
+    reason,
   });
 }
 
@@ -112,6 +118,7 @@ async function resolveScopedApprovalRequest(
     grantAccess: (task: ActiveTaskState) => void;
     grantOnce?: (task: ActiveTaskState) => void;
     persist: () => Promise<void>;
+    reason?: string;
   },
 ): Promise<PrivilegeResolutionResult> {
   const activeTask = requireSessionActiveTask(session, request.requestId);
@@ -121,7 +128,7 @@ async function resolveScopedApprovalRequest(
 
   switch (decision) {
     case "deny":
-      return deniedPrivilegeResult(request.requestId, options.deniedMessage);
+      return deniedPrivilegeResult(request.requestId, options.deniedMessage, options.reason);
     case "approve":
     case "approve_once":
       if (request.confirmsAutoApprovalForTask) {
@@ -151,6 +158,7 @@ export async function resolveHostDirectoryRequest(
   session: SessionState,
   request: Extract<PrivilegeRequest, { kind: "host_directory_access" }>,
   decision: ApprovalDecision,
+  reason?: string,
 ): Promise<PrivilegeResolutionResult> {
   const activeTask = requireSessionActiveTask(session, request.requestId);
   if ("result" in activeTask) {
@@ -159,7 +167,11 @@ export async function resolveHostDirectoryRequest(
 
   switch (decision) {
     case "deny":
-      return deniedPrivilegeResult(request.requestId, messages.hostDirectoryAccessDenied(request.path, request.level));
+      return deniedPrivilegeResult(
+        request.requestId,
+        messages.hostDirectoryAccessDenied(request.path, request.level, reason),
+        reason,
+      );
     case "approve":
     case "approve_once":
     case "approve_worker_session":
@@ -226,9 +238,10 @@ export async function resolveSkillMutationRequest(
   session: SessionState,
   request: Extract<PrivilegeRequest, { kind: "skill_mutation" }>,
   decision: ApprovalDecision,
+  reason?: string,
 ): Promise<PrivilegeResolutionResult> {
   return resolveApproveOnlyMutation(session, request.requestId, decision, {
-    deniedMessage: messages.skillMutationDenied(request.operation, request.skillId),
+    deniedMessage: messages.skillMutationDenied(request.operation, request.skillId, reason),
     apply: async () => {
       await ctx.workerToolsHandler.applySkillMutation({
         operation: request.operation,
@@ -242,6 +255,7 @@ export async function resolveSkillMutationRequest(
     approvedMessage: () => messages.skillMutationApproved(request.operation, request.skillId),
     failedMessage: (detail) => messages.skillMutationFailed(request.operation, request.skillId, detail),
     unknownFailureDetail: "Unknown skill mutation failure.",
+    reason,
   });
 }
 
@@ -250,14 +264,16 @@ export async function resolveJobMutationRequest(
   session: SessionState,
   request: Extract<PrivilegeRequest, { kind: "job_mutation" }>,
   decision: ApprovalDecision,
+  reason?: string,
 ): Promise<PrivilegeResolutionResult> {
   const { operation, jobId } = request.mutation;
   return resolveApproveOnlyMutation(session, request.requestId, decision, {
-    deniedMessage: messages.jobMutationDenied(operation, jobId),
+    deniedMessage: messages.jobMutationDenied(operation, jobId, reason),
     apply: () => ctx.workerToolsHandler.applyJobMutation(request.mutation),
     approvedMessage: (detail) => `${messages.jobMutationApproved(operation, jobId)} ${detail}`,
     failedMessage: (detail) => messages.jobMutationFailed(operation, jobId, detail),
     unknownFailureDetail: "Unknown job mutation failure.",
+    reason,
   });
 }
 
@@ -275,6 +291,7 @@ async function resolveApproveOnlyMutation(
     approvedMessage: (detail: string) => string;
     failedMessage: (detail: string) => string;
     unknownFailureDetail: string;
+    reason?: string;
   },
 ): Promise<PrivilegeResolutionResult> {
   if (!session.visibleTask) {
@@ -282,7 +299,7 @@ async function resolveApproveOnlyMutation(
   }
 
   if (decision !== "approve") {
-    return deniedPrivilegeResult(requestId, options.deniedMessage);
+    return deniedPrivilegeResult(requestId, options.deniedMessage, options.reason);
   }
 
   try {
@@ -299,9 +316,14 @@ export async function resolveFileCopyRequest(
   request: Extract<PrivilegeRequest, { kind: "file_copy" }>,
   decision: ApprovalDecision,
   taskId: string,
+  reason?: string,
 ): Promise<PrivilegeResolutionResult> {
   if (decision === "deny") {
-    return deniedPrivilegeResult(request.requestId, messages.userDeniedPrivilegeRequest(request.requestId));
+    return deniedPrivilegeResult(
+      request.requestId,
+      messages.userDeniedPrivilegeRequest(request.requestId, reason),
+      reason,
+    );
   }
 
   const operation = await ctx.workerToolsHandler.applyFileCopy(request.payload, { taskId });

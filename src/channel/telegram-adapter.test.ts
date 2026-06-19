@@ -720,6 +720,29 @@ test("TelegramBotApiAdapter sends privilege requests with appropriate controls",
   assert.equal(markup.inline_keyboard[1]?.[1]?.callback_data, "cancel");
 });
 
+test("TelegramBotApiAdapter asks for a denial reason with a force_reply markup", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
+    token: "test-token",
+    botFactory: () => fakeBot,
+  });
+
+  await adapter.askForDenialReason("7", {
+    kind: "mcp_tool_call",
+    requestId: "req-1",
+    serverId: "todoist",
+    toolName: "addTask",
+    arguments: { content: "Buy milk" },
+  });
+
+  assert.equal(fakeBot.sentMessages.length, 1);
+  const message = fakeBot.sentMessages[0];
+  assert.equal(message?.chatId, "7");
+  assert.deepEqual(message?.other?.["reply_markup"], { force_reply: true, selective: true });
+  assert.match(message?.text ?? "", /You denied the following privilege request/);
+});
+
 test("TelegramBotApiAdapter sends share deletion requests with approve and deny controls", async () => {
   const fakeBot = new FakeTelegramBot();
   const adapter = new TelegramBotApiAdapter({

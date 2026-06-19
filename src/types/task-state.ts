@@ -33,9 +33,29 @@ type TaskStatus =
   | "idle"
   | "running"
   | "awaiting_privilege_decision"
+  | "awaiting_denial_reason"
   | "completed"
   | "cancelled"
   | "failed";
+
+/**
+ * Allowed transitions for {@link ActiveTaskState.moveToState}.
+ * Terminal states (completed/cancelled/failed) permit no further transitions.
+ * `idle` is only ever left via construction; tasks start in `running`.
+ */
+const VALID_TASK_STATE_TRANSITIONS: Readonly<Record<TaskStatus, ReadonlySet<TaskStatus>>> = {
+  idle: new Set<TaskStatus>(["running"]),
+  running: new Set<TaskStatus>(["awaiting_privilege_decision", "awaiting_denial_reason", "completed", "cancelled", "failed"]),
+  awaiting_privilege_decision: new Set<TaskStatus>(["running", "awaiting_denial_reason", "completed", "cancelled", "failed"]),
+  awaiting_denial_reason: new Set<TaskStatus>(["running", "completed", "cancelled", "failed"]),
+  completed: new Set<TaskStatus>(),
+  cancelled: new Set<TaskStatus>(),
+  failed: new Set<TaskStatus>(),
+};
+
+function isValidTaskStateTransition(from: TaskStatus, to: TaskStatus): boolean {
+  return VALID_TASK_STATE_TRANSITIONS[from].has(to);
+}
 
 export type TaskOrigin =
   | { kind: "launchedByUser" }
@@ -43,13 +63,29 @@ export type TaskOrigin =
 
 type JobTaskInteractionState = "silent" | "waitingToInteract" | "interacting";
 
-export type ActiveTaskState = {
+type ActiveTaskStateRequired = Pick<
+  ActiveTaskState,
+  "taskId" | "taskName" | "startedAt" | "taskPolicy" | "origin" | "interactionState"
+>;
+
+type ActiveTaskStateOverrides = Partial<
+  Omit<ActiveTaskState, "taskId" | "taskName" | "startedAt" | "taskPolicy" | "origin" | "status">
+>;
+
+type ActiveTaskStateInit = ActiveTaskStateRequired & ActiveTaskStateOverrides;
+
+/**
+ * Mutable per-task state. All fields are publicly readable/mutable except
+ * {@link ActiveTaskState.status}, which is private and may only change through
+ * {@link ActiveTaskState.moveToState} so every transition is validated.
+ */
+export class ActiveTaskState {
   readonly taskId: string;
   readonly taskName: string;
-  status: TaskStatus;
   readonly startedAt: string;
-  pendingPrivilegeRequest: PrivilegeRequest | null;
   readonly taskPolicy: MainAgentTaskPolicy;
+  readonly origin: TaskOrigin;
+  pendingPrivilegeRequest: PrivilegeRequest | null;
   approvedMcpTools: McpToolGrant[];
   approvedMcpResourceReads: McpResourceReadGrant[];
   approvedHttpTokenSessionGrants: HttpTokenSessionGrant[];
@@ -57,27 +93,43 @@ export type ActiveTaskState = {
   approvedHostDirectories: HostDirectoryGrant[];
   workerConnected: boolean;
   taskSummary: string | null;
-  readonly origin: TaskOrigin;
   interactionState: JobTaskInteractionState;
-};
+  #status: TaskStatus;
 
-export function createActiveTaskState(
-  required: Pick<ActiveTaskState, "taskId" | "taskName" | "startedAt" | "taskPolicy" | "origin" | "interactionState">,
-  overrides?: Partial<Omit<ActiveTaskState, "taskId" | "taskName" | "startedAt" | "taskPolicy" | "origin">>,
-): ActiveTaskState {
-  return {
-    status: "running",
-    pendingPrivilegeRequest: null,
-    approvedMcpTools: [],
-    approvedMcpResourceReads: [],
-    approvedHttpTokenSessionGrants: [],
-    approvedHttpTokenOnceGrants: [],
-    approvedHostDirectories: [],
-    workerConnected: false,
-    taskSummary: null,
-    ...required,
-    ...overrides,
-  };
+  constructor(init: ActiveTaskStateInit) {
+    this.taskId = init.taskId;
+    this.taskName = init.taskName;
+    this.startedAt = init.startedAt;
+    this.taskPolicy = init.taskPolicy;
+    this.origin = init.origin;
+    this.interactionState = init.interactionState;
+    this.#status = "running";
+    this.pendingPrivilegeRequest = init.pendingPrivilegeRequest ?? null;
+    this.approvedMcpTools = init.approvedMcpTools ?? [];
+    this.approvedMcpResourceReads = init.approvedMcpResourceReads ?? [];
+    this.approvedHttpTokenSessionGrants = init.approvedHttpTokenSessionGrants ?? [];
+    this.approvedHttpTokenOnceGrants = init.approvedHttpTokenOnceGrants ?? [];
+    this.approvedHostDirectories = init.approvedHostDirectories ?? [];
+    this.workerConnected = init.workerConnected ?? false;
+    this.taskSummary = init.taskSummary ?? null;
+  }
+
+  get status(): TaskStatus {
+    return this.#status;
+  }
+
+  /**
+   * Transition the task to {@link next} status, throwing if the transition is
+   * not permitted by {@link VALID_TASK_STATE_TRANSITIONS}. This is the only way
+   * to mutate {@link status}.
+   */
+  moveToState(next: TaskStatus): void {
+    const current = this.#status;
+    if (!isValidTaskStateTransition(current, next)) {
+      throw new Error(`Invalid task state transition: ${current} -> ${next}.`);
+    }
+    this.#status = next;
+  }
 }
 
 type PendingShareDeletion = {

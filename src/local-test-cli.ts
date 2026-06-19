@@ -92,15 +92,21 @@ export async function runLocalTestCli(
         requestId: resolveRequiredOption(options, "request-id"),
       });
       return;
-    case "deny":
-      await writeInboxEvent(spoolRoot, {
+    case "deny": {
+      const reason = resolveStringOption(options, "reason");
+      const event: Record<string, unknown> = {
         kind: "approval_response",
         messageId: options["message-id"] ?? createIdentifier("message"),
         timestamp: new Date().toISOString(),
         decision: "deny",
         requestId: resolveRequiredOption(options, "request-id"),
-      });
+      };
+      if (reason) {
+        event["reason"] = reason;
+      }
+      await writeInboxEvent(spoolRoot, event);
       return;
+    }
     case "cancel":
       await writeSimpleEvent(spoolRoot, "cancel_request", options);
       return;
