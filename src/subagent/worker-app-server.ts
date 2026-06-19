@@ -6,7 +6,7 @@ import { writeSubAgentEvent } from "./subagent-event-writer.js";
 import { buildTaskSummaryInput } from "./worker-prompt.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.ts";
 import type {ThreadStartParams} from "../codex-app-server-client/generated/v2";
-import { messages } from "../messages.js";
+import { messages } from "../messages-to-user.js";
 import type { TurnError } from "../codex-app-server-client/generated/v2/TurnError.js";
 
 const WORKER_PROFILE: ThreadStartParams = {

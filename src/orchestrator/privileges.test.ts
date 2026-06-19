@@ -5,7 +5,8 @@ import { resolve } from "node:path";
 import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import type { HostDirectoryAccessLevel } from "../hostfs/path-policy.js";
 import { HttpTokenAuthorizer } from "../http/token-authorizer.js";
-import { messages } from "../messages.js";
+import { messages } from "../messages-to-agent.js";
+import { messages as userMessages } from "../messages-to-user.js";
 import {
   createTestOrchestrator,
   expectDefined,
@@ -226,7 +227,7 @@ test("request_interaction tool promotes a silent job task to interactive mode", 
   assert.equal(toolResult.isError, false);
   assert.match(toolResult.message, /promoted to interactive mode/i);
   assert.equal(channel.taskUpdates.length, 2);
-  assert.equal(channel.taskUpdates[0]?.text, messages.scheduledJobBecameInteractive("Scheduled job: Daily report", "Daily report"));
+  assert.equal(channel.taskUpdates[0]?.text, userMessages.scheduledJobBecameInteractive("Scheduled job: Daily report", "Daily report"));
   assert.match(channel.taskUpdates[1]?.text ?? "", /needs your attention.*confirm the report format/);
 
   const updatedTask = session.findTask(taskId)?.task;
@@ -269,7 +270,7 @@ test("silent job privilege requests are preceded by task context when they make 
 
   assert.deepEqual(channel.taskUpdates, [{
     chatId: "chat-privilege-context",
-    text: messages.scheduledJobBecameInteractive("Scheduled job: Shopping sync", "Shopping sync"),
+    text: userMessages.scheduledJobBecameInteractive("Scheduled job: Shopping sync", "Shopping sync"),
   }]);
 
   const requestId = channel.privilegeRequests[0]?.request.requestId;
@@ -412,11 +413,11 @@ test("request_interaction tool is a no-op for an already interactive job task", 
   assert.deepEqual(channel.taskUpdates, [
     {
       chatId: "chat-request-interaction-again",
-      text: messages.scheduledJobBecameInteractive("Scheduled job: Daily report", "Daily report"),
+      text: userMessages.scheduledJobBecameInteractive("Scheduled job: Daily report", "Daily report"),
     },
     {
       chatId: "chat-request-interaction-again",
-      text: messages.jobRequestsInteraction(
+      text: userMessages.jobRequestsInteraction(
         "Scheduled job: Daily report",
         "Daily report",
         "I need the user to confirm the report format.",
@@ -581,7 +582,7 @@ test("orchestrator fails the active task if channel file delivery fails", async 
 
   const session = store.getOrCreate("chat-file-failure");
   assert.equal(session.visibleTask, null);
-  assert.equal(channel.sentTexts.at(-1)?.text, messages.taskFailed("Telegram upload failed."));
+  assert.equal(channel.sentTexts.at(-1)?.text, userMessages.taskFailed("Telegram upload failed."));
   assert.equal(runner.handle.closeCalls, 1);
   assert.deepEqual(toolResult, {
     isError: true,

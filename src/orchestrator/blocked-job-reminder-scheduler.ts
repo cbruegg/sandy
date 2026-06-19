@@ -1,5 +1,5 @@
 import { logger } from "../logger.js";
-import { messages } from "../messages.js";
+import { messages } from "../messages-to-user.js";
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
 import type { ChatId } from "../types.js";
 

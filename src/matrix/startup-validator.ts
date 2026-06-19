@@ -2,7 +2,7 @@ import {
   loadMatrixAuthState,
   validateMatrixAuthStateForConfig,
 } from "./auth-state.js";
-import { matrixAdminMessages } from "../messages.js";
+import { matrixAdminMessages } from "../messages-to-user.js";
 import type { SandyConfig } from "../config.js";
 
 export async function validateMatrixAuthStateForStartup(

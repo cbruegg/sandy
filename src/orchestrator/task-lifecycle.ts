@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { logger } from "../logger.js";
-import { messages } from "../messages.js";
+import { messages } from "../messages-to-user.js";
+import { messages as agentMessages } from "../messages-to-agent.js";
 import {
   buildTaskBriefWithAttachments,
   buildTaskInputPayload,
@@ -521,7 +522,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     const failedResult = {
       ...failedPrivilegeResult(
         task.pendingPrivilegeRequest.requestId,
-        messages.taskEndedBeforePrivilegeRequestResolved(task.taskId, task.pendingPrivilegeRequest.requestId),
+        agentMessages.taskEndedBeforePrivilegeRequestResolved(task.taskId, task.pendingPrivilegeRequest.requestId),
       ),
     };
     if (isMcpPrivilegeRequest(task.pendingPrivilegeRequest)) {

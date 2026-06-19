@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { spawn } from "node:child_process";
 import { buildGitHubHeaders, isGitHubUrl } from "../github-http.js";
 import { logger } from "../logger.js";
-import { messages } from "../messages.js";
+import { messages } from "../messages-to-user.js";
 import type { SandyUpdateSource } from "../build-metadata.js";
 import type { SandyUpdateMode } from "../config.js";
 

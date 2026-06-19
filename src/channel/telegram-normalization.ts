@@ -5,7 +5,7 @@ import type {
 } from "../types.js";
 import type { ChatId } from "../types.js";
 import { logger } from "../logger.js";
-import { messages } from "../messages.js";
+import { messages } from "../messages-to-user.js";
 import type { TranscriptionProvider } from "../transcription/transcription-provider.js";
 import { normalizeTelegramUsername } from "./telegram-user.js";
 import { parseTelegramCallbackData } from "./telegram-callback-data.js";

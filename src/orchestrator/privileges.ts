@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { logger } from "../logger.js";
-import { messages } from "../messages.js";
+import { messages } from "../messages-to-agent.js";
+import { messages as userMessages } from "../messages-to-user.js";
 import { ActiveTaskRuntimeRegistry } from "./active-task-runtime-registry.js";
 import type { OrchestratorCoreDependencies, TaskFailureHandler } from "./shared.js";
 import { parseWorkerToolPayload } from "../subagent/worker-tools.js";
@@ -389,12 +390,12 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
         return;
       case "denied":
         await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, async (channel) => {
-          await channel.sendText(chatId, messages.privilegeDenied(result.requestId));
+          await channel.sendText(chatId, userMessages.privilegeDenied(result.requestId));
         });
         return;
       case "failed":
         await this.deps.taskCoordinator.runJobUserVisibleOperation(chatId, taskId, taskName, async (channel) => {
-          await channel.sendText(chatId, messages.privilegeFailed(result.requestId, result.message));
+          await channel.sendText(chatId, userMessages.privilegeFailed(result.requestId, result.message));
         });
         return;
       default:

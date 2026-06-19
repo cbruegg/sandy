@@ -7,7 +7,7 @@ import {
   buildTaskControls,
   formatPrivilegeRequestLogType,
 } from "./control-surface.js";
-import { buttonLabels } from "../messages.js";
+import { buttonLabels } from "../messages-to-user.js";
 
 test("buildTaskControls returns cancel and mark-finished actions", () => {
   const controls = buildTaskControls();

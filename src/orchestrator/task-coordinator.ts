@@ -1,5 +1,5 @@
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
-import { messages } from "../messages.js";
+import { messages } from "../messages-to-user.js";
 import type { SessionStore } from "../session/in-memory-session-store.js";
 import type { ActiveTaskState, SessionState } from "../types.js";
 import type { ChatId } from "../types.js";

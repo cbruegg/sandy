@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { McpServerConfig } from "../config.js";
-import { mcpAdminMessages } from "../messages.js";
+import { mcpAdminMessages } from "../messages-to-user.js";
 import { buildHostOauthStateDirectory } from "./oauth-paths.js";
 
 type PersistedOAuthState = {

@@ -6,7 +6,7 @@ import {
   saveMatrixAuthState,
   validateMatrixAuthStateForConfig,
 } from "./auth-state.js";
-import {matrixAdminMessages} from "../messages.js";
+import {matrixAdminMessages} from "../messages-to-user.js";
 
 type MatrixStatus = {
   homeserverUrl: string;

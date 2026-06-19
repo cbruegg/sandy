@@ -14,7 +14,7 @@ import {
 } from "@matrix-org/matrix-sdk-crypto-nodejs";
 import { loadMatrixAuthState } from "./auth-state.js";
 import { promptForPasswordHidden } from "./admin-service.js";
-import { matrixAdminMessages } from "../messages.js";
+import { matrixAdminMessages } from "../messages-to-user.js";
 
 type MatrixVerificationConfig = {
   homeserverUrl: string;

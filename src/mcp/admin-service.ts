@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 import { auth } from "@modelcontextprotocol/sdk/client/auth.js";
 import { ZodError } from "zod";
 import type { McpServerConfig } from "../config.js";
-import { mcpAdminMessages } from "../messages.js";
+import { mcpAdminMessages } from "../messages-to-user.js";
 import { SandyOAuthClientProvider } from "./oauth-provider.js";
 import { buildHostOauthStateDirectory } from "./oauth-paths.js";
 import {
