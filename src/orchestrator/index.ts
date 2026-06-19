@@ -258,10 +258,6 @@ export class SandyOrchestrator {
       activeTask.taskId,
       activeTask.taskName,
       async (channel) => {
-        const buffered = this.deps.commentaryBuffer.takeBuffer(activeTask.taskId);
-        if (buffered) {
-          await channel.sendTaskUpdate(session.chatId, buffered);
-        }
         await channel.askForDenialReason(session.chatId, request);
       },
     );
