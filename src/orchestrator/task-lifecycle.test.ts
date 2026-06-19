@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { messages } from "../messages.js";
 import {
   contextTexts,
-  createNoopCommentaryBuffer,
   createTestOrchestrator,
   expectDefined,
   RecordingChannel,
@@ -52,7 +51,7 @@ test("orchestrator stages attached files into the task share before launching th
     taskName: "file-analysis",
     taskLanguage: "English",
   });
-  const { orchestrator, channel, runner } = createTestOrchestrator({ mainAgent, commentaryBuffer: createNoopCommentaryBuffer() });
+  const { orchestrator, channel, runner } = createTestOrchestrator({ mainAgent });
 
   await orchestrator.handleChatEvent({
     kind: "user_message",
@@ -86,7 +85,6 @@ test("orchestrator stages attached files into the active task share and notifies
       taskName: "file-wait",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -126,7 +124,6 @@ test("orchestrator keeps completed-task summary pending until the user sends ano
       taskName: "env-inspection",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -170,7 +167,6 @@ test("orchestrator closes the sandbox handle on normal task completion", async (
       taskName: "env-inspection",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -196,7 +192,6 @@ test("orchestrator retries cleanup through event-failure handling when normal co
       taskName: "env-inspection",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -227,7 +222,6 @@ test("orchestrator asks the worker to finalize when the user marks the task as f
       taskName: "env-inspection",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -279,7 +273,6 @@ test("orchestrator uses the task name in task_done completion messages", async (
       taskName: "env-inspection",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -319,7 +312,7 @@ test("orchestrator releases completed-task output only when the user continues n
       replyText: "Continuing with the next step.",
     },
   ]);
-  const { orchestrator, runner, store } = createTestOrchestrator({ mainAgent, commentaryBuffer: createNoopCommentaryBuffer() });
+  const { orchestrator, runner, store } = createTestOrchestrator({ mainAgent });
 
   await orchestrator.handleChatEvent({
     kind: "user_message",
@@ -367,7 +360,6 @@ test("orchestrator discards completed-task output when the user sends a danger r
       taskName: "fs-inspect",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -417,7 +409,7 @@ test("orchestrator keeps final_result output pending until the user continues no
       replyText: "Continuing with the next step.",
     },
   ]);
-  const { orchestrator, runner, store, channel } = createTestOrchestrator({ mainAgent, commentaryBuffer: createNoopCommentaryBuffer() });
+  const { orchestrator, runner, store, channel } = createTestOrchestrator({ mainAgent });
 
   await orchestrator.handleChatEvent({
     kind: "user_message",
@@ -478,7 +470,6 @@ test("orchestrator marks worker disconnects as task failure and clears the task"
       taskName: "fs-inspect",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -509,7 +500,6 @@ test("orchestrator prompts before deleting a non-empty shared workspace", async 
       taskName: "fs-inspect",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -553,7 +543,7 @@ test("orchestrator deletes or preserves a finished task share based on user conf
       taskLanguage: "English",
     },
   ]);
-  const { orchestrator, runner, channel } = createTestOrchestrator({ mainAgent, commentaryBuffer: createNoopCommentaryBuffer() });
+  const { orchestrator, runner, channel } = createTestOrchestrator({ mainAgent });
 
   await orchestrator.handleChatEvent({
     kind: "user_message",
@@ -635,7 +625,7 @@ test("orchestrator blocks new idle input while shared workspace deletion is pend
       replyText: "This should not be reached yet.",
     },
   ]);
-  const { orchestrator, runner, channel } = createTestOrchestrator({ mainAgent, commentaryBuffer: createNoopCommentaryBuffer() });
+  const { orchestrator, runner, channel } = createTestOrchestrator({ mainAgent });
 
   await orchestrator.handleChatEvent({
     kind: "user_message",
@@ -673,7 +663,6 @@ test("orchestrator blocks new idle input while shared workspace deletion is pend
 test("orchestrator prompts for share deletion from a silent job task", async () => {
   const { taskLifecycle, runner, store, channel } = createTestOrchestrator({
     mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   const job: JobDefinition = {
@@ -710,7 +699,7 @@ test("orchestrator defers job share deletion prompt while a user task is active"
       replyText: "ok",
     },
   ]);
-  const { orchestrator, taskLifecycle, runner, store, channel } = createTestOrchestrator({ mainAgent, commentaryBuffer: createNoopCommentaryBuffer() });
+  const { orchestrator, taskLifecycle, runner, store, channel } = createTestOrchestrator({ mainAgent });
 
   await orchestrator.handleChatEvent({
     kind: "user_message",
@@ -757,7 +746,6 @@ test("orchestrator defers job share deletion prompt while a user task is active"
 test("silent job task progress updates are suppressed", async () => {
   const { taskLifecycle, runner, store, channel } = createTestOrchestrator({
     mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   const job: JobDefinition = {
@@ -790,7 +778,6 @@ test("commentary-phase assistant_output is buffered instead of sent immediately"
       taskName: "commentary-task",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -818,7 +805,6 @@ test("non-commentary assistant_output flushes buffered commentary first", async 
       taskName: "flush-task",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -850,7 +836,6 @@ test("progress output flushes buffered commentary first", async () => {
       taskName: "progress-flush-task",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -1037,7 +1022,6 @@ test("task error does not flush the commentary buffer", async () => {
       taskName: "error-task",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -1069,7 +1053,6 @@ test("privilege prompt flushes commentary buffer before showing the request", as
       taskLanguage: "English",
       taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({

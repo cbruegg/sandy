@@ -7,7 +7,6 @@ import type { HostDirectoryAccessLevel } from "../hostfs/path-policy.js";
 import { HttpTokenAuthorizer } from "../http/token-authorizer.js";
 import { messages } from "../messages.js";
 import {
-  createNoopCommentaryBuffer,
   createTestOrchestrator,
   expectDefined,
   FileCopySpy,
@@ -47,7 +46,6 @@ test("orchestrator applies supported privilege requests deterministically and ou
         taskLanguage: "English",
       }),
       fileCopySpy,
-      commentaryBuffer: createNoopCommentaryBuffer(),
     });
 
     await orchestrator.handleChatEvent({
@@ -111,7 +109,6 @@ test("orchestrator sends worker-requested shared files back through the channel"
       taskName: "file-out",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -148,7 +145,6 @@ test("approved skill mutation delegates execution through the worker tools handl
       taskName: "skill-create",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -204,7 +200,6 @@ test("approved skill mutation delegates execution through the worker tools handl
 test("request_interaction tool promotes a silent job task to interactive mode", async () => {
   const { orchestrator, taskLifecycle, store, channel } = createTestOrchestrator({
     mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   const job: JobDefinition = {
@@ -253,7 +248,6 @@ test("silent job privilege requests are preceded by task context when they make 
   const { orchestrator, taskLifecycle, channel } = createTestOrchestrator({
     persistentApprovalStore,
     mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   const job: JobDefinition = {
@@ -301,7 +295,6 @@ test("approved job mutation delegates execution through the worker tools handler
       taskName: "job-create",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -362,7 +355,7 @@ test("request_interaction tool is a no-op for user-launched tasks", async () => 
     taskName: "user-task",
     taskLanguage: "English",
   });
-  const { orchestrator, runner, channel } = createTestOrchestrator({ mainAgent, commentaryBuffer: createNoopCommentaryBuffer() });
+  const { orchestrator, runner, channel } = createTestOrchestrator({ mainAgent });
 
   await orchestrator.handleChatEvent({
     kind: "user_message",
@@ -391,7 +384,6 @@ test("request_interaction tool is a no-op for user-launched tasks", async () => 
 test("request_interaction tool is a no-op for an already interactive job task", async () => {
   const { orchestrator, taskLifecycle, channel, runner } = createTestOrchestrator({
     mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   const job: JobDefinition = {
@@ -442,7 +434,6 @@ test("request_interaction tool reports already waiting when a job task is blocke
       taskName: "user-task",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -491,7 +482,6 @@ test("request_interaction tool reports already waiting when a job task is blocke
 test("terminate_task marks a silent job task for completion", async () => {
   const { orchestrator, taskLifecycle, store, runner } = createTestOrchestrator({
     mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   const job: JobDefinition = {
@@ -530,7 +520,7 @@ test("terminate_task returns an error for user-launched tasks", async () => {
     taskName: "user-task",
     taskLanguage: "English",
   });
-  const { orchestrator, runner } = createTestOrchestrator({ mainAgent, commentaryBuffer: createNoopCommentaryBuffer() });
+  const { orchestrator, runner } = createTestOrchestrator({ mainAgent });
 
   await orchestrator.handleChatEvent({
     kind: "user_message",
@@ -568,7 +558,6 @@ test("orchestrator fails the active task if channel file delivery fails", async 
       taskName: "file-task",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -623,7 +612,6 @@ test("orchestrator authorizes mcp resource reads from persistent config", async 
         autoApproveHttpTokens: [],
       },
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -672,7 +660,6 @@ test("orchestrator does not apply persistent mcp approvals when task policy omit
         autoApproveHttpTokens: [],
       },
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -734,7 +721,6 @@ test("orchestrator confirms persisted mcp tool approval suitability and reuses i
         autoApproveHttpTokens: [],
       },
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -814,7 +800,6 @@ test("orchestrator confirms persisted http token suitability and enables later p
         autoApproveHttpTokens: [],
       },
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -901,7 +886,6 @@ test("orchestrator creates a hostfs grant for worker-session host directory appr
         };
       },
     } as unknown as HostfsBroker,
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -960,7 +944,6 @@ test("orchestrator sends mcp resource read privilege request to user when not pr
       taskName: "resource-read",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -1030,7 +1013,6 @@ test("job-scoped persistent approvals apply only to later executions of the same
       action: "reply",
       replyText: "idle",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   const job: JobDefinition = {
@@ -1110,7 +1092,6 @@ test("denial without an inline reason prompts for a reason and routes it back to
       taskName: "todoist-deny-reason",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -1213,7 +1194,6 @@ test("resolved denial restores task state before sending the channel notificatio
       taskName: "todoist-deny-race",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -1279,7 +1259,6 @@ test("denial reason can be skipped and the agent still receives the canned denia
       taskName: "file-copy-deny-skip",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
@@ -1343,7 +1322,6 @@ test("cancelling a task while awaiting a denial reason fails the pending privile
       taskName: "todoist-deny-cancel",
       taskLanguage: "English",
     }),
-    commentaryBuffer: createNoopCommentaryBuffer(),
   });
 
   await orchestrator.handleChatEvent({
