@@ -24,7 +24,7 @@ const builtInSkills = [
       "Your job is to turn the user's request into a dedicated monitoring skill plus a recurring Sandy job that runs that monitoring skill.",
       "",
       "Rules:",
-      "1. If the user did not provide a concrete recurring schedule, do not invent one and do not use a default. Ask the user to provide a schedule before creating anything.",
+      "1. If the user did not provide a recurring schedule, do not invent one and do not use a default. Ask the user to provide a schedule before creating anything. If the user provides a vague schedule like 'daily', you may select suitable details.",
       "2. Once you have a schedule, create a new Sandy skill dedicated to the condition being monitored.",
       "3. Then create a recurring Sandy job that uses that dedicated skill.",
       "4. Set definition.jobOwnsSkill to true when creating the job, because the dedicated skill exists only for that job.",
