@@ -41,6 +41,7 @@ export class CommentaryBufferManager {
     const buffer = this.buffers.get(taskId) ?? { chatId, lines: [] };
     buffer.lines.push(text.trim());
     this.buffers.set(taskId, buffer);
+    logger.info("task.commentary_buffered", { taskId, chatId, lineCount: buffer.lines.length });
     this.scheduleFlush(taskId);
   }
 
@@ -57,7 +58,9 @@ export class CommentaryBufferManager {
       return null;
     }
     this.buffers.delete(taskId);
-    return buffer.lines.join("\n\n");
+    const text = buffer.lines.join("\n\n");
+    logger.info("task.commentary_flushed", { taskId, chatId: buffer.chatId, lineCount: buffer.lines.length });
+    return text;
   }
 
   /** Restart the fallback timer for any buffered tasks in this chat. */
@@ -74,6 +77,10 @@ export class CommentaryBufferManager {
 
   /** Cancel timers and discard buffers for `taskId`. */
   clear(taskId: string): void {
+    const buffer = this.buffers.get(taskId);
+    if (buffer) {
+      logger.info("task.commentary_discarded", { taskId, chatId: buffer.chatId, lineCount: buffer.lines.length });
+    }
     this.clearTimer(taskId);
     this.buffers.delete(taskId);
   }

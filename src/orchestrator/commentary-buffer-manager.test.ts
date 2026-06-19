@@ -158,11 +158,13 @@ test("commentary timeout flush logs rejected flushes instead of leaking unhandle
 
     await timers.advanceBy(60_001);
 
-    assert.equal(logs.length, 1);
-    assert.equal(logs[0]?.event, "task.commentary_timeout_flush_failed");
-    assert.equal(logs[0]?.data?.["taskId"], "job-task");
-    assert.equal(logs[0]?.data?.["chatId"], "chat-slot");
-    assert.equal(logs[0]?.data?.["message"], "slot no longer available");
+    assert.equal(logs.length, 3);
+    assert.equal(logs[0]?.event, "task.commentary_buffered");
+    assert.equal(logs[1]?.event, "task.commentary_flushed");
+    assert.equal(logs[2]?.event, "task.commentary_timeout_flush_failed");
+    assert.equal(logs[2]?.data?.["taskId"], "job-task");
+    assert.equal(logs[2]?.data?.["chatId"], "chat-slot");
+    assert.equal(logs[2]?.data?.["message"], "slot no longer available");
   } finally {
     configureLogger({
       minLevel: "info",
