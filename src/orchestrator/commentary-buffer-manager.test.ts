@@ -1,6 +1,5 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { messages } from "../messages.js";
 import { InMemorySessionStore } from "../session/in-memory-session-store.js";
 import { ActiveTaskState } from "../types.js";
 import type { TaskOrigin } from "../types.js";
@@ -127,6 +126,6 @@ test("commentary timeout flush waits for the visible slot", async () => {
   await coordinator.onVisibleSlotAvailable("chat-slot");
 
   assert.equal(channel.taskUpdates.length, 2);
-  assert.equal(channel.taskUpdates[0]?.text, messages.scheduledJobBecameInteractive("Scheduled job: Daily cleanup", "Daily cleanup"));
+  assert.equal(channel.taskUpdates[0]?.text, 'Scheduled job "Daily cleanup" is now interactive. The next update or request comes from this task.');
   assert.equal(channel.taskUpdates[1]?.text, "Buffered commentary");
 });
