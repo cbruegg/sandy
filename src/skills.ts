@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { archivedSkillsDirectory, skillsDirectory } from "./config-paths.js";
 import { getBuiltInSkillDefinitions, isBuiltInSkillId, materializeBuiltInSkillsDirectory } from "./built-in-skills.js";
+import { builtInSkillsRuntimeDirectory } from "./state-paths.js";
 
 export type SkillMetadata = {
   name: string;
@@ -155,6 +156,10 @@ export class SkillService {
   }
 
   getBuiltInSkillsDirectory(): string {
+    return builtInSkillsRuntimeDirectory(this.configDirectory);
+  }
+
+  materializeBuiltInSkillsDirectory(): string {
     return materializeBuiltInSkillsDirectory(this.configDirectory);
   }
 

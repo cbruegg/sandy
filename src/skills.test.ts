@@ -167,11 +167,11 @@ test("getSkillsDirectory returns the skills subdirectory of the config directory
   }
 });
 
-test("getBuiltInSkillsDirectory materializes built-in skills into Sandy state", async () => {
+test("materializeBuiltInSkillsDirectory materializes built-in skills into Sandy state", async () => {
   const configDirectory = await createTempConfigDirectory();
   try {
     const service = new SkillService(configDirectory);
-    const builtInDirectory = service.getBuiltInSkillsDirectory();
+    const builtInDirectory = service.materializeBuiltInSkillsDirectory();
     assert.equal(builtInDirectory, builtInSkillsRuntimeDirectory(configDirectory));
 
     const skillFile = await readFile(join(builtInDirectory, "notify-me-when", "SKILL.md"), "utf8");
