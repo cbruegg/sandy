@@ -673,6 +673,59 @@ test("DockerSandboxRunner inspects and deletes task shares on the host", async (
   await rm(shareRoot, { recursive: true, force: true });
 });
 
+test("DockerSandboxRunner ignores mounted built-in skills when inspecting task shares", async () => {
+  const shareRoot = mkdtempSync(join(tmpdir(), "sandy-share-skills-test-"));
+  const launcherOptions: TaskBundleLauncherOptions = {
+    workerImage: "sandy-subagent:latest",
+    networkGuardImage: "sandy-network-guard:latest",
+    shareRoot,
+    controllerControlDir: "/tmp/sandy-controller",
+    codexAuthFile: null,
+    getUserSkillsDirectory: () => null,
+    getBuiltInSkillsDirectory: () => null,
+    workerCodexBinaryPath: defaultWorkerCodexBinaryPath,
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
+    httpProxyCaCertPath: null,
+    httpProxyConfDirPath: null,
+    httpProxyImage: null,
+    resolveHttpProxyRequest: undefined,
+  };
+  const runner = createRunner({
+    workerImage: "sandy-subagent:latest",
+    workerNetwork: {
+      mode: "unrestricted",
+      allowLocalCidrs: [],
+    },
+    workerCodexConfigBuilder: () => ({
+      codexConfigToml: null,
+      environment: {},
+    }),
+  }, launcherOptions);
+
+  const taskShare = join(shareRoot, "task-1");
+  trackTestTaskBundle(runner, "task-1", taskShare);
+  await mkdir(join(taskShare, ".agents", "skills"), { recursive: true });
+  await writeFile(join(taskShare, ".agents", "skills", "built-in-skill.md"), "skill\n");
+
+  const ignoredOnlyInspection = await runner.inspectTaskShare("task-1");
+  assert.equal(ignoredOnlyInspection.isEmpty, true);
+  assert.equal(ignoredOnlyInspection.summary, null);
+
+  await writeFile(join(taskShare, ".agents", "notes.txt"), "keep\n");
+
+  const inspection = await runner.inspectTaskShare("task-1");
+  assert.equal(inspection.isEmpty, false);
+  assert.match(inspection.summary ?? "", /\.agents\//);
+  assert.match(inspection.summary ?? "", /notes\.txt/);
+  assert.doesNotMatch(inspection.summary ?? "", /skills\//);
+  assert.doesNotMatch(inspection.summary ?? "", /built-in-skill\.md/);
+
+  await rm(shareRoot, { recursive: true, force: true });
+});
+
 test("DockerSandboxRunner falls back to a root Docker container when host rm fails due to permissions", async () => {
   const shareRoot = mkdtempSync(join(tmpdir(), "sandy-share-perm-test-"));
   const taskShare = join(shareRoot, "task-1");

@@ -12,6 +12,10 @@ import type {ReservedTaskBundle, TaskBundlePool} from "./task-bundle-types.js";
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 300_000;
 type TaskId = string;
 
+const ignoredSharePathPrefixes = [
+  [".agents", "skills"],
+] as const;
+
 type TaskBundleRecord = {
   bundle: ReservedTaskBundle;
   retired: boolean;
@@ -458,9 +462,14 @@ export class DockerSandboxRunner implements SandboxRunner {
 
   async inspectTaskShare(taskId: string): Promise<ShareInspection> {
     const sharePath = this.requireTaskBundleRecord(taskId).bundle.shareHostPath;
-    let entries;
     try {
-      entries = await readdir(sharePath, {withFileTypes: true});
+      const hasVisibleEntries = await this.hasVisibleShareEntries(sharePath, [], false);
+      if (!hasVisibleEntries) {
+        return {
+          isEmpty: true,
+          summary: null,
+        };
+      }
     } catch (error) {
       if (isMissingPathError(error)) {
         return {
@@ -471,14 +480,7 @@ export class DockerSandboxRunner implements SandboxRunner {
       throw error;
     }
 
-    if (entries.length === 0) {
-      return {
-        isEmpty: true,
-        summary: null,
-      };
-    }
-
-    const lines = await this.buildShareOverview(sharePath, 0, 2, 12);
+    const lines = await this.buildShareOverview(sharePath, [], 0, 2, 12);
     return {
       isEmpty: false,
       summary: lines.join("\n"),
@@ -676,6 +678,7 @@ export class DockerSandboxRunner implements SandboxRunner {
 
   private async buildShareOverview(
     directoryPath: string,
+    relativePath: readonly string[],
     depth: number,
     maxDepth: number,
     remainingLines: number,
@@ -693,22 +696,37 @@ export class DockerSandboxRunner implements SandboxRunner {
       if (lines.length >= remainingLines) {
         break;
       }
+
+      const childRelativePath = [...relativePath, entry.name];
+      if (this.isIgnoredSharePath(childRelativePath)) {
+        continue;
+      }
+
+      let childLines: string[] = [];
+      if (entry.isDirectory()) {
+        const childPath = join(directoryPath, entry.name);
+        const childHasVisibleEntries = await this.hasVisibleShareEntries(childPath, childRelativePath, true);
+        if (!childHasVisibleEntries) {
+          continue;
+        }
+
+        if (depth + 1 < maxDepth && lines.length < remainingLines) {
+          childLines = await this.buildShareOverview(
+            childPath,
+            childRelativePath,
+            depth + 1,
+            maxDepth,
+            remainingLines - lines.length - 1,
+          );
+        }
+      }
+
       processedEntries += 1;
 
       const indent = "  ".repeat(depth);
       const label = entry.isDirectory() ? `${entry.name}/` : entry.name;
       lines.push(`${indent}${label}`);
-
-      if (entry.isDirectory() && depth + 1 < maxDepth && lines.length < remainingLines) {
-        const childPath = join(directoryPath, entry.name);
-        const childLines = await this.buildShareOverview(
-          childPath,
-          depth + 1,
-          maxDepth,
-          remainingLines - lines.length,
-        );
-        lines.push(...childLines);
-      }
+      lines.push(...childLines);
     }
 
     if (processedEntries < entries.length && lines.length >= remainingLines) {
@@ -716,6 +734,40 @@ export class DockerSandboxRunner implements SandboxRunner {
     }
 
     return lines.slice(0, remainingLines);
+  }
+
+  private async hasVisibleShareEntries(
+    directoryPath: string,
+    relativePath: readonly string[],
+    includeDirectoryItself: boolean,
+  ): Promise<boolean> {
+    const entries = await readdir(directoryPath, {withFileTypes: true});
+    if (entries.length === 0) {
+      return includeDirectoryItself;
+    }
+
+    for (const entry of entries) {
+      const childRelativePath = [...relativePath, entry.name];
+      if (this.isIgnoredSharePath(childRelativePath)) {
+        continue;
+      }
+      if (!entry.isDirectory()) {
+        return true;
+      }
+
+      const childPath = join(directoryPath, entry.name);
+      if (await this.hasVisibleShareEntries(childPath, childRelativePath, true)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private isIgnoredSharePath(relativePath: readonly string[]): boolean {
+    return ignoredSharePathPrefixes.some((ignoredPath) =>
+      relativePath.length >= ignoredPath.length
+      && ignoredPath.every((segment, index) => relativePath[index] === segment));
   }
 }
 
