@@ -596,7 +596,7 @@ test("MatrixChannelAdapter evicts stale room polls after task completion", async
         timestamp: "2023-11-14T22:14:11.000Z",
       },
       {
-        kind: "cancel_request",
+        kind: "danger_report",
         chatId: ROOM_ID,
         messageId: "$abort-final",
         senderUserId: OWNER_ID,
@@ -680,7 +680,7 @@ test("MatrixChannelAdapter sends task updates and reportable text without polls 
       "<p>Still working.</p>",
       "<p><em>React with 👍 to finish task, 😮 to abort task</em></p>",
       "<p>Task complete.</p>",
-      "<p><em>React with 😮 to abort task</em></p>",
+      "<p><em>React with 😮 to report dangerous output</em></p>",
     ]);
     assert.equal(fakeClient.sentEvents.some((event) => event.eventType === "org.matrix.msc3381.poll.start"), false);
   } finally {

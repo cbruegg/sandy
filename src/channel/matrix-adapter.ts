@@ -345,9 +345,9 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     });
     this.discardRoomControls(chatId);
     await this.sendTextMessage(chatId, text);
-    const hintEventId = await this.sendNotice(chatId, messages.matrixAbortReactionHint());
+    const hintEventId = await this.sendNotice(chatId, messages.matrixReportReactionHint());
     this.registerReactions(chatId, hintEventId, [
-      { key: MATRIX_ABORT_REACTION, event: { kind: "cancel_request" } },
+      { key: MATRIX_ABORT_REACTION, event: { kind: "danger_report" } },
     ]);
   }
 
