@@ -98,5 +98,5 @@ function isAllowedTagName(name: string): name is typeof allowedTagNames[number] 
 }
 
 function normalizeMarkdownLineBreaks(markdown: string): string {
-  return markdown.replaceAll("\r\n", "\n").replaceAll("\\n", "\n");
+  return markdown.replaceAll("\r\n", "\n");
 }

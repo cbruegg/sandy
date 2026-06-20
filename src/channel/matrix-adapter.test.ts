@@ -32,13 +32,20 @@ test("renderMatrixMarkdown converts Markdown to sanitized Matrix HTML", () => {
 });
 
 test("renderMatrixMarkdown renders line breaks and fenced code blocks", () => {
-  const rendered = renderMatrixMarkdown("Output:\\n\n```\na\nb\n```");
+  const rendered = renderMatrixMarkdown("Output:\n\n```\na\nb\n```");
 
   assert.equal(rendered.body, "Output:\n\n```\na\nb\n```");
   assert.equal(
     rendered.formattedBody,
     "<p>Output:</p>\n<pre><code>a\nb\n</code></pre>",
   );
+});
+
+test("renderMatrixMarkdown preserves literal escaped newlines", () => {
+  const rendered = renderMatrixMarkdown("Arguments: `line 1\\nline 2`");
+
+  assert.equal(rendered.body, "Arguments: `line 1\\nline 2`");
+  assert.equal(rendered.formattedBody, "<p>Arguments: <code>line 1\\nline 2</code></p>");
 });
 
 test("buildMatrixPollStartContent produces a disclosed unstable poll payload", () => {
