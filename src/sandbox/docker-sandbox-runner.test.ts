@@ -18,7 +18,7 @@ import { workerBuiltInSkillsPath, workerUserSkillsPath } from "../worker-skills-
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
-  markup: "telegram_markdown",
+  markup: "markdown",
   allowedTags: [],
   instructions: "Use simple Markdown.",
 };

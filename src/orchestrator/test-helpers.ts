@@ -42,7 +42,7 @@ import type { JobMutationRequest } from "../jobs/job-types.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
-  markup: "telegram_markdown",
+  markup: "markdown",
   allowedTags: [],
   instructions: "Use simple Markdown.",
 };

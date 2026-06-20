@@ -19,7 +19,7 @@ import type {ThreadStartParams} from "../codex-app-server-client/generated/v2";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
-  markup: "telegram_markdown",
+  markup: "markdown",
   allowedTags: [],
   instructions: "Use simple Markdown.",
 };
@@ -184,7 +184,7 @@ test("buildMainAgentPrompt includes only the new visible entries for incremental
   assert.match(initialPrompt, /Visible chat entries for this decision:/);
   assert.match(deltaPrompt, /New visible chat entries since your last decision:/);
   assert.doesNotMatch(deltaPrompt, /Visible chat entries for this first decision:/);
-  assert.match(initialPrompt, /telegram_markdown/);
+  assert.match(initialPrompt, /markdown/);
   assert.match(initialPrompt, /"allowedTags"/);
 });
 

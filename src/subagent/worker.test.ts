@@ -19,7 +19,7 @@ import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
-  markup: "telegram_markdown",
+  markup: "markdown",
   allowedTags: [],
   instructions: "Use simple Markdown.",
 };
@@ -41,7 +41,7 @@ function createAppServerSessionStarter(session: {
 test("buildInitialTaskInput tells the sub-agent where the shared workspace is", () => {
   const formatting: ChannelFormatting = {
     channelId: "telegram",
-    markup: "telegram_markdown",
+    markup: "markdown",
     allowedTags: [],
     instructions: "Use simple Markdown.",
   };
@@ -136,7 +136,7 @@ test("buildTaskSummaryInput requests a host-facing handoff summary", () => {
 test("buildInitialTaskInput includes current date and time", () => {
   const formatting: ChannelFormatting = {
     channelId: "telegram",
-    markup: "telegram_markdown",
+    markup: "markdown",
     allowedTags: [],
     instructions: "Use simple Markdown.",
   };
