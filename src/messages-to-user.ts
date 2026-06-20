@@ -181,8 +181,7 @@ function formatCommandForChannel(command: string, channelFormatting: ChannelForm
     case "plain_text":
       return command;
 
-    case "telegram_markdown":
-    case "matrix_markdown":
+    case "markdown":
       return wrapMarkdownCode(command);
 
     case "matrix_html":

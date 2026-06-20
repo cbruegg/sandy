@@ -142,7 +142,7 @@ type MatrixNormalizeDeps = {
 
 const matrixFormatting: ChannelFormatting = {
   channelId: "matrix",
-  markup: "matrix_markdown",
+  markup: "markdown",
   allowedTags: matrixHtmlAllowedTags,
   instructions: "Format user-visible output as Markdown. Use backticks for inline code and fenced code blocks for multiline command output. Do not emit raw HTML; Matrix delivery will convert Markdown to safe HTML.",
 };
