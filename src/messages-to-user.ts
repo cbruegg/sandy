@@ -184,9 +184,6 @@ function formatCommandForChannel(command: string, channelFormatting: ChannelForm
     case "markdown":
       return wrapMarkdownCode(command);
 
-    case "matrix_html":
-      return `<code>${command}</code>`;
-
     default:
       return assertNever(channelFormatting.markup);
   }
