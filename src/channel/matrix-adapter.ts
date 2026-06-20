@@ -7,9 +7,7 @@ import { matrixHtmlAllowedTags, sanitizeMatrixHtml } from "./matrix-html.js";
 import { runWithMatrixSendRetry, sleepMs, type MatrixSleep } from "./matrix-send-retry.js";
 import {
   buildPrivilegeControls,
-  buildReportControls,
   buildShareDeletionControls,
-  buildTaskControls,
   formatPrivilegeRequestLogType,
   type ControlActionEvent,
 } from "./control-surface.js";
@@ -119,6 +117,16 @@ type MatrixPollRecord = {
   actionsByAnswerId: Map<string, MatrixPollAction>;
 };
 
+type MatrixReactionAction = {
+  key: string;
+  event: ControlActionEvent;
+};
+
+type MatrixReactionRecord = {
+  roomId: string;
+  actionsByKey: Map<string, MatrixReactionAction>;
+};
+
 type MatrixEventBase = {
   chatId: ChatId;
   messageId: string;
@@ -144,7 +152,10 @@ const MATRIX_POLL_START_EVENT_TYPE = "org.matrix.msc3381.poll.start";
 const MATRIX_POLL_RESPONSE_EVENT_TYPE = "org.matrix.msc3381.poll.response";
 const MATRIX_POLL_DISCLOSED_KIND = "org.matrix.msc3381.poll.disclosed";
 const MATRIX_REFERENCE_RELATION = "m.reference";
+const MATRIX_REACTION_EVENT_TYPE = "m.reaction";
 const MATRIX_CRYPTO_STORE_SQLITE = 0;
+const MATRIX_FINISH_REACTION = "👍";
+const MATRIX_ABORT_REACTION = "😮";
 
 async function defaultMatrixClientFactory(options: {
   homeserverUrl: string;
@@ -175,6 +186,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   private botDeviceId: string | null = null;
   private readonly lastUserInteractionTimestamps = new Map<ChatId, string>();
   private readonly activePolls = new Map<string, MatrixPollRecord>();
+  private readonly activeReactions = new Map<string, MatrixReactionRecord>();
   private readonly attachmentRefs = new Map<string, MatrixAttachmentRef>();
   private readonly qualifiedRooms = new Set<string>();
 
@@ -253,6 +265,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     this.botUserId = null;
     this.botDeviceId = null;
     this.activePolls.clear();
+    this.activeReactions.clear();
     this.attachmentRefs.clear();
     this.qualifiedRooms.clear();
     logger.info("matrix.sync_stopped");
@@ -318,9 +331,11 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       chatId,
       textPreview: previewText(text),
     });
-    await this.sendNotice(chatId, text);
-    const controls = buildTaskControls();
-    await this.sendPoll(chatId, "Task controls", controls.rows.flat().map((a) => ({ answerId: a.actionId, label: a.label, event: a.event })));
+    const eventId = await this.sendNotice(chatId, withMatrixReactionHint(text, messages.matrixTaskReactionHint()));
+    this.registerReactions(chatId, eventId, [
+      { key: MATRIX_FINISH_REACTION, event: { kind: "mark_finished_request" } },
+      { key: MATRIX_ABORT_REACTION, event: { kind: "cancel_request" } },
+    ]);
   }
 
   async sendReportableText(chatId: ChatId, text: string): Promise<void> {
@@ -328,10 +343,11 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       chatId,
       textPreview: previewText(text),
     });
-    this.discardRoomPolls(chatId);
-    await this.sendNotice(chatId, text);
-    const controls = buildReportControls();
-    await this.sendPoll(chatId, "Output controls", controls.rows.flat().map((a) => ({ answerId: a.actionId, label: a.label, event: a.event })));
+    this.discardRoomControls(chatId);
+    const eventId = await this.sendNotice(chatId, withMatrixReactionHint(text, messages.matrixAbortReactionHint()));
+    this.registerReactions(chatId, eventId, [
+      { key: MATRIX_ABORT_REACTION, event: { kind: "cancel_request" } },
+    ]);
   }
 
   async sendPrivilegeRequest(chatId: ChatId, request: PrivilegeRequest): Promise<void> {
@@ -341,9 +357,14 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       requestId: request.requestId,
       requestType,
     });
-    await this.sendNotice(chatId, messages.privilegeRequestPrompt(request));
+    const eventId = await this.sendNotice(chatId, withMatrixReactionHint(messages.privilegeRequestPrompt(request), messages.matrixAbortReactionHint()));
+    this.registerReactions(chatId, eventId, [
+      { key: MATRIX_ABORT_REACTION, event: { kind: "cancel_request" } },
+    ]);
     const controls = buildPrivilegeControls(request);
-    await this.sendPoll(chatId, "Privilege request", controls.rows.flat().map((a) => ({ answerId: a.actionId, label: a.label, event: a.event })));
+    await this.sendPoll(chatId, "Privilege request", controls.rows.flat()
+      .filter((action) => action.event.kind !== "cancel_request")
+      .map((a) => ({ answerId: a.actionId, label: a.label, event: a.event })));
   }
 
   async askForDenialReason(chatId: ChatId, request: PrivilegeRequest): Promise<void> {
@@ -369,8 +390,8 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     await this.sendPoll(chatId, "Shared workspace cleanup", controls.rows.flat().map((a) => ({ answerId: a.actionId, label: a.label, event: a.event })));
   }
 
-  private async sendNotice(chatId: ChatId, text: string): Promise<void> {
-    await this.sendWithMatrixBackoff(
+  private async sendNotice(chatId: ChatId, text: string): Promise<string> {
+    return this.sendWithMatrixBackoff(
       "matrix.send_notice",
       () => this.requireClient().sendHtmlNotice(chatId, sanitizeMatrixHtml(text)),
     );
@@ -385,6 +406,9 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       event: ControlActionEvent;
     }>,
   ): Promise<void> {
+    if (options.length === 0) {
+      return;
+    }
     const client = this.requireClient();
     const eventId = await this.sendWithMatrixBackoff(
       "matrix.send_poll",
@@ -393,6 +417,13 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     this.activePolls.set(eventId, {
       roomId,
       actionsByAnswerId: new Map(options.map((option) => [option.answerId, { event: option.event }])),
+    });
+  }
+
+  private registerReactions(roomId: string, eventId: string, actions: MatrixReactionAction[]): void {
+    this.activeReactions.set(eventId, {
+      roomId,
+      actionsByKey: new Map(actions.map((action) => [normalizeMatrixReactionKey(action.key), action])),
     });
   }
 
@@ -464,6 +495,36 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     }
     if (!(await this.shouldHandleInboundEvent(roomId, event))) {
       return;
+    }
+    const normalizedReaction = normalizeMatrixReactionResponse(roomId, event, this.activeReactions);
+    if (normalizedReaction) {
+      const relatedEventId = extractRelatedReactionEventId(event);
+      if (relatedEventId) {
+        this.activeReactions.delete(relatedEventId);
+      }
+      logger.info("matrix.reaction_received", {
+        roomId,
+        kind: normalizedReaction.kind,
+        eventId: normalizedReaction.messageId,
+      });
+      this.lastUserInteractionTimestamps.set(normalizedReaction.chatId, normalizedReaction.timestamp);
+      try {
+        await handler(normalizedReaction);
+      } catch (error) {
+        logger.error("matrix.handler_error", error, "Unknown handler error.", {
+          kind: normalizedReaction.kind,
+          chatId: normalizedReaction.chatId,
+        });
+      }
+      return;
+    }
+    if (event["type"] === MATRIX_REACTION_EVENT_TYPE) {
+      logger.debug("matrix.reaction_ignored", {
+        roomId,
+        eventId: asOptionalString(event["event_id"]),
+        relatedEventId: extractRelatedReactionEventId(event),
+        reactionKey: extractMatrixReactionKey(event),
+      });
     }
     const normalized = normalizeMatrixPollResponse(roomId, event, this.activePolls);
     if (!normalized) {
@@ -560,7 +621,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   }
 
   private discardRoomState(roomId: string): void {
-    this.discardRoomPolls(roomId);
+    this.discardRoomControls(roomId);
     for (const [attachmentId, ref] of this.attachmentRefs.entries()) {
       if (ref.roomId === roomId) {
         this.attachmentRefs.delete(attachmentId);
@@ -574,6 +635,19 @@ export class MatrixChannelAdapter implements ChannelAdapter {
         this.activePolls.delete(eventId);
       }
     }
+  }
+
+  private discardRoomReactions(roomId: string): void {
+    for (const [eventId, record] of this.activeReactions.entries()) {
+      if (record.roomId === roomId) {
+        this.activeReactions.delete(eventId);
+      }
+    }
+  }
+
+  private discardRoomControls(roomId: string): void {
+    this.discardRoomPolls(roomId);
+    this.discardRoomReactions(roomId);
   }
 }
 
@@ -650,6 +724,36 @@ export function normalizeMatrixPollResponse(
   }
   const answerIds = extractMatrixPollAnswerIds(event);
   const matched = answerIds.map((answerId) => pollRecord.actionsByAnswerId.get(answerId)).find((value) => value);
+  if (!matched) {
+    return null;
+  }
+  return {
+    ...matched.event,
+    ...buildMatrixEventBase(roomId, event),
+  };
+}
+
+export function normalizeMatrixReactionResponse(
+  roomId: string,
+  event: Record<string, unknown>,
+  activeReactions: ReadonlyMap<string, MatrixReactionRecord>,
+): NormalizedChatEvent | null {
+  if (event["type"] !== MATRIX_REACTION_EVENT_TYPE) {
+    return null;
+  }
+  const relatedEventId = extractRelatedReactionEventId(event);
+  if (!relatedEventId) {
+    return null;
+  }
+  const reactionRecord = activeReactions.get(relatedEventId);
+  if (!reactionRecord || reactionRecord.roomId !== roomId) {
+    return null;
+  }
+  const reactionKey = extractMatrixReactionKey(event);
+  if (!reactionKey) {
+    return null;
+  }
+  const matched = reactionRecord.actionsByKey.get(normalizeMatrixReactionKey(reactionKey));
   if (!matched) {
     return null;
   }
@@ -822,6 +926,31 @@ function extractRelatedPollEventId(event: Record<string, unknown>): string | nul
   }
   const eventId = asOptionalString(relation["event_id"]);
   return eventId ?? null;
+}
+
+function extractRelatedReactionEventId(event: Record<string, unknown>): string | null {
+  const content = asRecord(event["content"]);
+  const relation = asRecord(content["m.relates_to"]);
+  if (relation["rel_type"] !== "m.annotation") {
+    return null;
+  }
+  const eventId = asOptionalString(relation["event_id"]);
+  return eventId ?? null;
+}
+
+function extractMatrixReactionKey(event: Record<string, unknown>): string | null {
+  const content = asRecord(event["content"]);
+  const relation = asRecord(content["m.relates_to"]);
+  const key = asOptionalString(relation["key"]);
+  return key ?? null;
+}
+
+function normalizeMatrixReactionKey(key: string): string {
+  return key.trim().replaceAll(/[\uFE0E\uFE0F]/g, "");
+}
+
+function withMatrixReactionHint(text: string, hint: string): string {
+  return `${text}\n\n${hint}`;
 }
 
 function extractMatrixPollAnswerIds(event: Record<string, unknown>): string[] {

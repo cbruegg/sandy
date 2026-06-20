@@ -1,4 +1,5 @@
 const allowedTagNames = ["b", "i", "code", "pre"] as const;
+const preservedBlockPattern = /(<pre>[\s\S]*?<\/pre>|<code>[\s\S]*?<\/code>)/g;
 
 export const matrixHtmlAllowedTags = [...allowedTagNames];
 
@@ -11,7 +12,7 @@ export function sanitizeMatrixHtml(text: string): string {
       .replaceAll(`&lt;/${tag}&gt;`, `</${tag}>`);
   }
 
-  return result;
+  return renderMatrixLineBreaks(result);
 }
 
 function escapeHtml(text: string): string {
@@ -19,4 +20,17 @@ function escapeHtml(text: string): string {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+function renderMatrixLineBreaks(html: string): string {
+  const parts = html.split(preservedBlockPattern);
+  return parts.map((part, index) => {
+    if (index % 2 === 1) {
+      return part;
+    }
+    return part
+      .replaceAll("\r\n", "\n")
+      .replaceAll("\\n", "\n")
+      .replaceAll("\n", "<br>");
+  }).join("");
 }

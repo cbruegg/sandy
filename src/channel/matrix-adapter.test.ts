@@ -7,12 +7,14 @@ import {
   MatrixChannelAdapter,
   buildMatrixPollStartContent,
   normalizeMatrixPollResponse,
+  normalizeMatrixReactionResponse,
   normalizeMatrixRoomMessage,
 } from "./matrix-adapter.js";
 import { resolveMatrixCryptoBinaryName } from "./matrix-crypto-targets.js";
 import { sanitizeMatrixHtml } from "./matrix-html.js";
 import type { NormalizedChatEvent } from "../types.js";
 import type { TranscriptionProvider } from "../transcription/transcription-provider.js";
+import { messages } from "../messages-to-user.js";
 
 const BOT_ID = "@sandy:example.org";
 const OWNER_ID = "@owner:example.org";
@@ -23,6 +25,13 @@ test("sanitizeMatrixHtml preserves only the supported tags", () => {
   assert.equal(
     sanitizeMatrixHtml("Use <b>bold</b> and <script>alert(1)</script> plus <code>x < y</code>."),
     "Use <b>bold</b> and &lt;script&gt;alert(1)&lt;/script&gt; plus <code>x &lt; y</code>.",
+  );
+});
+
+test("sanitizeMatrixHtml renders line breaks outside code and pre blocks", () => {
+  assert.equal(
+    sanitizeMatrixHtml("<b>Line 1</b>\nLine 2\\n<pre>a\nb</pre>\n<code>x\\ny</code>"),
+    "<b>Line 1</b><br>Line 2<br><pre>a\nb</pre><br><code>x\\ny</code>",
   );
 });
 
@@ -243,6 +252,86 @@ test("normalizeMatrixPollResponse maps active polls and ignores stale poll answe
   assert.equal(staleResponse, null);
 });
 
+test("normalizeMatrixReactionResponse maps active reactions and ignores stale reactions", () => {
+  const activeReactions = new Map([["$notice", {
+    roomId: ROOM_ID,
+    actionsByKey: new Map([["😮", { key: "😮", event: { kind: "cancel_request" } }]]),
+  }]]) as ReadonlyMap<string, {
+    roomId: string;
+    actionsByKey: Map<string, { key: string; event: Omit<Extract<NormalizedChatEvent, { kind: "cancel_request" }>, "chatId" | "messageId" | "timestamp"> }>;
+  }>;
+
+  const activeResponse = normalizeMatrixReactionResponse(ROOM_ID, {
+    type: "m.reaction",
+    event_id: "$reaction",
+    sender: OWNER_ID,
+    origin_server_ts: 1_700_000_100_000,
+    content: {
+      "m.relates_to": {
+        rel_type: "m.annotation",
+        event_id: "$notice",
+        key: "😮",
+      },
+    },
+  }, activeReactions);
+
+  assert.deepEqual(activeResponse, {
+    kind: "cancel_request",
+    chatId: ROOM_ID,
+    messageId: "$reaction",
+    senderUserId: OWNER_ID,
+    timestamp: "2023-11-14T22:15:00.000Z",
+  });
+
+  const staleResponse = normalizeMatrixReactionResponse(ROOM_ID, {
+    type: "m.reaction",
+    event_id: "$reaction-2",
+    sender: OWNER_ID,
+    origin_server_ts: 1_700_000_101_000,
+    content: {
+      "m.relates_to": {
+        rel_type: "m.annotation",
+        event_id: "$missing",
+        key: "😮",
+      },
+    },
+  }, activeReactions);
+
+  assert.equal(staleResponse, null);
+});
+
+test("normalizeMatrixReactionResponse accepts emoji variation selectors", () => {
+  const activeReactions = new Map([["$notice", {
+    roomId: ROOM_ID,
+    actionsByKey: new Map([["👍", { key: "👍", event: { kind: "mark_finished_request" } }]]),
+  }]]) as ReadonlyMap<string, {
+    roomId: string;
+    actionsByKey: Map<string, { key: string; event: Omit<Extract<NormalizedChatEvent, { kind: "mark_finished_request" }>, "chatId" | "messageId" | "timestamp"> }>;
+  }>;
+
+  const response = normalizeMatrixReactionResponse(ROOM_ID, {
+    type: "m.reaction",
+    event_id: "$reaction-vs16",
+    sender: OWNER_ID,
+    origin_server_ts: 1_700_000_102_000,
+    content: {
+      "m.relates_to": {
+        rel_type: "m.annotation",
+        event_id: "$notice",
+        key: "👍️",
+      },
+    },
+  }, activeReactions);
+
+  assert.deepEqual(response, {
+    kind: "mark_finished_request",
+    chatId: ROOM_ID,
+    messageId: "$reaction-vs16",
+    senderUserId: OWNER_ID,
+    timestamp: "2023-11-14T22:15:02.000Z",
+  });
+});
+
 test("MatrixChannelAdapter auto-joins allowed invites and rejects unencrypted rooms", async () => {
   const fakeClient = new FakeMatrixClient();
   fakeClient.roomMembers.set(ROOM_ID, [BOT_ID, OWNER_ID]);
@@ -285,7 +374,7 @@ test("MatrixChannelAdapter auto-joins allowed invites and rejects unencrypted ro
   }
 });
 
-test("MatrixChannelAdapter ignores unauthorized senders and routes poll answers from Sandy-authored polls", async () => {
+test("MatrixChannelAdapter ignores unauthorized senders and routes task reactions from Sandy-authored notices", async () => {
   const fakeClient = new FakeMatrixClient();
   fakeClient.joinedRooms.add(ROOM_ID);
   fakeClient.roomMembers.set(ROOM_ID, [BOT_ID, OWNER_ID]);
@@ -319,29 +408,24 @@ test("MatrixChannelAdapter ignores unauthorized senders and routes poll answers 
     assert.equal(received.length, 0);
 
     await adapter.sendTaskUpdate(ROOM_ID, "Still working.");
-    const pollEvent = expectDefined(
-      fakeClient.sentEvents.find((event) => event.eventType === "org.matrix.msc3381.poll.start"),
-      "Expected a Matrix poll event.",
-    );
+    const noticeEventId = "$notice-1";
 
     await fakeClient.dispatch("room.event", ROOM_ID, {
-      type: "org.matrix.msc3381.poll.response",
+      type: "m.reaction",
       event_id: "$vote",
       sender: OWNER_ID,
       origin_server_ts: 1_700_000_050_000,
       content: {
-        "org.matrix.msc3381.poll.response": {
-          answers: ["cancel"],
-        },
         "m.relates_to": {
-          rel_type: "m.reference",
-          event_id: pollEvent.eventId,
+          rel_type: "m.annotation",
+          event_id: noticeEventId,
+          key: "👍",
         },
       },
     });
 
     assert.deepEqual(received, [{
-      kind: "cancel_request",
+      kind: "mark_finished_request",
       chatId: ROOM_ID,
       messageId: "$vote",
       senderUserId: OWNER_ID,
@@ -435,23 +519,18 @@ test("MatrixChannelAdapter evicts stale room polls after task completion", async
     });
 
     await adapter.sendTaskUpdate(ROOM_ID, "Still working.");
-    const taskPollId = expectDefined(
-      fakeClient.sentEvents.find((event) => event.eventType === "org.matrix.msc3381.poll.start"),
-      "Expected a task poll.",
-    ).eventId;
+    const taskNoticeId = "$notice-1";
 
     await fakeClient.dispatch("room.event", ROOM_ID, {
-      type: "org.matrix.msc3381.poll.response",
+      type: "m.reaction",
       event_id: "$fresh",
       sender: OWNER_ID,
       origin_server_ts: 1_700_000_051_000,
       content: {
-        "org.matrix.msc3381.poll.response": {
-          answers: ["cancel"],
-        },
         "m.relates_to": {
-          rel_type: "m.reference",
-          event_id: taskPollId,
+          rel_type: "m.annotation",
+          event_id: taskNoticeId,
+          key: "😮",
         },
       },
     });
@@ -465,39 +544,32 @@ test("MatrixChannelAdapter evicts stale room polls after task completion", async
     }]);
 
     await adapter.sendReportableText(ROOM_ID, "Task complete.");
-    const finalPollId = expectDefined(
-      fakeClient.sentEvents.filter((event) => event.eventType === "org.matrix.msc3381.poll.start").at(-1),
-      "Expected a final report poll.",
-    ).eventId;
+    const finalNoticeId = "$notice-2";
 
     await fakeClient.dispatch("room.event", ROOM_ID, {
-      type: "org.matrix.msc3381.poll.response",
+      type: "m.reaction",
       event_id: "$stale-after-summary",
       sender: OWNER_ID,
       origin_server_ts: 1_700_000_052_000,
       content: {
-        "org.matrix.msc3381.poll.response": {
-          answers: ["cancel"],
-        },
         "m.relates_to": {
-          rel_type: "m.reference",
-          event_id: taskPollId,
+          rel_type: "m.annotation",
+          event_id: taskNoticeId,
+          key: "😮",
         },
       },
     });
 
     await fakeClient.dispatch("room.event", ROOM_ID, {
-      type: "org.matrix.msc3381.poll.response",
-      event_id: "$report",
+      type: "m.reaction",
+      event_id: "$abort-final",
       sender: OWNER_ID,
       origin_server_ts: 1_700_000_053_000,
       content: {
-        "org.matrix.msc3381.poll.response": {
-          answers: ["report"],
-        },
         "m.relates_to": {
-          rel_type: "m.reference",
-          event_id: finalPollId,
+          rel_type: "m.annotation",
+          event_id: finalNoticeId,
+          key: "😮",
         },
       },
     });
@@ -511,9 +583,9 @@ test("MatrixChannelAdapter evicts stale room polls after task completion", async
         timestamp: "2023-11-14T22:14:11.000Z",
       },
       {
-        kind: "danger_report",
+        kind: "cancel_request",
         chatId: ROOM_ID,
-        messageId: "$report",
+        messageId: "$abort-final",
         senderUserId: OWNER_ID,
         timestamp: "2023-11-14T22:14:13.000Z",
       },
@@ -550,8 +622,101 @@ test("MatrixChannelAdapter honors Matrix retry_after_ms before retrying a task u
     await adapter.sendTaskUpdate(ROOM_ID, "Still working.");
 
     assert.deepEqual(sleepCalls, [2_500, 4_000]);
-    assert.equal(fakeClient.notices.at(-1)?.html, "Still working.");
-    assert.equal(fakeClient.sentEvents.at(-1)?.eventType, "org.matrix.msc3381.poll.start");
+    assert.equal(fakeClient.notices.at(-1)?.html, `Still working.<br><br>${messages.matrixTaskReactionHint()}`);
+    assert.equal(fakeClient.sentEvents.length, 0);
+  } finally {
+    await adapter.stop();
+  }
+});
+
+test("MatrixChannelAdapter sends task updates and reportable text without polls", async () => {
+  const fakeClient = new FakeMatrixClient();
+  fakeClient.joinedRooms.add(ROOM_ID);
+  fakeClient.roomMembers.set(ROOM_ID, [BOT_ID, OWNER_ID]);
+  fakeClient.encryptedRooms.add(ROOM_ID);
+
+  const adapter = new MatrixChannelAdapter({
+    homeserverUrl: "https://matrix.example",
+    accessToken: "token",
+    allowedUserId: OWNER_ID,
+    stateRoot: "/tmp/sandy-matrix-test",
+    clientFactory: () => fakeClient,
+  });
+
+  try {
+    await adapter.start(async () => {});
+
+    await adapter.sendTaskUpdate(ROOM_ID, "Still working.");
+    await adapter.sendReportableText(ROOM_ID, "Task complete.");
+
+    assert.deepEqual(fakeClient.notices.map((notice) => notice.html), [
+      `Still working.<br><br>${messages.matrixTaskReactionHint()}`,
+      `Task complete.<br><br>${messages.matrixAbortReactionHint()}`,
+    ]);
+    assert.equal(fakeClient.sentEvents.length, 0);
+  } finally {
+    await adapter.stop();
+  }
+});
+
+test("MatrixChannelAdapter sends privilege polls without the abort option and supports abort reactions", async () => {
+  const fakeClient = new FakeMatrixClient();
+  fakeClient.joinedRooms.add(ROOM_ID);
+  fakeClient.roomMembers.set(ROOM_ID, [BOT_ID, OWNER_ID]);
+  fakeClient.encryptedRooms.add(ROOM_ID);
+  const received: NormalizedChatEvent[] = [];
+
+  const adapter = new MatrixChannelAdapter({
+    homeserverUrl: "https://matrix.example",
+    accessToken: "token",
+    allowedUserId: OWNER_ID,
+    stateRoot: "/tmp/sandy-matrix-test",
+    clientFactory: () => fakeClient,
+  });
+
+  try {
+    await adapter.start(async (event) => {
+      received.push(event);
+    });
+
+    const request = {
+      kind: "skill_mutation",
+      requestId: "req-1",
+      operation: "create",
+      skillId: "skill-1",
+      name: "Skill One",
+    } as const;
+
+    await adapter.sendPrivilegeRequest(ROOM_ID, request);
+
+    assert.equal(fakeClient.notices.at(-1)?.html, `${sanitizeMatrixHtml(messages.privilegeRequestPrompt(request))}<br><br>${messages.matrixAbortReactionHint()}`);
+    const pollEvent = expectDefined(fakeClient.sentEvents.at(-1), "Expected a reduced privilege poll.");
+    assert.equal(pollEvent.eventType, "org.matrix.msc3381.poll.start");
+
+    const pollAnswers = (((pollEvent.content["org.matrix.msc3381.poll.start"] as { answers: Array<{ id: string }> }).answers)).map((answer) => answer.id);
+    assert.deepEqual(pollAnswers, ["approve", "deny", "report"]);
+
+    await fakeClient.dispatch("room.event", ROOM_ID, {
+      type: "m.reaction",
+      event_id: "$abort",
+      sender: OWNER_ID,
+      origin_server_ts: 1_700_000_054_000,
+      content: {
+        "m.relates_to": {
+          rel_type: "m.annotation",
+          event_id: "$notice-1",
+          key: "😮",
+        },
+      },
+    });
+
+    assert.deepEqual(received, [{
+      kind: "cancel_request",
+      chatId: ROOM_ID,
+      messageId: "$abort",
+      senderUserId: OWNER_ID,
+      timestamp: "2023-11-14T22:14:14.000Z",
+    }]);
   } finally {
     await adapter.stop();
   }

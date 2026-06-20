@@ -13,6 +13,10 @@ export const buttonLabels = {
 } as const;
 
 export const messages = {
+  matrixTaskReactionHint: (): string =>
+    "<i>React with</i> 👍 <i>to finish task,</i> 😮 <i>to abort task</i>",
+  matrixAbortReactionHint: (): string =>
+    "<i>React with</i> 😮 <i>to abort task</i>",
   unsupportedInput: (inputType: string): string =>
     `This build supports text messages, file attachments, and optionally voice messages when STT is configured. Received unsupported ${inputType} input.`,
   voiceMessagesNotEnabled: (): string =>
