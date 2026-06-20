@@ -165,7 +165,7 @@ async function defaultMatrixClientFactory(options: {
     MatrixClient,
     RustSdkCryptoStorageProvider,
     SimpleFsStorageProvider,
-  } = await import("matrix-bot-sdk");
+  } = await import("@vector-im/matrix-bot-sdk");
   const storage = new SimpleFsStorageProvider(join(options.stateRoot, "client.json"));
   const cryptoStorage = new RustSdkCryptoStorageProvider(join(options.stateRoot, "crypto"), MATRIX_CRYPTO_STORE_SQLITE);
   return new MatrixClient(options.homeserverUrl, options.accessToken, storage, cryptoStorage);
