@@ -11,7 +11,7 @@ import {
   normalizeMatrixRoomMessage,
 } from "./matrix-adapter.js";
 import { resolveMatrixCryptoBinaryName } from "./matrix-crypto-targets.js";
-import { sanitizeMatrixHtml } from "./matrix-html.js";
+import { renderMatrixMarkdown } from "./matrix-html.js";
 import type { NormalizedChatEvent } from "../types.js";
 import type { TranscriptionProvider } from "../transcription/transcription-provider.js";
 import { messages } from "../messages-to-user.js";
@@ -21,17 +21,23 @@ const OWNER_ID = "@owner:example.org";
 const OTHER_ID = "@other:example.org";
 const ROOM_ID = "!room:example.org";
 
-test("sanitizeMatrixHtml preserves only the supported tags", () => {
+test("renderMatrixMarkdown converts Markdown to sanitized Matrix HTML", () => {
+  const rendered = renderMatrixMarkdown("Use **bold** and <script>alert(1)</script> plus `x < y`.");
+
+  assert.equal(rendered.body, "Use **bold** and <script>alert(1)</script> plus `x < y`.");
   assert.equal(
-    sanitizeMatrixHtml("Use <b>bold</b> and <script>alert(1)</script> plus <code>x < y</code>."),
-    "Use <b>bold</b> and &lt;script&gt;alert(1)&lt;/script&gt; plus <code>x &lt; y</code>.",
+    rendered.formattedBody,
+    "<p>Use <strong>bold</strong> and &lt;script&gt;alert(1)&lt;/script&gt; plus <code>x &lt; y</code>.</p>",
   );
 });
 
-test("sanitizeMatrixHtml renders line breaks outside code and pre blocks", () => {
+test("renderMatrixMarkdown renders line breaks and fenced code blocks", () => {
+  const rendered = renderMatrixMarkdown("Output:\\n\n```\na\nb\n```");
+
+  assert.equal(rendered.body, "Output:\n\n```\na\nb\n```");
   assert.equal(
-    sanitizeMatrixHtml("<b>Line 1</b>\nLine 2\\n<pre>a\nb</pre>\n<code>x\\ny</code>"),
-    "<b>Line 1</b><br>Line 2<br><pre>a\nb</pre><br><code>x\\ny</code>",
+    rendered.formattedBody,
+    "<p>Output:</p>\n<pre><code>a\nb\n</code></pre>",
   );
 });
 
@@ -408,7 +414,7 @@ test("MatrixChannelAdapter ignores unauthorized senders and routes task reaction
     assert.equal(received.length, 0);
 
     await adapter.sendTaskUpdate(ROOM_ID, "Still working.");
-    const noticeEventId = "$notice-1";
+    const noticeEventId = "$event-2";
 
     await fakeClient.dispatch("room.event", ROOM_ID, {
       type: "m.reaction",
@@ -519,7 +525,7 @@ test("MatrixChannelAdapter evicts stale room polls after task completion", async
     });
 
     await adapter.sendTaskUpdate(ROOM_ID, "Still working.");
-    const taskNoticeId = "$notice-1";
+    const taskNoticeId = "$event-2";
 
     await fakeClient.dispatch("room.event", ROOM_ID, {
       type: "m.reaction",
@@ -544,7 +550,7 @@ test("MatrixChannelAdapter evicts stale room polls after task completion", async
     }]);
 
     await adapter.sendReportableText(ROOM_ID, "Task complete.");
-    const finalNoticeId = "$notice-2";
+    const finalNoticeId = "$event-4";
 
     await fakeClient.dispatch("room.event", ROOM_ID, {
       type: "m.reaction",
@@ -600,7 +606,7 @@ test("MatrixChannelAdapter honors Matrix retry_after_ms before retrying a task u
   fakeClient.joinedRooms.add(ROOM_ID);
   fakeClient.roomMembers.set(ROOM_ID, [BOT_ID, OWNER_ID]);
   fakeClient.encryptedRooms.add(ROOM_ID);
-  fakeClient.sendHtmlNoticeFailures = [
+  fakeClient.sendEventFailures = [
     createMatrixRateLimitError(2_500),
     createMatrixRateLimitError(1_000),
   ];
@@ -622,14 +628,16 @@ test("MatrixChannelAdapter honors Matrix retry_after_ms before retrying a task u
     await adapter.sendTaskUpdate(ROOM_ID, "Still working.");
 
     assert.deepEqual(sleepCalls, [2_500, 4_000]);
-    assert.equal(fakeClient.notices.at(-1)?.html, `Still working.<br><br>${messages.matrixTaskReactionHint()}`);
-    assert.equal(fakeClient.sentEvents.length, 0);
+    assert.equal(fakeClient.sentEvents[0]?.content["msgtype"], "m.notice");
+    assert.equal(fakeClient.sentEvents[0]?.content["formatted_body"], "<p>Still working.</p>");
+    assert.equal(fakeClient.sentEvents[1]?.content["msgtype"], "m.notice");
+    assert.equal(fakeClient.sentEvents[1]?.content["formatted_body"], "<p><em>React with 👍 to finish task, 😮 to abort task</em></p>");
   } finally {
     await adapter.stop();
   }
 });
 
-test("MatrixChannelAdapter sends task updates and reportable text without polls", async () => {
+test("MatrixChannelAdapter sends task updates and reportable text without polls and with separate hint notices", async () => {
   const fakeClient = new FakeMatrixClient();
   fakeClient.joinedRooms.add(ROOM_ID);
   fakeClient.roomMembers.set(ROOM_ID, [BOT_ID, OWNER_ID]);
@@ -649,11 +657,25 @@ test("MatrixChannelAdapter sends task updates and reportable text without polls"
     await adapter.sendTaskUpdate(ROOM_ID, "Still working.");
     await adapter.sendReportableText(ROOM_ID, "Task complete.");
 
-    assert.deepEqual(fakeClient.notices.map((notice) => notice.html), [
-      `Still working.<br><br>${messages.matrixTaskReactionHint()}`,
-      `Task complete.<br><br>${messages.matrixAbortReactionHint()}`,
+    assert.deepEqual(fakeClient.sentEvents.map((event) => event.eventType), [
+      "m.room.message",
+      "m.room.message",
+      "m.room.message",
+      "m.room.message",
     ]);
-    assert.equal(fakeClient.sentEvents.length, 0);
+    assert.deepEqual(fakeClient.sentEvents.map((event) => event.content["msgtype"]), [
+      "m.notice",
+      "m.notice",
+      "m.text",
+      "m.notice",
+    ]);
+    assert.deepEqual(fakeClient.sentEvents.map((event) => event.content["formatted_body"]), [
+      "<p>Still working.</p>",
+      "<p><em>React with 👍 to finish task, 😮 to abort task</em></p>",
+      "<p>Task complete.</p>",
+      "<p><em>React with 😮 to abort task</em></p>",
+    ]);
+    assert.equal(fakeClient.sentEvents.some((event) => event.eventType === "org.matrix.msc3381.poll.start"), false);
   } finally {
     await adapter.stop();
   }
@@ -689,7 +711,10 @@ test("MatrixChannelAdapter sends privilege polls without the abort option and su
 
     await adapter.sendPrivilegeRequest(ROOM_ID, request);
 
-    assert.equal(fakeClient.notices.at(-1)?.html, `${sanitizeMatrixHtml(messages.privilegeRequestPrompt(request))}<br><br>${messages.matrixAbortReactionHint()}`);
+    assert.equal(fakeClient.sentEvents[0]?.content["msgtype"], "m.text");
+    assert.equal(fakeClient.sentEvents[0]?.content["formatted_body"], renderMatrixMarkdown(messages.privilegeRequestPrompt(request)).formattedBody);
+    assert.equal(fakeClient.sentEvents[1]?.content["msgtype"], "m.notice");
+    assert.equal(fakeClient.sentEvents[1]?.content["formatted_body"], "<p><em>React with 😮 to abort task</em></p>");
     const pollEvent = expectDefined(fakeClient.sentEvents.at(-1), "Expected a reduced privilege poll.");
     assert.equal(pollEvent.eventType, "org.matrix.msc3381.poll.start");
 
@@ -704,7 +729,7 @@ test("MatrixChannelAdapter sends privilege polls without the abort option and su
       content: {
         "m.relates_to": {
           rel_type: "m.annotation",
-          event_id: "$notice-1",
+          event_id: "$event-2",
           key: "😮",
         },
       },
@@ -790,7 +815,8 @@ test("MatrixChannelAdapter saves encrypted attachments and sends encrypted files
     const uploadedMedia = fakeClient.uploads[0];
     assert.ok(uploadedMedia);
     assert.equal(uploadedMedia?.data.toString("utf8"), "encrypted:plain outbound");
-    assert.equal(fakeClient.notices.at(-1)?.html, "Caption");
+    assert.equal(fakeClient.sentEvents.at(-1)?.content["msgtype"], "m.text");
+    assert.equal(fakeClient.sentEvents.at(-1)?.content["formatted_body"], "<p>Caption</p>");
   } finally {
     await adapter.stop();
     await rm(root, { recursive: true, force: true });
@@ -804,11 +830,9 @@ class FakeMatrixClient {
   public readonly encryptedRooms = new Set<string>();
   public readonly joinCalls: string[] = [];
   public readonly leaveCalls: Array<{ roomId: string; reason?: string }> = [];
-  public readonly notices: Array<{ roomId: string; html: string }> = [];
   public readonly sentEvents: Array<{ roomId: string; eventType: string; content: Record<string, unknown>; eventId: string }> = [];
   public readonly media = new Map<string, { data: Buffer; contentType: string }>();
   public readonly uploads: Array<{ mxcUrl: string; data: Buffer; contentType?: string; filename?: string }> = [];
-  public sendHtmlNoticeFailures: Error[] = [];
   public sendEventFailures: Error[] = [];
   private nextEvent = 1;
   private nextMedia = 1;
@@ -882,15 +906,6 @@ class FakeMatrixClient {
       return { algorithm: "m.megolm.v1.aes-sha2" };
     }
     throw new Error("State event not found.");
-  }
-
-  async sendHtmlNotice(roomId: string, html: string): Promise<string> {
-    const failure = this.sendHtmlNoticeFailures.shift();
-    if (failure) {
-      throw failure;
-    }
-    this.notices.push({ roomId, html });
-    return `$notice-${this.nextEvent++}`;
   }
 
   async sendEvent(roomId: string, eventType: string, content: Record<string, unknown>): Promise<string> {

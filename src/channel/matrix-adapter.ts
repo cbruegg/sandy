@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { messages } from "../messages-to-user.js";
-import { matrixHtmlAllowedTags, sanitizeMatrixHtml } from "./matrix-html.js";
+import { matrixHtmlAllowedTags, renderMatrixMarkdown } from "./matrix-html.js";
 import { runWithMatrixSendRetry, sleepMs, type MatrixSleep } from "./matrix-send-retry.js";
 import {
   buildPrivilegeControls,
@@ -67,7 +67,6 @@ type MatrixClientLike = {
   joinRoom(roomId: string, viaServers?: string[]): Promise<string>;
   leaveRoom(roomId: string, reason?: string): Promise<unknown>;
   getRoomStateEvent(roomId: string, type: string, stateKey: string): Promise<unknown>;
-  sendHtmlNotice(roomId: string, html: string): Promise<string>;
   sendEvent(roomId: string, eventType: string, content: Record<string, unknown>): Promise<string>;
   uploadContent(data: Buffer, contentType?: string, filename?: string): Promise<string>;
   downloadContent(mxcUrl: string, allowRemote?: boolean): Promise<MatrixMediaInfo>;
@@ -143,9 +142,9 @@ type MatrixNormalizeDeps = {
 
 const matrixFormatting: ChannelFormatting = {
   channelId: "matrix",
-  markup: "matrix_html",
+  markup: "matrix_markdown",
   allowedTags: matrixHtmlAllowedTags,
-  instructions: "Format user-visible output as simple Matrix HTML using only <b>, <i>, <code>, and <pre>. Do not emit Markdown. Escape raw <, >, and & unless they are part of those exact tags. For line-breaks, use \\n instead of <br/> tags.",
+  instructions: "Format user-visible output as Markdown. Use backticks for inline code and fenced code blocks for multiline command output. Do not emit raw HTML; Matrix delivery will convert Markdown to safe HTML.",
 };
 
 const MATRIX_POLL_START_EVENT_TYPE = "org.matrix.msc3381.poll.start";
@@ -323,7 +322,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       chatId,
       textPreview: previewText(text),
     });
-    await this.sendNotice(chatId, text);
+    await this.sendTextMessage(chatId, text);
   }
 
   async sendTaskUpdate(chatId: ChatId, text: string): Promise<void> {
@@ -331,8 +330,9 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       chatId,
       textPreview: previewText(text),
     });
-    const eventId = await this.sendNotice(chatId, withMatrixReactionHint(text, messages.matrixTaskReactionHint()));
-    this.registerReactions(chatId, eventId, [
+    await this.sendNotice(chatId, text);
+    const hintEventId = await this.sendNotice(chatId, messages.matrixTaskReactionHint());
+    this.registerReactions(chatId, hintEventId, [
       { key: MATRIX_FINISH_REACTION, event: { kind: "mark_finished_request" } },
       { key: MATRIX_ABORT_REACTION, event: { kind: "cancel_request" } },
     ]);
@@ -344,8 +344,9 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       textPreview: previewText(text),
     });
     this.discardRoomControls(chatId);
-    const eventId = await this.sendNotice(chatId, withMatrixReactionHint(text, messages.matrixAbortReactionHint()));
-    this.registerReactions(chatId, eventId, [
+    await this.sendTextMessage(chatId, text);
+    const hintEventId = await this.sendNotice(chatId, messages.matrixAbortReactionHint());
+    this.registerReactions(chatId, hintEventId, [
       { key: MATRIX_ABORT_REACTION, event: { kind: "cancel_request" } },
     ]);
   }
@@ -357,8 +358,9 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       requestId: request.requestId,
       requestType,
     });
-    const eventId = await this.sendNotice(chatId, withMatrixReactionHint(messages.privilegeRequestPrompt(request), messages.matrixAbortReactionHint()));
-    this.registerReactions(chatId, eventId, [
+    await this.sendTextMessage(chatId, messages.privilegeRequestPrompt(request));
+    const hintEventId = await this.sendNotice(chatId, messages.matrixAbortReactionHint());
+    this.registerReactions(chatId, hintEventId, [
       { key: MATRIX_ABORT_REACTION, event: { kind: "cancel_request" } },
     ]);
     const controls = buildPrivilegeControls(request);
@@ -376,7 +378,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     // requires, the next text message is unambiguously the user's reply, so a
     // notice inviting a reply is sufficient; the orchestrator binds the next
     // inbound text to this denial via its awaiting_denial_reason state.
-    await this.sendNotice(chatId, messages.denialReasonPrompt(request));
+    await this.sendTextMessage(chatId, messages.denialReasonPrompt(request));
   }
 
   async sendShareDeletionRequest(chatId: ChatId, requestId: string, taskName: string, summary: string): Promise<void> {
@@ -385,15 +387,29 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       requestId,
       taskName,
     });
-    await this.sendNotice(chatId, messages.shareDeletionRequestPrompt(taskName, summary));
+    await this.sendTextMessage(chatId, messages.shareDeletionRequestPrompt(taskName, summary));
     const controls = buildShareDeletionControls(requestId);
     await this.sendPoll(chatId, "Shared workspace cleanup", controls.rows.flat().map((a) => ({ answerId: a.actionId, label: a.label, event: a.event })));
   }
 
   private async sendNotice(chatId: ChatId, text: string): Promise<string> {
+    return this.sendFormattedMessage(chatId, text, "m.notice");
+  }
+
+  private async sendTextMessage(chatId: ChatId, text: string): Promise<string> {
+    return this.sendFormattedMessage(chatId, text, "m.text");
+  }
+
+  private async sendFormattedMessage(chatId: ChatId, text: string, msgtype: "m.notice" | "m.text"): Promise<string> {
+    const rendered = renderMatrixMarkdown(text);
     return this.sendWithMatrixBackoff(
-      "matrix.send_notice",
-      () => this.requireClient().sendHtmlNotice(chatId, sanitizeMatrixHtml(text)),
+      "matrix.send_message",
+      () => this.requireClient().sendEvent(chatId, "m.room.message", {
+        body: rendered.body,
+        msgtype,
+        format: "org.matrix.custom.html",
+        formatted_body: rendered.formattedBody,
+      }),
     );
   }
 
@@ -947,10 +963,6 @@ function extractMatrixReactionKey(event: Record<string, unknown>): string | null
 
 function normalizeMatrixReactionKey(key: string): string {
   return key.trim().replaceAll(/[\uFE0E\uFE0F]/g, "");
-}
-
-function withMatrixReactionHint(text: string, hint: string): string {
-  return `${text}\n\n${hint}`;
 }
 
 function extractMatrixPollAnswerIds(event: Record<string, unknown>): string[] {

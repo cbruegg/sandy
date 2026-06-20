@@ -14,9 +14,9 @@ export const buttonLabels = {
 
 export const messages = {
   matrixTaskReactionHint: (): string =>
-    "<i>React with</i> 👍 <i>to finish task,</i> 😮 <i>to abort task</i>",
+    "_React with 👍 to finish task, 😮 to abort task_",
   matrixAbortReactionHint: (): string =>
-    "<i>React with</i> 😮 <i>to abort task</i>",
+    "_React with 😮 to abort task_",
   unsupportedInput: (inputType: string): string =>
     `This build supports text messages, file attachments, and optionally voice messages when STT is configured. Received unsupported ${inputType} input.`,
   voiceMessagesNotEnabled: (): string =>
@@ -180,6 +180,7 @@ function formatCommandForChannel(command: string, channelFormatting: ChannelForm
       return command;
 
     case "telegram_markdown":
+    case "matrix_markdown":
       return wrapMarkdownCode(command);
 
     case "matrix_html":
