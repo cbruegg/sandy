@@ -266,7 +266,7 @@ test("normalizeMatrixPollResponse maps active polls and ignores stale poll answe
 });
 
 test("normalizeMatrixReactionResponse maps active reactions and ignores stale reactions", () => {
-  const activeReactions = new Map([["$notice", {
+  const activeReactionHandlers = new Map([["$notice", {
     roomId: ROOM_ID,
     actionsByKey: new Map([["😮", { key: "😮", event: { kind: "cancel_request" } }]]),
   }]]) as ReadonlyMap<string, {
@@ -286,7 +286,7 @@ test("normalizeMatrixReactionResponse maps active reactions and ignores stale re
         key: "😮",
       },
     },
-  }, activeReactions);
+  }, activeReactionHandlers);
 
   assert.deepEqual(activeResponse, {
     kind: "cancel_request",
@@ -308,13 +308,13 @@ test("normalizeMatrixReactionResponse maps active reactions and ignores stale re
         key: "😮",
       },
     },
-  }, activeReactions);
+  }, activeReactionHandlers);
 
   assert.equal(staleResponse, null);
 });
 
 test("normalizeMatrixReactionResponse accepts emoji variation selectors", () => {
-  const activeReactions = new Map([["$notice", {
+  const activeReactionHandlers = new Map([["$notice", {
     roomId: ROOM_ID,
     actionsByKey: new Map([["👍", { key: "👍", event: { kind: "mark_finished_request" } }]]),
   }]]) as ReadonlyMap<string, {
@@ -334,7 +334,7 @@ test("normalizeMatrixReactionResponse accepts emoji variation selectors", () => 
         key: "👍️",
       },
     },
-  }, activeReactions);
+  }, activeReactionHandlers);
 
   assert.deepEqual(response, {
     kind: "mark_finished_request",

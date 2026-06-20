@@ -185,7 +185,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   private botDeviceId: string | null = null;
   private readonly lastUserInteractionTimestamps = new Map<ChatId, string>();
   private readonly activePolls = new Map<string, MatrixPollRecord>();
-  private readonly activeReactions = new Map<string, MatrixReactionRecord>();
+  private readonly activeReactionHandlers = new Map<string, MatrixReactionRecord>();
   private readonly attachmentRefs = new Map<string, MatrixAttachmentRef>();
   private readonly qualifiedRooms = new Set<string>();
 
@@ -264,7 +264,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     this.botUserId = null;
     this.botDeviceId = null;
     this.activePolls.clear();
-    this.activeReactions.clear();
+    this.activeReactionHandlers.clear();
     this.attachmentRefs.clear();
     this.qualifiedRooms.clear();
     logger.info("matrix.sync_stopped");
@@ -437,7 +437,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   }
 
   private registerReactions(roomId: string, eventId: string, actions: MatrixReactionAction[]): void {
-    this.activeReactions.set(eventId, {
+    this.activeReactionHandlers.set(eventId, {
       roomId,
       actionsByKey: new Map(actions.map((action) => [normalizeMatrixReactionKey(action.key), action])),
     });
@@ -512,11 +512,11 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     if (!(await this.shouldHandleInboundEvent(roomId, event))) {
       return;
     }
-    const normalizedReaction = normalizeMatrixReactionResponse(roomId, event, this.activeReactions);
+    const normalizedReaction = normalizeMatrixReactionResponse(roomId, event, this.activeReactionHandlers);
     if (normalizedReaction) {
       const relatedEventId = extractRelatedReactionEventId(event);
       if (relatedEventId) {
-        this.activeReactions.delete(relatedEventId);
+        this.activeReactionHandlers.delete(relatedEventId);
       }
       logger.info("matrix.reaction_received", {
         roomId,
@@ -654,9 +654,9 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   }
 
   private discardRoomReactions(roomId: string): void {
-    for (const [eventId, record] of this.activeReactions.entries()) {
+    for (const [eventId, record] of this.activeReactionHandlers.entries()) {
       if (record.roomId === roomId) {
-        this.activeReactions.delete(eventId);
+        this.activeReactionHandlers.delete(eventId);
       }
     }
   }
@@ -752,7 +752,7 @@ export function normalizeMatrixPollResponse(
 export function normalizeMatrixReactionResponse(
   roomId: string,
   event: Record<string, unknown>,
-  activeReactions: ReadonlyMap<string, MatrixReactionRecord>,
+  activeReactionHandlers: ReadonlyMap<string, MatrixReactionRecord>,
 ): NormalizedChatEvent | null {
   if (event["type"] !== MATRIX_REACTION_EVENT_TYPE) {
     return null;
@@ -761,7 +761,7 @@ export function normalizeMatrixReactionResponse(
   if (!relatedEventId) {
     return null;
   }
-  const reactionRecord = activeReactions.get(relatedEventId);
+  const reactionRecord = activeReactionHandlers.get(relatedEventId);
   if (!reactionRecord || reactionRecord.roomId !== roomId) {
     return null;
   }
