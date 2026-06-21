@@ -1,76 +1,128 @@
+import { Command } from "commander";
+import { defaultCliIo, type CliIo, configureCliProgram, runCliProgram } from "../command-line.js";
 import { loadConfig } from "../config.js";
 import { SandyMatrixAdminService } from "./admin-service.js";
 import { SandyMatrixVerificationService, type VerificationStatus } from "./verification-service.js";
 
-export async function runMatrixCommand(args: string[]): Promise<void> {
-  const config = loadConfig();
-  const matrixConfig = config.channel.kind === "matrix" ? config.channel.matrix : null;
-  const admin = new SandyMatrixAdminService(config.configDirectory, matrixConfig);
-  const verification = new SandyMatrixVerificationService(config.configDirectory, matrixConfig);
-  const [command, subcommand] = args;
+type MatrixCliHandlers = {
+  status: () => Promise<void>;
+  login: (deviceName: string) => Promise<void>;
+  logout: () => Promise<void>;
+  verifyStatus: () => Promise<void>;
+  verifyRecoveryKey: () => Promise<void>;
+};
 
-  switch (command) {
-    case "status": {
+function createDefaultHandlers(io: CliIo): MatrixCliHandlers {
+  const stdout = io.stdout;
+
+  function createServices(): {
+    admin: SandyMatrixAdminService;
+    verification: SandyMatrixVerificationService;
+  } {
+    const config = loadConfig();
+    const matrixConfig = config.channel.kind === "matrix" ? config.channel.matrix : null;
+
+    return {
+      admin: new SandyMatrixAdminService(config.configDirectory, matrixConfig),
+      verification: new SandyMatrixVerificationService(config.configDirectory, matrixConfig),
+    };
+  }
+
+  return {
+    async status(): Promise<void> {
+      const {admin} = createServices();
       const status = await admin.status();
       if (!status) {
-        console.log("Matrix channel is not configured.");
+        stdout.write("Matrix channel is not configured.\n");
         return;
       }
-      console.log(`Homeserver URL: ${status.homeserverUrl}`);
-      console.log(`Bot User ID: ${status.botUserId}`);
-      console.log(`Logged in: ${status.loggedIn ? "yes" : "no"}`);
+      stdout.write(`Homeserver URL: ${status.homeserverUrl}\n`);
+      stdout.write(`Bot User ID: ${status.botUserId}\n`);
+      stdout.write(`Logged in: ${status.loggedIn ? "yes" : "no"}\n`);
       if (status.deviceId) {
-        console.log(`Device ID: ${status.deviceId}`);
+        stdout.write(`Device ID: ${status.deviceId}\n`);
       }
-      console.log(`Matches config: ${status.matchesConfig ? "yes" : "no"}`);
-      return;
-    }
-    case "login": {
-      const deviceName = args[1] ?? "Sandy";
+      stdout.write(`Matches config: ${status.matchesConfig ? "yes" : "no"}\n`);
+    },
+    async login(deviceName: string): Promise<void> {
+      const {admin} = createServices();
       const result = await admin.login(deviceName);
-      console.log(`Logged in as ${result.userId} (device: ${result.deviceId}).`);
-      return;
-    }
-    case "logout": {
+      stdout.write(`Logged in as ${result.userId} (device: ${result.deviceId}).\n`);
+    },
+    async logout(): Promise<void> {
+      const {admin} = createServices();
       await admin.logout();
-      console.log("Logged out from Matrix.");
-      return;
-    }
-    case "verify": {
-      await runVerifyCommand(verification, subcommand);
-      return;
-    }
-    default:
-      throw new Error("Usage: sandy matrix <status|login|logout|verify>");
-  }
-}
-
-async function runVerifyCommand(
-  verification: SandyMatrixVerificationService,
-  subcommand: string | undefined,
-): Promise<void> {
-  switch (subcommand) {
-    case "status": {
+      stdout.write("Logged out from Matrix.\n");
+    },
+    async verifyStatus(): Promise<void> {
+      const {verification} = createServices();
       const status: VerificationStatus | null = await verification.status();
       if (!status) {
-        console.log(
-          "Matrix verification status is unavailable. Run \"sandy matrix login\" first.",
-        );
+        stdout.write("Matrix verification status is unavailable. Run \"sandy matrix login\" first.\n");
         return;
       }
-      console.log(`Device ID: ${status.deviceId}`);
-      console.log(
-        `Cross-signing keys: ${status.hasCrossSigningKeys ? "available" : "not available"}`,
-      );
-      console.log(`Device verified: ${status.isDeviceVerified ? "yes" : "no"}`);
-      return;
-    }
-    case "recovery-key": {
+      stdout.write(`Device ID: ${status.deviceId}\n`);
+      stdout.write(`Cross-signing keys: ${status.hasCrossSigningKeys ? "available" : "not available"}\n`);
+      stdout.write(`Device verified: ${status.isDeviceVerified ? "yes" : "no"}\n`);
+    },
+    async verifyRecoveryKey(): Promise<void> {
+      const {verification} = createServices();
       const result = await verification.verifyWithRecoveryKey();
-      console.log(`Device ${result.deviceId} has been signed successfully.`);
-      return;
-    }
-    default:
-      throw new Error("Usage: sandy matrix verify <status|recovery-key>");
-  }
+      stdout.write(`Device ${result.deviceId} has been signed successfully.\n`);
+    },
+  };
+}
+
+export function createMatrixCommand(
+  io: CliIo = defaultCliIo,
+  handlers: MatrixCliHandlers = createDefaultHandlers(io),
+): Command {
+  const command = configureCliProgram(new Command("matrix"), io)
+    .description("Manage Matrix channel authentication and verification.");
+
+  command
+    .command("status")
+    .description("Show Matrix channel status.")
+    .action(async () => {
+      await handlers.status();
+    });
+
+  command
+    .command("login")
+    .description("Log in the Matrix bot account.")
+    .argument("[deviceName]", "device display name", "Sandy")
+    .action(async (deviceName: string) => {
+      await handlers.login(deviceName);
+    });
+
+  command
+    .command("logout")
+    .description("Log out the Matrix bot account.")
+    .action(async () => {
+      await handlers.logout();
+    });
+
+  const verifyCommand = command
+    .command("verify")
+    .description("Inspect or update Matrix device verification.");
+
+  verifyCommand
+    .command("status")
+    .description("Show Matrix device verification status.")
+    .action(async () => {
+      await handlers.verifyStatus();
+    });
+
+  verifyCommand
+    .command("recovery-key")
+    .description("Verify the current Matrix device with the recovery key.")
+    .action(async () => {
+      await handlers.verifyRecoveryKey();
+    });
+
+  return command;
+}
+
+export async function runMatrixCommand(args: string[], io: CliIo = defaultCliIo): Promise<number> {
+  return runCliProgram(createMatrixCommand(io), args);
 }
