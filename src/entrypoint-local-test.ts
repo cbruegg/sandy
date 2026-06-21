@@ -1,5 +1,3 @@
-import { runLocalTestCli } from "./local-test-cli.js";
+import {runLocalTestCli} from "./local-test-cli.js";
 
-const [, , ...args] = process.argv;
-
-await runLocalTestCli(args);
+process.exitCode = await runLocalTestCli(process.argv.slice(2));

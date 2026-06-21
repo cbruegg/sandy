@@ -1,23 +1,26 @@
+import { Command } from "commander";
 import { spawn } from "node:child_process";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
+import {
+  defaultCliIo,
+  type CliIo,
+  configureCliProgram,
+  parseIntegerOption,
+  runCliProgram,
+} from "./command-line.js";
 import {
   createIdentifier,
   parseLocalTestOutboundEvent,
 } from "./channel/local-test-protocol.js";
 import { SANDY_MANAGED_CONTAINER_LABEL } from "./sandbox/container-label.js";
 
-type CliIo = {
-  stdout: NodeJS.WriteStream;
-  stderr: NodeJS.WriteStream;
-};
-
 type LocalTestCliRuntime = {
   listManagedContainers: () => Promise<ContainerInfo[]>;
   sleep: (delayMs: number) => Promise<void>;
 };
 
-type LocalTestCliCommand =
+type LocalTestCliCommandName =
   | "send"
   | "attach"
   | "approve"
@@ -31,9 +34,49 @@ type LocalTestCliCommand =
   | "list-events"
   | "status";
 
-const defaultCliIo: CliIo = {
-  stdout: process.stdout,
-  stderr: process.stderr,
+type SpoolRootOption = {
+  spoolRoot: string;
+};
+
+type MessageIdOption = {
+  messageId?: string;
+};
+
+type BasicMessageOptions = SpoolRootOption & MessageIdOption & {
+  text: string;
+  rawText?: string;
+};
+
+type AttachmentCommandOptions = SpoolRootOption & MessageIdOption & {
+  file: string[];
+  text?: string;
+  rawText?: string;
+};
+
+type ApprovalCommandOptions = SpoolRootOption & MessageIdOption & {
+  requestId: string;
+  scope: string;
+};
+
+type DenyCommandOptions = SpoolRootOption & MessageIdOption & {
+  requestId: string;
+  reason?: string;
+};
+
+type SimpleEventOptions = SpoolRootOption & MessageIdOption;
+
+type DirectionCommandOptions = SpoolRootOption & {
+  direction: string;
+};
+
+type TailCommandOptions = DirectionCommandOptions & {
+  limit: number;
+};
+
+type WaitForCommandOptions = SpoolRootOption & {
+  type: string;
+  contains?: string;
+  timeoutMs: number;
 };
 
 const defaultRuntime: LocalTestCliRuntime = {
@@ -41,136 +84,202 @@ const defaultRuntime: LocalTestCliRuntime = {
   sleep,
 };
 
+const simpleEventCommands: ReadonlyArray<{
+  name: LocalTestCliCommandName;
+  description: string;
+  kind: "cancel_request" | "mark_finished_request" | "danger_report";
+}> = [
+  {
+    name: "cancel",
+    description: "Write a cancel_request event.",
+    kind: "cancel_request",
+  },
+  {
+    name: "mark-finished",
+    description: "Write a mark_finished_request event.",
+    kind: "mark_finished_request",
+  },
+  {
+    name: "report-danger",
+    description: "Write a danger_report event.",
+    kind: "danger_report",
+  },
+];
+
 export async function runLocalTestCli(
   args: string[],
   io: CliIo = defaultCliIo,
   runtime: LocalTestCliRuntime = defaultRuntime,
-): Promise<void> {
-  const command = parseCommand(args[0]);
-  if (!command) {
-    throw new Error("Missing local-test command.");
-  }
+): Promise<number> {
+  return runCliProgram(createLocalTestProgram(io, runtime), args);
+}
 
-  const options = parseOptions(args.slice(1));
-  const spoolRoot = resolveRequiredOption(options, "spool-root");
-  await ensureSpoolDirectories(spoolRoot);
+function createLocalTestProgram(
+  io: CliIo = defaultCliIo,
+  runtime: LocalTestCliRuntime = defaultRuntime,
+): Command {
+  const command = configureCliProgram(new Command("sandy-local-test"), io)
+    .description("Send events to and inspect output from Sandy's local-test channel.");
 
-  switch (command) {
-    case "send":
+  command
+    .command("send")
+    .description("Write a user_message event.")
+    .requiredOption("--spool-root <path>", "local-test spool root")
+    .requiredOption("--text <text>", "message text")
+    .option("--raw-text <text>", "raw message text")
+    .option("--message-id <id>", "message identifier")
+    .action(async (options: BasicMessageOptions) => {
+      const spoolRoot = await prepareSpoolRoot(options.spoolRoot);
       await writeInboxEvent(spoolRoot, {
         kind: "user_message",
-        messageId: options["message-id"] ?? createIdentifier("message"),
+        messageId: options.messageId ?? createIdentifier("message"),
         timestamp: new Date().toISOString(),
-        text: resolveRequiredOption(options, "text"),
-        rawText: options["raw-text"] ?? options["text"] ?? "",
+        text: options.text,
+        rawText: options.rawText ?? options.text,
         attachments: [],
       });
-      return;
-    case "attach":
-      {
-        const messageId = resolveStringOption(options, "message-id") ?? createIdentifier("message");
+    });
+
+  command
+    .command("attach")
+    .description("Write a user_message event with file attachments.")
+    .requiredOption("--spool-root <path>", "local-test spool root")
+    .requiredOption("--file <path>", "host file to attach", collectOptionValues, [] as string[])
+    .option("--text <text>", "message text")
+    .option("--raw-text <text>", "raw message text")
+    .option("--message-id <id>", "message identifier")
+    .action(async (options: AttachmentCommandOptions) => {
+      const spoolRoot = await prepareSpoolRoot(options.spoolRoot);
+      const messageId = options.messageId ?? createIdentifier("message");
       await writeInboxEvent(spoolRoot, {
         kind: "user_message",
         messageId,
         timestamp: new Date().toISOString(),
-        text: options["text"] ?? "",
-        rawText: options["raw-text"] ?? options["text"] ?? "",
-        attachments: collectMultiOption(options, "file").map((hostPath, index) => ({
+        text: options.text ?? "",
+        rawText: options.rawText ?? options.text ?? "",
+        attachments: options.file.map((hostPath, index) => ({
           attachmentId: `${messageId}-attachment-${index + 1}`,
           fileName: basename(hostPath),
           hostPath: resolve(hostPath),
         })),
       });
-      return;
-      }
-    case "approve":
+    });
+
+  command
+    .command("approve")
+    .description("Approve a pending privilege request.")
+    .requiredOption("--spool-root <path>", "local-test spool root")
+    .requiredOption("--request-id <id>", "privilege request identifier")
+    .option("--scope <scope>", "approval scope", "once")
+    .option("--message-id <id>", "message identifier")
+    .action(async (options: ApprovalCommandOptions) => {
+      const spoolRoot = await prepareSpoolRoot(options.spoolRoot);
       await writeInboxEvent(spoolRoot, {
         kind: "approval_response",
-        messageId: options["message-id"] ?? createIdentifier("message"),
+        messageId: options.messageId ?? createIdentifier("message"),
         timestamp: new Date().toISOString(),
-        decision: mapApprovalScope(resolveStringOption(options, "scope") ?? "once"),
-        requestId: resolveRequiredOption(options, "request-id"),
+        decision: mapApprovalScope(options.scope),
+        requestId: options.requestId,
       });
-      return;
-    case "deny": {
-      const reason = resolveStringOption(options, "reason");
+    });
+
+  command
+    .command("deny")
+    .description("Deny a pending privilege request.")
+    .requiredOption("--spool-root <path>", "local-test spool root")
+    .requiredOption("--request-id <id>", "privilege request identifier")
+    .option("--reason <text>", "optional denial reason")
+    .option("--message-id <id>", "message identifier")
+    .action(async (options: DenyCommandOptions) => {
+      const spoolRoot = await prepareSpoolRoot(options.spoolRoot);
       const event: Record<string, unknown> = {
         kind: "approval_response",
-        messageId: options["message-id"] ?? createIdentifier("message"),
+        messageId: options.messageId ?? createIdentifier("message"),
         timestamp: new Date().toISOString(),
         decision: "deny",
-        requestId: resolveRequiredOption(options, "request-id"),
+        requestId: options.requestId,
       };
-      if (reason) {
-        event["reason"] = reason;
+      if (options.reason) {
+        event["reason"] = options.reason;
       }
       await writeInboxEvent(spoolRoot, event);
-      return;
-    }
-    case "cancel":
-      await writeSimpleEvent(spoolRoot, "cancel_request", options);
-      return;
-    case "mark-finished":
-      await writeSimpleEvent(spoolRoot, "mark_finished_request", options);
-      return;
-    case "report-danger":
-      await writeSimpleEvent(spoolRoot, "danger_report", options);
-      return;
-    case "tail":
-      printEvents(
-        io.stdout,
-        await listEvents(
-          spoolRoot,
-          resolveStringOption(options, "direction") ?? "outbox",
-          Number(resolveStringOption(options, "limit") ?? 20),
-        ),
-      );
-      return;
-    case "list-events":
-      printEvents(io.stdout, await listEvents(spoolRoot, resolveStringOption(options, "direction") ?? "outbox"));
-      return;
-    case "wait-for":
-      await waitForEvent(spoolRoot, options, io.stdout);
-      return;
-    case "status":
-      await printStatus(spoolRoot, options, io.stdout, runtime.listManagedContainers);
-      return;
-    case "cancel-all":
-      await cancelAll(spoolRoot, options, io, runtime);
-      return;
-  }
-}
+    });
 
-function parseCommand(raw: string | undefined): LocalTestCliCommand | undefined {
-  switch (raw) {
-    case undefined:
-      return undefined;
-    case "send":
-    case "attach":
-    case "approve":
-    case "deny":
-    case "cancel":
-    case "cancel-all":
-    case "mark-finished":
-    case "report-danger":
-    case "status":
-    case "tail":
-    case "wait-for":
-    case "list-events":
-      return raw;
-    default:
-      throw new Error(`Unsupported local-test command: ${raw}`);
+  for (const simpleCommand of simpleEventCommands) {
+    command
+      .command(simpleCommand.name)
+      .description(simpleCommand.description)
+      .requiredOption("--spool-root <path>", "local-test spool root")
+      .option("--message-id <id>", "message identifier")
+      .action(async (options: SimpleEventOptions) => {
+        const spoolRoot = await prepareSpoolRoot(options.spoolRoot);
+        await writeSimpleEvent(spoolRoot, simpleCommand.kind, options.messageId);
+      });
   }
+
+  command
+    .command("tail")
+    .description("Print recent inbox or outbox events.")
+    .requiredOption("--spool-root <path>", "local-test spool root")
+    .option("--direction <direction>", "inbox or outbox", "outbox")
+    .option("--limit <count>", "number of events to print", parseIntegerOption, 20)
+    .action(async (options: TailCommandOptions) => {
+      const spoolRoot = await prepareSpoolRoot(options.spoolRoot);
+      printEvents(io.stdout, await listEvents(spoolRoot, options.direction, options.limit));
+    });
+
+  command
+    .command("list-events")
+    .description("Print all inbox or outbox events.")
+    .requiredOption("--spool-root <path>", "local-test spool root")
+    .option("--direction <direction>", "inbox or outbox", "outbox")
+    .action(async (options: DirectionCommandOptions) => {
+      const spoolRoot = await prepareSpoolRoot(options.spoolRoot);
+      printEvents(io.stdout, await listEvents(spoolRoot, options.direction));
+    });
+
+  command
+    .command("wait-for")
+    .description("Wait for a matching outbox event.")
+    .requiredOption("--spool-root <path>", "local-test spool root")
+    .requiredOption("--type <type>", "event type to wait for")
+    .option("--contains <text>", "substring to match in the event payload")
+    .option("--timeout-ms <ms>", "time to wait before failing", parseIntegerOption, 30000)
+    .action(async (options: WaitForCommandOptions) => {
+      const spoolRoot = await prepareSpoolRoot(options.spoolRoot);
+      await waitForEvent(spoolRoot, options, io.stdout);
+    });
+
+  command
+    .command("status")
+    .description("Show local-test spool and managed container status.")
+    .requiredOption("--spool-root <path>", "local-test spool root")
+    .action(async (options: SpoolRootOption) => {
+      const spoolRoot = await prepareSpoolRoot(options.spoolRoot);
+      await printStatus(spoolRoot, io.stdout, runtime.listManagedContainers);
+    });
+
+  command
+    .command("cancel-all")
+    .description("Request task cancellation and print remaining managed containers.")
+    .requiredOption("--spool-root <path>", "local-test spool root")
+    .option("--message-id <id>", "message identifier")
+    .action(async (options: SimpleEventOptions) => {
+      const spoolRoot = await prepareSpoolRoot(options.spoolRoot);
+      await cancelAll(spoolRoot, options.messageId, io, runtime);
+    });
+
+  return command;
 }
 
 async function writeSimpleEvent(
   spoolRoot: string,
   kind: "cancel_request" | "mark_finished_request" | "danger_report",
-  options: Record<string, string | string[]>,
+  messageId: string | undefined,
 ): Promise<void> {
   await writeInboxEvent(spoolRoot, {
     kind,
-    messageId: options["message-id"] ?? createIdentifier("message"),
+    messageId: messageId ?? createIdentifier("message"),
     timestamp: new Date().toISOString(),
   });
 }
@@ -190,16 +299,13 @@ function mapApprovalScope(scope: string): "approve_once" | "approve_worker_sessi
 
 async function waitForEvent(
   spoolRoot: string,
-  options: Record<string, string | string[]>,
-  stdout: NodeJS.WriteStream,
+  options: WaitForCommandOptions,
+  stdout: Pick<NodeJS.WriteStream, "write">,
 ): Promise<void> {
-  const type = resolveRequiredOption(options, "type");
-  const contains = resolveStringOption(options, "contains");
-  const timeoutMs = Number(resolveStringOption(options, "timeout-ms") ?? 30000);
   const start = Date.now();
   const seen = new Set<string>();
 
-  while (Date.now() - start < timeoutMs) {
+  while (Date.now() - start < options.timeoutMs) {
     const entries = await readOutboxFiles(spoolRoot);
     for (const entry of entries) {
       if (seen.has(entry.path)) {
@@ -207,10 +313,10 @@ async function waitForEvent(
       }
       seen.add(entry.path);
       const parsed = parseLocalTestOutboundEvent(entry.raw);
-      if (parsed.type !== type) {
+      if (parsed.type !== options.type) {
         continue;
       }
-      if (contains && !JSON.stringify(parsed).includes(contains)) {
+      if (options.contains && !JSON.stringify(parsed).includes(options.contains)) {
         continue;
       }
       stdout.write(`${JSON.stringify(parsed, null, 2)}\n`);
@@ -219,10 +325,10 @@ async function waitForEvent(
     await sleep(100);
   }
 
-  throw new Error(`Timed out waiting for local-test event type ${type}.`);
+  throw new Error(`Timed out waiting for local-test event type ${options.type}.`);
 }
 
-function printEvents(stdout: NodeJS.WriteStream, events: unknown[]): void {
+function printEvents(stdout: Pick<NodeJS.WriteStream, "write">, events: unknown[]): void {
   stdout.write(`${JSON.stringify(events, null, 2)}\n`);
 }
 
@@ -275,59 +381,6 @@ async function ensureSpoolDirectories(spoolRoot: string): Promise<void> {
   ]);
 }
 
-function parseOptions(args: string[]): Record<string, string | string[]> {
-  const options: Record<string, string | string[]> = {};
-  for (let index = 0; index < args.length; index += 1) {
-    const token = args[index];
-    if (!token?.startsWith("--")) {
-      throw new Error(`Unexpected argument: ${token}`);
-    }
-    const key = token.slice(2);
-    const value = args[index + 1];
-    if (!value || value.startsWith("--")) {
-      options[key] = "true";
-      continue;
-    }
-    const existing = options[key];
-    if (existing === undefined) {
-      options[key] = value;
-    } else if (Array.isArray(existing)) {
-      existing.push(value);
-    } else {
-      options[key] = [existing, value];
-    }
-    index += 1;
-  }
-  return options;
-}
-
-function resolveRequiredOption(options: Record<string, string | string[]>, key: string): string {
-  const value = options[key];
-  if (!value || Array.isArray(value)) {
-    throw new Error(`Missing required option --${key}.`);
-  }
-  return value;
-}
-
-function collectMultiOption(options: Record<string, string | string[]>, key: string): string[] {
-  const value = options[key];
-  if (!value) {
-    throw new Error(`Missing required option --${key}.`);
-  }
-  return Array.isArray(value) ? value : [value];
-}
-
-function resolveStringOption(options: Record<string, string | string[]>, key: string): string | null {
-  const value = options[key];
-  if (!value) {
-    return null;
-  }
-  if (Array.isArray(value)) {
-    throw new Error(`Expected exactly one value for --${key}.`);
-  }
-  return value;
-}
-
 async function sleep(delayMs: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, delayMs));
 }
@@ -336,18 +389,15 @@ function parseUnknownJson(raw: string): unknown {
   return JSON.parse(raw) as unknown;
 }
 
-// ---- status command ----
-
 async function printStatus(
   spoolRoot: string,
-  _options: Record<string, string | string[]>,
-  stdout: NodeJS.WriteStream,
+  stdout: Pick<NodeJS.WriteStream, "write">,
   listContainers: () => Promise<ContainerInfo[]>,
 ): Promise<void> {
   const containers = await listContainers();
 
   const lines: string[] = [];
-  lines.push(`=== Sandy Container Status ===`);
+  lines.push("=== Sandy Container Status ===");
   lines.push(`Spool root: ${spoolRoot}`);
   lines.push(`Managed containers: ${containers.length}`);
   lines.push("");
@@ -355,26 +405,23 @@ async function printStatus(
   if (containers.length === 0) {
     lines.push("  (none)");
   } else {
-    for (const c of containers) {
-      lines.push(`  ${c.id.slice(0, 12)}  ${c.image.padEnd(32)} ${c.name}`);
+    for (const container of containers) {
+      lines.push(`  ${container.id.slice(0, 12)}  ${container.image.padEnd(32)} ${container.name}`);
     }
   }
 
-  stdout.write(lines.join("\n") + "\n");
+  stdout.write(`${lines.join("\n")}\n`);
 }
-
-// ---- cancel-all command ----
 
 async function cancelAll(
   spoolRoot: string,
-  options: Record<string, string | string[]>,
+  messageId: string | undefined,
   io: CliIo,
   runtime: LocalTestCliRuntime,
 ): Promise<void> {
   io.stdout.write("Sending cancel_request for active task...\n");
-  await writeSimpleEvent(spoolRoot, "cancel_request", options);
+  await writeSimpleEvent(spoolRoot, "cancel_request", messageId);
 
-  // Give Sandy a moment to process the cancel and emit task_update.
   await runtime.sleep(500);
 
   io.stdout.write("\nDocker containers remaining:\n");
@@ -382,20 +429,29 @@ async function cancelAll(
   if (remaining.length === 0) {
     io.stdout.write("  (none)\n");
   } else {
-    for (const c of remaining) {
-      io.stdout.write(`  ${c.id.slice(0, 12)}  ${c.image.padEnd(30)} ${c.name}\n`);
+    for (const container of remaining) {
+      io.stdout.write(`  ${container.id.slice(0, 12)}  ${container.image.padEnd(30)} ${container.name}\n`);
     }
     io.stdout.write(`\n  ${remaining.length} container(s) still running.\n`);
     io.stdout.write("  Run 'status' to check task state, or stop Sandy to clean up standbys.\n");
   }
 }
 
-// ---- Docker helpers ----
+async function prepareSpoolRoot(spoolRoot: string): Promise<string> {
+  const resolvedSpoolRoot = resolve(spoolRoot);
+  await ensureSpoolDirectories(resolvedSpoolRoot);
+  return resolvedSpoolRoot;
+}
+
+function collectOptionValues(value: string, previous: string[]): string[] {
+  previous.push(value);
+  return previous;
+}
 
 type ContainerInfo = { id: string; image: string; name: string };
 
 async function listManagedContainers(): Promise<ContainerInfo[]> {
-  return new Promise((resolve) => {
+  return new Promise((resolveContainers) => {
     const child = spawn("docker", [
       "ps",
       "--filter", `label=${SANDY_MANAGED_CONTAINER_LABEL}`,
@@ -405,14 +461,14 @@ async function listManagedContainers(): Promise<ContainerInfo[]> {
     let stdout = "";
     child.stdout.on("data", (chunk) => { stdout += String(chunk); });
 
-    child.on("error", () => resolve([]));
+    child.on("error", () => resolveContainers([]));
     child.on("exit", () => {
-      const lines = stdout.trim().split("\n").filter((l) => l.length > 0);
+      const lines = stdout.trim().split("\n").filter((line) => line.length > 0);
       const containers = lines.map((line) => {
         const [id, image, name] = line.split("|");
         return { id: id!, image: image!, name: name! };
       });
-      resolve(containers);
+      resolveContainers(containers);
     });
   });
 }
