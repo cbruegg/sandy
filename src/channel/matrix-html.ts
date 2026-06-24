@@ -1,4 +1,4 @@
-import { Marked } from "marked";
+import { Marked, type Tokens } from "marked";
 
 const allowedTagNames = [
   "del",
@@ -42,19 +42,12 @@ const allowedTagNames = [
 const htmlTagPattern = /<[^>]*>/g;
 const safeLinkPattern = /^(?:https?|ftp|mailto|magnet):/i;
 const matrixContentUriPattern = /^mxc:\/\/[^/]+\/.+/i;
-const marked = new Marked({
-  async: false,
-  breaks: true,
-  gfm: true,
-  renderer: {
-    html({ text }) {
-      return escapeHtml(text);
-    },
-    image({ text }) {
-      return escapeHtml(text);
-    },
-  },
-});
+
+// Element X on iOS currently renders HTML tables poorly. Keep Matrix's plain
+// text body unchanged, but render Markdown table formatted_body content as
+// simple paragraph/line-break HTML for more consistent mobile display.
+const renderMarkdownTablesWithoutHtmlTables = true;
+const marked = createMatrixMarkdownRenderer(renderMarkdownTablesWithoutHtmlTables);
 
 export const matrixHtmlAllowedTags = [...allowedTagNames];
 
@@ -63,13 +56,64 @@ export type MatrixRenderedMarkdown = {
   formattedBody: string;
 };
 
-export function renderMatrixMarkdown(markdown: string): MatrixRenderedMarkdown {
+type MatrixMarkdownRenderOptions = {
+  renderMarkdownTablesWithoutHtmlTables?: boolean;
+};
+
+export function renderMatrixMarkdown(markdown: string, options?: MatrixMarkdownRenderOptions): MatrixRenderedMarkdown {
   const normalized = normalizeMarkdownLineBreaks(markdown);
-  const rawHtml = marked.parse(normalized, { async: false });
+  const renderer = options?.renderMarkdownTablesWithoutHtmlTables === undefined
+    ? marked
+    : createMatrixMarkdownRenderer(options.renderMarkdownTablesWithoutHtmlTables);
+  const rawHtml = renderer.parse(normalized, { async: false });
   return {
     body: normalized,
     formattedBody: sanitizeMatrixHtml(rawHtml).trim(),
   };
+}
+
+function createMatrixMarkdownRenderer(renderTablesWithoutHtmlTables: boolean): Marked {
+  const renderer = {
+    html({ text }: Tokens.HTML | Tokens.Tag) {
+      return escapeHtml(text);
+    },
+    image({ text }: Tokens.Image) {
+      return escapeHtml(text);
+    },
+    ...(renderTablesWithoutHtmlTables ? { table: renderMarkdownTableWithoutHtmlTable } : {}),
+  };
+
+  return new Marked({
+    async: false,
+    breaks: true,
+    gfm: true,
+    renderer,
+  });
+}
+
+function renderMarkdownTableWithoutHtmlTable(token: Tokens.Table): string {
+  const headers = token.header.map((cell, index) => renderTableHeader(cell, index));
+  const rows = token.rows.map((row) => renderMarkdownTableRow(headers, row));
+  return rows.join("\n");
+}
+
+function renderMarkdownTableRow(headers: string[], row: Tokens.TableCell[]): string {
+  const cells = row.map((cell, index) => {
+    const label = headers[index] ?? `Column ${index + 1}`;
+    const value = renderTableCellInline(cell);
+    return `<strong>${label}:</strong> ${value}`;
+  });
+
+  return `<p>${cells.join("<br>\n")}</p>`;
+}
+
+function renderTableHeader(cell: Tokens.TableCell, index: number): string {
+  const header = renderTableCellInline(cell).trim();
+  return header.length === 0 ? `Column ${index + 1}` : header;
+}
+
+function renderTableCellInline(cell: Tokens.TableCell): string {
+  return marked.parseInline(cell.text, { async: false });
 }
 
 function sanitizeMatrixHtml(html: string): string {
