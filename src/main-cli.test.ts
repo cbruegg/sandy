@@ -1,5 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { CommanderError } from "commander";
 import { createMainProgram } from "./main-cli.js";
 
 test("main CLI starts the app when no args are provided", async () => {
@@ -23,7 +24,11 @@ test("main CLI prints help without starting the app", async () => {
     },
   }, createTestIo(output));
 
-  await command.parseAsync(["--help"], { from: "user" });
+  command.exitOverride();
+  await assert.rejects(
+    () => command.parseAsync(["--help"], { from: "user" }),
+    (error) => error instanceof CommanderError && error.code === "commander.helpDisplayed",
+  );
   assert.equal(started, false);
   assert.match(output.stdout, /Usage: sandy/);
 });
