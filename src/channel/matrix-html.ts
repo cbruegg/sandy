@@ -1,8 +1,47 @@
 import { Marked } from "marked";
 
-const allowedTagNames = ["p", "br", "strong", "em", "code", "pre", "ul", "ol", "li", "a"] as const;
+const allowedTagNames = [
+  "del",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "blockquote",
+  "p",
+  "a",
+  "ul",
+  "ol",
+  "sup",
+  "sub",
+  "li",
+  "b",
+  "i",
+  "u",
+  "strong",
+  "em",
+  "s",
+  "code",
+  "hr",
+  "br",
+  "div",
+  "table",
+  "thead",
+  "tbody",
+  "tr",
+  "th",
+  "td",
+  "caption",
+  "pre",
+  "span",
+  "img",
+  "details",
+  "summary",
+] as const;
 const htmlTagPattern = /<[^>]*>/g;
 const safeLinkPattern = /^(?:https?|ftp|mailto|magnet):/i;
+const matrixContentUriPattern = /^mxc:\/\/[^/]+\/.+/i;
 const marked = new Marked({
   async: false,
   breaks: true,
@@ -48,6 +87,10 @@ function sanitizeMatrixHtmlTag(tag: string): string {
     return "<br>";
   }
 
+  if (name === "hr") {
+    return "<hr>";
+  }
+
   if (closing) {
     return `</${name}>`;
   }
@@ -55,8 +98,25 @@ function sanitizeMatrixHtmlTag(tag: string): string {
   if (name === "a") {
     const href = extractHtmlAttribute(tag, "href");
     if (href && safeLinkPattern.test(href)) {
-      return `<a href="${escapeHtmlAttribute(href)}">`;
+      return sanitizeMatrixHtmlAttributes(tag, "a", ["target", "href"]);
     }
+  }
+
+  if (name === "span") {
+    return sanitizeMatrixHtmlAttributes(tag, "span", ["data-mx-bg-color", "data-mx-color", "data-mx-spoiler", "data-mx-maths"]);
+  }
+
+  if (name === "div") {
+    return sanitizeMatrixHtmlAttributes(tag, "div", ["data-mx-maths"]);
+  }
+
+  if (name === "img") {
+    const src = extractHtmlAttribute(tag, "src");
+    if (!src || !matrixContentUriPattern.test(src)) {
+      return "";
+    }
+
+    return sanitizeMatrixHtmlAttributes(tag, "img", ["width", "height", "alt", "title", "src"]);
   }
 
   if (name === "ol") {
@@ -74,6 +134,17 @@ function sanitizeMatrixHtmlTag(tag: string): string {
   }
 
   return `<${name}>`;
+}
+
+function sanitizeMatrixHtmlAttributes(tag: string, name: string, allowedAttributes: readonly string[]): string {
+  const attributes = allowedAttributes
+    .map((attribute) => {
+      const value = extractHtmlAttribute(tag, attribute);
+      return value === null ? null : `${attribute}="${escapeHtmlAttribute(value)}"`;
+    })
+    .filter((attribute): attribute is string => attribute !== null);
+
+  return attributes.length === 0 ? `<${name}>` : `<${name} ${attributes.join(" ")}>`;
 }
 
 function escapeHtml(text: string): string {

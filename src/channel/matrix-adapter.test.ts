@@ -41,6 +41,24 @@ test("renderMatrixMarkdown renders line breaks and fenced code blocks", () => {
   );
 });
 
+test("renderMatrixMarkdown renders Markdown tables as Matrix HTML", () => {
+  const rendered = renderMatrixMarkdown("| A | B |\n|---|---|\n| 1 | 2 |");
+
+  assert.equal(
+    rendered.formattedBody,
+    "<table>\n<thead>\n<tr>\n<th>A</th>\n<th>B</th>\n</tr>\n</thead>\n<tbody><tr>\n<td>1</td>\n<td>2</td>\n</tr>\n</tbody></table>",
+  );
+});
+
+test("renderMatrixMarkdown keeps only Matrix-safe HTML attributes", () => {
+  const rendered = renderMatrixMarkdown("[link](https://example.org)\n\n3. item");
+
+  assert.equal(
+    rendered.formattedBody,
+    '<p><a href="https://example.org">link</a></p>\n<ol start="3">\n<li>item</li>\n</ol>',
+  );
+});
+
 test("renderMatrixMarkdown preserves literal escaped newlines", () => {
   const rendered = renderMatrixMarkdown("Arguments: `line 1\\nline 2`");
 
