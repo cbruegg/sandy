@@ -233,17 +233,18 @@ export class TaskCoordinator {
       return;
     }
 
-    const requestId = session.pendingTaskSummary.confirmationRequestId ?? randomUUID();
     if (session.pendingTaskSummary.confirmationRequestId) {
+      // We already requested confirmation of the summary.
       return;
     }
 
-    session.pendingTaskSummary.confirmationRequestId = requestId;
+    const requestId = randomUUID();
     await this.deps.channel.sendTaskSummaryConfirmationRequest(
       session.chatId,
       requestId,
       session.pendingTaskSummary.taskName,
     );
+    session.pendingTaskSummary.confirmationRequestId = requestId;
     this.reminders.sync(session.chatId);
   }
 

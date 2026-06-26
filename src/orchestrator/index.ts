@@ -119,8 +119,7 @@ export class SandyOrchestrator {
           && (!event.requestId || event.requestId === session.pendingTaskSummary.confirmationRequestId)
         ) {
           if (event.decision === "deny") {
-            await this.deps.channel.sendText(event.chatId, messages.pendingSummaryStillPending());
-            return;
+            throw new Error("Unexpected deny decision for task summary confirmation.");
           }
           const taskName = this.deps.taskLifecycle.confirmPendingTaskSummary(session);
           if (taskName) {
@@ -128,16 +127,14 @@ export class SandyOrchestrator {
           }
           await this.deps.taskCoordinator.onVisibleSlotAvailable(event.chatId);
           return;
-        }
-        if (session.pendingShareDeletion) {
+        } else if (session.pendingShareDeletion) {
           if (event.requestId && event.requestId !== session.pendingShareDeletion.requestId) {
             await this.deps.channel.sendText(event.chatId, messages.staleShareDeletionRequest());
             return;
           }
           await this.deps.taskLifecycle.resolvePendingShareDeletion(session, event.decision === "deny" ? "deny" : "approve");
           return;
-        }
-        if (session.pendingTaskSummary?.confirmationRequestId) {
+        } else if (session.pendingTaskSummary?.confirmationRequestId) {
           await this.deps.channel.sendText(event.chatId, messages.staleTaskSummaryConfirmation());
           return;
         }
