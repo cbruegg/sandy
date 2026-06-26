@@ -22,7 +22,7 @@ export function createChannelAdapter(
         adapter: new LocalTestChannelAdapter({
           spoolRoot: config.channel.localTest.spoolRoot,
         }),
-        destinationStore: new ImplicitChannelDestinationStore("local_test"),
+        destinationStore: new ImplicitChannelDestinationStore("local-test"),
       };
     case "matrix": {
       if (!matrixAccessToken) {

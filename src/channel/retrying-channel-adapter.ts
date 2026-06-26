@@ -72,6 +72,11 @@ export function createRetryingChannelAdapter(
       retrySend("channel.sendTaskUpdate", () => adapter.sendTaskUpdate(chatId, text)),
     sendReportableText: (chatId, text) =>
       retrySend("channel.sendReportableText", () => adapter.sendReportableText(chatId, text)),
+    sendTaskSummaryConfirmationRequest: (chatId, requestId, taskName) =>
+      retrySend(
+        "channel.sendTaskSummaryConfirmationRequest",
+        () => adapter.sendTaskSummaryConfirmationRequest(chatId, requestId, taskName),
+      ),
     sendPrivilegeRequest: (chatId, request) =>
       retrySend("channel.sendPrivilegeRequest", () => adapter.sendPrivilegeRequest(chatId, request)),
     askForDenialReason: (chatId, request) =>

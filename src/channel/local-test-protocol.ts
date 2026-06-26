@@ -4,6 +4,7 @@ import type { MessageAttachment, NormalizedChatEvent, PrivilegeRequest } from ".
 import type { ChatId } from "../types.js";
 
 const approvalDecisionSchema = z.enum(["approve", "approve_once", "approve_worker_session", "approve_always", "deny"]);
+const approvalTargetSchema = z.enum(["privilege_request", "share_deletion", "task_summary_confirmation"]);
 
 const localTestAttachmentSchema = z.object({
   attachmentId: z.string().min(1).optional(),
@@ -28,6 +29,7 @@ const localTestSimpleInputSchema = z.object({
 
 const localTestApprovalInputSchema = localTestSimpleInputSchema.extend({
   kind: z.literal("approval_response"),
+  target: approvalTargetSchema,
   decision: approvalDecisionSchema,
   requestId: z.string().min(1).optional(),
   reason: z.string().optional(),
@@ -71,6 +73,11 @@ type LocalTestOutboundEvent =
       requestId: string;
       taskName: string;
       summary: string;
+    })
+  | (OutboundBase & {
+      type: "send_task_summary_confirmation_request";
+      requestId: string;
+      taskName: string;
     })
   | (OutboundBase & {
       type: "send_file";
@@ -127,6 +134,14 @@ const localTestOutboundEventSchema = z.discriminatedUnion("type", [
     eventId: z.string().min(1),
     chatId: z.string().min(1),
     timestamp: z.string().min(1),
+    type: z.literal("send_task_summary_confirmation_request"),
+    requestId: z.string().min(1),
+    taskName: z.string(),
+  }).strict(),
+  z.object({
+    eventId: z.string().min(1),
+    chatId: z.string().min(1),
+    timestamp: z.string().min(1),
     type: z.literal("send_file"),
     filePath: z.string().min(1),
     caption: z.string().optional(),
@@ -176,6 +191,7 @@ export function parseLocalTestInboundEvent(raw: string): {
         chatId: localTestChatId,
         messageId,
         timestamp,
+        target: parsed.target,
         decision: parsed.decision,
         requestId: parsed.requestId,
         reason: parsed.reason,

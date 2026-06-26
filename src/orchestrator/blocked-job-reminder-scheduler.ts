@@ -15,6 +15,7 @@ export type BlockedJobReminderContext = {
   blockerTaskName: string;
   blockerStartedAt: string;
   waitingJobName: string;
+  blockerKind?: "active_task" | "pending_summary";
 };
 
 type ScheduledReminder = {
@@ -105,7 +106,10 @@ export class BlockedJobReminderScheduler {
       blockerTaskName: context.blockerTaskName,
       waitingJobName: context.waitingJobName,
     });
-    await this.channel.sendText(chatId, messages.scheduledJobBlocked(context.waitingJobName, context.blockerTaskName));
+    const reminderText = context.blockerKind === "pending_summary"
+      ? messages.scheduledJobBlockedByPendingSummary(context.waitingJobName, context.blockerTaskName)
+      : messages.scheduledJobBlocked(context.waitingJobName, context.blockerTaskName);
+    await this.channel.sendText(chatId, reminderText);
 
     if (this.stopped) {
       return;

@@ -1,16 +1,18 @@
-import type { NormalizedChatEvent, PrivilegeRequest } from "../types.js";
+import type { ApprovalResponseTarget, NormalizedChatEvent, PrivilegeRequest } from "../types.js";
 import { buttonLabels } from "../messages-to-user.js";
 
 export type ControlActionEvent =
   | { kind: "cancel_request" }
   | { kind: "mark_finished_request" }
   | { kind: "danger_report" }
-  | { kind: "approval_response"; decision: ApprovalDecision; requestId: string | undefined };
+  | { kind: "approval_response"; target: ApprovalTarget; decision: ApprovalDecision; requestId: string | undefined };
 
 type ApprovalDecision = Extract<
   NormalizedChatEvent,
   { kind: "approval_response" }
 >["decision"];
+
+type ApprovalTarget = ApprovalResponseTarget;
 
 type ControlAction = {
   actionId: string;
@@ -43,12 +45,23 @@ export function buildReportControls(): ControlSurface {
   };
 }
 
+export function buildTaskSummaryConfirmationControls(requestId: string): ControlSurface {
+  return {
+    rows: [
+      [
+        { actionId: "summary_confirm", label: buttonLabels.confirmSummary, event: { kind: "approval_response", target: "task_summary_confirmation", decision: "approve", requestId } },
+        { actionId: "report", label: buttonLabels.reportDangerousOutput, event: { kind: "danger_report" } },
+      ],
+    ],
+  };
+}
+
 export function buildShareDeletionControls(requestId: string): ControlSurface {
   return {
     rows: [
       [
-        { actionId: "share_approve", label: buttonLabels.approve, event: { kind: "approval_response", decision: "approve", requestId } },
-        { actionId: "share_deny", label: buttonLabels.deny, event: { kind: "approval_response", decision: "deny", requestId } },
+        { actionId: "share_approve", label: buttonLabels.approve, event: { kind: "approval_response", target: "share_deletion", decision: "approve", requestId } },
+        { actionId: "share_deny", label: buttonLabels.deny, event: { kind: "approval_response", target: "share_deletion", decision: "deny", requestId } },
       ],
     ],
   };
@@ -62,8 +75,8 @@ export function buildPrivilegeControls(request: PrivilegeRequest): ControlSurfac
     && request.confirmsAutoApprovalForTask
   ) {
     rows.push([
-      { actionId: "approve", label: buttonLabels.approve, event: { kind: "approval_response", decision: "approve", requestId: request.requestId } },
-      { actionId: "deny", label: buttonLabels.deny, event: { kind: "approval_response", decision: "deny", requestId: request.requestId } },
+      { actionId: "approve", label: buttonLabels.approve, event: { kind: "approval_response", target: "privilege_request", decision: "approve", requestId: request.requestId } },
+      { actionId: "deny", label: buttonLabels.deny, event: { kind: "approval_response", target: "privilege_request", decision: "deny", requestId: request.requestId } },
     ]);
     rows.push([
       { actionId: "report", label: buttonLabels.reportDangerousOutput, event: { kind: "danger_report" } },
@@ -74,12 +87,12 @@ export function buildPrivilegeControls(request: PrivilegeRequest): ControlSurfac
 
   if (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use") {
     rows.push([
-      { actionId: "approve_once", label: buttonLabels.approve, event: { kind: "approval_response", decision: "approve_once", requestId: request.requestId } },
-      { actionId: "approve_worker_session", label: buttonLabels.approveWorkerSession, event: { kind: "approval_response", decision: "approve_worker_session", requestId: request.requestId } },
+      { actionId: "approve_once", label: buttonLabels.approve, event: { kind: "approval_response", target: "privilege_request", decision: "approve_once", requestId: request.requestId } },
+      { actionId: "approve_worker_session", label: buttonLabels.approveWorkerSession, event: { kind: "approval_response", target: "privilege_request", decision: "approve_worker_session", requestId: request.requestId } },
     ]);
     rows.push([
-      { actionId: "approve_always", label: buttonLabels.approveAlways, event: { kind: "approval_response", decision: "approve_always", requestId: request.requestId } },
-      { actionId: "deny", label: buttonLabels.deny, event: { kind: "approval_response", decision: "deny", requestId: request.requestId } },
+      { actionId: "approve_always", label: buttonLabels.approveAlways, event: { kind: "approval_response", target: "privilege_request", decision: "approve_always", requestId: request.requestId } },
+      { actionId: "deny", label: buttonLabels.deny, event: { kind: "approval_response", target: "privilege_request", decision: "deny", requestId: request.requestId } },
     ]);
     rows.push([
       { actionId: "report", label: buttonLabels.reportDangerousOutput, event: { kind: "danger_report" } },
@@ -90,11 +103,11 @@ export function buildPrivilegeControls(request: PrivilegeRequest): ControlSurfac
 
   if (request.kind === "host_directory_access") {
     rows.push([
-      { actionId: "approve_worker_session", label: buttonLabels.approveWorkerSession, event: { kind: "approval_response", decision: "approve_worker_session", requestId: request.requestId } },
-      { actionId: "approve_always", label: buttonLabels.approveAlwaysHostDirectory, event: { kind: "approval_response", decision: "approve_always", requestId: request.requestId } },
+      { actionId: "approve_worker_session", label: buttonLabels.approveWorkerSession, event: { kind: "approval_response", target: "privilege_request", decision: "approve_worker_session", requestId: request.requestId } },
+      { actionId: "approve_always", label: buttonLabels.approveAlwaysHostDirectory, event: { kind: "approval_response", target: "privilege_request", decision: "approve_always", requestId: request.requestId } },
     ]);
     rows.push([
-      { actionId: "deny", label: buttonLabels.deny, event: { kind: "approval_response", decision: "deny", requestId: request.requestId } },
+      { actionId: "deny", label: buttonLabels.deny, event: { kind: "approval_response", target: "privilege_request", decision: "deny", requestId: request.requestId } },
     ]);
     rows.push([
       { actionId: "report", label: buttonLabels.reportDangerousOutput, event: { kind: "danger_report" } },
@@ -105,8 +118,8 @@ export function buildPrivilegeControls(request: PrivilegeRequest): ControlSurfac
 
   if (request.kind === "skill_mutation" || request.kind === "job_mutation") {
     rows.push([
-      { actionId: "approve", label: buttonLabels.approve, event: { kind: "approval_response", decision: "approve", requestId: request.requestId } },
-      { actionId: "deny", label: buttonLabels.deny, event: { kind: "approval_response", decision: "deny", requestId: request.requestId } },
+      { actionId: "approve", label: buttonLabels.approve, event: { kind: "approval_response", target: "privilege_request", decision: "approve", requestId: request.requestId } },
+      { actionId: "deny", label: buttonLabels.deny, event: { kind: "approval_response", target: "privilege_request", decision: "deny", requestId: request.requestId } },
     ]);
     rows.push([
       { actionId: "report", label: buttonLabels.reportDangerousOutput, event: { kind: "danger_report" } },
@@ -116,8 +129,8 @@ export function buildPrivilegeControls(request: PrivilegeRequest): ControlSurfac
   }
 
   rows.push([
-    { actionId: "approve", label: buttonLabels.approve, event: { kind: "approval_response", decision: "approve", requestId: request.requestId } },
-    { actionId: "deny", label: buttonLabels.deny, event: { kind: "approval_response", decision: "deny", requestId: request.requestId } },
+    { actionId: "approve", label: buttonLabels.approve, event: { kind: "approval_response", target: "privilege_request", decision: "approve", requestId: request.requestId } },
+    { actionId: "deny", label: buttonLabels.deny, event: { kind: "approval_response", target: "privilege_request", decision: "deny", requestId: request.requestId } },
   ]);
   rows.push([
     { actionId: "report", label: buttonLabels.reportDangerousOutput, event: { kind: "danger_report" } },

@@ -13,6 +13,7 @@ import {
   createIdentifier,
   parseLocalTestOutboundEvent,
 } from "./channel/local-test-protocol.js";
+import type { ApprovalResponseTarget } from "./types.js";
 import { SANDY_MANAGED_CONTAINER_LABEL } from "./sandbox/container-label.js";
 
 type LocalTestCliRuntime = {
@@ -56,11 +57,13 @@ type AttachmentCommandOptions = SpoolRootOption & MessageIdOption & {
 type ApprovalCommandOptions = SpoolRootOption & MessageIdOption & {
   requestId: string;
   scope: string;
+  target: ApprovalResponseTarget;
 };
 
 type DenyCommandOptions = SpoolRootOption & MessageIdOption & {
   requestId: string;
   reason?: string;
+  target: ApprovalResponseTarget;
 };
 
 type SimpleEventOptions = SpoolRootOption & MessageIdOption;
@@ -167,9 +170,10 @@ function createLocalTestProgram(
 
   command
     .command("approve")
-    .description("Approve a pending privilege request.")
+    .description("Approve a pending request.")
     .requiredOption("--spool-root <path>", "local-test spool root")
-    .requiredOption("--request-id <id>", "privilege request identifier")
+    .requiredOption("--request-id <id>", "pending request identifier")
+    .requiredOption("--target <target>", "approval target: privilege_request, share_deletion, or task_summary_confirmation")
     .option("--scope <scope>", "approval scope", "once")
     .option("--message-id <id>", "message identifier")
     .action(async (options: ApprovalCommandOptions) => {
@@ -178,6 +182,7 @@ function createLocalTestProgram(
         kind: "approval_response",
         messageId: options.messageId ?? createIdentifier("message"),
         timestamp: new Date().toISOString(),
+        target: options.target,
         decision: mapApprovalScope(options.scope),
         requestId: options.requestId,
       });
@@ -185,9 +190,10 @@ function createLocalTestProgram(
 
   command
     .command("deny")
-    .description("Deny a pending privilege request.")
+    .description("Deny a pending request.")
     .requiredOption("--spool-root <path>", "local-test spool root")
-    .requiredOption("--request-id <id>", "privilege request identifier")
+    .requiredOption("--request-id <id>", "pending request identifier")
+    .requiredOption("--target <target>", "approval target: privilege_request, share_deletion, or task_summary_confirmation")
     .option("--reason <text>", "optional denial reason")
     .option("--message-id <id>", "message identifier")
     .action(async (options: DenyCommandOptions) => {
@@ -196,6 +202,7 @@ function createLocalTestProgram(
         kind: "approval_response",
         messageId: options.messageId ?? createIdentifier("message"),
         timestamp: new Date().toISOString(),
+        target: options.target,
         decision: "deny",
         requestId: options.requestId,
       };

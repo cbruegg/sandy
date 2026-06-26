@@ -1,5 +1,6 @@
 import { logger } from "../logger.js";
 import { messages } from "../messages-to-user.js";
+import { assertNever } from "../utils/assert-never.js";
 import type { SandyOrchestratorDependencies, SupportedChatEvent } from "./shared.js";
 import { describeUserMessageForMainAgent } from "./task-lifecycle.js";
 import { buildWorkerFollowUpInput } from "./worker-input.js";
@@ -114,16 +115,44 @@ export class SandyOrchestrator {
         await this.deps.channel.sendText(event.chatId, messages.noActiveTaskToFinish());
         return;
       case "approval_response":
-        if (session.pendingShareDeletion) {
-          if (event.requestId && event.requestId !== session.pendingShareDeletion.requestId) {
-            await this.deps.channel.sendText(event.chatId, messages.staleShareDeletionRequest());
+        switch (event.target) {
+          case "task_summary_confirmation": {
+            if (
+              !session.pendingTaskSummary?.confirmationRequestId
+              || (event.requestId && event.requestId !== session.pendingTaskSummary.confirmationRequestId)
+            ) {
+              await this.deps.channel.sendText(event.chatId, messages.staleTaskSummaryConfirmation());
+              return;
+            }
+            if (event.decision === "deny") {
+              throw new Error("Unexpected deny decision for task summary confirmation.");
+            }
+            const taskName = this.deps.taskLifecycle.confirmPendingTaskSummary(session);
+            if (taskName) {
+              await this.deps.channel.sendText(event.chatId, messages.confirmedPendingTaskSummary(taskName));
+            }
+            await this.deps.taskCoordinator.onVisibleSlotAvailable(event.chatId);
             return;
           }
-          await this.deps.taskLifecycle.resolvePendingShareDeletion(session, event.decision === "deny" ? "deny" : "approve");
-          return;
+          case "share_deletion": {
+            if (!session.pendingShareDeletion) {
+              await this.deps.channel.sendText(event.chatId, messages.staleShareDeletionRequest());
+              return;
+            }
+            if (event.requestId && event.requestId !== session.pendingShareDeletion.requestId) {
+              await this.deps.channel.sendText(event.chatId, messages.staleShareDeletionRequest());
+              return;
+            }
+            await this.deps.taskLifecycle.resolvePendingShareDeletion(session, event.decision === "deny" ? "deny" : "approve");
+            return;
+          }
+          case "privilege_request":
+            // Active privilege requests are routed to routeActiveTaskChatEvent while a task is visible.
+            await this.deps.channel.sendText(event.chatId, messages.noPendingPrivilegeRequest());
+            return;
+          default:
+            return assertNever(event.target);
         }
-        await this.deps.channel.sendText(event.chatId, messages.noPendingPrivilegeRequest());
-        return;
       case "danger_report":
         if (!session.pendingTaskSummary) {
           await this.deps.channel.sendText(event.chatId, messages.noActiveOutputToReport());
@@ -131,10 +160,15 @@ export class SandyOrchestrator {
         }
         session.pendingTaskSummary = null;
         await this.deps.channel.sendText(event.chatId, messages.discardedPendingOutput());
+        await this.deps.taskCoordinator.onVisibleSlotAvailable(event.chatId);
         return;
       case "user_message": {
         if (session.pendingShareDeletion) {
           await this.deps.channel.sendText(event.chatId, messages.shareDeletionStillPending());
+          return;
+        }
+        if (session.pendingTaskSummary?.confirmationRequestId) {
+          await this.deps.channel.sendText(event.chatId, messages.pendingSummaryStillPending());
           return;
         }
 
@@ -189,6 +223,10 @@ export class SandyOrchestrator {
         await this.deps.channel.sendText(event.chatId, messages.noPendingOutputToReport());
         return;
       case "approval_response":
+        if (event.target !== "privilege_request") {
+          await this.deps.channel.sendText(event.chatId, messages.noPendingPrivilegeRequest());
+          return;
+        }
         if (!activeTask.pendingPrivilegeRequest) {
           await this.deps.channel.sendText(event.chatId, messages.noPendingPrivilegeRequest());
           return;

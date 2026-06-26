@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { ChannelAdapter } from "../channel/channel-adapter.js";
 import { messages } from "../messages-to-user.js";
 import type { SessionStore } from "../session/in-memory-session-store.js";
@@ -82,9 +83,10 @@ class PerChatQueue<T> {
 /**
  * Coordinates the single user-visible slot each chat exposes.
  *
- * At any moment a chat can present exactly one user-facing blocker: either an
- * visible task (`session.visibleTask`) or a share-deletion prompt
- * (`session.pendingShareDeletion`). User-launched tasks own that slot directly.
+ * At any moment a chat can present exactly one user-facing blocker: either a
+ * visible task (`session.visibleTask`), a share-deletion prompt
+ * (`session.pendingShareDeletion`), or a completed-task summary that needs
+ * confirmation before later background work becomes visible.
  * Job-launched tasks run silently in the background and must acquire the slot
  * before they can talk to the user.
  *
@@ -175,7 +177,7 @@ export class TaskCoordinator {
     }
 
     task.interactionState = "waitingToInteract";
-    await new Promise<void>((resolve, reject) => {
+    const waitForInteraction = new Promise<void>((resolve, reject) => {
       this.waitingJobInteractions.enqueue(chatId, {
         taskId,
         jobName,
@@ -185,6 +187,8 @@ export class TaskCoordinator {
       });
       this.reminders.sync(chatId);
     });
+    await this.requestPendingSummaryConfirmationIfBlocking(session);
+    await waitForInteraction;
   }
 
   /**
@@ -195,6 +199,7 @@ export class TaskCoordinator {
   async onVisibleSlotAvailable(chatId: ChatId): Promise<void> {
     const session = this.deps.sessionStore.getOrCreate(chatId);
     if (!this.isVisibleSlotAvailable(session)) {
+      await this.requestPendingSummaryConfirmationIfBlocking(session);
       this.reminders.sync(chatId);
       return;
     }
@@ -220,7 +225,31 @@ export class TaskCoordinator {
   // ---------------------------------------------------------------------------
 
   private isVisibleSlotAvailable(session: SessionState): boolean {
-    return !session.visibleTask && !session.pendingShareDeletion;
+    return !session.visibleTask && !session.pendingShareDeletion && !session.pendingTaskSummary;
+  }
+
+  private async requestPendingSummaryConfirmationIfBlocking(session: SessionState): Promise<void> {
+    if (!session.pendingTaskSummary || !this.hasQueuedVisibleWork(session.chatId)) {
+      return;
+    }
+
+    if (session.pendingTaskSummary.confirmationRequestId) {
+      // We already requested confirmation of the summary.
+      return;
+    }
+
+    const requestId = randomUUID();
+    await this.deps.channel.sendTaskSummaryConfirmationRequest(
+      session.chatId,
+      requestId,
+      session.pendingTaskSummary.taskName,
+    );
+    session.pendingTaskSummary.confirmationRequestId = requestId;
+    this.reminders.sync(session.chatId);
+  }
+
+  private hasQueuedVisibleWork(chatId: ChatId): boolean {
+    return Boolean(this.waitingJobInteractions.peek(chatId) || this.pendingShareDeletionPrompts.peek(chatId));
   }
 
   /** Moves a background job task into the visible slot and marks it interacting. */
@@ -332,14 +361,25 @@ export class TaskCoordinator {
 
   private getBlockedJobReminderContext(chatId: ChatId): BlockedJobReminderContext | null {
     const session = this.deps.sessionStore.getOrCreate(chatId);
-    const blocker = session.visibleTask;
-    if (!blocker || blocker.origin.kind !== "launchedByUser") {
-      return null;
-    }
-
     const waitingJobName = this.waitingJobInteractions.peek(chatId)?.jobName
       ?? this.pendingShareDeletionPrompts.peek(chatId)?.jobName;
     if (!waitingJobName) {
+      return null;
+    }
+
+    if (session.pendingTaskSummary) {
+      return {
+        chatId,
+        blockerTaskId: "pending-summary",
+        blockerTaskName: session.pendingTaskSummary.taskName,
+        blockerStartedAt: this.deps.channel.getLastUserInteractionTimestamp(chatId) ?? new Date().toISOString(),
+        waitingJobName,
+        blockerKind: "pending_summary",
+      };
+    }
+
+    const blocker = session.visibleTask;
+    if (!blocker || blocker.origin.kind !== "launchedByUser") {
       return null;
     }
 
@@ -349,6 +389,7 @@ export class TaskCoordinator {
       blockerTaskName: blocker.taskName,
       blockerStartedAt: blocker.startedAt,
       waitingJobName,
+      blockerKind: "active_task",
     };
   }
 }

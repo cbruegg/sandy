@@ -3,6 +3,7 @@ import { assertNever } from "./utils/assert-never.js";
 
 export const buttonLabels = {
   reportDangerousOutput: "Report dangerous output",
+  confirmSummary: "Confirm summary",
   abortTask: "Abort task",
   markAsFinished: "Mark as finished",
   approve: "Approve once",
@@ -34,6 +35,12 @@ export const messages = {
   },
   taskSummaryReady: (taskName: string, summary: string): string =>
     `Task "${taskName}" completed.\n\n${summary}`,
+  taskSummaryConfirmationPrompt: (taskName: string): string =>
+    `Confirm the summary for task "${taskName}" before the waiting background task becomes interactive.`,
+  pendingSummaryStillPending: (): string =>
+    "A completed-task summary is waiting for confirmation. Confirm it or report dangerous output before sending more input.",
+  staleTaskSummaryConfirmation: (): string => "That task summary confirmation is no longer pending.",
+  confirmedPendingTaskSummary: (taskName: string): string => `Confirmed the summary for task "${taskName}".`,
   taskFailed: (message: string): string => `Task failed: ${message}`,
   chatgptAuthRefreshFailed: (): string =>
     "ChatGPT authentication expired on the host and could not be refreshed. Sign in again on the host, then retry the task.",
@@ -74,6 +81,8 @@ export const messages = {
       : `MCP ${status}: ${serverId}.${toolName}`,
   scheduledJobBlocked: (jobName: string, taskName: string): string =>
     `A scheduled job (${jobName}) is waiting to interact, but task "${taskName}" is still active.`,
+  scheduledJobBlockedByPendingSummary: (jobName: string, taskName: string): string =>
+    `A scheduled job (${jobName}) is waiting to interact, but the summary for task "${taskName}" still needs confirmation.`,
   scheduledJobBecameInteractive: (taskName: string, jobName: string | null): string => {
     const label = describeInteractiveTask(taskName, jobName);
     return `${label} is now interactive. The next update or request comes from this task.`;

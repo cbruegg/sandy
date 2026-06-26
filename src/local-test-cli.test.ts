@@ -34,10 +34,10 @@ test("local-test CLI writes approval and denial events", async () => {
   const root = await mkdtemp(join(tmpdir(), "sandy-local-cli-"));
   try {
     assert.equal(
-      await runLocalTestCli(["approve", "--spool-root", root, "--request-id", "req-1", "--scope", "worker_session"]),
+      await runLocalTestCli(["approve", "--spool-root", root, "--request-id", "req-1", "--target", "privilege_request", "--scope", "worker_session"]),
       0,
     );
-    assert.equal(await runLocalTestCli(["deny", "--spool-root", root, "--request-id", "req-2"]), 0);
+    assert.equal(await runLocalTestCli(["deny", "--spool-root", root, "--request-id", "req-2", "--target", "privilege_request"]), 0);
     const files = (await readdir(join(root, "inbox"))).sort();
     assert.equal(files.length, 2);
     const decisions = await Promise.all(
@@ -56,7 +56,7 @@ test("local-test CLI deny --reason embeds the reason in the approval_response", 
   const root = await mkdtemp(join(tmpdir(), "sandy-local-cli-"));
   try {
     assert.equal(
-      await runLocalTestCli(["deny", "--spool-root", root, "--request-id", "req-2", "--reason", "Too risky"]),
+      await runLocalTestCli(["deny", "--spool-root", root, "--request-id", "req-2", "--target", "privilege_request", "--reason", "Too risky"]),
       0,
     );
     const files = await readdir(join(root, "inbox"));
@@ -64,6 +64,7 @@ test("local-test CLI deny --reason embeds the reason in the approval_response", 
     const event = inboxEventSchema.parse(JSON.parse(await readFile(join(root, "inbox", files[0]!), "utf8")) as unknown);
     assert.equal(event.decision, "deny");
     assert.equal(event.reason, "Too risky");
+    assert.equal(event["target"], "privilege_request");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

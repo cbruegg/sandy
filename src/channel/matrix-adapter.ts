@@ -8,6 +8,7 @@ import { runWithMatrixSendRetry, sleepMs, type MatrixSleep } from "./matrix-send
 import {
   buildPrivilegeControls,
   buildShareDeletionControls,
+  buildTaskSummaryConfirmationControls,
   formatPrivilegeRequestLogType,
   type ControlActionEvent,
 } from "./control-surface.js";
@@ -349,6 +350,17 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     this.registerReactions(chatId, hintEventId, [
       { key: MATRIX_ABORT_REACTION, event: { kind: "danger_report" } },
     ]);
+  }
+
+  async sendTaskSummaryConfirmationRequest(chatId: ChatId, requestId: string, taskName: string): Promise<void> {
+    logger.info("matrix.send_task_summary_confirmation_request", {
+      chatId,
+      requestId,
+      taskName,
+    });
+    await this.sendTextMessage(chatId, messages.taskSummaryConfirmationPrompt(taskName));
+    const controls = buildTaskSummaryConfirmationControls(requestId);
+    await this.sendPoll(chatId, "Task summary confirmation", controls.rows.flat().map((a) => ({ answerId: a.actionId, label: a.label, event: a.event })));
   }
 
   async sendPrivilegeRequest(chatId: ChatId, request: PrivilegeRequest): Promise<void> {
