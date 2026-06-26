@@ -74,6 +74,7 @@ test("orchestrator applies supported privilege requests deterministically and ou
 
     await orchestrator.handleChatEvent({
       kind: "approval_response",
+      target: "privilege_request",
       chatId: "chat-3",
       messageId: "2",
       timestamp: "2026-04-01T00:00:10.000Z",
@@ -175,6 +176,7 @@ test("approved skill mutation delegates execution through the worker tools handl
 
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "privilege_request",
     chatId: "chat-skill-create",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -276,6 +278,7 @@ test("silent job privilege requests are preceded by task context when they make 
   const requestId = channel.privilegeRequests[0]?.request.requestId;
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "privilege_request",
     chatId: "chat-privilege-context",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -328,6 +331,7 @@ test("approved job mutation delegates execution through the worker tools handler
 
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "privilege_request",
     chatId: "chat-job-create",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -479,6 +483,7 @@ test("request_interaction tool reports already waiting when a job task is blocke
   assert.equal(channel.taskSummaryConfirmationRequests.length, 1);
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "task_summary_confirmation",
     chatId: "chat-request-interaction-waiting",
     messageId: "confirm-summary:1",
     timestamp: "2026-04-01T00:00:30.000Z",
@@ -697,6 +702,7 @@ test("orchestrator does not apply persistent mcp approvals when task policy omit
 
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "privilege_request",
     chatId: "chat-resource-no-server-access",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -761,6 +767,7 @@ test("orchestrator confirms persisted mcp tool approval suitability and reuses i
 
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "privilege_request",
     chatId: "chat-mcp-confirm",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -843,6 +850,7 @@ test("orchestrator confirms persisted http token suitability and enables later p
 
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "privilege_request",
     chatId: "chat-http-confirm",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -927,6 +935,7 @@ test("orchestrator creates a hostfs grant for worker-session host directory appr
 
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "privilege_request",
     chatId: "chat-hostfs-once",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -985,6 +994,7 @@ test("orchestrator sends mcp resource read privilege request to user when not pr
 
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "privilege_request",
     chatId: "chat-resource-pending",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -1045,6 +1055,7 @@ test("job-scoped persistent approvals apply only to later executions of the same
   const firstRequestId = channel.privilegeRequests[0]?.request.requestId;
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "privilege_request",
     chatId: "chat-job-approval",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -1077,6 +1088,7 @@ test("job-scoped persistent approvals apply only to later executions of the same
   await waitFor(() => channel.taskSummaryConfirmationRequests.length >= 1);
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "task_summary_confirmation",
     chatId: "chat-job-approval",
     messageId: "confirm-summary:1",
     timestamp: "2026-04-01T00:00:25.000Z",
@@ -1091,6 +1103,7 @@ test("job-scoped persistent approvals apply only to later executions of the same
   assert.equal(thirdRequest?.confirmsAutoApprovalForTask, true);
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "privilege_request",
     chatId: "chat-job-approval",
     messageId: "3",
     timestamp: "2026-04-01T00:00:30.000Z",
@@ -1138,6 +1151,7 @@ test("denial without an inline reason prompts for a reason and routes it back to
   // Deny without a reason: the orchestrator must ask for a reason before resolving.
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "privilege_request",
     chatId: "chat-deny-reason",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -1154,6 +1168,7 @@ test("denial without an inline reason prompts for a reason and routes it back to
   // forwarded to the agent, and a second approval/deny is rejected.
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "privilege_request",
     chatId: "chat-deny-reason",
     messageId: "3",
     timestamp: "2026-04-01T00:00:11.000Z",
@@ -1237,6 +1252,7 @@ test("resolved denial restores task state before sending the channel notificatio
 
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "privilege_request",
     chatId: "chat-deny-race",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -1308,6 +1324,7 @@ test("denial reason can be skipped and the agent still receives the canned denia
 
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "privilege_request",
     chatId: "chat-deny-skip",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -1367,6 +1384,7 @@ test("cancelling a task while awaiting a denial reason fails the pending privile
 
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "privilege_request",
     chatId: "chat-deny-cancel",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",

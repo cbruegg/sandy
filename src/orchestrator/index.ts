@@ -114,10 +114,14 @@ export class SandyOrchestrator {
         await this.deps.channel.sendText(event.chatId, messages.noActiveTaskToFinish());
         return;
       case "approval_response":
-        if (
-          session.pendingTaskSummary?.confirmationRequestId
-          && (!event.requestId || event.requestId === session.pendingTaskSummary.confirmationRequestId)
-        ) {
+        if (event.target === "task_summary_confirmation") {
+          if (
+            !session.pendingTaskSummary?.confirmationRequestId
+            || (event.requestId && event.requestId !== session.pendingTaskSummary.confirmationRequestId)
+          ) {
+            await this.deps.channel.sendText(event.chatId, messages.staleTaskSummaryConfirmation());
+            return;
+          }
           if (event.decision === "deny") {
             throw new Error("Unexpected deny decision for task summary confirmation.");
           }
@@ -127,15 +131,17 @@ export class SandyOrchestrator {
           }
           await this.deps.taskCoordinator.onVisibleSlotAvailable(event.chatId);
           return;
-        } else if (session.pendingShareDeletion) {
+        }
+        if (event.target === "share_deletion") {
+          if (!session.pendingShareDeletion) {
+            await this.deps.channel.sendText(event.chatId, messages.staleShareDeletionRequest());
+            return;
+          }
           if (event.requestId && event.requestId !== session.pendingShareDeletion.requestId) {
             await this.deps.channel.sendText(event.chatId, messages.staleShareDeletionRequest());
             return;
           }
           await this.deps.taskLifecycle.resolvePendingShareDeletion(session, event.decision === "deny" ? "deny" : "approve");
-          return;
-        } else if (session.pendingTaskSummary?.confirmationRequestId) {
-          await this.deps.channel.sendText(event.chatId, messages.staleTaskSummaryConfirmation());
           return;
         }
         await this.deps.channel.sendText(event.chatId, messages.noPendingPrivilegeRequest());
@@ -210,6 +216,10 @@ export class SandyOrchestrator {
         await this.deps.channel.sendText(event.chatId, messages.noPendingOutputToReport());
         return;
       case "approval_response":
+        if (event.target !== "privilege_request") {
+          await this.deps.channel.sendText(event.chatId, messages.noPendingPrivilegeRequest());
+          return;
+        }
         if (!activeTask.pendingPrivilegeRequest) {
           await this.deps.channel.sendText(event.chatId, messages.noPendingPrivilegeRequest());
           return;

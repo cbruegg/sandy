@@ -120,6 +120,7 @@ test("user messages route to an interacting scheduled job after waiting behind a
   assert.equal(channel.taskSummaryConfirmationRequests.length, 1);
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "task_summary_confirmation",
     chatId: "chat-job-routing",
     messageId: "confirm-summary:1",
     timestamp: "2026-04-01T00:00:30.000Z",

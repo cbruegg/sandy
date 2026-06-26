@@ -463,6 +463,7 @@ test("orchestrator requires pending summary confirmation before a background job
 
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "task_summary_confirmation",
     chatId: "chat-summary-confirm",
     messageId: "confirm:1",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -679,6 +680,7 @@ test("orchestrator deletes or preserves a finished task share based on user conf
   assert.ok(deleteRequestId);
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "share_deletion",
     chatId: "chat-9",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
@@ -712,6 +714,7 @@ test("orchestrator deletes or preserves a finished task share based on user conf
   assert.ok(preserveRequestId);
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "share_deletion",
     chatId: "chat-9",
     messageId: "4",
     timestamp: "2026-04-01T00:00:30.000Z",
@@ -853,6 +856,7 @@ test("orchestrator defers job share deletion prompt while a user task is active"
   assert.equal(channel.taskSummaryConfirmationRequests.length, 1);
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "task_summary_confirmation",
     chatId: "chat-job-defer",
     messageId: "confirm-summary:1",
     timestamp: "2026-04-01T00:00:20.000Z",
@@ -1211,6 +1215,7 @@ test("privilege prompt flushes commentary buffer before showing the request", as
   // Resolve the pending privilege to clean up.
   await orchestrator.handleChatEvent({
     kind: "approval_response",
+    target: "privilege_request",
     chatId: "chat-privilege",
     messageId: "approve:1",
     timestamp: "2026-04-01T00:00:05.000Z",

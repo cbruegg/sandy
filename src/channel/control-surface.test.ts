@@ -43,12 +43,12 @@ test("buildShareDeletionControls returns approve and deny actions", () => {
   assert.deepEqual(controls.rows[0]?.[0], {
     actionId: "share_approve",
     label: buttonLabels.approve,
-    event: { kind: "approval_response", decision: "approve", requestId: "req-1" },
+    event: { kind: "approval_response", target: "share_deletion", decision: "approve", requestId: "req-1" },
   });
   assert.deepEqual(controls.rows[0]?.[1], {
     actionId: "share_deny",
     label: buttonLabels.deny,
-    event: { kind: "approval_response", decision: "deny", requestId: "req-1" },
+    event: { kind: "approval_response", target: "share_deletion", decision: "deny", requestId: "req-1" },
   });
 });
 
@@ -63,6 +63,7 @@ test("buildPrivilegeControls for file_copy returns approve, deny, report, cancel
   assert.equal(controls.rows[0]?.[0]?.actionId, "approve");
   assert.equal(controls.rows[0]?.[0]?.event.kind, "approval_response");
   assert.deepEqual((controls.rows[0]?.[0]?.event as { kind: "approval_response"; decision: string }).decision, "approve");
+  assert.deepEqual((controls.rows[0]?.[0]?.event as { kind: "approval_response"; target: string }).target, "privilege_request");
   assert.equal(controls.rows[0]?.[1]?.actionId, "deny");
   assert.equal(controls.rows[1]?.length, 2);
   assert.equal(controls.rows[1]?.[0]?.actionId, "report");
@@ -83,6 +84,7 @@ test("buildPrivilegeControls for mcp_tool_call with auto-confirmation returns ap
   assert.equal(controls.rows[0]?.[0]?.actionId, "approve");
   assert.equal(controls.rows[0]?.[0]?.event.kind, "approval_response");
   assert.deepEqual((controls.rows[0]?.[0]?.event as { kind: "approval_response"; decision: string }).decision, "approve");
+  assert.deepEqual((controls.rows[0]?.[0]?.event as { kind: "approval_response"; target: string }).target, "privilege_request");
   assert.equal(controls.rows[0]?.[1]?.actionId, "deny");
   assert.equal(controls.rows[1]?.[0]?.actionId, "report");
   assert.equal(controls.rows[1]?.[1]?.actionId, "cancel");
@@ -101,6 +103,7 @@ test("buildPrivilegeControls for mcp_tool_call without auto-confirmation returns
   assert.equal(controls.rows[0]?.[0]?.actionId, "approve_once");
   assert.equal(controls.rows[0]?.[0]?.event.kind, "approval_response");
   assert.deepEqual((controls.rows[0]?.[0]?.event as { kind: "approval_response"; decision: string }).decision, "approve_once");
+  assert.deepEqual((controls.rows[0]?.[0]?.event as { kind: "approval_response"; target: string }).target, "privilege_request");
   assert.equal(controls.rows[0]?.[1]?.actionId, "approve_worker_session");
   assert.equal(controls.rows[1]?.length, 2);
   assert.equal(controls.rows[1]?.[0]?.actionId, "approve_always");
@@ -142,6 +145,7 @@ test("buildPrivilegeControls for skill_mutation returns approve once, deny, repo
   assert.equal(controls.rows[0]?.length, 2);
   assert.equal(controls.rows[0]?.[0]?.actionId, "approve");
   assert.deepEqual((controls.rows[0]?.[0]?.event as { kind: "approval_response"; decision: string }).decision, "approve");
+  assert.deepEqual((controls.rows[0]?.[0]?.event as { kind: "approval_response"; target: string }).target, "privilege_request");
   assert.equal(controls.rows[0]?.[1]?.actionId, "deny");
   assert.equal(controls.rows[1]?.length, 2);
   assert.equal(controls.rows[1]?.[0]?.actionId, "report");

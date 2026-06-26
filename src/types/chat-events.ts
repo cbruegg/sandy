@@ -23,8 +23,11 @@ type MarkFinishedRequestEvent = ChatEventBase & {
   kind: "mark_finished_request";
 };
 
+export type ApprovalResponseTarget = "privilege_request" | "share_deletion" | "task_summary_confirmation";
+
 type ApprovalResponseEvent = ChatEventBase & {
   kind: "approval_response";
+  target: ApprovalResponseTarget;
   decision: "approve" | "approve_once" | "approve_worker_session" | "approve_always" | "deny";
   requestId?: string;
   reason?: string;
