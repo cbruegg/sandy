@@ -73,6 +73,11 @@ type LocalTestOutboundEvent =
       summary: string;
     })
   | (OutboundBase & {
+      type: "send_task_summary_confirmation_request";
+      requestId: string;
+      taskName: string;
+    })
+  | (OutboundBase & {
       type: "send_file";
       filePath: string;
       caption?: string;
@@ -122,6 +127,14 @@ const localTestOutboundEventSchema = z.discriminatedUnion("type", [
     requestId: z.string().min(1),
     taskName: z.string(),
     summary: z.string(),
+  }).strict(),
+  z.object({
+    eventId: z.string().min(1),
+    chatId: z.string().min(1),
+    timestamp: z.string().min(1),
+    type: z.literal("send_task_summary_confirmation_request"),
+    requestId: z.string().min(1),
+    taskName: z.string(),
   }).strict(),
   z.object({
     eventId: z.string().min(1),

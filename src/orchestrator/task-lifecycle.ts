@@ -42,6 +42,7 @@ import { failedPrivilegeResult, isMcpPrivilegeRequest, isNativeToolPrivilegeRequ
 export interface OrchestratorTaskLifecycle {
   resolvePendingShareDeletion(session: SessionState, decision: "approve" | "deny"): Promise<void>;
   releasePendingTaskSummaries(session: SessionState): TranscriptEntry[];
+  confirmPendingTaskSummary(session: SessionState): string | null;
   executeMainAgentDecision(session: SessionState, event: UserMessageEvent, decision: MainAgentDecision): Promise<void>;
   cancelActiveTask(session: SessionState, reason: string): Promise<void>;
   markActiveTaskFinished(taskId: string): Promise<void>;
@@ -321,24 +322,36 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
   }
 
   releasePendingTaskSummaries(session: SessionState): TranscriptEntry[] {
+    const releasedEntries = [...session.confirmedTaskSummaryEntries];
+    session.confirmedTaskSummaryEntries = [];
+
     if (!session.pendingTaskSummary) {
-      return [];
+      return releasedEntries;
     }
 
     logger.info("task.pending_output_released", {
       chatId: session.chatId,
       taskName: session.pendingTaskSummary.taskName,
     });
-    const timestamp = new Date().toISOString();
-    const releasedEntries = [{
-      role: "assistant" as const,
-      kind: "released_task_summary",
-      timestamp,
-      text: session.pendingTaskSummary.summary,
-    }];
+    releasedEntries.push(createReleasedTaskSummaryEntry(session.pendingTaskSummary.summary));
 
     session.pendingTaskSummary = null;
     return releasedEntries;
+  }
+
+  confirmPendingTaskSummary(session: SessionState): string | null {
+    if (!session.pendingTaskSummary) {
+      return null;
+    }
+
+    logger.info("task.pending_output_confirmed", {
+      chatId: session.chatId,
+      taskName: session.pendingTaskSummary.taskName,
+    });
+    const taskName = session.pendingTaskSummary.taskName;
+    session.confirmedTaskSummaryEntries.push(createReleasedTaskSummaryEntry(session.pendingTaskSummary.summary));
+    session.pendingTaskSummary = null;
+    return taskName;
   }
 
   recordTaskSummary(session: SessionState, taskId: string, summary: string): void {
@@ -570,6 +583,15 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     await this.channel.sendShareDeletionRequest(session.chatId, requestId, taskName, summary);
   }
 
+}
+
+function createReleasedTaskSummaryEntry(summary: string): TranscriptEntry {
+  return {
+    role: "assistant" as const,
+    kind: "released_task_summary",
+    timestamp: new Date().toISOString(),
+    text: summary,
+  };
 }
 
 function normalizeTaskPolicy(policy: MainAgentTaskPolicyInput | undefined): MainAgentTaskPolicy {

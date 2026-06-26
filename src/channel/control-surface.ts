@@ -43,6 +43,17 @@ export function buildReportControls(): ControlSurface {
   };
 }
 
+export function buildTaskSummaryConfirmationControls(requestId: string): ControlSurface {
+  return {
+    rows: [
+      [
+        { actionId: "summary_confirm", label: buttonLabels.confirmSummary, event: { kind: "approval_response", decision: "approve", requestId } },
+        { actionId: "report", label: buttonLabels.reportDangerousOutput, event: { kind: "danger_report" } },
+      ],
+    ],
+  };
+}
+
 export function buildShareDeletionControls(requestId: string): ControlSurface {
   return {
     rows: [

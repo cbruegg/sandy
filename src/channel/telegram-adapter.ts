@@ -8,6 +8,7 @@ import {
   buildPrivilegeControls,
   buildReportControls,
   buildShareDeletionControls,
+  buildTaskSummaryConfirmationControls,
   buildTaskControls,
   formatPrivilegeRequestLogType,
   type ControlSurface,
@@ -219,6 +220,18 @@ export class TelegramBotApiAdapter implements ChannelAdapter {
     });
     const controls = buildReportControls();
     await this.sendFormattedMessage(chatId, text, {
+      reply_markup: { inline_keyboard: controlSurfaceToTelegramKeyboard(controls) },
+    });
+  }
+
+  async sendTaskSummaryConfirmationRequest(chatId: ChatId, requestId: string, taskName: string): Promise<void> {
+    logger.info("telegram.send_task_summary_confirmation_request", {
+      chatId,
+      requestId,
+      taskName,
+    });
+    const controls = buildTaskSummaryConfirmationControls(requestId);
+    await this.sendFormattedMessage(chatId, messages.taskSummaryConfirmationPrompt(taskName), {
       reply_markup: { inline_keyboard: controlSurfaceToTelegramKeyboard(controls) },
     });
   }

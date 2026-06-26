@@ -476,6 +476,15 @@ test("request_interaction tool reports already waiting when a job task is blocke
 
   const userTaskId = expectDefined(runner.launches[0], "Expected launch.").taskId;
   await runner.emit({ type: "task_done" }, userTaskId);
+  assert.equal(channel.taskSummaryConfirmationRequests.length, 1);
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-request-interaction-waiting",
+    messageId: "confirm-summary:1",
+    timestamp: "2026-04-01T00:00:30.000Z",
+    decision: "approve",
+    requestId: channel.taskSummaryConfirmationRequests[0]?.requestId,
+  });
   await blockedInteraction;
   assert.equal(runner.handles.get(taskId)?.interactiveNotices, 1);
 });
@@ -1064,6 +1073,15 @@ test("job-scoped persistent approvals apply only to later executions of the same
     serverId: "todoist",
     toolName: "list_projects",
     arguments: {},
+  });
+  await waitFor(() => channel.taskSummaryConfirmationRequests.length >= 1);
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-job-approval",
+    messageId: "confirm-summary:1",
+    timestamp: "2026-04-01T00:00:25.000Z",
+    decision: "approve",
+    requestId: channel.taskSummaryConfirmationRequests[0]?.requestId,
   });
   await waitFor(() => channel.privilegeRequests.length >= 2);
 

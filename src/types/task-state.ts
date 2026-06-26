@@ -2,6 +2,7 @@ import type {PrivilegeRequest} from "./privilege.js";
 import type {MainAgentTaskPolicy} from "./main-agent.js";
 import type {HostDirectoryAccessLevel} from "../hostfs/path-policy.ts";
 import type { ChatId } from "./chat-events.js";
+import type { TranscriptEntry } from "./transcript.js";
 
 type McpToolGrant = {
   serverId: string;
@@ -146,7 +147,9 @@ export class SessionState {
   pendingTaskSummary: {
     taskName: string;
     summary: string;
+    confirmationRequestId?: string;
   } | null;
+  confirmedTaskSummaryEntries: TranscriptEntry[];
   pendingShareDeletion: PendingShareDeletion | null;
 
   constructor(chatId: ChatId) {
@@ -154,6 +157,7 @@ export class SessionState {
     this.visibleTask = null;
     this.backgroundJobTasks = [];
     this.pendingTaskSummary = null;
+    this.confirmedTaskSummaryEntries = [];
     this.pendingShareDeletion = null;
   }
 

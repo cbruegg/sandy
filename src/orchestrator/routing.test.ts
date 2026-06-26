@@ -117,6 +117,15 @@ test("user messages route to an interacting scheduled job after waiting behind a
 
   const userTaskId = expectDefined(runner.launches[0], "Expected launch.").taskId;
   await runner.emit({ type: "task_done" }, userTaskId);
+  assert.equal(channel.taskSummaryConfirmationRequests.length, 1);
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-job-routing",
+    messageId: "confirm-summary:1",
+    timestamp: "2026-04-01T00:00:30.000Z",
+    decision: "approve",
+    requestId: channel.taskSummaryConfirmationRequests[0]?.requestId,
+  });
   await blockedInteraction;
 
   assert.match(channel.taskUpdates.at(-1)?.text ?? "", /needs your attention.*Waiting on the user task/);

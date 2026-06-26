@@ -12,6 +12,10 @@ import {
 import type { JobDefinition } from "../jobs/job-validation.js";
 import { CommentaryBufferManager } from "./commentary-buffer-manager.js";
 
+function assertNull(value: unknown): void {
+  assert.equal(value, null);
+}
+
 class FakeTimers {
   public now = 0;
   private nextId = 1;
@@ -209,7 +213,7 @@ test("orchestrator retries cleanup through event-failure handling when normal co
   await runner.emit({ type: "task_done" });
 
   const session = store.getOrCreate("chat-close-retry");
-  assert.equal(session.visibleTask, null);
+  assert.ok(session.visibleTask === null);
   assert.equal(runner.handle.closeCalls, 2);
   assert.equal(channel.sentTexts.at(-1)?.text, messages.taskFailed("close failed once"));
 });
@@ -394,6 +398,113 @@ test("orchestrator discards completed-task output when the user sends a danger r
   assert.equal(session.visibleTask, null);
   assert.equal(session.pendingTaskSummary, null);
   assert.equal(channel.sentTexts.at(-1)?.text, messages.discardedPendingOutput());
+});
+
+test("orchestrator requires pending summary confirmation before a background job becomes interactive", async () => {
+  const mainAgent = new SequenceMainAgent([
+    {
+      action: "launch_task",
+      taskBrief: "Inspect the environment.",
+      taskName: "env-inspection",
+      taskLanguage: "English",
+    },
+    {
+      action: "reply",
+      replyText: "should not run yet",
+    },
+  ]);
+  const { orchestrator, taskLifecycle, runner, store, channel } = createTestOrchestrator({ mainAgent });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-summary-confirm",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Inspect the environment",
+    rawText: "Inspect the environment",
+    attachments: [],
+  });
+  await runner.emit({ type: "task_summary", summary: "Summary: Found 8 CPUs." });
+  await runner.emit({ type: "task_done" });
+
+  const job: JobDefinition = {
+    id: "job-confirm",
+    name: "Daily report",
+    enabled: true,
+    schedule: { kind: "one_shot", runAt: "2026-04-01T00:00:00.000Z" },
+    skillId: "report",
+  };
+  const jobTaskId = await taskLifecycle.launchJobTask(job, "chat-summary-confirm", null);
+  const interactionPromise = orchestrator.executeNativeWorkerToolCall({
+    taskId: jobTaskId,
+    toolName: "request_interaction",
+    arguments: { message: "Need review." },
+  });
+  await Promise.resolve();
+
+  const session = store.getOrCreate("chat-summary-confirm");
+  assertNull(session.visibleTask);
+  assert.equal(channel.taskUpdates.length, 0);
+  assert.equal(channel.taskSummaryConfirmationRequests.length, 1);
+  const requestId = expectDefined(channel.taskSummaryConfirmationRequests[0], "Expected summary confirmation request.").requestId;
+  assert.equal(session.pendingTaskSummary?.confirmationRequestId, requestId);
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-summary-confirm",
+    messageId: "2",
+    timestamp: "2026-04-01T00:00:05.000Z",
+    text: "hello?",
+    rawText: "hello?",
+    attachments: [],
+  });
+  assert.equal(mainAgent.contexts.length, 1);
+  assert.equal(channel.sentTexts.at(-1)?.text, messages.pendingSummaryStillPending());
+
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-summary-confirm",
+    messageId: "confirm:1",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    decision: "approve",
+    requestId,
+  });
+
+  assert.equal(session.pendingTaskSummary, null);
+  assert.equal(session.visibleTask?.taskId, jobTaskId);
+  assert.equal(channel.taskUpdates.length, 2);
+  assert.equal(channel.taskUpdates[0]?.text, messages.scheduledJobBecameInteractive("Scheduled job: Daily report", "Daily report"));
+  assert.equal(channel.taskUpdates[1]?.text, messages.jobRequestsInteraction("Scheduled job: Daily report", "Daily report", "Need review."));
+
+  await interactionPromise;
+});
+
+test("confirmed task summaries are released on the next idle main-agent turn", async () => {
+  const mainAgent = new SequenceMainAgent([
+    { action: "reply", replyText: "ok" },
+  ]);
+  const { orchestrator, taskLifecycle, store } = createTestOrchestrator({ mainAgent });
+  const session = store.getOrCreate("chat-confirmed-summary-release");
+  session.pendingTaskSummary = {
+    taskName: "env-inspection",
+    summary: "Summary: Found 8 CPUs.",
+    confirmationRequestId: "summary-1",
+  };
+
+  assert.equal(taskLifecycle.confirmPendingTaskSummary(session), "env-inspection");
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-confirmed-summary-release",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "thanks",
+    rawText: "thanks",
+    attachments: [],
+  });
+
+  const context = expectDefined(mainAgent.contexts[0], "Expected main-agent context.");
+  assert.deepEqual(contextTexts(context), ["Summary: Found 8 CPUs.", "thanks"]);
 });
 
 test("orchestrator keeps final_result output pending until the user continues normally", async () => {
@@ -739,6 +850,16 @@ test("orchestrator defers job share deletion prompt while a user task is active"
   await runner.emit({ type: "task_done" }, userTaskId);
 
   assert.equal(session.visibleTask, null);
+  assert.equal(channel.taskSummaryConfirmationRequests.length, 1);
+  await orchestrator.handleChatEvent({
+    kind: "approval_response",
+    chatId: "chat-job-defer",
+    messageId: "confirm-summary:1",
+    timestamp: "2026-04-01T00:00:20.000Z",
+    decision: "approve",
+    requestId: channel.taskSummaryConfirmationRequests[0]?.requestId,
+  });
+
   assert.equal(channel.shareDeletionRequests.length, 1);
   assert.equal(channel.shareDeletionRequests[0]?.taskName, "Scheduled job: Daily cleanup");
 });

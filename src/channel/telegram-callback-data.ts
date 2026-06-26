@@ -57,6 +57,14 @@ export function parseTelegramCallbackData(data: string): ControlActionEvent | nu
     };
   }
 
+  if (data.startsWith("summary_confirm:")) {
+    return {
+      kind: "approval_response",
+      decision: "approve",
+      requestId: data.slice("summary_confirm:".length) || undefined,
+    };
+  }
+
   if (data === "report") {
     return { kind: "danger_report" };
   }

@@ -121,6 +121,17 @@ export class LocalTestChannelAdapter implements ChannelAdapter {
     await this.writeTextEvent("send_reportable_text", chatId, text);
   }
 
+  async sendTaskSummaryConfirmationRequest(chatId: ChatId, requestId: string, taskName: string): Promise<void> {
+    await this.writeOutbound({
+      type: "send_task_summary_confirmation_request",
+      eventId: createIdentifier("outbound"),
+      chatId,
+      timestamp: new Date().toISOString(),
+      requestId,
+      taskName,
+    });
+  }
+
   async sendPrivilegeRequest(chatId: ChatId, request: PrivilegeRequest): Promise<void> {
     await this.writeOutbound({
       type: "send_privilege_request",

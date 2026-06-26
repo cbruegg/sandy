@@ -114,12 +114,31 @@ export class SandyOrchestrator {
         await this.deps.channel.sendText(event.chatId, messages.noActiveTaskToFinish());
         return;
       case "approval_response":
+        if (
+          session.pendingTaskSummary?.confirmationRequestId
+          && (!event.requestId || event.requestId === session.pendingTaskSummary.confirmationRequestId)
+        ) {
+          if (event.decision === "deny") {
+            await this.deps.channel.sendText(event.chatId, messages.pendingSummaryStillPending());
+            return;
+          }
+          const taskName = this.deps.taskLifecycle.confirmPendingTaskSummary(session);
+          if (taskName) {
+            await this.deps.channel.sendText(event.chatId, messages.confirmedPendingTaskSummary(taskName));
+          }
+          await this.deps.taskCoordinator.onVisibleSlotAvailable(event.chatId);
+          return;
+        }
         if (session.pendingShareDeletion) {
           if (event.requestId && event.requestId !== session.pendingShareDeletion.requestId) {
             await this.deps.channel.sendText(event.chatId, messages.staleShareDeletionRequest());
             return;
           }
           await this.deps.taskLifecycle.resolvePendingShareDeletion(session, event.decision === "deny" ? "deny" : "approve");
+          return;
+        }
+        if (session.pendingTaskSummary?.confirmationRequestId) {
+          await this.deps.channel.sendText(event.chatId, messages.staleTaskSummaryConfirmation());
           return;
         }
         await this.deps.channel.sendText(event.chatId, messages.noPendingPrivilegeRequest());
@@ -131,10 +150,15 @@ export class SandyOrchestrator {
         }
         session.pendingTaskSummary = null;
         await this.deps.channel.sendText(event.chatId, messages.discardedPendingOutput());
+        await this.deps.taskCoordinator.onVisibleSlotAvailable(event.chatId);
         return;
       case "user_message": {
         if (session.pendingShareDeletion) {
           await this.deps.channel.sendText(event.chatId, messages.shareDeletionStillPending());
+          return;
+        }
+        if (session.pendingTaskSummary?.confirmationRequestId) {
+          await this.deps.channel.sendText(event.chatId, messages.pendingSummaryStillPending());
           return;
         }
 

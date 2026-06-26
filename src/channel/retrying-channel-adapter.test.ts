@@ -56,6 +56,8 @@ class RetryTestChannelAdapter implements ChannelAdapter {
 
   async sendReportableText(_chatId: ChatId, _text: string): Promise<void> {}
 
+  async sendTaskSummaryConfirmationRequest(_chatId: ChatId, _requestId: string, _taskName: string): Promise<void> {}
+
   async sendPrivilegeRequest(_chatId: ChatId, _request: PrivilegeRequest): Promise<void> {}
 
   async askForDenialReason(_chatId: ChatId, _request: PrivilegeRequest): Promise<void> {}

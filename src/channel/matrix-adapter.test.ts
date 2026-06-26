@@ -718,6 +718,39 @@ test("MatrixChannelAdapter sends task updates and reportable text without polls 
   }
 });
 
+test("MatrixChannelAdapter sends summary confirmation as a poll without repeating the summary", async () => {
+  const fakeClient = new FakeMatrixClient();
+  fakeClient.joinedRooms.add(ROOM_ID);
+  fakeClient.roomMembers.set(ROOM_ID, [BOT_ID, OWNER_ID]);
+  fakeClient.encryptedRooms.add(ROOM_ID);
+
+  const adapter = new MatrixChannelAdapter({
+    homeserverUrl: "https://matrix.example",
+    accessToken: "token",
+    allowedUserId: OWNER_ID,
+    stateRoot: "/tmp/sandy-matrix-test",
+    clientFactory: () => fakeClient,
+  });
+
+  try {
+    await adapter.start(async () => {});
+
+    await adapter.sendTaskSummaryConfirmationRequest(ROOM_ID, "summary-req-1", "inspect");
+
+    assert.equal(fakeClient.sentEvents.length, 2);
+    assert.equal(fakeClient.sentEvents[0]?.eventType, "m.room.message");
+    const promptBody = asString(fakeClient.sentEvents[0]?.content["body"]);
+    assert.match(promptBody, /Confirm the summary for task "inspect"/);
+    assert.doesNotMatch(promptBody, /Summary:/);
+    assert.equal(fakeClient.sentEvents[1]?.eventType, "org.matrix.msc3381.poll.start");
+    const pollFallback = asString(fakeClient.sentEvents[1]?.content["m.text"]);
+    assert.match(pollFallback, /Confirm summary/);
+    assert.match(pollFallback, /Report dangerous output/);
+  } finally {
+    await adapter.stop();
+  }
+});
+
 test("MatrixChannelAdapter sends privilege polls without the abort option and supports abort reactions", async () => {
   const fakeClient = new FakeMatrixClient();
   fakeClient.joinedRooms.add(ROOM_ID);
@@ -984,6 +1017,10 @@ function expectDefined<T>(value: T | null | undefined, message: string): NonNull
   assert.notEqual(value, undefined, message);
   assert.notEqual(value, null, message);
   return value as NonNullable<T>;
+}
+
+function asString(value: unknown): string {
+  return typeof value === "string" ? value : "";
 }
 
 function createMatrixRateLimitError(retryAfterMs: number): Error & { retryAfterMs: number; body: { retry_after_ms: number } } {

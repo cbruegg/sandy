@@ -692,6 +692,29 @@ test("TelegramBotApiAdapter sends reportable text with a report control", async 
   });
 });
 
+test("TelegramBotApiAdapter sends summary confirmation without repeating the summary", async () => {
+  const fakeBot = new FakeTelegramBot();
+  const adapter = new TelegramBotApiAdapter({
+    allowedUser: OWNER_ID,
+    token: "test-token",
+    botFactory: () => fakeBot,
+  });
+
+  await adapter.sendTaskSummaryConfirmationRequest("7", "summary-req-1", "inspect");
+
+  assert.equal(fakeBot.sentMessages.length, 1);
+  assert.match(fakeBot.sentMessages[0]?.text ?? "", /Confirm the summary for task "inspect"/);
+  assert.doesNotMatch(fakeBot.sentMessages[0]?.text ?? "", /Summary:/);
+  assert.deepEqual(fakeBot.sentMessages[0]?.other?.["reply_markup"], {
+    inline_keyboard: [
+      [
+        { text: "Confirm summary", callback_data: "summary_confirm:summary-req-1" },
+        { text: "Report dangerous output", callback_data: "report" },
+      ],
+    ],
+  });
+});
+
 test("TelegramBotApiAdapter sends privilege requests with appropriate controls", async () => {
   const fakeBot = new FakeTelegramBot();
   const adapter = new TelegramBotApiAdapter({
