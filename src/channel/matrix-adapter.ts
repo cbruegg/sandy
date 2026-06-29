@@ -3,6 +3,11 @@ import { basename, join } from "node:path";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { messages } from "../messages-to-user.js";
+import {
+  hasMatrixOneTimeKeys,
+  isMatrixDuplicateOneTimeKeyError,
+  stripMatrixOneTimeKeys,
+} from "../matrix/keys-upload.js";
 import { renderMarkdownTableWithWebView } from "./matrix-html.js";
 import {
   containsMarkdownTable,
@@ -209,17 +214,38 @@ async function defaultMatrixClientFactory(options: {
 export function applyMatrixOneTimeKeyUploadCompatibilityPatch(
   RustEngine: MatrixRustEngineConstructor,
 ): void {
+  // The bot SDK does not currently special-case duplicate one-time-key uploads.
+  // If Sandy crashes or is killed after the homeserver accepts a keys/upload but
+  // before the Rust store marks that outgoing request as sent, the next startup
+  // may regenerate a different key with the same key ID. Matrix homeservers then
+  // reject startup with "One time key ... already exists". We monkey-patch only
+  // the upload handler so normal uploads still include one-time keys; on that
+  // specific duplicate-key error we retry without ordinary one-time keys while
+  // preserving device keys and fallback keys, allowing the SDK to mark the
+  // request sent and continue syncing.
   RustEngine.prototype.processKeysUploadRequest = async function processKeysUploadRequest(
     this: MatrixRustEngineLike,
     request: MatrixKeysUploadRequest,
   ): Promise<void> {
     const body = JSON.parse(request.body) as Record<string, unknown>;
-    // matrix.org rejects reused one-time key IDs if a previous startup uploaded
-    // a different key before the local Rust crypto store durably recorded it.
-    // Fallback keys are enough for this bot, and the SDK already has a note
-    // that omitting one-time keys is the intended MSC3983-compatible path.
-    delete body["one_time_keys"];
-    const response = await this.client.doRequest("POST", "/_matrix/client/v3/keys/upload", null, body);
+    let response: unknown;
+    try {
+      response = await this.client.doRequest("POST", "/_matrix/client/v3/keys/upload", null, body);
+    } catch (error) {
+      if (!hasMatrixOneTimeKeys(body) || !isMatrixDuplicateOneTimeKeyError(error)) {
+        throw error;
+      }
+
+      logger.warn("matrix.keys_upload_retry_without_one_time_keys", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      response = await this.client.doRequest(
+        "POST",
+        "/_matrix/client/v3/keys/upload",
+        null,
+        stripMatrixOneTimeKeys(body),
+      );
+    }
     await this.machine.markRequestAsSent(request.id, request.type, JSON.stringify(response));
   };
 }

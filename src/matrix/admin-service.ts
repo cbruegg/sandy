@@ -58,6 +58,9 @@ export class SandyMatrixAdminService {
     const { homeserverUrl, botUserId } = this.matrixConfig;
     const password = await this.promptForPassword();
 
+    // Matrix permits clients to choose their device ID at login. Asking for a
+    // fresh Sandy-scoped ID avoids reusing a homeserver device whose one-time
+    // keys may no longer match our freshly-created local Rust crypto store.
     const requestedDeviceId = createMatrixLoginDeviceId();
     const loginResponse = await this.performMatrixLogin(homeserverUrl, botUserId, password, deviceName, requestedDeviceId);
 

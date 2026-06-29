@@ -208,7 +208,7 @@ test("resolveMatrixCryptoBinaryName maps supported platforms", () => {
   assert.equal(resolveMatrixCryptoBinaryName("win32", "arm64"), "matrix-sdk-crypto.win32-arm64-msvc.node");
 });
 
-test("applyMatrixOneTimeKeyUploadCompatibilityPatch strips one-time keys before upload", async () => {
+test("applyMatrixOneTimeKeyUploadCompatibilityPatch uploads one-time keys normally", async () => {
   const uploadedBodies: unknown[] = [];
   const sentRequests: Array<{ id: string; type: number; response: string }> = [];
 
@@ -250,10 +250,90 @@ test("applyMatrixOneTimeKeyUploadCompatibilityPatch strips one-time keys before 
 
   assert.deepEqual(uploadedBodies, [{
     device_keys: { keys: {} },
+    one_time_keys: {
+      "signed_curve25519:AAAAAAAAAA0": { key: "old" },
+    },
     fallback_keys: {
       "signed_curve25519:fallback": { key: "fallback" },
     },
   }]);
+  assert.deepEqual(sentRequests, [{
+    id: "request-1",
+    type: 0,
+    response: JSON.stringify({ one_time_key_counts: { signed_curve25519: 0 } }),
+  }]);
+});
+
+test("applyMatrixOneTimeKeyUploadCompatibilityPatch retries duplicate one-time key uploads without one-time keys", async () => {
+  const uploadedBodies: unknown[] = [];
+  const sentRequests: Array<{ id: string; type: number; response: string }> = [];
+
+  class FakeRustEngine {
+    private uploadCount = 0;
+
+    readonly client = {
+      doRequest: async (_method: string, _path: string, _queryParams: unknown, body: unknown) => {
+        uploadedBodies.push(body);
+        this.uploadCount += 1;
+        if (this.uploadCount === 1) {
+          const error = new Error("M_UNKNOWN: One time key signed_curve25519:AAAAAAAAAA0 already exists.") as Error & {
+            body?: Record<string, unknown>;
+          };
+          error.body = {
+            errcode: "M_UNKNOWN",
+            error: "One time key signed_curve25519:AAAAAAAAAA0 already exists.",
+          };
+          throw error;
+        }
+        return { one_time_key_counts: { signed_curve25519: 0 } };
+      },
+    };
+
+    readonly machine = {
+      markRequestAsSent: async (id: string, type: number, response: string) => {
+        sentRequests.push({ id, type, response });
+      },
+    };
+
+    async processKeysUploadRequest(_request: { id: string; type: number; body: string }): Promise<void> {
+      throw new Error("unpatched");
+    }
+  }
+
+  applyMatrixOneTimeKeyUploadCompatibilityPatch(FakeRustEngine);
+
+  const engine = new FakeRustEngine();
+  await engine.processKeysUploadRequest({
+    id: "request-1",
+    type: 0,
+    body: JSON.stringify({
+      device_keys: { keys: {} },
+      one_time_keys: {
+        "signed_curve25519:AAAAAAAAAA0": { key: "old" },
+      },
+      fallback_keys: {
+        "signed_curve25519:fallback": { key: "fallback" },
+      },
+    }),
+  });
+
+  assert.deepEqual(uploadedBodies, [
+    {
+      device_keys: { keys: {} },
+      one_time_keys: {
+        "signed_curve25519:AAAAAAAAAA0": { key: "old" },
+      },
+      fallback_keys: {
+        "signed_curve25519:fallback": { key: "fallback" },
+      },
+    },
+    {
+      device_keys: { keys: {} },
+      fallback_keys: {
+        "signed_curve25519:fallback": { key: "fallback" },
+      },
+    },
+  ]);
   assert.deepEqual(sentRequests, [{
     id: "request-1",
     type: 0,

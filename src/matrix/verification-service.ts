@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { matrixStateRoot } from "../state-paths.js";
 import {
@@ -15,6 +16,11 @@ import {
 import { loadMatrixAuthState } from "./auth-state.js";
 import { promptForPasswordHidden } from "./admin-service.js";
 import { matrixAdminMessages } from "../messages-to-user.js";
+import {
+  hasMatrixOneTimeKeys,
+  isMatrixDuplicateOneTimeKeyError,
+  stripMatrixOneTimeKeys,
+} from "./keys-upload.js";
 
 type MatrixVerificationConfig = {
   homeserverUrl: string;
@@ -189,7 +195,7 @@ async function processOutgoingRequest(
     throw new Error("Unsupported Matrix crypto outgoing request type");
   }
 
-  const response = await fetch(new URL(path, homeserverUrl), {
+  let response = await fetch(new URL(path, homeserverUrl), {
     method,
     headers: {
       authorization: `Bearer ${accessToken}`,
@@ -197,6 +203,35 @@ async function processOutgoingRequest(
     },
     body: JSON.stringify(payload),
   });
+
+  if (
+    request instanceof KeysUploadRequest &&
+    !response.ok &&
+    hasMatrixOneTimeKeys(parsedBody)
+  ) {
+    // Verification drives the Rust crypto machine directly, outside the bot
+    // SDK patch used by the channel adapter. Apply the same compatibility retry
+    // here so `sandy matrix verify ...` cannot poison a fresh login by failing
+    // on a duplicate one-time key before recording the outgoing request as sent.
+    const errorBody = await readMatrixErrorBody(response);
+    if (!isMatrixDuplicateOneTimeKeyError(errorBody)) {
+      throw new Error(`Matrix keys upload failed: ${formatMatrixHttpError(response.status, errorBody)}`);
+    }
+
+    response = await fetch(new URL(path, homeserverUrl), {
+      method,
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(stripMatrixOneTimeKeys(parsedBody)),
+    });
+  }
+
+  if (!response.ok) {
+    const errorBody = await readMatrixErrorBody(response);
+    throw new Error(`Matrix crypto outgoing request failed: ${formatMatrixHttpError(response.status, errorBody)}`);
+  }
 
   const responseText = await response.text();
   await machine.markRequestAsSent(
@@ -241,10 +276,52 @@ async function createMachine(
   return await OlmMachine.initialize(
     new UserId(botUserId),
     new DeviceId(deviceId),
-    join(matrixStateRoot(configDirectory), "crypto"),
+    buildMatrixCryptoMachineStoragePath(configDirectory, deviceId),
     "",
     0,
   );
+}
+
+export function buildMatrixCryptoMachineStoragePath(
+  configDirectory: string,
+  deviceId: string,
+): string {
+  // Match @vector-im/matrix-bot-sdk's RustSdkCryptoStorageProvider exactly:
+  // it stores each OlmMachine database under crypto/sha256(deviceId). Using the
+  // crypto root directly creates a legacy DB that the runtime later tries to
+  // migrate with an undefined previous device ID.
+  const hashedDeviceId = createHash("sha256").update(deviceId).digest("hex");
+  return join(matrixStateRoot(configDirectory), "crypto", hashedDeviceId);
+}
+
+export function sanitizeMatrixKeysUploadPayload(payload: Record<string, unknown>): void {
+  const sanitized = stripMatrixOneTimeKeys(payload);
+  for (const key of Object.keys(payload)) {
+    delete payload[key];
+  }
+  Object.assign(payload, sanitized);
+}
+
+async function readMatrixErrorBody(response: Response): Promise<unknown> {
+  const text = await response.text();
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+}
+
+function formatMatrixHttpError(status: number, errorBody: unknown): string {
+  if (typeof errorBody === "string" && errorBody) {
+    return `HTTP ${status}: ${errorBody}`;
+  }
+  if (errorBody && typeof errorBody === "object") {
+    const record = errorBody as Record<string, unknown>;
+    if (typeof record["error"] === "string") {
+      return `HTTP ${status}: ${record["error"]}`;
+    }
+  }
+  return `HTTP ${status}`;
 }
 
 async function getVerificationStatus(
