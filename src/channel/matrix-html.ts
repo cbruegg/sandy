@@ -1,44 +1,30 @@
-import type { WebView } from "bun";
 import { renderMatrixMarkdownTableHtml, type MatrixRenderedTableImage } from "./matrix-markdown.js";
 
 const tableScreenshotEdgePadding = 4;
 const maxTableScreenshotSize = 16_384;
 
-type BunWithWebView = typeof Bun & {
-  WebView?: typeof WebView;
-};
-
 export async function renderMarkdownTableWithWebView(tableMarkdown: string): Promise<MatrixRenderedTableImage | null> {
-  const webViewConstructor = (Bun as BunWithWebView).WebView;
-  if (!webViewConstructor) {
-    throw new Error("Bun.WebView is unavailable in this Bun runtime.");
+  await using view = new Bun.WebView({ width: 1280, height: 720 });
+  await view.navigate(`data:text/html;charset=utf-8,${encodeURIComponent(buildTableScreenshotHtml(tableMarkdown))}`);
+  const size = normalizeScreenshotSize(await view.evaluate(`(() => {
+    const rect = document.body.getBoundingClientRect();
+    return { width: Math.ceil(rect.width), height: Math.ceil(rect.height) };
+  })()`));
+  if (!size) {
+    return null;
   }
-
-  const view = new webViewConstructor({ width: 1280, height: 720 });
-  try {
-    await view.navigate(`data:text/html;charset=utf-8,${encodeURIComponent(buildTableScreenshotHtml(tableMarkdown))}`);
-    const size = normalizeScreenshotSize(await view.evaluate(`(() => {
-      const rect = document.body.getBoundingClientRect();
-      return { width: Math.ceil(rect.width), height: Math.ceil(rect.height) };
-    })()`));
-    if (!size) {
-      return null;
-    }
-    await view.resize(size.width, size.height);
-    const data = await view.screenshot({ format: "png", encoding: "buffer" });
-    const dimensions = readPngDimensions(data);
-    if (!dimensions) {
-      return null;
-    }
-    return {
-      data,
-      width: dimensions.width,
-      height: dimensions.height,
-      alt: "Markdown table",
-    };
-  } finally {
-    view.close();
+  await view.resize(size.width, size.height);
+  const data = await view.screenshot({ format: "png", encoding: "buffer" });
+  const dimensions = readPngDimensions(data);
+  if (!dimensions) {
+    return null;
   }
+  return {
+    data,
+    width: dimensions.width,
+    height: dimensions.height,
+    alt: "Markdown table",
+  };
 }
 
 function normalizeScreenshotSize(value: unknown): { width: number; height: number } | null {
