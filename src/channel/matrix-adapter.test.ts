@@ -11,7 +11,7 @@ import {
   normalizeMatrixRoomMessage,
 } from "./matrix-adapter.js";
 import { resolveMatrixCryptoBinaryName } from "./matrix-crypto-targets.js";
-import { renderMatrixMarkdown } from "./matrix-html.js";
+import { renderMatrixMarkdown } from "./matrix-markdown.js";
 import type { NormalizedChatEvent } from "../types.js";
 import type { TranscriptionProvider } from "../transcription/transcription-provider.js";
 import { messages } from "../messages-to-user.js";

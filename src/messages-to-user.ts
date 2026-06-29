@@ -20,6 +20,8 @@ export const messages = {
     "_React with 😮 to abort task_",
   matrixReportReactionHint: (): string =>
     "_React with 😮 to report dangerous output_",
+  matrixTableImageAttached: (): string =>
+    "Table image attached separately.",
   unsupportedInput: (inputType: string): string =>
     `This build supports text messages, file attachments, and optionally voice messages when STT is configured. Received unsupported ${inputType} input.`,
   voiceMessagesNotEnabled: (): string =>

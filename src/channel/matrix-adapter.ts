@@ -3,15 +3,15 @@ import { basename, join } from "node:path";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { messages } from "../messages-to-user.js";
+import { renderMarkdownTableWithWebView } from "./matrix-html.js";
 import {
   containsMarkdownTable,
   matrixHtmlAllowedTags,
-  renderMarkdownTableWithWebView,
   renderMatrixMarkdown,
   renderMatrixMarkdownWithAttachedTableImages,
   type MatrixRenderedTableImage,
   type MatrixTableImageRenderer,
-} from "./matrix-html.js";
+} from "./matrix-markdown.js";
 import { runWithMatrixSendRetry, sleepMs, type MatrixSleep } from "./matrix-send-retry.js";
 import {
   buildPrivilegeControls,
@@ -115,6 +115,15 @@ type MatrixAttachmentRef = {
   mimeType?: string;
   url?: string;
   encryptedFile?: EncryptedFile;
+};
+
+type MatrixRenderedMessageWithTableImages = {
+  body: string;
+  formattedBody: string;
+  tableImages: Array<{
+    image: MatrixRenderedTableImage;
+    index: number;
+  }>;
 };
 
 type MatrixPollAction = {
@@ -426,10 +435,21 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   private async sendFormattedMessage(chatId: ChatId, text: string, msgtype: "m.notice" | "m.text"): Promise<string> {
     const rendered = containsMarkdownTable(text)
       ? await this.renderMessageWithTableImages(chatId, text)
-      : renderMatrixMarkdown(text);
+      : { ...renderMatrixMarkdown(text), tableImages: [] };
+    const client = this.requireClient();
+
+    for (const tableImage of rendered.tableImages) {
+      const fileName = `sandy-table-${tableImage.index + 1}.png`;
+      const content = await buildMatrixImageContent(client, chatId, tableImage.image, fileName);
+      await this.sendWithMatrixBackoff(
+        "matrix.send_table_image",
+        () => client.sendEvent(chatId, "m.room.message", content),
+      );
+    }
+
     return this.sendWithMatrixBackoff(
       "matrix.send_message",
-      () => this.requireClient().sendEvent(chatId, "m.room.message", {
+      () => client.sendEvent(chatId, "m.room.message", {
         body: rendered.body,
         msgtype,
         format: "org.matrix.custom.html",
@@ -438,16 +458,11 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     );
   }
 
-  private async renderMessageWithTableImages(chatId: ChatId, text: string): Promise<{ body: string; formattedBody: string }> {
-    const client = this.requireClient();
-
-    return renderMatrixMarkdownWithAttachedTableImages(text, async (image, index) => {
-      const fileName = `sandy-table-${index + 1}.png`;
-      const content = await buildMatrixImageContent(client, chatId, image, fileName);
-      await this.sendWithMatrixBackoff(
-        "matrix.send_table_image",
-        () => client.sendEvent(chatId, "m.room.message", content),
-      );
+  private async renderMessageWithTableImages(chatId: ChatId, text: string): Promise<MatrixRenderedMessageWithTableImages> {
+    const tableImages: MatrixRenderedMessageWithTableImages["tableImages"] = [];
+    const rendered = await renderMatrixMarkdownWithAttachedTableImages(text, (image, index) => {
+      tableImages.push({ image, index });
+      return Promise.resolve();
     }, async (tableMarkdown, index) => {
       let image: MatrixRenderedTableImage | null;
       try {
@@ -457,7 +472,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
           chatId,
           tableIndex: index,
           detail: "Bun.WebView table screenshot failed; falling back to text table conversion.",
-          error: describeError(error),
+          error,
         });
         return null;
       }
@@ -471,6 +486,10 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       }
       return image;
     });
+    return {
+      ...rendered,
+      tableImages,
+    };
   }
 
   private async sendPoll(
@@ -960,14 +979,6 @@ async function buildMatrixFileContent(
   };
 }
 
-async function uploadMatrixTableImage(
-  client: MatrixClientLike,
-  image: MatrixRenderedTableImage,
-  fileName: string,
-): Promise<string> {
-  return client.uploadContent(image.data, "image/png", fileName);
-}
-
 async function buildMatrixImageContent(
   client: MatrixClientLike,
   roomId: string,
@@ -996,7 +1007,7 @@ async function buildMatrixImageContent(
     };
   }
 
-  const mxcUrl = await uploadMatrixTableImage(client, image, fileName);
+  const mxcUrl = await client.uploadContent(image.data, "image/png", fileName);
   return {
     body: fileName,
     msgtype: "m.image",
@@ -1124,49 +1135,4 @@ function asOptionalString(value: unknown): string | undefined {
 
 function previewText(text: string): string {
   return text.length <= 120 ? text : `${text.slice(0, 117)}...`;
-}
-
-function describeError(error: unknown): string {
-  if (!(error instanceof Error)) {
-    return String(error);
-  }
-
-  const details: string[] = [error.message];
-  const errorWithProcessOutput = error as Error & {
-    code?: unknown;
-    signal?: unknown;
-    stdout?: unknown;
-    stderr?: unknown;
-  };
-  if (errorWithProcessOutput.code !== undefined) {
-    details.push(`code=${describeUnknownValue(errorWithProcessOutput.code)}`);
-  }
-  if (errorWithProcessOutput.signal !== undefined) {
-    details.push(`signal=${describeUnknownValue(errorWithProcessOutput.signal)}`);
-  }
-
-  const stderr = typeof errorWithProcessOutput.stderr === "string" ? errorWithProcessOutput.stderr.trim() : "";
-  if (stderr.length > 0) {
-    details.push(`stderr=${previewText(stderr)}`);
-  }
-
-  const stdout = typeof errorWithProcessOutput.stdout === "string" ? errorWithProcessOutput.stdout.trim() : "";
-  if (stdout.length > 0) {
-    details.push(`stdout=${previewText(stdout)}`);
-  }
-
-  return details.join("; ");
-}
-
-function describeUnknownValue(value: unknown): string {
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return `${value}`;
-  }
-  if (value === null) {
-    return "null";
-  }
-  if (value === undefined) {
-    return "undefined";
-  }
-  return "unprintable value";
 }
