@@ -7,6 +7,7 @@ import { renderMarkdownTableWithWebView } from "./matrix-html.js";
 import {
   containsMarkdownTable,
   matrixHtmlAllowedTags,
+  renderMarkdownTablesWithoutHtmlTables,
   renderMatrixMarkdown,
   renderMatrixMarkdownWithAttachedTableImages,
   type MatrixRenderedMarkdownWithTableImages,
@@ -425,7 +426,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   }
 
   private async sendFormattedMessage(chatId: ChatId, text: string, msgtype: "m.notice" | "m.text"): Promise<string> {
-    const rendered = containsMarkdownTable(text)
+    const rendered = renderMarkdownTablesWithoutHtmlTables && containsMarkdownTable(text)
       ? await this.renderMessageWithTableImages(text)
       : { ...renderMatrixMarkdown(text), tableImages: [] };
     const client = this.requireClient();

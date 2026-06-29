@@ -47,7 +47,7 @@ const matrixContentUriPattern = /^mxc:\/\/[^/]+\/.+/i;
 // Element X on iOS currently does not render HTML tables
 // (https://github.com/element-hq/element-x-ios/issues/1416). Keep Matrix's
 // plain text body unchanged; Matrix delivery sends table images separately.
-const renderMarkdownTablesWithoutHtmlTables = true;
+export const renderMarkdownTablesWithoutHtmlTables = true;
 const marked = createMatrixMarkdownRenderer(renderMarkdownTablesWithoutHtmlTables);
 const tableMarked = createMatrixMarkdownRenderer(false);
 
