@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {rm} from "node:fs/promises";
 import { matrixStateRoot } from "../state-paths.js";
 import {
@@ -57,7 +58,8 @@ export class SandyMatrixAdminService {
     const { homeserverUrl, botUserId } = this.matrixConfig;
     const password = await this.promptForPassword();
 
-    const loginResponse = await this.performMatrixLogin(homeserverUrl, botUserId, password, deviceName);
+    const requestedDeviceId = createMatrixLoginDeviceId();
+    const loginResponse = await this.performMatrixLogin(homeserverUrl, botUserId, password, deviceName, requestedDeviceId);
 
     await this.clearMatrixState();
 
@@ -84,6 +86,7 @@ export class SandyMatrixAdminService {
     userId: string,
     password: string,
     deviceName: string,
+    deviceId: string,
   ): Promise<{ userId: string; deviceId: string; accessToken: string }> {
     const loginUrl = new URL("/_matrix/client/v3/login", homeserverUrl);
     const response = await fetch(loginUrl, {
@@ -91,15 +94,7 @@ export class SandyMatrixAdminService {
       headers: {
         "content-type": "application/json",
       },
-      body: JSON.stringify({
-        type: "m.login.password",
-        identifier: {
-          type: "m.id.user",
-          user: userId,
-        },
-        password,
-        initial_device_display_name: deviceName,
-      }),
+      body: JSON.stringify(buildMatrixLoginRequestBody(userId, password, deviceName, deviceId)),
     });
 
     const body = await response.json();
@@ -139,6 +134,30 @@ export class SandyMatrixAdminService {
     const matrixRoot = matrixStateRoot(this.configDirectory);
     await rm(matrixRoot, { recursive: true, force: true });
   }
+}
+
+export function buildMatrixLoginRequestBody(
+  userId: string,
+  password: string,
+  deviceName: string,
+  deviceId: string,
+): Record<string, unknown> {
+  return {
+    type: "m.login.password",
+    identifier: {
+      type: "m.id.user",
+      user: userId,
+    },
+    password,
+    device_id: deviceId,
+    initial_device_display_name: deviceName,
+  };
+}
+
+export function createMatrixLoginDeviceId(): string {
+  const timestamp = Date.now().toString(36).toUpperCase();
+  const suffix = randomBytes(8).toString("hex").toUpperCase();
+  return `SANDY_${timestamp}_${suffix}`;
 }
 
 export async function promptForPasswordHidden(

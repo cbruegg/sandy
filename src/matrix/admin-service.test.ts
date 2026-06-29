@@ -1,7 +1,11 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { promptForPasswordHidden } from "./admin-service.js";
+import {
+  buildMatrixLoginRequestBody,
+  createMatrixLoginDeviceId,
+  promptForPasswordHidden,
+} from "./admin-service.js";
 
 class MockReadStream extends EventEmitter {
   setRawMode(_raw: boolean): this {
@@ -98,4 +102,33 @@ test("promptForPasswordHidden throws on Ctrl+C", async () => {
   mockStdin.emitChars(["s", "e", "c", "\u0003"]);
 
   await assert.rejects(promptPromise, /cancelled/i);
+});
+
+test("buildMatrixLoginRequestBody requests an explicit device ID", () => {
+  const body = buildMatrixLoginRequestBody(
+    "@sandy:example.org",
+    "secret",
+    "Sandy Pi",
+    "SANDY_DEVICE_1",
+  );
+
+  assert.deepEqual(body, {
+    type: "m.login.password",
+    identifier: {
+      type: "m.id.user",
+      user: "@sandy:example.org",
+    },
+    password: "secret",
+    device_id: "SANDY_DEVICE_1",
+    initial_device_display_name: "Sandy Pi",
+  });
+});
+
+test("createMatrixLoginDeviceId creates Sandy-scoped unique device IDs", () => {
+  const first = createMatrixLoginDeviceId();
+  const second = createMatrixLoginDeviceId();
+
+  assert.match(first, /^SANDY_[0-9A-Z]+_[0-9A-F]{16}$/);
+  assert.match(second, /^SANDY_[0-9A-Z]+_[0-9A-F]{16}$/);
+  assert.notEqual(first, second);
 });
