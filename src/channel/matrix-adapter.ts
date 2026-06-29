@@ -434,7 +434,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
 
   private async sendFormattedMessage(chatId: ChatId, text: string, msgtype: "m.notice" | "m.text"): Promise<string> {
     const rendered = containsMarkdownTable(text)
-      ? await this.renderMessageWithTableImages(chatId, text)
+      ? await this.renderMessageWithTableImages(text)
       : { ...renderMatrixMarkdown(text), tableImages: [] };
     const client = this.requireClient();
 
@@ -458,7 +458,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     );
   }
 
-  private async renderMessageWithTableImages(chatId: ChatId, text: string): Promise<MatrixRenderedMessageWithTableImages> {
+  private async renderMessageWithTableImages(text: string): Promise<MatrixRenderedMessageWithTableImages> {
     const tableImages: MatrixRenderedMessageWithTableImages["tableImages"] = [];
     const rendered = await renderMatrixMarkdownWithAttachedTableImages(text, (image, index) => {
       tableImages.push({ image, index });
@@ -469,7 +469,6 @@ export class MatrixChannelAdapter implements ChannelAdapter {
         image = await this.tableImageRenderer(tableMarkdown, index);
       } catch (error) {
         logger.warn("matrix.table_image_render_failed", {
-          chatId,
           tableIndex: index,
           detail: "Bun.WebView table screenshot failed; falling back to text table conversion.",
           error,
@@ -478,7 +477,6 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       }
       if (!image) {
         logger.warn("matrix.table_image_render_failed", {
-          chatId,
           tableIndex: index,
           detail: "Bun.WebView table screenshot failed; falling back to text table conversion.",
           error: "renderer returned no image",
