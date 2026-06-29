@@ -62,6 +62,98 @@ test("renderMatrixMarkdown can render Markdown tables as Matrix HTML table eleme
   );
 });
 
+test("MatrixChannelAdapter sends Markdown tables as attached PNG images", async () => {
+  const fakeClient = new FakeMatrixClient();
+  fakeClient.joinedRooms.add(ROOM_ID);
+  fakeClient.roomMembers.set(ROOM_ID, [BOT_ID, OWNER_ID]);
+  const adapter = new MatrixChannelAdapter({
+    homeserverUrl: "https://matrix.example",
+    accessToken: "token",
+    allowedUserId: OWNER_ID,
+    stateRoot: "/tmp/sandy-matrix-test",
+    clientFactory: () => fakeClient,
+    tableImageRenderer: async () => fakePngTableImage(123, 45),
+  });
+
+  try {
+    await adapter.start(async () => {});
+    await adapter.sendText(ROOM_ID, "Here:\n\n| A | B |\n|---|---|\n| 1 | 2 |");
+
+    assert.equal(fakeClient.uploads.length, 1);
+    assert.equal(fakeClient.uploads[0]?.contentType, "image/png");
+    assert.equal(fakeClient.uploads[0]?.filename, "sandy-table-1.png");
+    assert.deepEqual([...expectDefined(fakeClient.uploads[0]?.data, "Expected uploaded PNG.").subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    assert.equal(fakeClient.sentEvents[0]?.content["msgtype"], "m.image");
+    assert.equal(fakeClient.sentEvents[0]?.content["url"], "mxc://example/1");
+    assert.deepEqual(fakeClient.sentEvents[0]?.content["info"], {
+      mimetype: "image/png",
+      size: fakeClient.uploads[0]?.data.byteLength,
+      w: 123,
+      h: 45,
+    });
+    const content = expectDefined(fakeClient.sentEvents[1]?.content, "Expected a Matrix message.");
+    assert.equal(content["body"], "Here:\n\n| A | B |\n|---|---|\n| 1 | 2 |");
+    assert.equal(content["formatted_body"], "<p>Here:</p>\n<p><em>Table image attached separately.</em></p>");
+  } finally {
+    await adapter.stop();
+  }
+});
+
+test("MatrixChannelAdapter sends encrypted table images separately in encrypted rooms", async () => {
+  const fakeClient = new FakeMatrixClient();
+  fakeClient.joinedRooms.add(ROOM_ID);
+  fakeClient.roomMembers.set(ROOM_ID, [BOT_ID, OWNER_ID]);
+  fakeClient.encryptedRooms.add(ROOM_ID);
+  const adapter = new MatrixChannelAdapter({
+    homeserverUrl: "https://matrix.example",
+    accessToken: "token",
+    allowedUserId: OWNER_ID,
+    stateRoot: "/tmp/sandy-matrix-test",
+    clientFactory: () => fakeClient,
+    tableImageRenderer: async () => fakePngTableImage(123, 45),
+  });
+
+  try {
+    await adapter.start(async () => {});
+    await adapter.sendText(ROOM_ID, "| A | B |\n|---|---|\n| 1 | 2 |");
+
+    assert.equal(fakeClient.uploads.length, 1);
+    assert.equal(fakeClient.uploads[0]?.contentType, "application/octet-stream");
+    assert.deepEqual([...expectDefined(fakeClient.uploads[0]?.data, "Expected encrypted upload.").subarray(0, 18)], [...Buffer.concat([Buffer.from("encrypted:", "utf8"), Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])])]);
+    assert.equal(fakeClient.sentEvents[0]?.content["msgtype"], "m.image");
+    assert.equal(typeof fakeClient.sentEvents[0]?.content["file"], "object");
+    assert.equal(fakeClient.sentEvents[1]?.content["msgtype"], "m.text");
+    assert.equal(fakeClient.sentEvents[1]?.content["formatted_body"], "<p><em>Table image attached separately.</em></p>");
+  } finally {
+    await adapter.stop();
+  }
+});
+
+test("MatrixChannelAdapter falls back to text table conversion when table image rendering fails", async () => {
+  const fakeClient = new FakeMatrixClient();
+  fakeClient.joinedRooms.add(ROOM_ID);
+  fakeClient.roomMembers.set(ROOM_ID, [BOT_ID, OWNER_ID]);
+  const adapter = new MatrixChannelAdapter({
+    homeserverUrl: "https://matrix.example",
+    accessToken: "token",
+    allowedUserId: OWNER_ID,
+    stateRoot: "/tmp/sandy-matrix-test",
+    clientFactory: () => fakeClient,
+    tableImageRenderer: async () => null,
+  });
+
+  try {
+    await adapter.start(async () => {});
+    await adapter.sendText(ROOM_ID, "| A | B |\n|---|---|\n| 1 | 2 |");
+
+    assert.equal(fakeClient.uploads.length, 0);
+    assert.equal(fakeClient.sentEvents[0]?.content["msgtype"], "m.text");
+    assert.equal(fakeClient.sentEvents[0]?.content["formatted_body"], "<p><strong>A:</strong> 1<br>\n<strong>B:</strong> 2</p>");
+  } finally {
+    await adapter.stop();
+  }
+});
+
 test("renderMatrixMarkdown keeps only Matrix-safe HTML attributes", () => {
   const rendered = renderMatrixMarkdown("[link](https://example.org)\n\n3. item");
 
@@ -910,7 +1002,7 @@ class FakeMatrixClient {
   public readonly crypto = {
     isRoomEncrypted: async (roomId: string) => this.encryptedRooms.has(roomId),
     encryptMedia: async (file: Buffer) => ({
-      buffer: Buffer.from(`encrypted:${file.toString("utf8")}`),
+      buffer: Buffer.concat([Buffer.from("encrypted:", "utf8"), file]),
       file: {
         iv: "iv",
         v: "v2" as const,
@@ -1021,6 +1113,14 @@ function expectDefined<T>(value: T | null | undefined, message: string): NonNull
 
 function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function fakePngTableImage(width: number, height: number): { data: Buffer; width: number; height: number; alt: string } {
+  const data = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(data, 0);
+  data.writeUInt32BE(width, 16);
+  data.writeUInt32BE(height, 20);
+  return { data, width, height, alt: "Markdown table" };
 }
 
 function createMatrixRateLimitError(retryAfterMs: number): Error & { retryAfterMs: number; body: { retry_after_ms: number } } {

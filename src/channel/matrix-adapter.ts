@@ -3,7 +3,15 @@ import { basename, join } from "node:path";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { messages } from "../messages-to-user.js";
-import { matrixHtmlAllowedTags, renderMatrixMarkdown } from "./matrix-html.js";
+import {
+  containsMarkdownTable,
+  matrixHtmlAllowedTags,
+  renderMarkdownTableWithWebView,
+  renderMatrixMarkdown,
+  renderMatrixMarkdownWithAttachedTableImages,
+  type MatrixRenderedTableImage,
+  type MatrixTableImageRenderer,
+} from "./matrix-html.js";
 import { runWithMatrixSendRetry, sleepMs, type MatrixSleep } from "./matrix-send-retry.js";
 import {
   buildPrivilegeControls,
@@ -98,6 +106,7 @@ type MatrixAdapterOptions = {
   clientFactory?: MatrixClientFactory;
   transcriptionProvider?: TranscriptionProvider;
   sleep?: MatrixSleep;
+  tableImageRenderer?: MatrixTableImageRenderer;
 };
 
 type MatrixAttachmentRef = {
@@ -180,6 +189,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   private readonly transcriptionProvider: TranscriptionProvider | null;
   private readonly clientFactory: MatrixClientFactory;
   private readonly sleep: MatrixSleep;
+  private readonly tableImageRenderer: MatrixTableImageRenderer;
   private client: MatrixClientLike | null = null;
   private startPromise: Promise<void> | null = null;
   private botUserId: string | null = null;
@@ -198,6 +208,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     this.transcriptionProvider = options.transcriptionProvider ?? null;
     this.clientFactory = options.clientFactory ?? defaultMatrixClientFactory;
     this.sleep = options.sleep ?? sleepMs;
+    this.tableImageRenderer = options.tableImageRenderer ?? renderMarkdownTableWithWebView;
   }
 
   getFormatting(): ChannelFormatting {
@@ -413,7 +424,9 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   }
 
   private async sendFormattedMessage(chatId: ChatId, text: string, msgtype: "m.notice" | "m.text"): Promise<string> {
-    const rendered = renderMatrixMarkdown(text);
+    const rendered = containsMarkdownTable(text)
+      ? await this.renderMessageWithTableImages(chatId, text)
+      : renderMatrixMarkdown(text);
     return this.sendWithMatrixBackoff(
       "matrix.send_message",
       () => this.requireClient().sendEvent(chatId, "m.room.message", {
@@ -423,6 +436,41 @@ export class MatrixChannelAdapter implements ChannelAdapter {
         formatted_body: rendered.formattedBody,
       }),
     );
+  }
+
+  private async renderMessageWithTableImages(chatId: ChatId, text: string): Promise<{ body: string; formattedBody: string }> {
+    const client = this.requireClient();
+
+    return renderMatrixMarkdownWithAttachedTableImages(text, async (image, index) => {
+      const fileName = `sandy-table-${index + 1}.png`;
+      const content = await buildMatrixImageContent(client, chatId, image, fileName);
+      await this.sendWithMatrixBackoff(
+        "matrix.send_table_image",
+        () => client.sendEvent(chatId, "m.room.message", content),
+      );
+    }, async (tableMarkdown, index) => {
+      let image: MatrixRenderedTableImage | null;
+      try {
+        image = await this.tableImageRenderer(tableMarkdown, index);
+      } catch (error) {
+        logger.warn("matrix.table_image_render_failed", {
+          chatId,
+          tableIndex: index,
+          detail: "Bun.WebView table screenshot failed; falling back to text table conversion.",
+          error: describeError(error),
+        });
+        return null;
+      }
+      if (!image) {
+        logger.warn("matrix.table_image_render_failed", {
+          chatId,
+          tableIndex: index,
+          detail: "Bun.WebView table screenshot failed; falling back to text table conversion.",
+          error: "renderer returned no image",
+        });
+      }
+      return image;
+    });
   }
 
   private async sendPoll(
@@ -912,6 +960,51 @@ async function buildMatrixFileContent(
   };
 }
 
+async function uploadMatrixTableImage(
+  client: MatrixClientLike,
+  image: MatrixRenderedTableImage,
+  fileName: string,
+): Promise<string> {
+  return client.uploadContent(image.data, "image/png", fileName);
+}
+
+async function buildMatrixImageContent(
+  client: MatrixClientLike,
+  roomId: string,
+  image: MatrixRenderedTableImage,
+  fileName: string,
+): Promise<Record<string, unknown>> {
+  const encrypted = await isMatrixRoomEncrypted(client, roomId);
+  const info = {
+    mimetype: "image/png",
+    size: image.data.byteLength,
+    w: image.width,
+    h: image.height,
+  };
+
+  if (encrypted && client.crypto) {
+    const encryptedMedia = await client.crypto.encryptMedia(image.data);
+    const mxcUrl = await client.uploadContent(encryptedMedia.buffer, "application/octet-stream", fileName);
+    return {
+      body: fileName,
+      msgtype: "m.image",
+      info,
+      file: {
+        ...encryptedMedia.file,
+        url: mxcUrl,
+      },
+    };
+  }
+
+  const mxcUrl = await uploadMatrixTableImage(client, image, fileName);
+  return {
+    body: fileName,
+    msgtype: "m.image",
+    url: mxcUrl,
+    info,
+  };
+}
+
 async function downloadMatrixAttachment(client: MatrixClientLike, ref: MatrixAttachmentRef): Promise<Buffer> {
   if (ref.encryptedFile) {
     if (!client.crypto) {
@@ -1031,4 +1124,49 @@ function asOptionalString(value: unknown): string | undefined {
 
 function previewText(text: string): string {
   return text.length <= 120 ? text : `${text.slice(0, 117)}...`;
+}
+
+function describeError(error: unknown): string {
+  if (!(error instanceof Error)) {
+    return String(error);
+  }
+
+  const details: string[] = [error.message];
+  const errorWithProcessOutput = error as Error & {
+    code?: unknown;
+    signal?: unknown;
+    stdout?: unknown;
+    stderr?: unknown;
+  };
+  if (errorWithProcessOutput.code !== undefined) {
+    details.push(`code=${describeUnknownValue(errorWithProcessOutput.code)}`);
+  }
+  if (errorWithProcessOutput.signal !== undefined) {
+    details.push(`signal=${describeUnknownValue(errorWithProcessOutput.signal)}`);
+  }
+
+  const stderr = typeof errorWithProcessOutput.stderr === "string" ? errorWithProcessOutput.stderr.trim() : "";
+  if (stderr.length > 0) {
+    details.push(`stderr=${previewText(stderr)}`);
+  }
+
+  const stdout = typeof errorWithProcessOutput.stdout === "string" ? errorWithProcessOutput.stdout.trim() : "";
+  if (stdout.length > 0) {
+    details.push(`stdout=${previewText(stdout)}`);
+  }
+
+  return details.join("; ");
+}
+
+function describeUnknownValue(value: unknown): string {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return `${value}`;
+  }
+  if (value === null) {
+    return "null";
+  }
+  if (value === undefined) {
+    return "undefined";
+  }
+  return "unprintable value";
 }
