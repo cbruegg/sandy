@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   MatrixChannelAdapter,
+  applyMatrixOneTimeKeyUploadCompatibilityPatch,
   buildMatrixPollStartContent,
   normalizeMatrixPollResponse,
   normalizeMatrixReactionResponse,
@@ -205,6 +206,59 @@ test("resolveMatrixCryptoBinaryName maps supported platforms", () => {
   assert.equal(resolveMatrixCryptoBinaryName("darwin", "x64"), "matrix-sdk-crypto.darwin-x64.node");
   assert.equal(resolveMatrixCryptoBinaryName("linux", "arm64"), "matrix-sdk-crypto.linux-arm64-gnu.node");
   assert.equal(resolveMatrixCryptoBinaryName("win32", "arm64"), "matrix-sdk-crypto.win32-arm64-msvc.node");
+});
+
+test("applyMatrixOneTimeKeyUploadCompatibilityPatch strips one-time keys before upload", async () => {
+  const uploadedBodies: unknown[] = [];
+  const sentRequests: Array<{ id: string; type: number; response: string }> = [];
+
+  class FakeRustEngine {
+    readonly client = {
+      doRequest: async (_method: string, _path: string, _queryParams: unknown, body: unknown) => {
+        uploadedBodies.push(body);
+        return { one_time_key_counts: { signed_curve25519: 0 } };
+      },
+    };
+
+    readonly machine = {
+      markRequestAsSent: async (id: string, type: number, response: string) => {
+        sentRequests.push({ id, type, response });
+      },
+    };
+
+    async processKeysUploadRequest(_request: { id: string; type: number; body: string }): Promise<void> {
+      throw new Error("unpatched");
+    }
+  }
+
+  applyMatrixOneTimeKeyUploadCompatibilityPatch(FakeRustEngine);
+
+  const engine = new FakeRustEngine();
+  await engine.processKeysUploadRequest({
+    id: "request-1",
+    type: 0,
+    body: JSON.stringify({
+      device_keys: { keys: {} },
+      one_time_keys: {
+        "signed_curve25519:AAAAAAAAAA0": { key: "old" },
+      },
+      fallback_keys: {
+        "signed_curve25519:fallback": { key: "fallback" },
+      },
+    }),
+  });
+
+  assert.deepEqual(uploadedBodies, [{
+    device_keys: { keys: {} },
+    fallback_keys: {
+      "signed_curve25519:fallback": { key: "fallback" },
+    },
+  }]);
+  assert.deepEqual(sentRequests, [{
+    id: "request-1",
+    type: 0,
+    response: JSON.stringify({ one_time_key_counts: { signed_curve25519: 0 } }),
+  }]);
 });
 
 test("normalizeMatrixRoomMessage maps text, encrypted file, and audio events", async () => {

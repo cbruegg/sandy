@@ -84,6 +84,27 @@ type MatrixClientLike = {
   crypto?: MatrixCryptoLike;
 };
 
+type MatrixKeysUploadRequest = {
+  id: string;
+  type: number;
+  body: string;
+};
+
+type MatrixRustEngineLike = {
+  client: {
+    doRequest(method: string, path: string, queryParams: unknown, body: unknown): Promise<unknown>;
+  };
+  machine: {
+    markRequestAsSent(id: string, type: number, response: string): Promise<void>;
+  };
+};
+
+type MatrixRustEngineConstructor = {
+  prototype: MatrixRustEngineLike & {
+    processKeysUploadRequest(request: MatrixKeysUploadRequest): Promise<void>;
+  };
+};
+
 type MatrixMessageContent = {
   body?: string;
   msgtype?: string;
@@ -173,6 +194,8 @@ async function defaultMatrixClientFactory(options: {
   accessToken: string;
   stateRoot: string;
 }): Promise<MatrixClientLike> {
+  const { RustEngine } = await import("@vector-im/matrix-bot-sdk/lib/e2ee/RustEngine.js");
+  applyMatrixOneTimeKeyUploadCompatibilityPatch(RustEngine as MatrixRustEngineConstructor);
   const {
     MatrixClient,
     RustSdkCryptoStorageProvider,
@@ -181,6 +204,24 @@ async function defaultMatrixClientFactory(options: {
   const storage = new SimpleFsStorageProvider(join(options.stateRoot, "client.json"));
   const cryptoStorage = new RustSdkCryptoStorageProvider(join(options.stateRoot, "crypto"), MATRIX_CRYPTO_STORE_SQLITE);
   return new MatrixClient(options.homeserverUrl, options.accessToken, storage, cryptoStorage);
+}
+
+export function applyMatrixOneTimeKeyUploadCompatibilityPatch(
+  RustEngine: MatrixRustEngineConstructor,
+): void {
+  RustEngine.prototype.processKeysUploadRequest = async function processKeysUploadRequest(
+    this: MatrixRustEngineLike,
+    request: MatrixKeysUploadRequest,
+  ): Promise<void> {
+    const body = JSON.parse(request.body) as Record<string, unknown>;
+    // matrix.org rejects reused one-time key IDs if a previous startup uploaded
+    // a different key before the local Rust crypto store durably recorded it.
+    // Fallback keys are enough for this bot, and the SDK already has a note
+    // that omitting one-time keys is the intended MSC3983-compatible path.
+    delete body["one_time_keys"];
+    const response = await this.client.doRequest("POST", "/_matrix/client/v3/keys/upload", null, body);
+    await this.machine.markRequestAsSent(request.id, request.type, JSON.stringify(response));
+  };
 }
 
 export class MatrixChannelAdapter implements ChannelAdapter {
