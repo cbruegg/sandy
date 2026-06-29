@@ -1,217 +1,101 @@
-import { Marked, type Tokens } from "marked";
+import { renderMatrixMarkdownTableHtml, type MatrixRenderedTableImage } from "./matrix-markdown.js";
 
-const allowedTagNames = [
-  "del",
-  "h1",
-  "h2",
-  "h3",
-  "h4",
-  "h5",
-  "h6",
-  "blockquote",
-  "p",
-  "a",
-  "ul",
-  "ol",
-  "sup",
-  "sub",
-  "li",
-  "b",
-  "i",
-  "u",
-  "strong",
-  "em",
-  "s",
-  "code",
-  "hr",
-  "br",
-  "div",
-  "table",
-  "thead",
-  "tbody",
-  "tr",
-  "th",
-  "td",
-  "caption",
-  "pre",
-  "span",
-  "img",
-  "details",
-  "summary",
-] as const;
-const htmlTagPattern = /<[^>]*>/g;
-const safeLinkPattern = /^(?:https?|ftp|mailto|magnet):/i;
-const matrixContentUriPattern = /^mxc:\/\/[^/]+\/.+/i;
+const tableScreenshotEdgePadding = 4;
+const maxTableScreenshotSize = 16_384;
 
-// Element X on iOS currently renders HTML tables poorly. Keep Matrix's plain
-// text body unchanged, but render Markdown table formatted_body content as
-// simple paragraph/line-break HTML for more consistent mobile display.
-const renderMarkdownTablesWithoutHtmlTables = true;
-const marked = createMatrixMarkdownRenderer(renderMarkdownTablesWithoutHtmlTables);
-
-export const matrixHtmlAllowedTags = [...allowedTagNames];
-
-export type MatrixRenderedMarkdown = {
-  body: string;
-  formattedBody: string;
-};
-
-type MatrixMarkdownRenderOptions = {
-  renderMarkdownTablesWithoutHtmlTables?: boolean;
-};
-
-export function renderMatrixMarkdown(markdown: string, options?: MatrixMarkdownRenderOptions): MatrixRenderedMarkdown {
-  const normalized = normalizeMarkdownLineBreaks(markdown);
-  const renderer = options?.renderMarkdownTablesWithoutHtmlTables === undefined
-    ? marked
-    : createMatrixMarkdownRenderer(options.renderMarkdownTablesWithoutHtmlTables);
-  const rawHtml = renderer.parse(normalized, { async: false });
+export async function renderMarkdownTableWithWebView(tableMarkdown: string): Promise<MatrixRenderedTableImage | null> {
+  await using view = new Bun.WebView({ width: 1280, height: 720 });
+  await view.navigate(`data:text/html;charset=utf-8,${encodeURIComponent(buildTableScreenshotHtml(tableMarkdown))}`);
+  const size = normalizeScreenshotSize(await view.evaluate(`(() => {
+    const rect = document.body.getBoundingClientRect();
+    return { width: Math.ceil(rect.width), height: Math.ceil(rect.height) };
+  })()`));
+  if (!size) {
+    return null;
+  }
+  await view.resize(size.width, size.height);
+  const data = await view.screenshot({ format: "png", encoding: "buffer" });
+  const dimensions = readPngDimensions(data);
+  if (!dimensions) {
+    return null;
+  }
   return {
-    body: normalized,
-    formattedBody: sanitizeMatrixHtml(rawHtml).trim(),
+    data,
+    width: dimensions.width,
+    height: dimensions.height,
+    alt: "Markdown table",
   };
 }
 
-function createMatrixMarkdownRenderer(renderTablesWithoutHtmlTables: boolean): Marked {
-  const renderer = {
-    html({ text }: Tokens.HTML | Tokens.Tag) {
-      return escapeHtml(text);
-    },
-    image({ text }: Tokens.Image) {
-      return escapeHtml(text);
-    },
-    ...(renderTablesWithoutHtmlTables ? { table: renderMarkdownTableWithoutHtmlTable } : {}),
+function normalizeScreenshotSize(value: unknown): { width: number; height: number } | null {
+  const size = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const width = typeof size["width"] === "number" && Number.isFinite(size["width"])
+    ? size["width"]
+    : 1280;
+  const height = typeof size["height"] === "number" && Number.isFinite(size["height"])
+    ? size["height"]
+    : 720;
+  const paddedWidth = Math.max(1, Math.ceil(width) + tableScreenshotEdgePadding);
+  const paddedHeight = Math.max(1, Math.ceil(height) + tableScreenshotEdgePadding);
+  if (paddedWidth > maxTableScreenshotSize || paddedHeight > maxTableScreenshotSize) {
+    return null;
+  }
+  return {
+    width: paddedWidth,
+    height: paddedHeight,
   };
-
-  return new Marked({
-    async: false,
-    breaks: true,
-    gfm: true,
-    renderer,
-  });
 }
 
-function renderMarkdownTableWithoutHtmlTable(token: Tokens.Table): string {
-  const headers = token.header.map((cell, index) => renderTableHeader(cell, index));
-  const rows = token.rows.map((row) => renderMarkdownTableRow(headers, row));
-  return rows.join("\n");
+function buildTableScreenshotHtml(tableMarkdown: string): string {
+  const tableHtml = renderMatrixMarkdownTableHtml(tableMarkdown);
+  return `<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+html, body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}
+body {
+  display: inline-block;
+  padding: 12px;
+  color: #1f2328;
+  font: 14px -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+table {
+  border-spacing: 0;
+  border-collapse: collapse;
+  width: max-content;
+  max-width: 1200px;
+}
+th, td {
+  padding: 6px 13px;
+  border: 1px solid #d0d7de;
+  line-height: 1.5;
+  vertical-align: top;
+  white-space: pre-wrap;
+}
+tr:nth-child(2n) {
+  background-color: #f6f8fa;
+}
+th {
+  font-weight: 600;
+}
+</style>
+</head>
+<body>${tableHtml}</body>
+</html>`;
 }
 
-function renderMarkdownTableRow(headers: string[], row: Tokens.TableCell[]): string {
-  const cells = row.map((cell, index) => {
-    const label = headers[index] ?? `Column ${index + 1}`;
-    const value = renderTableCellInline(cell);
-    return `<strong>${label}:</strong> ${value}`;
-  });
-
-  return `<p>${cells.join("<br>\n")}</p>`;
-}
-
-function renderTableHeader(cell: Tokens.TableCell, index: number): string {
-  const header = renderTableCellInline(cell).trim();
-  return header.length === 0 ? `Column ${index + 1}` : header;
-}
-
-function renderTableCellInline(cell: Tokens.TableCell): string {
-  return marked.parseInline(cell.text, { async: false });
-}
-
-function sanitizeMatrixHtml(html: string): string {
-  return html.replace(htmlTagPattern, (tag) => sanitizeMatrixHtmlTag(tag));
-}
-
-function sanitizeMatrixHtmlTag(tag: string): string {
-  const closing = /^<\s*\//.test(tag);
-  const name = tag.match(/^<\s*\/?\s*([A-Za-z0-9-]+)/)?.[1]?.toLowerCase();
-  if (!name || !isAllowedTagName(name)) {
-    return escapeHtml(tag);
+function readPngDimensions(data: Buffer): { width: number; height: number } | null {
+  const pngSignature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  if (data.length < 24 || !data.subarray(0, 8).equals(pngSignature)) {
+    return null;
   }
-
-  if (name === "br") {
-    return "<br>";
-  }
-
-  if (name === "hr") {
-    return "<hr>";
-  }
-
-  if (closing) {
-    return `</${name}>`;
-  }
-
-  if (name === "a") {
-    const href = extractHtmlAttribute(tag, "href");
-    if (href && safeLinkPattern.test(href)) {
-      return sanitizeMatrixHtmlAttributes(tag, "a", ["target", "href"]);
-    }
-  }
-
-  if (name === "span") {
-    return sanitizeMatrixHtmlAttributes(tag, "span", ["data-mx-bg-color", "data-mx-color", "data-mx-spoiler", "data-mx-maths"]);
-  }
-
-  if (name === "div") {
-    return sanitizeMatrixHtmlAttributes(tag, "div", ["data-mx-maths"]);
-  }
-
-  if (name === "img") {
-    const src = extractHtmlAttribute(tag, "src");
-    if (!src || !matrixContentUriPattern.test(src)) {
-      return "";
-    }
-
-    return sanitizeMatrixHtmlAttributes(tag, "img", ["width", "height", "alt", "title", "src"]);
-  }
-
-  if (name === "ol") {
-    const start = extractHtmlAttribute(tag, "start");
-    if (start && /^\d+$/.test(start)) {
-      return `<ol start="${start}">`;
-    }
-  }
-
-  if (name === "code") {
-    const className = extractHtmlAttribute(tag, "class");
-    if (className?.startsWith("language-")) {
-      return `<code class="${escapeHtmlAttribute(className)}">`;
-    }
-  }
-
-  return `<${name}>`;
-}
-
-function sanitizeMatrixHtmlAttributes(tag: string, name: string, allowedAttributes: readonly string[]): string {
-  const attributes = allowedAttributes
-    .map((attribute) => {
-      const value = extractHtmlAttribute(tag, attribute);
-      return value === null ? null : `${attribute}="${escapeHtmlAttribute(value)}"`;
-    })
-    .filter((attribute): attribute is string => attribute !== null);
-
-  return attributes.length === 0 ? `<${name}>` : `<${name} ${attributes.join(" ")}>`;
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
-}
-
-function escapeHtmlAttribute(value: string): string {
-  return escapeHtml(value).replaceAll('"', "&quot;");
-}
-
-function extractHtmlAttribute(tag: string, name: string): string | null {
-  const pattern = new RegExp(`${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i");
-  const match = tag.match(pattern);
-  return match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
-}
-
-function isAllowedTagName(name: string): name is typeof allowedTagNames[number] {
-  return (allowedTagNames as readonly string[]).includes(name);
-}
-
-function normalizeMarkdownLineBreaks(markdown: string): string {
-  return markdown.replaceAll("\r\n", "\n");
+  return {
+    width: data.readUInt32BE(16),
+    height: data.readUInt32BE(20),
+  };
 }

@@ -3,7 +3,17 @@ import { basename, join } from "node:path";
 import type { ChannelAdapter, MessageHandler } from "./channel-adapter.js";
 import { logger } from "../logger.js";
 import { messages } from "../messages-to-user.js";
-import { matrixHtmlAllowedTags, renderMatrixMarkdown } from "./matrix-html.js";
+import { renderMarkdownTableWithWebView } from "./matrix-html.js";
+import {
+  containsMarkdownTable,
+  matrixHtmlAllowedTags,
+  renderMarkdownTablesWithoutHtmlTables,
+  renderMatrixMarkdown,
+  renderMatrixMarkdownWithAttachedTableImages,
+  type MatrixRenderedMarkdownWithTableImages,
+  type MatrixRenderedTableImage,
+  type MatrixTableImageRenderer,
+} from "./matrix-markdown.js";
 import { runWithMatrixSendRetry, sleepMs, type MatrixSleep } from "./matrix-send-retry.js";
 import {
   buildPrivilegeControls,
@@ -98,6 +108,7 @@ type MatrixAdapterOptions = {
   clientFactory?: MatrixClientFactory;
   transcriptionProvider?: TranscriptionProvider;
   sleep?: MatrixSleep;
+  tableImageRenderer?: MatrixTableImageRenderer;
 };
 
 type MatrixAttachmentRef = {
@@ -180,6 +191,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   private readonly transcriptionProvider: TranscriptionProvider | null;
   private readonly clientFactory: MatrixClientFactory;
   private readonly sleep: MatrixSleep;
+  private readonly tableImageRenderer: MatrixTableImageRenderer;
   private client: MatrixClientLike | null = null;
   private startPromise: Promise<void> | null = null;
   private botUserId: string | null = null;
@@ -198,6 +210,7 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     this.transcriptionProvider = options.transcriptionProvider ?? null;
     this.clientFactory = options.clientFactory ?? defaultMatrixClientFactory;
     this.sleep = options.sleep ?? sleepMs;
+    this.tableImageRenderer = options.tableImageRenderer ?? renderMarkdownTableWithWebView;
   }
 
   getFormatting(): ChannelFormatting {
@@ -413,16 +426,53 @@ export class MatrixChannelAdapter implements ChannelAdapter {
   }
 
   private async sendFormattedMessage(chatId: ChatId, text: string, msgtype: "m.notice" | "m.text"): Promise<string> {
-    const rendered = renderMatrixMarkdown(text);
+    const rendered = renderMarkdownTablesWithoutHtmlTables && containsMarkdownTable(text)
+      ? await this.renderMessageWithTableImages(text)
+      : { ...renderMatrixMarkdown(text), tableImages: [] };
+    const client = this.requireClient();
+
+    for (const tableImage of rendered.tableImages) {
+      const fileName = `sandy-table-${tableImage.index + 1}.png`;
+      const content = await buildMatrixImageContent(client, chatId, tableImage.image, fileName);
+      await this.sendWithMatrixBackoff(
+        "matrix.send_table_image",
+        () => client.sendEvent(chatId, "m.room.message", content),
+      );
+    }
+
     return this.sendWithMatrixBackoff(
       "matrix.send_message",
-      () => this.requireClient().sendEvent(chatId, "m.room.message", {
+      () => client.sendEvent(chatId, "m.room.message", {
         body: rendered.body,
         msgtype,
         format: "org.matrix.custom.html",
         formatted_body: rendered.formattedBody,
       }),
     );
+  }
+
+  private async renderMessageWithTableImages(text: string): Promise<MatrixRenderedMarkdownWithTableImages> {
+    return renderMatrixMarkdownWithAttachedTableImages(text, async (tableMarkdown, index) => {
+      let image: MatrixRenderedTableImage | null;
+      try {
+        image = await this.tableImageRenderer(tableMarkdown, index);
+      } catch (error) {
+        logger.warn("matrix.table_image_render_failed", {
+          tableIndex: index,
+          detail: "Bun.WebView table screenshot failed; falling back to text table conversion.",
+          error,
+        });
+        return null;
+      }
+      if (!image) {
+        logger.warn("matrix.table_image_render_failed", {
+          tableIndex: index,
+          detail: "Bun.WebView table screenshot failed; falling back to text table conversion.",
+          error: "renderer returned no image",
+        });
+      }
+      return image;
+    });
   }
 
   private async sendPoll(
@@ -909,6 +959,43 @@ async function buildMatrixFileContent(
     body: fileName,
     msgtype: "m.file",
     url: mxcUrl,
+  };
+}
+
+async function buildMatrixImageContent(
+  client: MatrixClientLike,
+  roomId: string,
+  image: MatrixRenderedTableImage,
+  fileName: string,
+): Promise<Record<string, unknown>> {
+  const encrypted = await isMatrixRoomEncrypted(client, roomId);
+  const info = {
+    mimetype: "image/png",
+    size: image.data.byteLength,
+    w: image.width,
+    h: image.height,
+  };
+
+  if (encrypted && client.crypto) {
+    const encryptedMedia = await client.crypto.encryptMedia(image.data);
+    const mxcUrl = await client.uploadContent(encryptedMedia.buffer, "application/octet-stream", fileName);
+    return {
+      body: fileName,
+      msgtype: "m.image",
+      info,
+      file: {
+        ...encryptedMedia.file,
+        url: mxcUrl,
+      },
+    };
+  }
+
+  const mxcUrl = await client.uploadContent(image.data, "image/png", fileName);
+  return {
+    body: fileName,
+    msgtype: "m.image",
+    url: mxcUrl,
+    info,
   };
 }
 
