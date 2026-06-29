@@ -65,6 +65,13 @@ export type MatrixRenderedTableImage = {
   alt: string;
 };
 
+export type MatrixRenderedMarkdownWithTableImages = MatrixRenderedMarkdown & {
+  tableImages: Array<{
+    image: MatrixRenderedTableImage;
+    index: number;
+  }>;
+};
+
 export type MatrixTableImageRenderer = (tableMarkdown: string, index: number) => Promise<MatrixRenderedTableImage | null>;
 
 type MatrixMarkdownRenderOptions = {
@@ -86,12 +93,12 @@ export function renderMatrixMarkdown(markdown: string, options?: MatrixMarkdownR
 
 export async function renderMatrixMarkdownWithAttachedTableImages(
   markdown: string,
-  attachTableImage: (image: MatrixRenderedTableImage, index: number) => Promise<void>,
   renderTableImage: MatrixTableImageRenderer,
-): Promise<MatrixRenderedMarkdown> {
+): Promise<MatrixRenderedMarkdownWithTableImages> {
   const normalized = normalizeMarkdownLineBreaks(markdown);
   const tokens = marked.lexer(normalized);
   const formattedParts: string[] = [];
+  const tableImages: MatrixRenderedMarkdownWithTableImages["tableImages"] = [];
   let tableIndex = 0;
 
   for (const token of tokens) {
@@ -106,7 +113,7 @@ export async function renderMatrixMarkdownWithAttachedTableImages(
         tableIndex += 1;
         continue;
       }
-      await attachTableImage(tableImage, tableIndex);
+      tableImages.push({ image: tableImage, index: tableIndex });
       tableIndex += 1;
       formattedParts.push(`<p><em>${messages.matrixTableImageAttached()}</em></p>`);
       continue;
@@ -121,6 +128,7 @@ export async function renderMatrixMarkdownWithAttachedTableImages(
   return {
     body: normalized,
     formattedBody: formattedParts.join("\n").trim(),
+    tableImages,
   };
 }
 

@@ -9,6 +9,7 @@ import {
   matrixHtmlAllowedTags,
   renderMatrixMarkdown,
   renderMatrixMarkdownWithAttachedTableImages,
+  type MatrixRenderedMarkdownWithTableImages,
   type MatrixRenderedTableImage,
   type MatrixTableImageRenderer,
 } from "./matrix-markdown.js";
@@ -115,15 +116,6 @@ type MatrixAttachmentRef = {
   mimeType?: string;
   url?: string;
   encryptedFile?: EncryptedFile;
-};
-
-type MatrixRenderedMessageWithTableImages = {
-  body: string;
-  formattedBody: string;
-  tableImages: Array<{
-    image: MatrixRenderedTableImage;
-    index: number;
-  }>;
 };
 
 type MatrixPollAction = {
@@ -458,12 +450,8 @@ export class MatrixChannelAdapter implements ChannelAdapter {
     );
   }
 
-  private async renderMessageWithTableImages(text: string): Promise<MatrixRenderedMessageWithTableImages> {
-    const tableImages: MatrixRenderedMessageWithTableImages["tableImages"] = [];
-    const rendered = await renderMatrixMarkdownWithAttachedTableImages(text, (image, index) => {
-      tableImages.push({ image, index });
-      return Promise.resolve();
-    }, async (tableMarkdown, index) => {
+  private async renderMessageWithTableImages(text: string): Promise<MatrixRenderedMarkdownWithTableImages> {
+    return renderMatrixMarkdownWithAttachedTableImages(text, async (tableMarkdown, index) => {
       let image: MatrixRenderedTableImage | null;
       try {
         image = await this.tableImageRenderer(tableMarkdown, index);
@@ -484,10 +472,6 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       }
       return image;
     });
-    return {
-      ...rendered,
-      tableImages,
-    };
   }
 
   private async sendPoll(
