@@ -1,18 +1,26 @@
-import { existsSync, readdirSync, readFileSync, type Dirent } from "node:fs";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { randomUUID } from "node:crypto";
-import { join } from "node:path";
-import { archivedSkillsDirectory, skillsDirectory } from "./config-paths.js";
-import { getBuiltInSkillDefinitions, isBuiltInSkillId, materializeBuiltInSkillsDirectory } from "./built-in-skills.js";
-import { builtInSkillsRuntimeDirectory } from "./state-paths.js";
+import {
+  type Dirent,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync
+} from "node:fs";
+import {randomUUID} from "node:crypto";
+import {join} from "node:path";
+import {archivedSkillsDirectory, skillsDirectory} from "./config-paths.js";
+import {getBuiltInSkillDefinitions, isBuiltInSkillId, materializeBuiltInSkillsDirectory} from "./built-in-skills.js";
+import {builtInSkillsRuntimeDirectory} from "./state-paths.js";
 
 export type SkillMetadata = {
-  name: string;
-  description: string;
+  readonly name: string;
+  readonly description: string;
 };
 
 export type SkillDetails = SkillMetadata & {
-  body: string;
+  readonly body: string;
 };
 
 type CreateSkillInput = {
@@ -54,15 +62,6 @@ function readSkillFile(skillFilePath: string): string {
 }
 
 function parseSkillMetadata(raw: string, skillFilePath: string): SkillMetadata {
-  const { name, description } = parseSkillFrontmatter(raw, skillFilePath);
-
-  return {
-    name,
-    description,
-  };
-}
-
-function parseSkillFrontmatter(raw: string, skillFilePath: string): SkillMetadata {
   const { frontmatter } = parseSkillFrontmatterBlock(raw, skillFilePath);
   return parseSkillFrontmatterFields(frontmatter, skillFilePath);
 }
@@ -145,12 +144,8 @@ function renderSkillFile(name: string, description: string, body: string): strin
   return `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}`;
 }
 
-async function parseExistingSkillFile(skillFilePath: string): Promise<ParsedSkillFile> {
-  const raw = await readFile(skillFilePath, "utf8");
-  return parseSkillFile(raw, skillFilePath);
-}
-
-function parseSkillFile(raw: string, skillFilePath: string): ParsedSkillFile {
+function readAndParseSkillFile(skillFilePath: string): ParsedSkillFile {
+  const raw = readSkillFile(skillFilePath);
   const { frontmatter, body } = parseSkillFrontmatterBlock(raw, skillFilePath);
   const { name, description } = parseSkillFrontmatterFields(frontmatter, skillFilePath);
   return { name, description, body };
@@ -206,7 +201,7 @@ export class SkillService {
           return [];
         }
 
-        const skillFilePath = join(this.skillsDirectory, entry.name, "SKILL.md");
+        const skillFilePath = this.skillFilePath(entry.name);
         if (!existsSync(skillFilePath)) {
           return [];
         }
@@ -229,67 +224,75 @@ export class SkillService {
       };
     }
 
-    const skillFilePath = join(this.skillsDirectory, skillId, "SKILL.md");
+    const skillFilePath = this.skillFilePath(skillId);
     if (!existsSync(skillFilePath)) {
       return null;
     }
 
-    return parseSkillFile(readSkillFile(skillFilePath), skillFilePath);
+    return readAndParseSkillFile(skillFilePath);
   }
 
-  async createSkill(input: CreateSkillInput): Promise<void> {
+  createSkill(input: CreateSkillInput): void {
     assertValidSkillId(input.skillId);
     this.assertMutableSkillId(input.skillId);
-    const skillDir = join(this.skillsDirectory, input.skillId);
+    const skillDir = this.skillDirectory(input.skillId);
     if (existsSync(skillDir)) {
       throw new Error(`Skill "${input.skillId}" already exists.`);
     }
     const content = renderSkillFile(input.name, input.description, input.body);
-    await mkdir(skillDir, { recursive: true });
-    await writeFile(join(skillDir, "SKILL.md"), content, "utf8");
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(this.skillFilePath(input.skillId), content, "utf8");
   }
 
-  async updateSkill(input: UpdateSkillInput): Promise<void> {
+  updateSkill(input: UpdateSkillInput): void {
     assertValidSkillId(input.skillId);
     this.assertMutableSkillId(input.skillId);
-    const skillDir = join(this.skillsDirectory, input.skillId);
+    const skillDir = this.skillDirectory(input.skillId);
     if (!existsSync(skillDir)) {
       throw new Error(`Skill "${input.skillId}" does not exist.`);
     }
-    const skillFilePath = join(skillDir, "SKILL.md");
-    const existing = await parseExistingSkillFile(skillFilePath);
+    const skillFilePath = this.skillFilePath(input.skillId);
+    const existing = readAndParseSkillFile(skillFilePath);
     const content = renderSkillFile(
       input.name ?? existing.name,
       input.description ?? existing.description,
       input.body ?? existing.body,
     );
-    await writeFile(skillFilePath, content, "utf8");
+    writeFileSync(skillFilePath, content, "utf8");
   }
 
-  async deleteSkill(input: DeleteSkillInput): Promise<void> {
+  deleteSkill(input: DeleteSkillInput): void {
     assertValidSkillId(input.skillId);
     this.assertMutableSkillId(input.skillId);
-    const skillDir = join(this.skillsDirectory, input.skillId);
+    const skillDir = this.skillDirectory(input.skillId);
     if (!existsSync(skillDir)) {
       throw new Error(`Skill "${input.skillId}" does not exist.`);
     }
-    await rm(skillDir, { recursive: true, force: true });
+    rmSync(skillDir, { recursive: true, force: true });
   }
 
-  async archiveSkill(skillId: string): Promise<void> {
+  archiveSkill(skillId: string): void {
     assertValidSkillId(skillId);
     this.assertMutableSkillId(skillId);
 
-    const sourceDirectory = join(this.skillsDirectory, skillId);
-    await mkdir(this.archivedSkillsDir, { recursive: true });
+    const sourceDirectory = this.skillDirectory(skillId);
+    mkdirSync(this.archivedSkillsDir, { recursive: true });
     try {
-      await rename(sourceDirectory, join(this.archivedSkillsDir, `${skillId}-${randomUUID()}`));
+      renameSync(sourceDirectory, join(this.archivedSkillsDir, `${skillId}-${randomUUID()}`));
     } catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
         return;
       }
       throw error;
     }
+  }
+
+  private skillDirectory(skillId: string): string {
+    return join(this.skillsDirectory, skillId);
+  }
+
+  private skillFilePath(skillId: string): string {
+    return join(this.skillDirectory(skillId), "SKILL.md");
   }
 
   private assertMutableSkillId(skillId: string): void {

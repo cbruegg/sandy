@@ -230,7 +230,7 @@ test("createSkill writes a valid SKILL.md file", async () => {
   const configDirectory = await createTempConfigDirectory();
   try {
     const service = new SkillService(configDirectory);
-    await service.createSkill({
+    service.createSkill({
       skillId: "todoist",
       name: "Adding task to Todoist",
       description: "When the user asks you to add a task to their Todoist, use this skill.",
@@ -253,15 +253,15 @@ test("createSkill rejects duplicate skillIds", async () => {
   const configDirectory = await createTempConfigDirectory();
   try {
     const service = new SkillService(configDirectory);
-    await service.createSkill({
+    service.createSkill({
       skillId: "todoist",
       name: "Adding task to Todoist",
       description: "Use this skill for Todoist.",
       body: "Body",
     });
 
-    await assert.rejects(
-      service.createSkill({
+    assert.throws(
+      () => service.createSkill({
         skillId: "todoist",
         name: "Another name",
         description: "Another description.",
@@ -279,16 +279,16 @@ test("createSkill rejects invalid skillIds", async () => {
   try {
     const service = new SkillService(configDirectory);
 
-    await assert.rejects(
-      service.createSkill({ skillId: "", name: "Name", description: "Description.", body: "Body" }),
+    assert.throws(
+      () => service.createSkill({ skillId: "", name: "Name", description: "Description.", body: "Body" }),
       /skillId is required/,
     );
-    await assert.rejects(
-      service.createSkill({ skillId: "../escape", name: "Name", description: "Description.", body: "Body" }),
+    assert.throws(
+      () => service.createSkill({ skillId: "../escape", name: "Name", description: "Description.", body: "Body" }),
       /Invalid skillId/,
     );
-    await assert.rejects(
-      service.createSkill({ skillId: ".", name: "Name", description: "Description.", body: "Body" }),
+    assert.throws(
+      () => service.createSkill({ skillId: ".", name: "Name", description: "Description.", body: "Body" }),
       /Invalid skillId/,
     );
   } finally {
@@ -301,8 +301,8 @@ test("createSkill rejects built-in skillIds", async () => {
   try {
     const service = new SkillService(configDirectory);
 
-    await assert.rejects(
-      service.createSkill({
+    assert.throws(
+      () => service.createSkill({
         skillId: "notify-me-when",
         name: "Name",
         description: "Description.",
@@ -320,12 +320,12 @@ test("createSkill rejects empty name or description", async () => {
   try {
     const service = new SkillService(configDirectory);
 
-    await assert.rejects(
-      service.createSkill({ skillId: "x", name: "", description: "Description.", body: "Body" }),
+    assert.throws(
+      () => service.createSkill({ skillId: "x", name: "", description: "Description.", body: "Body" }),
       /name is required/,
     );
-    await assert.rejects(
-      service.createSkill({ skillId: "x", name: "Name", description: "", body: "Body" }),
+    assert.throws(
+      () => service.createSkill({ skillId: "x", name: "Name", description: "", body: "Body" }),
       /description is required/,
     );
   } finally {
@@ -338,12 +338,12 @@ test("createSkill rejects name or description containing newlines", async () => 
   try {
     const service = new SkillService(configDirectory);
 
-    await assert.rejects(
-      service.createSkill({ skillId: "x", name: "Multi\nline", description: "Description.", body: "Body" }),
+    assert.throws(
+      () => service.createSkill({ skillId: "x", name: "Multi\nline", description: "Description.", body: "Body" }),
       /must not contain newlines/,
     );
-    await assert.rejects(
-      service.createSkill({ skillId: "x", name: "Name", description: "Multi\nline", body: "Body" }),
+    assert.throws(
+      () => service.createSkill({ skillId: "x", name: "Name", description: "Multi\nline", body: "Body" }),
       /must not contain newlines/,
     );
   } finally {
@@ -355,14 +355,14 @@ test("updateSkill replaces all fields when provided", async () => {
   const configDirectory = await createTempConfigDirectory();
   try {
     const service = new SkillService(configDirectory);
-    await service.createSkill({
+    service.createSkill({
       skillId: "todoist",
       name: "Old name",
       description: "Old description.",
       body: "Old body.",
     });
 
-    await service.updateSkill({
+    service.updateSkill({
       skillId: "todoist",
       name: "New name",
       description: "New description.",
@@ -383,14 +383,14 @@ test("updateSkill preserves unspecified fields", async () => {
   const configDirectory = await createTempConfigDirectory();
   try {
     const service = new SkillService(configDirectory);
-    await service.createSkill({
+    service.createSkill({
       skillId: "todoist",
       name: "Original name",
       description: "Original description.",
       body: "Original body.",
     });
 
-    await service.updateSkill({
+    service.updateSkill({
       skillId: "todoist",
       description: "Updated description.",
     });
@@ -409,8 +409,8 @@ test("updateSkill rejects missing skills", async () => {
   try {
     const service = new SkillService(configDirectory);
 
-    await assert.rejects(
-      service.updateSkill({ skillId: "missing", name: "Name", description: "Description.", body: "Body" }),
+    assert.throws(
+      () => service.updateSkill({ skillId: "missing", name: "Name", description: "Description.", body: "Body" }),
       /does not exist/,
     );
   } finally {
@@ -423,8 +423,8 @@ test("updateSkill rejects built-in skillIds", async () => {
   try {
     const service = new SkillService(configDirectory);
 
-    await assert.rejects(
-      service.updateSkill({ skillId: "notify-me-when", description: "Updated description." }),
+    assert.throws(
+      () => service.updateSkill({ skillId: "notify-me-when", description: "Updated description." }),
       /built in and cannot be modified/,
     );
   } finally {
@@ -437,12 +437,12 @@ test("updateSkill rejects invalid skillIds", async () => {
   try {
     const service = new SkillService(configDirectory);
 
-    await assert.rejects(
-      service.updateSkill({ skillId: "", name: "Name", description: "Description.", body: "Body" }),
+    assert.throws(
+      () => service.updateSkill({ skillId: "", name: "Name", description: "Description.", body: "Body" }),
       /skillId is required/,
     );
-    await assert.rejects(
-      service.updateSkill({ skillId: "a/b", name: "Name", description: "Description.", body: "Body" }),
+    assert.throws(
+      () => service.updateSkill({ skillId: "a/b", name: "Name", description: "Description.", body: "Body" }),
       /Invalid skillId/,
     );
   } finally {
@@ -454,14 +454,14 @@ test("deleteSkill removes the skill directory", async () => {
   const configDirectory = await createTempConfigDirectory();
   try {
     const service = new SkillService(configDirectory);
-    await service.createSkill({
+    service.createSkill({
       skillId: "todoist",
       name: "Adding task to Todoist",
       description: "Use this skill for Todoist.",
       body: "Body",
     });
 
-    await service.deleteSkill({ skillId: "todoist" });
+    service.deleteSkill({ skillId: "todoist" });
 
     assert.equal(existsSync(join(configDirectory, "skills", "todoist")), false);
   } finally {
@@ -474,8 +474,8 @@ test("deleteSkill rejects missing skills", async () => {
   try {
     const service = new SkillService(configDirectory);
 
-    await assert.rejects(
-      service.deleteSkill({ skillId: "missing" }),
+    assert.throws(
+      () => service.deleteSkill({ skillId: "missing" }),
       /does not exist/,
     );
   } finally {
@@ -488,12 +488,12 @@ test("deleteSkill rejects invalid skillIds", async () => {
   try {
     const service = new SkillService(configDirectory);
 
-    await assert.rejects(
-      service.deleteSkill({ skillId: "" }),
+    assert.throws(
+      () => service.deleteSkill({ skillId: "" }),
       /skillId is required/,
     );
-    await assert.rejects(
-      service.deleteSkill({ skillId: ".." }),
+    assert.throws(
+      () => service.deleteSkill({ skillId: ".." }),
       /Invalid skillId/,
     );
   } finally {
@@ -506,8 +506,8 @@ test("deleteSkill rejects built-in skillIds", async () => {
   try {
     const service = new SkillService(configDirectory);
 
-    await assert.rejects(
-      service.deleteSkill({ skillId: "notify-me-when" }),
+    assert.throws(
+      () => service.deleteSkill({ skillId: "notify-me-when" }),
       /built in and cannot be modified/,
     );
   } finally {

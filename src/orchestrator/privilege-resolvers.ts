@@ -242,15 +242,15 @@ export async function resolveSkillMutationRequest(
 ): Promise<PrivilegeResolutionResult> {
   return resolveApproveOnlyMutation(session, request.requestId, decision, {
     deniedMessage: messages.skillMutationDenied(request.operation, request.skillId, reason),
-    apply: async () => {
-      await ctx.workerToolsHandler.applySkillMutation({
+    apply: () => {
+      ctx.workerToolsHandler.applySkillMutation({
         operation: request.operation,
         skillId: request.skillId,
         name: request.name,
         description: request.description,
         body: request.body,
       });
-      return "";
+      return Promise.resolve("");
     },
     approvedMessage: () => messages.skillMutationApproved(request.operation, request.skillId),
     failedMessage: (detail) => messages.skillMutationFailed(request.operation, request.skillId, detail),
