@@ -39,6 +39,12 @@ type ParsedSkillFile = {
   body: string;
 };
 
+type SkillFrontmatterBlock = {
+  frontmatter: string;
+  normalizedRaw: string;
+  endOffset: number;
+};
+
 function readSkillFile(skillFilePath: string): string {
   try {
     return readFileSync(skillFilePath, "utf8");
@@ -58,13 +64,25 @@ function parseSkillMetadata(raw: string, skillFilePath: string): SkillMetadata {
 }
 
 function parseSkillFrontmatter(raw: string, skillFilePath: string): SkillMetadata {
+  const { frontmatter } = parseSkillFrontmatterBlock(raw, skillFilePath);
+  return parseSkillFrontmatterFields(frontmatter, skillFilePath);
+}
+
+function parseSkillFrontmatterBlock(raw: string, skillFilePath: string): SkillFrontmatterBlock {
   const normalizedRaw = raw.replace(/^\uFEFF/, "");
   const match = normalizedRaw.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
   if (!match) {
     throw new Error(`Sandy skill file ${skillFilePath} must start with a frontmatter block delimited by "---".`);
   }
 
-  const frontmatter = match[1] ?? "";
+  return {
+    frontmatter: match[1] ?? "",
+    normalizedRaw,
+    endOffset: (match.index ?? 0) + match[0].length,
+  };
+}
+
+function parseSkillFrontmatterFields(frontmatter: string, skillFilePath: string): SkillMetadata {
   const fields = new Map<string, string>();
   for (const rawLine of frontmatter.split(/\r?\n/)) {
     const line = rawLine.trim();
@@ -131,17 +149,13 @@ function renderSkillFile(name: string, description: string, body: string): strin
 
 async function parseExistingSkillFile(skillFilePath: string): Promise<ParsedSkillFile> {
   const raw = await readFile(skillFilePath, "utf8");
-  const normalizedRaw = raw.replace(/^\uFEFF/, "");
-  const match = normalizedRaw.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-  if (!match) {
-    throw new Error(`Sandy skill file ${skillFilePath} must start with a frontmatter block delimited by "---".`);
-  }
+  return parseSkillFile(raw, skillFilePath);
+}
 
-  const { name, description } = parseSkillFrontmatter(normalizedRaw, skillFilePath);
-  const endOfFrontmatter = (match.index ?? 0) + match[0].length;
-  const body = normalizedRaw.slice(endOfFrontmatter).trimStart();
-
-  return { name, description, body };
+function parseSkillFile(raw: string, skillFilePath: string): ParsedSkillFile {
+  const { frontmatter, normalizedRaw, endOffset } = parseSkillFrontmatterBlock(raw, skillFilePath);
+  const { name, description } = parseSkillFrontmatterFields(frontmatter, skillFilePath);
+  return { name, description, body: normalizedRaw.slice(endOffset).trimStart() };
 }
 
 export class SkillService {
@@ -222,15 +236,7 @@ export class SkillService {
       return null;
     }
 
-    const raw = readSkillFile(skillFilePath);
-    const { name, description } = parseSkillFrontmatter(raw, skillFilePath);
-    const normalizedRaw = raw.replace(/^\uFEFF/, "");
-    const match = normalizedRaw.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-    return {
-      name,
-      description,
-      body: match ? normalizedRaw.slice((match.index ?? 0) + match[0].length).trimStart() : "",
-    };
+    return parseSkillFile(readSkillFile(skillFilePath), skillFilePath);
   }
 
   async createSkill(input: CreateSkillInput): Promise<void> {
