@@ -12,6 +12,7 @@ import type { ChannelAdapter } from "../channel/channel-adapter.js";
 import type { ChannelDestinationStore } from "../channel/channel-destination-store.js";
 import type { CertificateAuthority } from "../http/ca.js";
 import type { ChatGPTTokenBroker } from "../auth/chatgpt-token-broker.js";
+import type { TaskMemoryContextCollector } from "../memory/task-memory-context-collector.js";
 import type { CodexMainAgentController } from "../agent/main-agent-controller.js";
 import type { CodexAppServerClient } from "../codex-app-server-client/app-server-client.js";
 import type { ProxyAccess } from "../proxy-access.js";
@@ -181,6 +182,7 @@ export type SandboxLayerResult = {
 
 export type MainAgentLayerInput = {
   readonly config: SandyConfig;
+  readonly mainAgentCodexPath: string;
   readonly mainAgentAppServer: CodexAppServerClient;
   readonly skillService: SkillService;
   readonly hostMcpServerKeys: string[];
@@ -191,6 +193,7 @@ export type MainAgentLayerResult = {
   readonly name: "main-agent";
   readonly tokenBroker: ChatGPTTokenBroker | null;
   readonly mainAgent: CodexMainAgentController;
+  readonly memoryContextCollector: TaskMemoryContextCollector;
   stop(): Promise<void>;
 };
 
@@ -209,6 +212,7 @@ export type OrchestratorLayerInput = {
   readonly skillService: SkillService;
   readonly jobStore: JobStore;
   readonly mainAgent: CodexMainAgentController;
+  readonly memoryContextCollector: TaskMemoryContextCollector;
   readonly tokenBroker: ChatGPTTokenBroker | null;
   readonly sandboxRunner: DockerSandboxRunner;
   readonly hostfsBroker: HostfsBroker;

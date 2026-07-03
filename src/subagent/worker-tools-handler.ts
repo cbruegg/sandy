@@ -119,16 +119,16 @@ export class WorkerToolsHandler {
     return { isError: false, message: JSON.stringify(job) };
   }
 
-  async applySkillMutation(input: {
+  applySkillMutation(input: {
     operation: "create" | "update" | "delete";
     skillId: string;
     name?: string;
     description?: string;
     body?: string;
-  }): Promise<void> {
+  }): void {
     switch (input.operation) {
       case "create":
-        await this.deps.skillService.createSkill({
+        this.deps.skillService.createSkill({
           skillId: input.skillId,
           name: input.name ?? "",
           description: input.description ?? "",
@@ -136,7 +136,7 @@ export class WorkerToolsHandler {
         });
         return;
       case "update":
-        await this.deps.skillService.updateSkill({
+        this.deps.skillService.updateSkill({
           skillId: input.skillId,
           ...(input.name !== undefined ? { name: input.name } : {}),
           ...(input.description !== undefined ? { description: input.description } : {}),
@@ -144,7 +144,7 @@ export class WorkerToolsHandler {
         });
         return;
       case "delete":
-        await this.deps.skillService.deleteSkill({ skillId: input.skillId });
+        this.deps.skillService.deleteSkill({ skillId: input.skillId });
         return;
       default:
         assertNever(input.operation);
@@ -239,5 +239,3 @@ export class WorkerToolsHandler {
     };
   }
 }
-
-

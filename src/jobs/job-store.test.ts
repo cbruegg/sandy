@@ -131,7 +131,7 @@ test("JobStore.deleteDefinition archives skills owned by deleted jobs", async ()
   try {
     const skillService = new SkillService(configDirectory);
     const store = new JobStore(configDirectory, skillService);
-    await skillService.createSkill({
+    skillService.createSkill({
       skillId: "owned-cleanup",
       name: "Owned cleanup",
       description: "Runs cleanup for one job.",
@@ -164,7 +164,7 @@ test("JobStore.deleteDefinition leaves shared skills in place", async () => {
   try {
     const skillService = new SkillService(configDirectory);
     const store = new JobStore(configDirectory, skillService);
-    await skillService.createSkill({
+    skillService.createSkill({
       skillId: "shared-cleanup",
       name: "Shared cleanup",
       description: "Runs cleanup for many jobs.",
@@ -192,7 +192,7 @@ test("JobStore.deleteDefinition keeps an owned skill when another job still refe
   try {
     const skillService = new SkillService(configDirectory);
     const store = new JobStore(configDirectory, skillService);
-    await skillService.createSkill({
+    skillService.createSkill({
       skillId: "shared-owned-skill",
       name: "Shared owned skill",
       description: "Starts owned, later shared.",
@@ -229,7 +229,7 @@ test("JobStore.deleteOldOneShots archives skills owned by cleaned-up jobs", asyn
   try {
     const skillService = new SkillService(configDirectory);
     const store = new JobStore(configDirectory, skillService);
-    await skillService.createSkill({
+    skillService.createSkill({
       skillId: "old-shot-skill",
       name: "Old shot skill",
       description: "Runs one old shot.",
@@ -260,7 +260,7 @@ test("JobStore.deleteOldOneShots keeps an owned skill when another job still ref
   try {
     const skillService = new SkillService(configDirectory);
     const store = new JobStore(configDirectory, skillService);
-    await skillService.createSkill({
+    skillService.createSkill({
       skillId: "old-shared-skill",
       name: "Old shared skill",
       description: "Owned by a one-shot until reused.",

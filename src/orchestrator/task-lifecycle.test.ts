@@ -11,6 +11,7 @@ import {
 } from "./test-helpers.js";
 import type { JobDefinition } from "../jobs/job-validation.js";
 import { CommentaryBufferManager } from "./commentary-buffer-manager.js";
+import type { JobTaskMemoryContextInput, TaskMemoryContextCollector } from "../memory/task-memory-context-collector.js";
 
 function assertNull(value: unknown): void {
   assert.equal(value, null);
@@ -45,6 +46,17 @@ class FakeTimers {
       await Promise.resolve();
     }
     this.now = target;
+  }
+}
+
+class StaticTaskMemoryContextCollector implements TaskMemoryContextCollector {
+  public readonly inputs: JobTaskMemoryContextInput[] = [];
+
+  constructor(private readonly context: string | null) {}
+
+  collectForJobTask(input: JobTaskMemoryContextInput): Promise<string | null> {
+    this.inputs.push(input);
+    return Promise.resolve(this.context);
   }
 }
 
@@ -118,6 +130,31 @@ test("orchestrator stages attached files into the active task share and notifies
   assert.equal(channel.savedAttachments.length, 1);
   assert.match(runner.handle.userMessages[0]?.text ?? "", /The user attached additional files to the shared workspace/);
   assert.match(runner.handle.userMessages[0]?.text ?? "", /\/workspace\/share\/inbox\/message_2\/1-followup\.txt/);
+});
+
+test("scheduled job task brief includes collected memory context", async () => {
+  const memoryContextCollector = new StaticTaskMemoryContextCollector("User prefers weekly reports in concise bullet points.");
+  const { taskLifecycle, runner } = createTestOrchestrator({
+    mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
+    memoryContextCollector,
+  });
+  const job: JobDefinition = {
+    id: "job-memory-context",
+    name: "Weekly report",
+    enabled: true,
+    schedule: { kind: "cron", expression: "0 9 * * 1" },
+    skillId: "report",
+  };
+
+  await taskLifecycle.launchJobTask(job, "chat-job-memory", "/host/job-workspace");
+
+  assert.equal(memoryContextCollector.inputs.length, 1);
+  assert.equal(memoryContextCollector.inputs[0]?.job.id, "job-memory-context");
+  assert.equal(memoryContextCollector.inputs[0]?.workspacePath, "/host/job-workspace");
+  const launch = expectDefined(runner.launches[0], "Expected scheduled job launch.");
+  assert.match(launch.taskBrief, /Relevant stored memories:/);
+  assert.match(launch.taskBrief, /User prefers weekly reports in concise bullet points/);
+  assert.match(launch.taskBrief, /potentially useful background context/);
 });
 
 test("orchestrator keeps completed-task summary pending until the user sends another message", async () => {

@@ -66,6 +66,7 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     skillService,
     jobStore,
     mainAgent,
+    memoryContextCollector,
     tokenBroker,
     sandboxRunner,
     hostfsBroker,
@@ -118,6 +119,7 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
     jobApprovalStore,
     hostfsBroker,
     skillService,
+    memoryContextCollector,
     taskCoordinator,
     commentaryBuffer,
   };

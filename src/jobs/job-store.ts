@@ -44,7 +44,7 @@ export class JobStore {
       data.runtimeState = data.runtimeState.filter((state) => state.jobId !== jobId);
       return this.getOwnedSkillIdsToArchive(deletedDefinitions, data.definitions);
     });
-    await this.archiveOwnedSkills(skillIdsToArchive);
+    this.archiveOwnedSkills(skillIdsToArchive);
   }
 
   async setEnabled(jobId: string, enabled: boolean): Promise<void> {
@@ -135,7 +135,7 @@ export class JobStore {
         skillIdsToArchive: this.getOwnedSkillIdsToArchive(deletedDefinitions, data.definitions),
       };
     });
-    await this.archiveOwnedSkills(skillIdsToArchive);
+    this.archiveOwnedSkills(skillIdsToArchive);
     return deletedDefinitions.length;
   }
 
@@ -188,9 +188,9 @@ export class JobStore {
     return [...skillIdsToArchive];
   }
 
-  private async archiveOwnedSkills(skillIdsToArchive: string[]): Promise<void> {
+  private archiveOwnedSkills(skillIdsToArchive: string[]): void {
     for (const skillId of skillIdsToArchive) {
-      await this.skillService.archiveSkill(skillId);
+      this.skillService.archiveSkill(skillId);
     }
   }
 }

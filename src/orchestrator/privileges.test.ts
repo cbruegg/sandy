@@ -180,7 +180,7 @@ test("approved skill mutation delegates execution through the worker tools handl
     chatId: "chat-skill-create",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
-    decision: "approve",
+    decision: "approve_once",
     requestId,
   });
 
@@ -335,7 +335,7 @@ test("approved job mutation delegates execution through the worker tools handler
     chatId: "chat-job-create",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
-    decision: "approve",
+    decision: "approve_once",
     requestId,
   });
 

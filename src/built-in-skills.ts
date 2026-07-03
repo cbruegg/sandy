@@ -3,10 +3,10 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { builtInSkillsRuntimeDirectory } from "./state-paths.js";
 
 export type BuiltInSkillDefinition = {
-  skillId: string;
-  name: string;
-  description: string;
-  body: string;
+  readonly skillId: string;
+  readonly name: string;
+  readonly description: string;
+  readonly body: string;
 };
 
 function renderBuiltInSkillFile(skill: BuiltInSkillDefinition): string {
