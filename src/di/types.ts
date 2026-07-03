@@ -182,6 +182,7 @@ export type SandboxLayerResult = {
 
 export type MainAgentLayerInput = {
   readonly config: SandyConfig;
+  readonly mainAgentCodexPath: string;
   readonly mainAgentAppServer: CodexAppServerClient;
   readonly skillService: SkillService;
   readonly hostMcpServerKeys: string[];

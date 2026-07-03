@@ -52,8 +52,9 @@ export async function startApp(): Promise<void> {
     backend: mempalaceAvailable ? "mempalace" : "none",
   });
 
-  const mainAgentLayer = createMainAgentLayer({
+  const mainAgentLayer = await createMainAgentLayer({
     config,
+    mainAgentCodexPath: foundation.mainAgentCodexPath,
     mainAgentAppServer: foundation.mainAgentAppServer,
     skillService: coreStores.skillService,
     hostMcpServerKeys: Object.keys(config.mcpServers),
