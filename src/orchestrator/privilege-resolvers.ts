@@ -298,7 +298,7 @@ async function resolveApproveOnlyMutation(
     return failedPrivilegeResult(requestId, messages.taskNoLongerActive(session.chatId));
   }
 
-  if (decision !== "approve") {
+  if (decision === "deny") {
     return deniedPrivilegeResult(requestId, options.deniedMessage, options.reason);
   }
 
