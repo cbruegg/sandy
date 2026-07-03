@@ -34,3 +34,10 @@ test("cron job task brief does not include rescheduling instructions", () => {
   assert.doesNotMatch(brief, /one-off job/);
   assert.doesNotMatch(brief, new RegExp(`sandy\\.${updateJobToolName}`));
 });
+
+test("job task brief includes relevant stored memories when provided", () => {
+  const brief = buildJobTaskBrief(createJob(), null, "The user prefers concise summaries.");
+  assert.match(brief, /Relevant stored memories:/);
+  assert.match(brief, /The user prefers concise summaries\./);
+  assert.match(brief, /potentially useful background context/);
+});

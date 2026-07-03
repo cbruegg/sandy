@@ -11,6 +11,10 @@ export type SkillMetadata = {
   description: string;
 };
 
+export type SkillDetails = SkillMetadata & {
+  body: string;
+};
+
 type CreateSkillInput = {
   skillId: string;
   name: string;
@@ -199,6 +203,34 @@ export class SkillService {
       });
 
     return [...builtInMetadata, ...userMetadata];
+  }
+
+  getSkill(skillId: string): SkillDetails | null {
+    assertValidSkillId(skillId);
+
+    const builtInSkill = getBuiltInSkillDefinitions().find((skill) => skill.skillId === skillId);
+    if (builtInSkill) {
+      return {
+        name: builtInSkill.name,
+        description: builtInSkill.description,
+        body: builtInSkill.body,
+      };
+    }
+
+    const skillFilePath = join(this.skillsDirectory, skillId, "SKILL.md");
+    if (!existsSync(skillFilePath)) {
+      return null;
+    }
+
+    const raw = readSkillFile(skillFilePath);
+    const { name, description } = parseSkillFrontmatter(raw, skillFilePath);
+    const normalizedRaw = raw.replace(/^\uFEFF/, "");
+    const match = normalizedRaw.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+    return {
+      name,
+      description,
+      body: match ? normalizedRaw.slice((match.index ?? 0) + match[0].length).trimStart() : "",
+    };
   }
 
   async createSkill(input: CreateSkillInput): Promise<void> {

@@ -19,6 +19,7 @@ import type { OrchestratorTaskLifecycle } from "./task-lifecycle.js";
 import type { OrchestratorPrivileges } from "./privileges.js";
 import type { CommentaryBufferManager } from "./commentary-buffer-manager.js";
 import type { TaskCoordinator } from "./task-coordinator.js";
+import type { TaskMemoryContextCollector } from "../memory/task-memory-context-collector.js";
 
 export type SupportedChatEvent = Exclude<NormalizedChatEvent, { kind: "unsupported_input" }>;
 export type UserMessageEvent = Extract<NormalizedChatEvent, { kind: "user_message" }>;
@@ -34,6 +35,7 @@ export type OrchestratorCoreDependencies = {
   jobApprovalStore: JobApprovalStoreApi;
   hostfsBroker: HostfsBroker;
   skillService: SkillService;
+  memoryContextCollector: TaskMemoryContextCollector;
   taskCoordinator: TaskCoordinator;
   commentaryBuffer: CommentaryBufferManager;
 };

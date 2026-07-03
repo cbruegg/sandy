@@ -104,6 +104,7 @@ export async function startApp(): Promise<void> {
     skillService: coreStores.skillService,
     jobStore: coreStores.jobStore,
     mainAgent: mainAgentLayer.mainAgent,
+    memoryContextCollector: mainAgentLayer.memoryContextCollector,
     tokenBroker: mainAgentLayer.tokenBroker,
     sandboxRunner: sandbox.sandboxRunner,
     hostfsBroker: hostfs.hostfsBroker,

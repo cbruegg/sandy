@@ -3,6 +3,7 @@ import { defaultCodexAuthFilePath } from "../config.js";
 import { ChatGPTTokenBroker } from "../auth/chatgpt-token-broker.js";
 import { CodexMainAgentController } from "../agent/main-agent-controller.js";
 import { buildMainAgentConfig } from "../app.js";
+import { MempalaceTaskMemoryContextCollector, NoopTaskMemoryContextCollector } from "../memory/task-memory-context-collector.js";
 
 export function createMainAgentLayer(input: MainAgentLayerInput): MainAgentLayerResult {
   const { config, mainAgentAppServer, skillService, hostMcpServerKeys, mempalaceAvailable } = input;
@@ -13,6 +14,9 @@ export function createMainAgentLayer(input: MainAgentLayerInput): MainAgentLayer
     : null;
 
   const mainAgentConfig = buildMainAgentConfig(config.configDirectory, config.memory.enabled);
+  const memoryContextCollector = mempalaceAvailable
+    ? new MempalaceTaskMemoryContextCollector(mainAgentAppServer, config.agentModel, mainAgentConfig, skillService)
+    : new NoopTaskMemoryContextCollector();
 
   const mainAgent = new CodexMainAgentController(
     mainAgentAppServer,
@@ -32,6 +36,7 @@ export function createMainAgentLayer(input: MainAgentLayerInput): MainAgentLayer
     name: "main-agent",
     tokenBroker,
     mainAgent,
+    memoryContextCollector,
     stop,
   };
 }

@@ -278,8 +278,15 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
         taskId,
         taskName,
         "en",
-        () => Promise.resolve({
-          taskBrief: buildJobTaskBrief(job, workspacePath),
+        async () => ({
+          taskBrief: buildJobTaskBrief(
+            job,
+            workspacePath,
+            await this.deps.memoryContextCollector.collectForJobTask({
+              job,
+              workspacePath,
+            }),
+          ),
           initialInput: { text: `Execute skill ${job.skillId}.`, images: [] },
         }),
       );

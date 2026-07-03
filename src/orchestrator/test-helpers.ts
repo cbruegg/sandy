@@ -39,6 +39,7 @@ import { JobApprovalStore, type JobApprovalStoreApi } from "../jobs/job-approval
 import type { JobService } from "../jobs/job-service.js";
 import type { JobDefinition } from "../jobs/job-validation.js";
 import type { JobMutationRequest } from "../jobs/job-types.js";
+import { NoopTaskMemoryContextCollector, type TaskMemoryContextCollector } from "../memory/task-memory-context-collector.js";
 
 const testFormatting: ChannelFormatting = {
   channelId: "telegram",
@@ -391,6 +392,7 @@ export function createTestOrchestrator(options: {
   persistentApprovalStore?: PersistentApprovalStore;
   hostfsBroker?: HostfsBroker;
   skillService?: SkillService;
+  memoryContextCollector?: TaskMemoryContextCollector;
   taskCoordinator?: TaskCoordinator;
   commentaryBuffer?: CommentaryBufferManager;
   jobApprovalStore?: JobApprovalStoreApi;
@@ -430,6 +432,7 @@ export function createTestOrchestrator(options: {
     jobApprovalStore: options.jobApprovalStore ?? new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
     hostfsBroker: options.hostfsBroker ?? createNoopHostfsBroker(),
     skillService,
+    memoryContextCollector: options.memoryContextCollector ?? new NoopTaskMemoryContextCollector(),
     taskCoordinator,
     commentaryBuffer,
   };
