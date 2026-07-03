@@ -524,11 +524,14 @@ export class MatrixChannelAdapter implements ChannelAdapter {
       try {
         image = await this.tableImageRenderer(tableMarkdown, index);
       } catch (error) {
-        logger.warn("matrix.table_image_render_failed", {
-          tableIndex: index,
-          detail: "Bun.WebView table screenshot failed; falling back to text table conversion.",
+        logger.error(
+          "matrix.table_image_render_failed",
           error,
-        });
+          "Bun.WebView table screenshot failed; falling back to text table conversion.",
+          {
+            tableIndex: index,
+          },
+        );
         return null;
       }
       if (!image) {
