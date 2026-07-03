@@ -41,8 +41,7 @@ type ParsedSkillFile = {
 
 type SkillFrontmatterBlock = {
   frontmatter: string;
-  normalizedRaw: string;
-  endOffset: number;
+  body: string;
 };
 
 function readSkillFile(skillFilePath: string): string {
@@ -77,8 +76,7 @@ function parseSkillFrontmatterBlock(raw: string, skillFilePath: string): SkillFr
 
   return {
     frontmatter: match[1] ?? "",
-    normalizedRaw,
-    endOffset: (match.index ?? 0) + match[0].length,
+    body: normalizedRaw.slice((match.index ?? 0) + match[0].length).trimStart(),
   };
 }
 
@@ -153,9 +151,9 @@ async function parseExistingSkillFile(skillFilePath: string): Promise<ParsedSkil
 }
 
 function parseSkillFile(raw: string, skillFilePath: string): ParsedSkillFile {
-  const { frontmatter, normalizedRaw, endOffset } = parseSkillFrontmatterBlock(raw, skillFilePath);
+  const { frontmatter, body } = parseSkillFrontmatterBlock(raw, skillFilePath);
   const { name, description } = parseSkillFrontmatterFields(frontmatter, skillFilePath);
-  return { name, description, body: normalizedRaw.slice(endOffset).trimStart() };
+  return { name, description, body };
 }
 
 export class SkillService {
