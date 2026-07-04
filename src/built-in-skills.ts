@@ -36,7 +36,7 @@ const builtInSkills = [
       "- If the condition is not met, terminate immediately after clearing the workspace directory without requesting user interaction.",
       "- If the condition is met, request user interaction and notify the user.",
       "- When the condition is met, delete the current job before terminating.",
-      "- Clear the persistent job workspace directory before termination. Then terminate.",
+      "- In case it wrote files into the persistent job workspace directory, clear it before termination. Then terminate.",
       "",
       "Important implementation details for the generated monitoring skill:",
       "- The scheduled job brief will tell the worker the persistent workspace directory path on the host when one exists.",
