@@ -28,6 +28,7 @@ export type ActiveTaskStatus = ActiveTaskState["status"];
 export type OrchestratorCoreDependencies = {
   mainAgent: MainAgentController;
   sandboxRunner: SandboxRunner;
+  autoDeleteTaskShares: boolean;
   buildWorkerStartConfig: () => Promise<WorkerStartConfig>;
   refreshChatGPTTokens?: (taskId: string, previousAccountId: string | null) => Promise<ChatGPTExternalTokens | null>;
   sessionStore: SessionStore;

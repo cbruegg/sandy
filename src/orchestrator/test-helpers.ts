@@ -388,6 +388,7 @@ export function createTestOrchestrator(options: {
   destinationStore?: ChannelDestinationStore;
   mainAgent: MainAgentController;
   sandboxRunner?: FakeSandboxRunner;
+  autoDeleteTaskShares?: boolean;
   sessionStore?: InMemorySessionStore;
   persistentApprovalStore?: PersistentApprovalStore;
   hostfsBroker?: HostfsBroker;
@@ -426,6 +427,7 @@ export function createTestOrchestrator(options: {
   const coreDeps: OrchestratorCoreDependencies = {
     mainAgent: options.mainAgent,
     sandboxRunner: runner,
+    autoDeleteTaskShares: options.autoDeleteTaskShares ?? false,
     buildWorkerStartConfig: () => Promise.resolve(createTestWorkerStartConfig()),
     sessionStore: store,
     persistentApprovalStore: options.persistentApprovalStore ?? createNoopPersistentApprovalStore(),

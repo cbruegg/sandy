@@ -562,7 +562,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
 
   private async promptForShareDeletionIfNeeded(session: SessionState, taskId: string, taskName: string, origin: TaskOrigin): Promise<void> {
     const inspection = await this.deps.sandboxRunner.inspectTaskShare(taskId);
-    if (inspection.isEmpty) {
+    if (inspection.isEmpty || this.deps.autoDeleteTaskShares) {
       await this.deps.sandboxRunner.deleteTaskShare(taskId);
       return;
     }

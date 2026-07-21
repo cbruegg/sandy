@@ -106,6 +106,7 @@ export function createOrchestratorLayer(input: OrchestratorLayerInput): Orchestr
   const orchestratorCoreDeps: OrchestratorCoreDependencies = {
     mainAgent,
     sandboxRunner,
+    autoDeleteTaskShares: config.autoDeleteTaskShares,
     buildWorkerStartConfig: () => buildWorkerStartConfig(
       config.authMode,
       config.agentModel,

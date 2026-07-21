@@ -13,6 +13,7 @@ const mcpStdioTransportSchema = z.literal("stdio");
 
 const DEFAULT_LOG_LEVEL: z.infer<typeof logLevelSchema> = "info";
 const DEFAULT_SHARE_ROOT = "/tmp/sandy-shares";
+const DEFAULT_AUTO_DELETE_TASK_SHARES = false;
 const DEFAULT_STT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_STT_MODEL = "gpt-4o-mini-transcribe";
 const updateModeSchema = z.enum(["disabled", "relaunch", "exit"]);
@@ -130,6 +131,7 @@ function buildSandyConfigSchema(defaultImages: SandyImageDefaults) {
     worker: z.object({
       image: z.string().min(1).default(defaultImages.workerImage),
       share_root: z.string().min(1).default(DEFAULT_SHARE_ROOT),
+      auto_delete_task_shares: z.boolean().default(DEFAULT_AUTO_DELETE_TASK_SHARES),
       preinstall: z.object({
         commands: z.array(z.string().trim().min(1)).default([]),
         refresh: workerPreinstallRefreshSchema.default(DEFAULT_WORKER_PREINSTALL_REFRESH),
@@ -148,6 +150,7 @@ function buildSandyConfigSchema(defaultImages: SandyImageDefaults) {
     }).default({
       image: defaultImages.workerImage,
       share_root: DEFAULT_SHARE_ROOT,
+      auto_delete_task_shares: DEFAULT_AUTO_DELETE_TASK_SHARES,
       preinstall: {
         commands: [],
         refresh: DEFAULT_WORKER_PREINSTALL_REFRESH,
@@ -293,6 +296,7 @@ export type SandyConfig = {
   httpProxyImage: string;
   networkGuardImage: string;
   shareRoot: string;
+  autoDeleteTaskShares: boolean;
   agentModel: string | null;
   workerPreinstall: {
     commands: string[];
@@ -429,6 +433,7 @@ export function parseConfigToml(
     httpProxyImage: parsed.http.proxy_image,
     networkGuardImage: defaultImages.networkGuardImage,
     shareRoot: parsed.worker.share_root,
+    autoDeleteTaskShares: parsed.worker.auto_delete_task_shares,
     agentModel: parsed.agent?.model ?? null,
     workerPreinstall: {
       commands: parsed.worker.preinstall.commands,
