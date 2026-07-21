@@ -49,6 +49,7 @@ openai_api_key = "sk-test"
       mode: "public_internet_only",
       allowLocalCidrs: [],
     });
+    assert.equal(config.autoDeleteTaskShares, false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -454,6 +455,22 @@ allow_local_cidrs = ["192.168.1.0/24", "10.0.0.15", "fd00::/8"]
     mode: "public_internet_only",
     allowLocalCidrs: ["192.168.1.0/24", "10.0.0.15", "fd00::/8"],
   });
+});
+
+test("parseConfigToml parses automatic task share deletion", () => {
+  const config = parseConfigToml(`
+[channel]
+kind = "telegram"
+
+[channel.telegram]
+bot_token = "telegram-token"
+allowed_user = "123456"
+
+[worker]
+auto_delete_task_shares = true
+`);
+
+  assert.equal(config.autoDeleteTaskShares, true);
 });
 
 test("parseConfigToml rejects hostnames in worker network allow_local_cidrs", () => {

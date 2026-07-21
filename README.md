@@ -72,6 +72,7 @@ allowed_user_id = "@cbruegg:matrix.org"
 [worker]
 # image = "sandy-subagent:latest" # explicit override; otherwise Sandy uses a baked GHCR sha tag when present, or this local default
 # share_root = "/tmp/sandy-shares"
+# auto_delete_task_shares = false # delete non-empty task shares on completion without asking
 
 [worker.network]
 # mode = "public_internet_only" # one of: "public_internet_only", "unrestricted"
@@ -281,6 +282,11 @@ Worker network behavior:
 - In `"public_internet_only"` mode, workers keep normal public internet access but cannot reach local/private network ranges unless they are explicitly allowlisted in `worker.network.allow_local_cidrs`.
 - `worker.network.allow_local_cidrs` accepts only literal IP addresses and CIDR blocks.
 - Set `worker.network.mode = "unrestricted"` only if you intentionally want workers to be able to reach local/private network addresses directly.
+
+Task share cleanup behavior:
+
+- Sandy removes empty task shares when a task completes. By default, it asks before removing a non-empty share.
+- Set `worker.auto_delete_task_shares = true` to remove non-empty task shares automatically at task completion.
 
 [Skills](https://github.com/anthropics/skills) behavior:
 

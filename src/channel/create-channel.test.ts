@@ -16,6 +16,7 @@ function baseConfig(): Omit<SandyConfig, "channel"> {
     httpProxyImage: "sandy-http-proxy:latest",
     networkGuardImage: "sandy-network-guard:latest",
     shareRoot: "/tmp/sandy-shares",
+    autoDeleteTaskShares: false,
     agentModel: null,
     workerPreinstall: {
       commands: [],

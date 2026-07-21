@@ -677,6 +677,37 @@ test("orchestrator prompts before deleting a non-empty shared workspace", async 
   assert.equal(runner.deletedTaskShares.length, 0);
 });
 
+test("orchestrator automatically deletes a non-empty shared workspace when configured", async () => {
+  const { orchestrator, runner, channel } = createTestOrchestrator({
+    autoDeleteTaskShares: true,
+    mainAgent: new StubMainAgent({
+      action: "launch_task",
+      taskBrief: "Inspect the filesystem.",
+      taskName: "fs-inspect",
+      taskLanguage: "English",
+    }),
+  });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-auto-delete",
+    messageId: "1",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "Inspect the filesystem",
+    rawText: "Inspect the filesystem",
+    attachments: [],
+  });
+
+  const taskId = runner.launches[0]?.taskId;
+  assert.ok(taskId);
+  runner.shareInspections.set(taskId, { isEmpty: false, summary: "report.txt" });
+
+  await runner.emit({ type: "task_done" });
+
+  assert.equal(channel.shareDeletionRequests.length, 0);
+  assert.deepEqual(runner.deletedTaskShares, [taskId]);
+});
+
 test("orchestrator deletes or preserves a finished task share based on user confirmation", async () => {
   const mainAgent = new SequenceMainAgent([
     {
