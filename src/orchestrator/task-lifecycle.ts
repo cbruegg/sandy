@@ -198,6 +198,8 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
         await this.channel.sendText(event.chatId, decision.replyText);
         return;
       case "launch_task": {
+        const attachmentBatches = session.pendingAttachmentBatches;
+        session.pendingAttachmentBatches = [];
         const taskId = randomUUID();
         const now = new Date().toISOString();
         let launchSucceeded = false;
@@ -223,7 +225,15 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
             decision.taskName,
             decision.taskLanguage,
             async (taskSharePath) => {
-              const stagedAttachments = await this.stageAttachments(event.chatId, event.messageId, event.attachments, taskSharePath);
+              const stagedAttachments: SharedAttachment[] = [];
+              for (const batch of attachmentBatches) {
+                stagedAttachments.push(...await this.stageAttachments(
+                  event.chatId,
+                  batch.messageId,
+                  batch.attachments,
+                  taskSharePath,
+                ));
+              }
               const brief = buildTaskBriefWithAttachments(decision.taskBrief, stagedAttachments);
               logger.debug("task.task_brief", {
                 chatId: event.chatId,

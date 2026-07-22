@@ -172,6 +172,13 @@ export class SandyOrchestrator {
           return;
         }
 
+        if (event.attachments.length > 0) {
+          session.pendingAttachmentBatches.push({
+            messageId: event.messageId,
+            attachments: [...event.attachments],
+          });
+        }
+
         const releasedEntries = this.deps.taskLifecycle.releasePendingTaskSummaries(session);
 
         const newVisibleEntries = [

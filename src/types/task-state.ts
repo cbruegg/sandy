@@ -2,6 +2,7 @@ import type {PrivilegeRequest} from "./privilege.js";
 import type {MainAgentTaskPolicy} from "./main-agent.js";
 import type {HostDirectoryAccessLevel} from "../hostfs/path-policy.ts";
 import type { ChatId } from "./chat-events.js";
+import type { MessageAttachment } from "./attachments.js";
 import type { TranscriptEntry } from "./transcript.js";
 
 type McpToolGrant = {
@@ -140,6 +141,11 @@ type PendingShareDeletion = {
   summary: string;
 };
 
+export type PendingAttachmentBatch = {
+  messageId: string;
+  attachments: MessageAttachment[];
+};
+
 export class SessionState {
   chatId: ChatId;
   visibleTask: ActiveTaskState | null;
@@ -151,6 +157,7 @@ export class SessionState {
   } | null;
   confirmedTaskSummaryEntries: TranscriptEntry[];
   pendingShareDeletion: PendingShareDeletion | null;
+  pendingAttachmentBatches: PendingAttachmentBatch[];
 
   constructor(chatId: ChatId) {
     this.chatId = chatId;
@@ -159,6 +166,7 @@ export class SessionState {
     this.pendingTaskSummary = null;
     this.confirmedTaskSummaryEntries = [];
     this.pendingShareDeletion = null;
+    this.pendingAttachmentBatches = [];
   }
 
   findTask(taskId: string): { task: ActiveTaskState; location: "visible" | "background"; } | null {
