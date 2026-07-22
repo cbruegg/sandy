@@ -64,6 +64,7 @@ export class RecordingChannel implements ChannelAdapter {
   public readonly shareDeletionRequests: Array<{ chatId: ChatId; requestId: string; taskName: string; summary: string }> = [];
   public readonly taskSummaryConfirmationRequests: Array<{ chatId: ChatId; requestId: string; taskName: string }> = [];
   public readonly savedAttachments: Array<{ chatId: ChatId; attachments: MessageAttachment[]; targetDirectory: string }> = [];
+  public saveAttachmentsError: Error | null = null;
   public sendFileError: Error | null = null;
   public sendTaskUpdateError: Error | null = null;
 
@@ -88,6 +89,11 @@ export class RecordingChannel implements ChannelAdapter {
   }
 
   saveAttachments(chatId: ChatId, attachments: MessageAttachment[], targetDirectory: string): Promise<SavedAttachment[]> {
+    if (this.saveAttachmentsError) {
+      const error = this.saveAttachmentsError;
+      this.saveAttachmentsError = null;
+      return Promise.reject(error);
+    }
     this.savedAttachments.push({ chatId, attachments, targetDirectory });
     return Promise.resolve(attachments.map((attachment, index) => ({
       attachmentId: attachment.attachmentId,

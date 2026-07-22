@@ -253,8 +253,14 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
           await this.channel.sendText(event.chatId, messages.taskStarted(decision.taskName));
           return;
         } catch (error) {
-          if (!launchSucceeded && session.visibleTask?.taskId === taskId) {
-            session.visibleTask = null;
+          if (!launchSucceeded) {
+            session.pendingAttachmentBatches = [
+              ...attachmentBatches,
+              ...session.pendingAttachmentBatches,
+            ];
+            if (session.visibleTask?.taskId === taskId) {
+              session.visibleTask = null;
+            }
           }
           throw error;
         }
