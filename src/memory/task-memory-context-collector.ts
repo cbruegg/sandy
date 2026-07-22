@@ -35,7 +35,7 @@ const noopAuthRefresh: AuthRefreshCallback = () => {
 };
 
 const MAX_MEMORY_CONTEXT_LENGTH = 10_000;
-const DEFAULT_MEMORY_CONTEXT_TIMEOUT_MS = 60_000;
+const DEFAULT_MEMORY_CONTEXT_TIMEOUT_MS = 120_000;
 
 export class MempalaceTaskMemoryContextCollector implements TaskMemoryContextCollector {
   private readonly appServer: AgentClient;
