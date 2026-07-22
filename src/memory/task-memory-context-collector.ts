@@ -35,41 +35,64 @@ const noopAuthRefresh: AuthRefreshCallback = () => {
 };
 
 const MAX_MEMORY_CONTEXT_LENGTH = 10_000;
+const DEFAULT_MEMORY_CONTEXT_TIMEOUT_MS = 120_000;
 
 export class MempalaceTaskMemoryContextCollector implements TaskMemoryContextCollector {
   private readonly appServer: AgentClient;
   private readonly model: string | null;
   private readonly mainAgentConfig: ThreadStartParams["config"];
   private readonly skillService: SkillService;
+  private readonly timeoutMs: number;
   private threadId: string | null = null;
   private readonly workingDirectory: string;
+  private collectionLock: Promise<void> = Promise.resolve();
 
   constructor(
     appServer: AgentClient,
     model: string | null,
     mainAgentConfig: ThreadStartParams["config"],
     skillService: SkillService,
+    timeoutMs = DEFAULT_MEMORY_CONTEXT_TIMEOUT_MS,
   ) {
     this.appServer = appServer;
     this.model = model;
     this.mainAgentConfig = mainAgentConfig;
     this.skillService = skillService;
+    this.timeoutMs = timeoutMs;
     this.workingDirectory = mkdtempSync(join(tmpdir(), "sandy-memory-context-"));
   }
 
   async collectForJobTask(input: JobTaskMemoryContextInput): Promise<string | null> {
-    const threadId = await this.getOrCreateThreadId();
-    const skill = this.skillService.getSkill(input.job.skillId);
-    const prompt = buildJobTaskMemoryContextPrompt(input, skill);
-    const agentInput: Input = [{ type: "text", text: prompt }];
-    let finalResponse = "";
+    const previousLock = this.collectionLock;
+    let releaseLock: () => void;
+    this.collectionLock = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    await previousLock;
 
     try {
+      return await this.collectForJobTaskWithTimeout(input);
+    } finally {
+      releaseLock!();
+    }
+  }
+
+  private async collectForJobTaskWithTimeout(input: JobTaskMemoryContextInput): Promise<string | null> {
+    const abortController = new AbortController();
+    const timeout = setTimeout(() => abortController.abort(), this.timeoutMs);
+
+    try {
+      const threadId = await this.getOrCreateThreadId();
+      const skill = this.skillService.getSkill(input.job.skillId);
+      const prompt = buildJobTaskMemoryContextPrompt(input, skill);
+      const agentInput: Input = [{ type: "text", text: prompt }];
+      let finalResponse = "";
+
       for await (const event of this.appServer.streamTurn(
         threadId,
         agentInput,
         noopAuthRefresh,
-        undefined,
+        abortController.signal,
         (request) => Promise.resolve(handleMempalaceMemoryServerRequest(request)),
       )) {
         switch (event.method) {
@@ -89,20 +112,26 @@ export class MempalaceTaskMemoryContextCollector implements TaskMemoryContextCol
             throw new Error(`App server error: ${event.params.error?.message ?? "Unknown app-server error."}`);
         }
       }
+
+      if (abortController.signal.aborted) {
+        throw new Error(`Memory context collection timed out after ${this.timeoutMs}ms.`);
+      }
+
+      const normalized = normalizeCollectedMemoryContext(finalResponse);
+      logger.info("memory.job_context_collection_completed", {
+        jobId: input.job.id,
+        hasContext: normalized !== null,
+      });
+      return normalized;
     } catch (error) {
       logger.warn("memory.job_context_collection_failed", {
         jobId: input.job.id,
         message: error instanceof Error ? error.message : "Unknown memory context collection failure.",
       });
       return null;
+    } finally {
+      clearTimeout(timeout);
     }
-
-    const normalized = normalizeCollectedMemoryContext(finalResponse);
-    logger.info("memory.job_context_collection_completed", {
-      jobId: input.job.id,
-      hasContext: normalized !== null,
-    });
-    return normalized;
   }
 
   private async getOrCreateThreadId(): Promise<string> {
