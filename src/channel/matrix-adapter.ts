@@ -112,6 +112,7 @@ type MatrixRustEngineConstructor = {
 
 type MatrixMessageContent = {
   body?: string;
+  filename?: string;
   msgtype?: string;
   url?: string;
   file?: unknown;
@@ -830,7 +831,9 @@ export async function normalizeMatrixRoomMessage(
   if (msgtype === "m.file" || msgtype === "m.image" || msgtype === "m.video") {
     const attachmentId = `${base.messageId}:1`;
     const messageContent = content as MatrixMessageContent;
-    const fileName = sanitizeMatrixFileName(asOptionalString(messageContent["body"]) ?? "attachment");
+    const body = asOptionalString(messageContent["body"]) ?? "";
+    const originalFileName = asOptionalString(messageContent["filename"]);
+    const fileName = sanitizeMatrixFileName(originalFileName ?? body ?? "attachment");
     const attachmentRef = buildMatrixAttachmentRef(roomId, fileName, content);
     if (!attachmentRef) {
       return null;
@@ -840,8 +843,8 @@ export async function normalizeMatrixRoomMessage(
     return {
       kind: "user_message",
       ...base,
-      text: "",
-      rawText: "",
+      text: originalFileName && originalFileName !== body ? body : "",
+      rawText: originalFileName && originalFileName !== body ? body : "",
       attachments: [{
         attachmentId,
         kind: attachmentKind,
