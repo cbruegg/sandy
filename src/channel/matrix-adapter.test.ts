@@ -428,6 +428,38 @@ test("normalizeMatrixRoomMessage maps text, encrypted file, and audio events", a
   assert.equal(fileEvent?.attachments[0]?.fileName, "report.txt");
   assert.equal(savedRefs.size, 1);
 
+  const imageCaptionEvent = await normalizeMatrixRoomMessage(ROOM_ID, {
+    type: "m.room.message",
+    event_id: "$image-caption",
+    sender: OWNER_ID,
+    origin_server_ts: 1_700_000_002_000,
+    content: {
+      msgtype: "m.image",
+      body: "Find the full set",
+      filename: "instagram-screenshot.png",
+      url: "mxc://example/image",
+      info: {
+        mimetype: "image/png",
+      },
+    },
+  }, {
+    client: fakeClient,
+    transcriptionProvider,
+    sendText: async (_chatId, text) => {
+      sentTexts.push(text);
+    },
+    saveAttachmentRef: (attachmentId, ref) => {
+      savedRefs.set(attachmentId, ref);
+    },
+  });
+
+  if (!imageCaptionEvent || imageCaptionEvent.kind !== "user_message") {
+    throw new Error("Expected an image user message.");
+  }
+  assert.equal(imageCaptionEvent.text, "Find the full set");
+  assert.equal(imageCaptionEvent.rawText, "Find the full set");
+  assert.match(JSON.stringify(imageCaptionEvent), /instagram-screenshot\.png/);
+
   fakeClient.media.set("mxc://example/audio", {
     data: Buffer.from("voice-bytes"),
     contentType: "audio/ogg",
