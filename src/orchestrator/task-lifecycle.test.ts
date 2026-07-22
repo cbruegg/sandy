@@ -93,6 +93,128 @@ test("orchestrator stages attached files into the task share before launching th
   assert.deepEqual(contextTexts(expectDefined(mainAgent.contexts[0], "Expected main-agent context.")), ["Analyze this\n\nAttached files:\n- input.csv"]);
 });
 
+test("orchestrator retains idle attachments across direct replies until the next task launch", async () => {
+  const mainAgent = new SequenceMainAgent([
+    {
+      action: "reply",
+      replyText: "What should I do with the image?",
+    },
+    {
+      action: "launch_task",
+      taskBrief: "Identify the event shown in the image.",
+      taskName: "image-analysis",
+      taskLanguage: "English",
+    },
+  ]);
+  const { orchestrator, channel, runner, store } = createTestOrchestrator({ mainAgent });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-pending-image",
+    messageId: "image-message",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "",
+    rawText: "",
+    attachments: [{
+      attachmentId: "image-1",
+      kind: "image",
+      fileName: "dj-set.png",
+      mimeType: "image/png",
+    }],
+  });
+
+  assert.equal(channel.savedAttachments.length, 0);
+  assert.equal(store.getOrCreate("chat-pending-image").pendingAttachmentBatches.length, 1);
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-pending-image",
+    messageId: "text-message",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    text: "Find the full set",
+    rawText: "Find the full set",
+    attachments: [],
+  });
+
+  assert.equal(channel.savedAttachments.length, 1);
+  assert.equal(channel.savedAttachments[0]?.attachments[0]?.attachmentId, "image-1");
+  assert.match(channel.savedAttachments[0]?.targetDirectory ?? "", /inbox\/image-message$/);
+  assert.equal(store.getOrCreate("chat-pending-image").pendingAttachmentBatches.length, 0);
+  assert.deepEqual(runner.launches[0]?.initialInput.images, [{
+    sharePath: expectDefined(runner.launches[0]?.initialInput.images[0], "Expected staged image.").sharePath,
+    fileName: "dj-set.png",
+  }]);
+  assert.match(runner.launches[0]?.initialInput.images[0]?.sharePath ?? "", /inbox\/image-message\/1-dj-set\.png$/);
+});
+
+test("orchestrator retains pending attachments when task launch fails", async () => {
+  const mainAgent = new SequenceMainAgent([
+    {
+      action: "reply",
+      replyText: "What should I do with the image?",
+    },
+    {
+      action: "launch_task",
+      taskBrief: "Identify the event shown in the image.",
+      taskName: "failed-image-analysis",
+      taskLanguage: "English",
+    },
+    {
+      action: "launch_task",
+      taskBrief: "Retry identifying the event shown in the image.",
+      taskName: "retried-image-analysis",
+      taskLanguage: "English",
+    },
+  ]);
+  const channel = new RecordingChannel();
+  const { orchestrator, runner, store } = createTestOrchestrator({ mainAgent, channel });
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-image-launch-retry",
+    messageId: "image-message",
+    timestamp: "2026-04-01T00:00:00.000Z",
+    text: "",
+    rawText: "",
+    attachments: [{
+      attachmentId: "image-1",
+      kind: "image",
+      fileName: "dj-set.png",
+      mimeType: "image/png",
+    }],
+  });
+
+  channel.saveAttachmentsError = new Error("download failed");
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-image-launch-retry",
+    messageId: "first-instruction",
+    timestamp: "2026-04-01T00:00:10.000Z",
+    text: "Find the full set",
+    rawText: "Find the full set",
+    attachments: [],
+  });
+
+  assert.equal(runner.launches.length, 0);
+  assert.equal(store.getOrCreate("chat-image-launch-retry").visibleTask, null);
+  assert.equal(store.getOrCreate("chat-image-launch-retry").pendingAttachmentBatches.length, 1);
+
+  await orchestrator.handleChatEvent({
+    kind: "user_message",
+    chatId: "chat-image-launch-retry",
+    messageId: "retry-instruction",
+    timestamp: "2026-04-01T00:00:20.000Z",
+    text: "Retry",
+    rawText: "Retry",
+    attachments: [],
+  });
+
+  assert.equal(store.getOrCreate("chat-image-launch-retry").pendingAttachmentBatches.length, 0);
+  assert.equal(runner.launches.length, 1);
+  assert.equal(runner.launches[0]?.initialInput.images[0]?.fileName, "dj-set.png");
+  assert.match(runner.launches[0]?.initialInput.images[0]?.sharePath ?? "", /inbox\/image-message\/1-dj-set\.png$/);
+});
+
 test("orchestrator stages attached files into the active task share and notifies the worker", async () => {
   const { orchestrator, channel, runner } = createTestOrchestrator({
     mainAgent: new StubMainAgent({
