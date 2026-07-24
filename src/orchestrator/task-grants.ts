@@ -1,5 +1,6 @@
 import type { JobApprovalStoreApi } from "../jobs/job-approval-store.js";
 import type { HostDirectoryAccessLevel } from "../hostfs/path-policy.js";
+import { logger } from "../logger.js";
 import type { ActiveTaskState } from "../types.js";
 
 export function isTaskToolGrantAllowed(
@@ -113,10 +114,12 @@ export async function grantMcpToolApprovalForJob(
   serverId: string,
   toolName: string,
 ): Promise<void> {
-  grantTaskToolAccess(task, serverId, toolName);
-  if (task.origin.kind === "launchedByJob") {
-    await jobApprovalStore.allowMcpTool(task.origin.jobId, serverId, toolName);
+  if (task.origin.kind !== "launchedByJob") {
+    logger.warn("approval.job_mcp_tool_requested_for_user_task", { taskId: task.taskId, serverId, toolName });
+    return;
   }
+  grantTaskToolAccess(task, serverId, toolName);
+  await jobApprovalStore.allowMcpTool(task.origin.jobId, serverId, toolName);
 }
 
 export async function grantMcpResourceReadApprovalForJob(
@@ -125,10 +128,12 @@ export async function grantMcpResourceReadApprovalForJob(
   serverId: string,
   uri: string,
 ): Promise<void> {
-  grantTaskResourceReadAccess(task, serverId, uri);
-  if (task.origin.kind === "launchedByJob") {
-    await jobApprovalStore.allowMcpResourceRead(task.origin.jobId, serverId, uri);
+  if (task.origin.kind !== "launchedByJob") {
+    logger.warn("approval.job_mcp_resource_read_requested_for_user_task", { taskId: task.taskId, serverId, uri });
+    return;
   }
+  grantTaskResourceReadAccess(task, serverId, uri);
+  await jobApprovalStore.allowMcpResourceRead(task.origin.jobId, serverId, uri);
 }
 
 export async function grantHttpTokenAutoApprovalForTask(
