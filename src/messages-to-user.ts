@@ -8,6 +8,7 @@ export const buttonLabels = {
   markAsFinished: "Mark as finished",
   approve: "Approve once",
   approveWorkerSession: "Allow in task",
+  approveForJob: "Allow for job",
   approveAlways: "Auto-allow for suitable tasks",
   approveAlwaysHostDirectory: "Always allow",
   deny: "Deny",

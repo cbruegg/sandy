@@ -9,8 +9,8 @@ import { ImplicitChannelDestinationStore, type ChannelDestinationStore } from ".
 import { createNoopHostfsBroker } from "../hostfs/hostfs-broker.js";
 import type { HostfsBroker } from "../hostfs/hostfs-broker.js";
 import { SandyOrchestrator } from "./index.js";
-import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
-import { createNoopPersistentApprovalStore } from "../privilege/persistent-approval-store.js";
+import type { GlobalApprovalStore } from "../privilege/global-approval-store.js";
+import { createNoopGlobalApprovalStore } from "../privilege/global-approval-store.js";
 import type { LaunchTaskRequest, SandboxHandle, SandboxRunner, SandboxTaskBundle } from "../sandbox/sandbox-runner.js";
 import { InMemorySessionStore } from "../session/in-memory-session-store.js";
 import { OrchestratorPrivilegesImpl } from "./privileges.js";
@@ -315,21 +315,41 @@ class FakeSandboxRunner implements SandboxRunner {
 
 /** In-memory JobApprovalStore for tests that need predictable job-scoped persistence without file I/O. */
 export class InMemoryJobApprovalStore implements JobApprovalStoreApi {
-  private readonly taskPolicies = new Map<string, { autoApproveMcpServers: string[]; autoApproveHttpTokens: string[] }>();
+  private readonly autoApprovalEligibilities = new Map<string, { eligibleMcpServers: string[]; eligibleHttpTokens: string[] }>();
+  private readonly mcpApprovals = new Map<string, { approvedMcpTools: Array<{ serverId: string; toolName: string }>; approvedMcpResourceReads: Array<{ serverId: string; uri: string }> }>();
 
-  getTaskPolicy(jobId: string): Promise<{ autoApproveMcpServers: string[]; autoApproveHttpTokens: string[] }> {
-    const taskPolicy = this.taskPolicies.get(jobId);
+  getAutoApprovalEligibility(jobId: string): Promise<{ eligibleMcpServers: string[]; eligibleHttpTokens: string[] }> {
+    const autoApprovalEligibility = this.autoApprovalEligibilities.get(jobId);
     return Promise.resolve({
-      autoApproveMcpServers: [...(taskPolicy?.autoApproveMcpServers ?? [])],
-      autoApproveHttpTokens: [...(taskPolicy?.autoApproveHttpTokens ?? [])],
+      eligibleMcpServers: [...(autoApprovalEligibility?.eligibleMcpServers ?? [])],
+      eligibleHttpTokens: [...(autoApprovalEligibility?.eligibleHttpTokens ?? [])],
     });
   }
 
-  saveTaskPolicy(jobId: string, taskPolicy: { autoApproveMcpServers: string[]; autoApproveHttpTokens: string[] }): Promise<void> {
-    this.taskPolicies.set(jobId, {
-      autoApproveMcpServers: Array.from(new Set(taskPolicy.autoApproveMcpServers)).sort(),
-      autoApproveHttpTokens: Array.from(new Set(taskPolicy.autoApproveHttpTokens)).sort(),
+  saveAutoApprovalEligibility(jobId: string, autoApprovalEligibility: { eligibleMcpServers: string[]; eligibleHttpTokens: string[] }): Promise<void> {
+    this.autoApprovalEligibilities.set(jobId, {
+      eligibleMcpServers: Array.from(new Set(autoApprovalEligibility.eligibleMcpServers)).sort(),
+      eligibleHttpTokens: Array.from(new Set(autoApprovalEligibility.eligibleHttpTokens)).sort(),
     });
+    return Promise.resolve();
+  }
+
+  getMcpApprovals(jobId: string): Promise<{ approvedMcpTools: Array<{ serverId: string; toolName: string }>; approvedMcpResourceReads: Array<{ serverId: string; uri: string }> }> {
+    const approvals = this.mcpApprovals.get(jobId);
+    return Promise.resolve({ approvedMcpTools: [...(approvals?.approvedMcpTools ?? [])], approvedMcpResourceReads: [...(approvals?.approvedMcpResourceReads ?? [])] });
+  }
+
+  allowMcpTool(jobId: string, serverId: string, toolName: string): Promise<void> {
+    const approvals = this.mcpApprovals.get(jobId) ?? { approvedMcpTools: [], approvedMcpResourceReads: [] };
+    if (!approvals.approvedMcpTools.some((entry) => entry.serverId === serverId && entry.toolName === toolName)) approvals.approvedMcpTools.push({ serverId, toolName });
+    this.mcpApprovals.set(jobId, approvals);
+    return Promise.resolve();
+  }
+
+  allowMcpResourceRead(jobId: string, serverId: string, uri: string): Promise<void> {
+    const approvals = this.mcpApprovals.get(jobId) ?? { approvedMcpTools: [], approvedMcpResourceReads: [] };
+    if (!approvals.approvedMcpResourceReads.some((entry) => entry.serverId === serverId && entry.uri === uri)) approvals.approvedMcpResourceReads.push({ serverId, uri });
+    this.mcpApprovals.set(jobId, approvals);
     return Promise.resolve();
   }
 }
@@ -396,7 +416,7 @@ export function createTestOrchestrator(options: {
   sandboxRunner?: FakeSandboxRunner;
   autoDeleteTaskShares?: boolean;
   sessionStore?: InMemorySessionStore;
-  persistentApprovalStore?: PersistentApprovalStore;
+  globalApprovalStore?: GlobalApprovalStore;
   hostfsBroker?: HostfsBroker;
   skillService?: SkillService;
   memoryContextCollector?: TaskMemoryContextCollector;
@@ -436,7 +456,7 @@ export function createTestOrchestrator(options: {
     autoDeleteTaskShares: options.autoDeleteTaskShares ?? false,
     buildWorkerStartConfig: () => Promise.resolve(createTestWorkerStartConfig()),
     sessionStore: store,
-    persistentApprovalStore: options.persistentApprovalStore ?? createNoopPersistentApprovalStore(),
+    globalApprovalStore: options.globalApprovalStore ?? createNoopGlobalApprovalStore(),
     jobApprovalStore: options.jobApprovalStore ?? new JobApprovalStore(mkdtempSync(join(tmpdir(), "sandy-job-approvals-"))),
     hostfsBroker: options.hostfsBroker ?? createNoopHostfsBroker(),
     skillService,

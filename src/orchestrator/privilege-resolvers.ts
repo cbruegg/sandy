@@ -1,4 +1,4 @@
-import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
+import type { GlobalApprovalStore } from "../privilege/global-approval-store.js";
 import type { JobApprovalStoreApi } from "../jobs/job-approval-store.js";
 import { messages } from "../messages-to-agent.js";
 import type {
@@ -21,6 +21,8 @@ import {
   grantHttpTokenSessionAccess,
   grantHttpTokenAutoApprovalForTask,
   grantMcpAutoApprovalForTask,
+  grantMcpResourceReadApprovalForJob,
+  grantMcpToolApprovalForJob,
   grantTaskHostDirectoryAccess,
   grantTaskResourceReadAccess,
   grantTaskToolAccess,
@@ -33,7 +35,7 @@ type ApprovalDecision = Extract<NormalizedChatEvent, { kind: "approval_response"
  * A superset that both modules share so the orchestrator builds it once.
  */
 export interface PrivilegeContext {
-  readonly persistentApprovalStore: PersistentApprovalStore;
+  readonly globalApprovalStore: GlobalApprovalStore;
   readonly jobApprovalStore: JobApprovalStoreApi;
   readonly workerToolsHandler: WorkerToolsHandler;
 }
@@ -49,11 +51,13 @@ export async function resolveMcpToolCallRequest(
     deniedMessage: messages.userDeniedMcpToolCall(request.serverId, request.toolName, reason),
     onceMessage: messages.mcpToolAllowedOnce(request.serverId, request.toolName),
     sessionMessage: messages.mcpToolAllowedForWorkerSession(request.serverId, request.toolName),
+    jobMessage: messages.mcpToolAllowedForJob(request.serverId, request.toolName),
     alwaysMessage: messages.mcpToolAllowedAndPersisted(request.serverId, request.toolName),
     persistentMessage: messages.mcpToolAllowedFromPersistentConfig(request.serverId, request.toolName),
     grantAutoApprovalForTask: (task) => grantMcpAutoApprovalForTask(ctx.jobApprovalStore, task, request.serverId),
+    grantApprovalForJob: (task) => grantMcpToolApprovalForJob(ctx.jobApprovalStore, task, request.serverId, request.toolName),
     grantAccess: (task) => grantTaskToolAccess(task, request.serverId, request.toolName),
-    persist: () => ctx.persistentApprovalStore.allowTool(request.serverId, request.toolName),
+    persist: () => ctx.globalApprovalStore.allowTool(request.serverId, request.toolName),
     reason,
   });
 }
@@ -69,11 +73,13 @@ export async function resolveMcpResourceReadRequest(
     deniedMessage: messages.userDeniedMcpResourceRead(request.serverId, request.uri, reason),
     onceMessage: messages.mcpResourceReadAllowedOnce(request.serverId, request.uri),
     sessionMessage: messages.mcpResourceReadAllowedForWorkerSession(request.serverId, request.uri),
+    jobMessage: messages.mcpResourceReadAllowedForJob(request.serverId, request.uri),
     alwaysMessage: messages.mcpResourceReadAllowedAndPersisted(request.serverId, request.uri),
     persistentMessage: messages.mcpResourceReadAllowedFromPersistentConfig(request.serverId, request.uri),
     grantAutoApprovalForTask: (task) => grantMcpAutoApprovalForTask(ctx.jobApprovalStore, task, request.serverId),
+    grantApprovalForJob: (task) => grantMcpResourceReadApprovalForJob(ctx.jobApprovalStore, task, request.serverId, request.uri),
     grantAccess: (task) => grantTaskResourceReadAccess(task, request.serverId, request.uri),
-    persist: () => ctx.persistentApprovalStore.allowResourceRead(request.serverId, request.uri),
+    persist: () => ctx.globalApprovalStore.allowResourceRead(request.serverId, request.uri),
     reason,
   });
 }
@@ -94,7 +100,7 @@ export async function resolveHttpTokenRequest(
     grantAutoApprovalForTask: (task) => grantHttpTokenAutoApprovalForTask(ctx.jobApprovalStore, task, request.tokenId),
     grantOnce: (task) => grantHttpTokenOnce(task, request.tokenId, request.host),
     grantAccess: (task) => grantHttpTokenSessionAccess(task, request.tokenId, request.host),
-    persist: () => ctx.persistentApprovalStore.allowHttpToken(request.tokenId, request.host),
+    persist: () => ctx.globalApprovalStore.allowHttpToken(request.tokenId, request.host),
     reason,
   });
 }
@@ -112,9 +118,11 @@ async function resolveScopedApprovalRequest(
     deniedMessage: string;
     onceMessage: string;
     sessionMessage: string;
+    jobMessage?: string;
     alwaysMessage: string;
     persistentMessage: string;
     grantAutoApprovalForTask: (task: ActiveTaskState) => Promise<void>;
+    grantApprovalForJob?: (task: ActiveTaskState) => Promise<void>;
     grantAccess: (task: ActiveTaskState) => void;
     grantOnce?: (task: ActiveTaskState) => void;
     persist: () => Promise<void>;
@@ -144,6 +152,12 @@ async function resolveScopedApprovalRequest(
       }
       options.grantAccess(activeTask.activeTask);
       return approvedPrivilegeResult(request.requestId, options.sessionMessage, "worker_session");
+    case "approve_for_job":
+      if (!options.jobMessage || !options.grantApprovalForJob) {
+        return deniedPrivilegeResult(request.requestId, options.deniedMessage, options.reason);
+      }
+      await options.grantApprovalForJob(activeTask.activeTask);
+      return approvedPrivilegeResult(request.requestId, options.jobMessage, "job");
     case "approve_always":
       await options.persist();
       await options.grantAutoApprovalForTask(activeTask.activeTask);
@@ -183,8 +197,14 @@ export async function resolveHostDirectoryRequest(
         messages.hostDirectoryAccessAllowedForWorkerSession(request.path, request.level),
         "worker_session",
       );
+    case "approve_for_job":
+      return deniedPrivilegeResult(
+        request.requestId,
+        messages.hostDirectoryAccessDenied(request.path, request.level, reason),
+        reason,
+      );
     case "approve_always":
-      await ctx.persistentApprovalStore.allowHostDirectory(request.path, request.level);
+      await ctx.globalApprovalStore.allowHostDirectory(request.path, request.level);
       grantTaskHostDirectoryAccess(activeTask.activeTask, request.path, request.level);
       return grantHostDirectoryWithMessage(
         ctx,

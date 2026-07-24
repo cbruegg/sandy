@@ -22,8 +22,8 @@ import {
 import type {
   ChannelFormatting,
   MainAgentDecision,
-  MainAgentTaskPolicy,
-  MainAgentTaskPolicyInput,
+  TaskAutoApprovalEligibility,
+  TaskAutoApprovalEligibilityInput,
   NormalizedChatEvent,
   SessionState,
   SharedAttachment,
@@ -209,12 +209,12 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
             taskId,
             taskName: decision.taskName,
           });
-          const taskPolicy = normalizeTaskPolicy(decision.taskPolicy);
+          const autoApprovalEligibility = normalizeAutoApprovalEligibility(decision.autoApprovalEligibility);
           session.visibleTask = new ActiveTaskState({
             taskId,
             taskName: decision.taskName,
             startedAt: now,
-            taskPolicy,
+            autoApprovalEligibility,
             origin: { kind: "launchedByUser" },
             interactionState: "interacting",
           });
@@ -276,14 +276,17 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     const taskId = randomUUID();
     const now = new Date().toISOString();
     const taskName = `Scheduled job: ${job.name}`;
-    const taskPolicy = await this.deps.jobApprovalStore.getTaskPolicy(job.id);
+    const autoApprovalEligibility = await this.deps.jobApprovalStore.getAutoApprovalEligibility(job.id);
+    const mcpApprovals = await this.deps.jobApprovalStore.getMcpApprovals(job.id);
     const taskState = new ActiveTaskState({
       taskId,
       taskName,
       startedAt: now,
-      taskPolicy,
+      autoApprovalEligibility,
       origin: { kind: "launchedByJob", jobId: job.id, jobName: job.name },
       interactionState: "silent",
+      approvedMcpTools: mcpApprovals.approvedMcpTools,
+      approvedMcpResourceReads: mcpApprovals.approvedMcpResourceReads,
       approvedHostDirectories: workspacePath ? [{ path: workspacePath, level: "read_write" }] : [],
     });
     this.deps.taskCoordinator.addBackgroundJobTask(session, taskState);
@@ -617,10 +620,10 @@ function createReleasedTaskSummaryEntry(summary: string): TranscriptEntry {
   };
 }
 
-function normalizeTaskPolicy(policy: MainAgentTaskPolicyInput | undefined): MainAgentTaskPolicy {
+function normalizeAutoApprovalEligibility(policy: TaskAutoApprovalEligibilityInput | undefined): TaskAutoApprovalEligibility {
   return {
-    autoApproveMcpServers: [...new Set(policy?.autoApproveMcpServers ?? [])],
-    autoApproveHttpTokens: [...new Set(policy?.autoApproveHttpTokens ?? [])],
+    eligibleMcpServers: [...new Set(policy?.eligibleMcpServers ?? [])],
+    eligibleHttpTokens: [...new Set(policy?.eligibleHttpTokens ?? [])],
   };
 }
 

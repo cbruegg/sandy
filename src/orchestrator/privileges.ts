@@ -75,7 +75,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     private readonly taskFailureHandler: TaskFailureHandler,
   ) {
     this.privilegeContext = {
-      persistentApprovalStore: deps.persistentApprovalStore,
+      globalApprovalStore: deps.globalApprovalStore,
       jobApprovalStore: deps.jobApprovalStore,
       workerToolsHandler,
     };
@@ -196,7 +196,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     return this.authorizeMcpRequest(input.taskId, {
       serverId: input.serverId,
       isTaskGrantAllowed: (task) => isTaskToolGrantAllowed(task, input.serverId, input.toolName),
-      isPersistentAllowed: () => Promise.resolve(this.deps.persistentApprovalStore.isAlwaysAllowed(input.serverId, input.toolName)),
+      isPersistentAllowed: () => Promise.resolve(this.deps.globalApprovalStore.isAlwaysAllowed(input.serverId, input.toolName)),
       sessionMessage: messages.mcpToolAllowedForWorkerSession(input.serverId, input.toolName),
       persistentMessage: messages.mcpToolAllowedFromPersistentConfig(input.serverId, input.toolName),
       buildRequest: (requestId) => ({
@@ -217,7 +217,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
     return this.authorizeMcpRequest(input.taskId, {
       serverId: input.serverId,
       isTaskGrantAllowed: (task) => isTaskResourceReadGrantAllowed(task, input.serverId, input.uri),
-      isPersistentAllowed: () => Promise.resolve(this.deps.persistentApprovalStore.isResourceReadAlwaysAllowed(input.serverId, input.uri)),
+      isPersistentAllowed: () => Promise.resolve(this.deps.globalApprovalStore.isResourceReadAlwaysAllowed(input.serverId, input.uri)),
       sessionMessage: messages.mcpResourceReadAllowedForWorkerSession(input.serverId, input.uri),
       persistentMessage: messages.mcpResourceReadAllowedFromPersistentConfig(input.serverId, input.uri),
       buildRequest: (requestId) => ({
@@ -365,6 +365,7 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       request: {
         ...options.buildRequest(randomUUID()),
         confirmsAutoApprovalForTask: authorization.confirmsAutoApprovalForTask,
+        canApproveForJob: activeTask.origin.kind === "launchedByJob",
       },
       registerResolver: (requestId, resolve) => {
         this.activeTasks.setPendingMcpPrivilegeResolver(requestId, resolve);

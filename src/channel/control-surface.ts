@@ -91,6 +91,9 @@ export function buildPrivilegeControls(request: PrivilegeRequest): ControlSurfac
       { actionId: "approve_worker_session", label: buttonLabels.approveWorkerSession, event: { kind: "approval_response", target: "privilege_request", decision: "approve_worker_session", requestId: request.requestId } },
     ]);
     rows.push([
+      ...(request.canApproveForJob
+        ? [{ actionId: "approve_for_job", label: buttonLabels.approveForJob, event: { kind: "approval_response" as const, target: "privilege_request" as const, decision: "approve_for_job" as const, requestId: request.requestId } }]
+        : []),
       { actionId: "approve_always", label: buttonLabels.approveAlways, event: { kind: "approval_response", target: "privilege_request", decision: "approve_always", requestId: request.requestId } },
       { actionId: "deny", label: buttonLabels.deny, event: { kind: "approval_response", target: "privilege_request", decision: "deny", requestId: request.requestId } },
     ]);

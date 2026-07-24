@@ -291,12 +291,14 @@ async function writeSimpleEvent(
   });
 }
 
-function mapApprovalScope(scope: string): "approve_once" | "approve_worker_session" | "approve_always" {
+function mapApprovalScope(scope: string): "approve_once" | "approve_worker_session" | "approve_for_job" | "approve_always" {
   switch (scope) {
     case "once":
       return "approve_once";
     case "worker_session":
       return "approve_worker_session";
+    case "job":
+      return "approve_for_job";
     case "always":
       return "approve_always";
     default:

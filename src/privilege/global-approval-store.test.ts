@@ -2,9 +2,9 @@ import { describe, it, expect, beforeEach, afterEach } from "bun:test";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TomlPersistentApprovalStore } from "./persistent-approval-store.js";
+import { TomlGlobalApprovalStore } from "./global-approval-store.js";
 
-describe("TomlPersistentApprovalStore", () => {
+describe("TomlGlobalApprovalStore", () => {
   let tempDir: string;
   let configFilePath: string;
 
@@ -25,7 +25,7 @@ allowed_user = "12345"
 `;
     await writeFile(configFilePath, originalConfig, "utf8");
 
-    const store = new TomlPersistentApprovalStore(configFilePath, {});
+    const store = new TomlGlobalApprovalStore(configFilePath, {});
     await store.allowTool("todoist", "find-projects");
 
     const result = await readFile(configFilePath, "utf8");
@@ -59,7 +59,7 @@ always_allow_tools = ["list_projects"]
 `;
     await writeFile(configFilePath, originalConfig, "utf8");
 
-    const store = new TomlPersistentApprovalStore(configFilePath, {
+    const store = new TomlGlobalApprovalStore(configFilePath, {
       todoist: ["list_projects"],
     });
     await store.allowTool("todoist", "find-projects");
@@ -84,7 +84,7 @@ always_allow_tools = ["list_projects"]
 `;
     await writeFile(configFilePath, originalConfig, "utf8");
 
-    const store = new TomlPersistentApprovalStore(configFilePath, {
+    const store = new TomlGlobalApprovalStore(configFilePath, {
       todoist: ["list_projects"],
     });
     await store.allowTool("github", "create-issue");
@@ -110,7 +110,7 @@ always_allow_tools = ["find-projects"]
 `;
     await writeFile(configFilePath, originalConfig, "utf8");
 
-    const store = new TomlPersistentApprovalStore(configFilePath, {
+    const store = new TomlGlobalApprovalStore(configFilePath, {
       todoist: ["find-projects"],
     });
     await store.allowTool("todoist", "find-projects");
@@ -128,7 +128,7 @@ allowed_user = "12345"
 `;
     await writeFile(configFilePath, originalConfig, "utf8");
 
-    const store = new TomlPersistentApprovalStore(configFilePath, {});
+    const store = new TomlGlobalApprovalStore(configFilePath, {});
     await store.allowResourceRead("todoist", "test://resource");
 
     const result = await readFile(configFilePath, "utf8");
@@ -149,7 +149,7 @@ always_allow_tools = ["list_projects"]
 `;
     await writeFile(configFilePath, originalConfig, "utf8");
 
-    const store = new TomlPersistentApprovalStore(configFilePath, {
+    const store = new TomlGlobalApprovalStore(configFilePath, {
       todoist: ["list_projects"],
     });
     await store.allowResourceRead("todoist", "test://resource");
@@ -170,7 +170,7 @@ always_allow_resources = ["test://resource"]
 `;
     await writeFile(configFilePath, originalConfig, "utf8");
 
-    const store = new TomlPersistentApprovalStore(configFilePath, {}, {}, {
+    const store = new TomlGlobalApprovalStore(configFilePath, {}, {}, {
       todoist: ["test://resource"],
     });
     await store.allowResourceRead("todoist", "test://resource");

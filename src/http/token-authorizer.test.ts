@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import { HttpTokenAuthorizer } from "./token-authorizer.js";
 import { InMemorySessionStore } from "../session/in-memory-session-store.js";
 import { ActiveTaskState } from "../types.js";
-import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
+import type { GlobalApprovalStore } from "../privilege/global-approval-store.js";
 
-function createFakePersistentApprovalStore(
+function createFakeGlobalApprovalStore(
   alwaysAllowed: Array<{ tokenId: string; host: string }> = [],
-): PersistentApprovalStore {
+): GlobalApprovalStore {
   const allowed = new Set(alwaysAllowed.map((a) => `${a.tokenId}:${a.host}`));
   return {
     isAlwaysAllowed: () => false,
@@ -23,7 +23,7 @@ function createFakePersistentApprovalStore(
 
 test("HttpTokenAuthorizer prefers worker_session grants over once grants", async () => {
   const sessionStore = new InMemorySessionStore();
-  const authorizer = new HttpTokenAuthorizer(sessionStore, createFakePersistentApprovalStore());
+  const authorizer = new HttpTokenAuthorizer(sessionStore, createFakeGlobalApprovalStore());
 
   const chatId = "chat-1";
   const taskId = "task-1";
@@ -33,7 +33,7 @@ test("HttpTokenAuthorizer prefers worker_session grants over once grants", async
     taskId,
     taskName: "test",
     startedAt: new Date().toISOString(),
-    taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
+    autoApprovalEligibility: { eligibleMcpServers: [], eligibleHttpTokens: [] },
     origin: { kind: "launchedByUser" },
     interactionState: "interacting",
     approvedHttpTokenSessionGrants: [{ tokenId: "api-token", host: "api.example.com" }],
@@ -60,7 +60,7 @@ test("HttpTokenAuthorizer prefers worker_session grants over once grants", async
 
 test("HttpTokenAuthorizer consumes once grants without affecting session grants", async () => {
   const sessionStore = new InMemorySessionStore();
-  const authorizer = new HttpTokenAuthorizer(sessionStore, createFakePersistentApprovalStore());
+  const authorizer = new HttpTokenAuthorizer(sessionStore, createFakeGlobalApprovalStore());
 
   const chatId = "chat-1";
   const taskId = "task-1";
@@ -70,7 +70,7 @@ test("HttpTokenAuthorizer consumes once grants without affecting session grants"
     taskId,
     taskName: "test",
     startedAt: new Date().toISOString(),
-    taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
+    autoApprovalEligibility: { eligibleMcpServers: [], eligibleHttpTokens: [] },
     origin: { kind: "launchedByUser" },
     interactionState: "interacting",
     approvedHttpTokenOnceGrants: [{ tokenId: "api-token", host: "api.example.com", consumed: false }],
@@ -94,7 +94,7 @@ test("HttpTokenAuthorizer consumes once grants without affecting session grants"
 });
 
 test("HttpTokenAuthorizer returns failed when task is not registered", async () => {
-  const authorizer = new HttpTokenAuthorizer(new InMemorySessionStore(), createFakePersistentApprovalStore());
+  const authorizer = new HttpTokenAuthorizer(new InMemorySessionStore(), createFakeGlobalApprovalStore());
 
   const result = authorizer.authorizeHttpTokenUse({
     taskId: "missing-task",
@@ -109,7 +109,7 @@ test("HttpTokenAuthorizer applies persistent approvals only when task policy ena
   const sessionStore = new InMemorySessionStore();
   const authorizer = new HttpTokenAuthorizer(
     sessionStore,
-    createFakePersistentApprovalStore([{ tokenId: "api-token", host: "api.example.com" }]),
+    createFakeGlobalApprovalStore([{ tokenId: "api-token", host: "api.example.com" }]),
   );
 
   const chatId = "chat-1";
@@ -120,7 +120,7 @@ test("HttpTokenAuthorizer applies persistent approvals only when task policy ena
     taskId,
     taskName: "test",
     startedAt: new Date().toISOString(),
-    taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
+    autoApprovalEligibility: { eligibleMcpServers: [], eligibleHttpTokens: [] },
     origin: { kind: "launchedByUser" },
     interactionState: "interacting",
   });
@@ -130,7 +130,7 @@ test("HttpTokenAuthorizer applies persistent approvals only when task policy ena
     tokenId: "api-token",
     host: "api.example.com",
   });
-  session.visibleTask.taskPolicy.autoApproveHttpTokens.push("api-token");
+  session.visibleTask.autoApprovalEligibility.eligibleHttpTokens.push("api-token");
   const afterAccess = authorizer.authorizeHttpTokenUse({
     taskId,
     tokenId: "api-token",
@@ -146,7 +146,7 @@ test("HttpTokenAuthorizer applies global persistent approvals to job tasks only 
   const sessionStore = new InMemorySessionStore();
   const authorizer = new HttpTokenAuthorizer(
     sessionStore,
-    createFakePersistentApprovalStore([{ tokenId: "api-token", host: "api.example.com" }]),
+    createFakeGlobalApprovalStore([{ tokenId: "api-token", host: "api.example.com" }]),
   );
 
   const session = sessionStore.getOrCreate("chat-1");
@@ -154,7 +154,7 @@ test("HttpTokenAuthorizer applies global persistent approvals to job tasks only 
     taskId: "task-1",
     taskName: "test",
     startedAt: new Date().toISOString(),
-    taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
+    autoApprovalEligibility: { eligibleMcpServers: [], eligibleHttpTokens: [] },
     origin: { kind: "launchedByJob", jobId: "job-1", jobName: "Job 1" },
     interactionState: "silent",
   });
@@ -164,7 +164,7 @@ test("HttpTokenAuthorizer applies global persistent approvals to job tasks only 
     tokenId: "api-token",
     host: "api.example.com",
   });
-  session.visibleTask.taskPolicy.autoApproveHttpTokens.push("api-token");
+  session.visibleTask.autoApprovalEligibility.eligibleHttpTokens.push("api-token");
   const afterAccess = authorizer.authorizeHttpTokenUse({
     taskId: "task-1",
     tokenId: "api-token",

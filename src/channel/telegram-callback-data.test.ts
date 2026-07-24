@@ -15,11 +15,16 @@ test("Telegram callback data round-trips semantic control events", () => {
       event: { kind: "approval_response", target: "privilege_request", decision: "approve_once", requestId: "req-2" },
       serialized: "approve_once:req-2",
     },
-    {
-      actionId: "approve_worker_session",
+  {
+    actionId: "approve_worker_session",
       event: { kind: "approval_response", target: "privilege_request", decision: "approve_worker_session", requestId: "req-3" },
       serialized: "approve_worker_session:req-3",
-    },
+  },
+  {
+    actionId: "approve_for_job",
+    event: { kind: "approval_response", target: "privilege_request", decision: "approve_for_job", requestId: "req-job" },
+    serialized: "approve_for_job:req-job",
+  },
     {
       actionId: "approve_always",
       event: { kind: "approval_response", target: "privilege_request", decision: "approve_always", requestId: "req-4" },

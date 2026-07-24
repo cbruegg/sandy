@@ -1,5 +1,5 @@
 import type {PrivilegeRequest} from "./privilege.js";
-import type {MainAgentTaskPolicy} from "./main-agent.js";
+import type {TaskAutoApprovalEligibility} from "./main-agent.js";
 import type {HostDirectoryAccessLevel} from "../hostfs/path-policy.ts";
 import type { ChatId } from "./chat-events.js";
 import type { MessageAttachment } from "./attachments.js";
@@ -67,11 +67,11 @@ type JobTaskInteractionState = "silent" | "waitingToInteract" | "interacting";
 
 type ActiveTaskStateRequired = Pick<
   ActiveTaskState,
-  "taskId" | "taskName" | "startedAt" | "taskPolicy" | "origin" | "interactionState"
+  "taskId" | "taskName" | "startedAt" | "autoApprovalEligibility" | "origin" | "interactionState"
 >;
 
 type ActiveTaskStateOverrides = Partial<
-  Omit<ActiveTaskState, "taskId" | "taskName" | "startedAt" | "taskPolicy" | "origin" | "status">
+  Omit<ActiveTaskState, "taskId" | "taskName" | "startedAt" | "autoApprovalEligibility" | "origin" | "status">
 >;
 
 type ActiveTaskStateInit = ActiveTaskStateRequired & ActiveTaskStateOverrides;
@@ -85,7 +85,7 @@ export class ActiveTaskState {
   readonly taskId: string;
   readonly taskName: string;
   readonly startedAt: string;
-  readonly taskPolicy: MainAgentTaskPolicy;
+  readonly autoApprovalEligibility: TaskAutoApprovalEligibility;
   readonly origin: TaskOrigin;
   pendingPrivilegeRequest: PrivilegeRequest | null;
   approvedMcpTools: McpToolGrant[];
@@ -102,7 +102,7 @@ export class ActiveTaskState {
     this.taskId = init.taskId;
     this.taskName = init.taskName;
     this.startedAt = init.startedAt;
-    this.taskPolicy = init.taskPolicy;
+    this.autoApprovalEligibility = init.autoApprovalEligibility;
     this.origin = init.origin;
     this.interactionState = init.interactionState;
     this.#status = "running";

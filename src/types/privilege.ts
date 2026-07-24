@@ -3,50 +3,50 @@ import type {HostDirectoryAccessLevel} from "../hostfs/path-policy.ts";
 import type { JobMutationRequest } from "../jobs/job-types.js";
 import type { FileCopyWorkerToolPayload } from "../subagent/worker-tools.js";
 
-const privilegeApprovalScopeSchema = z.enum(["once", "worker_session", "always"]);
+const privilegeApprovalScopeSchema = z.enum(["once", "worker_session", "job", "always"]);
 
-type FileCopyPrivilegeRequest = {
-  kind: "file_copy";
+type PrivilegeRequestBase = {
+  kind: string;
   requestId: string;
+  canApproveForJob?: boolean;
+};
+
+type FileCopyPrivilegeRequest = PrivilegeRequestBase & {
+  kind: "file_copy";
   payload: FileCopyWorkerToolPayload;
 };
 
-type HostDirectoryAccessPrivilegeRequest = {
+type HostDirectoryAccessPrivilegeRequest = PrivilegeRequestBase & {
   kind: "host_directory_access";
-  requestId: string;
   path: string;
   level: HostDirectoryAccessLevel;
 };
 
-type McpToolCallPrivilegeRequest = {
+type McpToolCallPrivilegeRequest = PrivilegeRequestBase & {
   kind: "mcp_tool_call";
-  requestId: string;
   serverId: string;
   toolName: string;
   arguments: unknown;
   confirmsAutoApprovalForTask?: boolean;
 };
 
-type McpResourceReadPrivilegeRequest = {
+type McpResourceReadPrivilegeRequest = PrivilegeRequestBase & {
   kind: "mcp_resource_read";
-  requestId: string;
   serverId: string;
   uri: string;
   confirmsAutoApprovalForTask?: boolean;
 };
 
-type HttpTokenUsePrivilegeRequest = {
+type HttpTokenUsePrivilegeRequest = PrivilegeRequestBase & {
   kind: "http_token_use";
-  requestId: string;
   tokenId: string;
   host: string;
   reason: string;
   confirmsAutoApprovalForTask?: boolean;
 };
 
-type SkillMutationPrivilegeRequest = {
+type SkillMutationPrivilegeRequest = PrivilegeRequestBase & {
   kind: "skill_mutation";
-  requestId: string;
   operation: "create" | "update" | "delete";
   skillId: string;
   name?: string;
@@ -54,9 +54,8 @@ type SkillMutationPrivilegeRequest = {
   body?: string;
 };
 
-type JobMutationPrivilegeRequest = {
+type JobMutationPrivilegeRequest = PrivilegeRequestBase & {
   kind: "job_mutation";
-  requestId: string;
   mutation: JobMutationRequest;
 };
 
