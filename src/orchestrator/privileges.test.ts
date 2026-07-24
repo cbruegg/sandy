@@ -1010,7 +1010,7 @@ test("orchestrator sends mcp resource read privilege request to user when not pr
   assert.ok(session.visibleTask?.approvedMcpResourceReads.some((entry) => entry.serverId === "todoist" && entry.uri === "test://resource"));
 });
 
-test("job-scoped persistent approvals apply only to later executions of the same job", async () => {
+test("allow for job persists an approval only for later executions of the same job", async () => {
   const allowedServers = new Map<string, Set<string>>();
   const persistentApprovalStore: PersistentApprovalStore = {
     isAlwaysAllowed: (serverId, toolName) => allowedServers.get(serverId)?.has(toolName) ?? false,
@@ -1052,17 +1052,24 @@ test("job-scoped persistent approvals apply only to later executions of the same
   });
   await waitFor(() => channel.privilegeRequests.length === 1);
 
-  const firstRequestId = channel.privilegeRequests[0]?.request.requestId;
+  const firstRequest = channel.privilegeRequests[0]?.request;
+  assert.equal(firstRequest?.kind, "mcp_tool_call");
+  if (!firstRequest || firstRequest.kind !== "mcp_tool_call") {
+    throw new Error("Expected an MCP tool privilege request.");
+  }
+  assert.equal(firstRequest?.canApproveForJob, true);
+  const firstRequestId = firstRequest?.requestId;
   await orchestrator.handleChatEvent({
     kind: "approval_response",
     target: "privilege_request",
     chatId: "chat-job-approval",
     messageId: "2",
     timestamp: "2026-04-01T00:00:10.000Z",
-    decision: "approve_always",
+    decision: "approve_for_job",
     requestId: firstRequestId,
   });
-  assert.equal((await firstApproval).scope, "always");
+  assert.equal((await firstApproval).scope, "job");
+  assert.equal(allowedServers.size, 0);
 
   await runner.emit({ type: "task_done" }, firstTaskId);
 
@@ -1073,7 +1080,7 @@ test("job-scoped persistent approvals apply only to later executions of the same
     toolName: "list_projects",
     arguments: {},
   });
-  assert.equal((await secondApproval).scope, "always");
+  assert.equal((await secondApproval).scope, "job");
   assert.equal(channel.privilegeRequests.length, 1);
 
   await runner.emit({ type: "task_done" }, secondTaskId);
@@ -1100,7 +1107,7 @@ test("job-scoped persistent approvals apply only to later executions of the same
   assert.equal(channel.privilegeRequests.length, 2);
   const thirdRequest = channel.privilegeRequests[1]?.request;
   assert.equal(thirdRequest?.kind, "mcp_tool_call");
-  assert.equal(thirdRequest?.confirmsAutoApprovalForTask, true);
+  assert.equal(thirdRequest?.confirmsAutoApprovalForTask, false);
   await orchestrator.handleChatEvent({
     kind: "approval_response",
     target: "privilege_request",

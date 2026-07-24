@@ -49,6 +49,8 @@ export async function resolveMcpToolCallRequest(
     deniedMessage: messages.userDeniedMcpToolCall(request.serverId, request.toolName, reason),
     onceMessage: messages.mcpToolAllowedOnce(request.serverId, request.toolName),
     sessionMessage: messages.mcpToolAllowedForWorkerSession(request.serverId, request.toolName),
+    jobMessage: messages.mcpToolAllowedForJob(request.serverId, request.toolName),
+    canApproveForJob: true,
     alwaysMessage: messages.mcpToolAllowedAndPersisted(request.serverId, request.toolName),
     persistentMessage: messages.mcpToolAllowedFromPersistentConfig(request.serverId, request.toolName),
     grantAutoApprovalForTask: (task) => grantMcpAutoApprovalForTask(ctx.jobApprovalStore, task, request.serverId),
@@ -69,6 +71,8 @@ export async function resolveMcpResourceReadRequest(
     deniedMessage: messages.userDeniedMcpResourceRead(request.serverId, request.uri, reason),
     onceMessage: messages.mcpResourceReadAllowedOnce(request.serverId, request.uri),
     sessionMessage: messages.mcpResourceReadAllowedForWorkerSession(request.serverId, request.uri),
+    jobMessage: messages.mcpResourceReadAllowedForJob(request.serverId, request.uri),
+    canApproveForJob: true,
     alwaysMessage: messages.mcpResourceReadAllowedAndPersisted(request.serverId, request.uri),
     persistentMessage: messages.mcpResourceReadAllowedFromPersistentConfig(request.serverId, request.uri),
     grantAutoApprovalForTask: (task) => grantMcpAutoApprovalForTask(ctx.jobApprovalStore, task, request.serverId),
@@ -112,6 +116,8 @@ async function resolveScopedApprovalRequest(
     deniedMessage: string;
     onceMessage: string;
     sessionMessage: string;
+    jobMessage?: string;
+    canApproveForJob?: boolean;
     alwaysMessage: string;
     persistentMessage: string;
     grantAutoApprovalForTask: (task: ActiveTaskState) => Promise<void>;
@@ -144,6 +150,12 @@ async function resolveScopedApprovalRequest(
       }
       options.grantAccess(activeTask.activeTask);
       return approvedPrivilegeResult(request.requestId, options.sessionMessage, "worker_session");
+    case "approve_for_job":
+      if (!options.canApproveForJob || !options.jobMessage || activeTask.activeTask.origin.kind !== "launchedByJob") {
+        return deniedPrivilegeResult(request.requestId, options.deniedMessage, options.reason);
+      }
+      await options.grantAutoApprovalForTask(activeTask.activeTask);
+      return approvedPrivilegeResult(request.requestId, options.jobMessage, "job");
     case "approve_always":
       await options.persist();
       await options.grantAutoApprovalForTask(activeTask.activeTask);
@@ -182,6 +194,12 @@ export async function resolveHostDirectoryRequest(
         request,
         messages.hostDirectoryAccessAllowedForWorkerSession(request.path, request.level),
         "worker_session",
+      );
+    case "approve_for_job":
+      return deniedPrivilegeResult(
+        request.requestId,
+        messages.hostDirectoryAccessDenied(request.path, request.level, reason),
+        reason,
       );
     case "approve_always":
       await ctx.persistentApprovalStore.allowHostDirectory(request.path, request.level);

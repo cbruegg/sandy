@@ -113,6 +113,21 @@ test("buildPrivilegeControls for mcp_tool_call without auto-confirmation returns
   assert.equal(controls.rows[2]?.[1]?.actionId, "cancel");
 });
 
+test("buildPrivilegeControls offers allow for job only to job tasks", () => {
+  const controls = buildPrivilegeControls({
+    kind: "mcp_tool_call",
+    requestId: "req-1",
+    serverId: "test",
+    toolName: "run",
+    arguments: {},
+    canApproveForJob: true,
+  });
+
+  assert.equal(controls.rows[1]?.[0]?.actionId, "approve_for_job");
+  assert.equal(controls.rows[1]?.[0]?.label, buttonLabels.approveForJob);
+  assert.deepEqual((controls.rows[1]?.[0]?.event as { kind: "approval_response"; decision: string }).decision, "approve_for_job");
+});
+
 test("buildPrivilegeControls for host_directory_access returns session, always, deny, report, cancel", () => {
   const controls = buildPrivilegeControls({
     kind: "host_directory_access",

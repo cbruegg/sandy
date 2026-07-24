@@ -28,6 +28,15 @@ export function parseTelegramCallbackData(data: string): ControlActionEvent | nu
     };
   }
 
+  if (data.startsWith("approve_for_job:")) {
+    return {
+      kind: "approval_response",
+      target: "privilege_request",
+      decision: "approve_for_job",
+      requestId: data.slice("approve_for_job:".length) || undefined,
+    };
+  }
+
   if (data.startsWith("approve_always:")) {
     return {
       kind: "approval_response",

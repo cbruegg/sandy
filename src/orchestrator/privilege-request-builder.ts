@@ -131,6 +131,7 @@ export function buildNativeToolPrivilegeRequest(
   }
 }
 
+
 function shouldConfirmHttpTokenAutoApprovalForTask(
   ctx: PrivilegeRequestBuilderContext,
   session: SessionState,
