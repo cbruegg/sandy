@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { SessionStore } from "../session/in-memory-session-store.js";
-import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
+import type { GlobalApprovalStore } from "../privilege/global-approval-store.js";
 import type { PrivilegeResolutionResult } from "../types.js";
 import { messages } from "../messages-to-agent.js";
 import type { ActiveTaskState } from "../types/task-state.js";
@@ -15,7 +15,7 @@ type AuthorizeHttpTokenUseInput = {
 export class HttpTokenAuthorizer {
   constructor(
     private readonly sessionStore: SessionStore,
-    private readonly persistentApprovalStore: PersistentApprovalStore,
+    private readonly globalApprovalStore: GlobalApprovalStore,
   ) {}
 
   authorizeHttpTokenUse(input: AuthorizeHttpTokenUseInput): PrivilegeResolutionResult {
@@ -77,7 +77,7 @@ export class HttpTokenAuthorizer {
   }
 
   private isHttpTokenAlwaysAllowed(tokenId: string, host: string): boolean {
-    return this.persistentApprovalStore.isHttpTokenAlwaysAllowed(tokenId, host);
+    return this.globalApprovalStore.isHttpTokenAlwaysAllowed(tokenId, host);
   }
 }
 
@@ -85,7 +85,7 @@ function isHttpTokenAutoApprovalAllowed(
   task: ActiveTaskState,
   tokenId: string,
 ): boolean {
-  return task.taskPolicy.autoApproveHttpTokens.includes(tokenId);
+  return task.autoApprovalEligibility.eligibleHttpTokens.includes(tokenId);
 }
 
 function isHttpTokenSessionGrantAllowed(

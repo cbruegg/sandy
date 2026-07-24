@@ -248,9 +248,9 @@ test("buildMainAgentPrompt includes the precise decision schema", () => {
   assert.match(prompt, /"reply"/);
   assert.match(prompt, /"launch_task"/);
   assert.match(prompt, /"taskLanguage"/);
-  assert.match(prompt, /"taskPolicy"/);
-  assert.match(prompt, /autoApproveMcpServers/);
-  assert.match(prompt, /autoApproveHttpTokens/);
+  assert.match(prompt, /"autoApprovalEligibility"/);
+  assert.match(prompt, /eligibleMcpServers/);
+  assert.match(prompt, /eligibleHttpTokens/);
 });
 
 test("buildMainAgentPrompt includes MemPalace MCP instructions when mempalaceAvailable is true", () => {

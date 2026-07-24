@@ -1,4 +1,4 @@
-import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
+import type { GlobalApprovalStore } from "../privilege/global-approval-store.js";
 import type { SessionState } from "../types.js";
 import type { WorkerToolPayload } from "../subagent/worker-tools.js";
 import type { TaskCoordinator } from "./task-coordinator.js";
@@ -25,7 +25,7 @@ export type PrivilegedNativeToolCall = Extract<WorkerToolPayload, {
 
 export interface PrivilegeRequestBuilderContext {
   readonly taskCoordinator: TaskCoordinator;
-  readonly persistentApprovalStore: PersistentApprovalStore;
+  readonly globalApprovalStore: GlobalApprovalStore;
 }
 
 /**
@@ -141,5 +141,5 @@ function shouldConfirmHttpTokenAutoApprovalForTask(
   const activeTask = ctx.taskCoordinator.findTask(session, taskId);
   return activeTask !== null
     && !isHttpTokenAutoApprovalAllowed(activeTask, tokenId)
-    && ctx.persistentApprovalStore.isHttpTokenAlwaysAllowed(tokenId, host);
+    && ctx.globalApprovalStore.isHttpTokenAlwaysAllowed(tokenId, host);
 }

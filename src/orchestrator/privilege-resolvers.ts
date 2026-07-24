@@ -1,4 +1,4 @@
-import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
+import type { GlobalApprovalStore } from "../privilege/global-approval-store.js";
 import type { JobApprovalStoreApi } from "../jobs/job-approval-store.js";
 import { messages } from "../messages-to-agent.js";
 import type {
@@ -35,7 +35,7 @@ type ApprovalDecision = Extract<NormalizedChatEvent, { kind: "approval_response"
  * A superset that both modules share so the orchestrator builds it once.
  */
 export interface PrivilegeContext {
-  readonly persistentApprovalStore: PersistentApprovalStore;
+  readonly globalApprovalStore: GlobalApprovalStore;
   readonly jobApprovalStore: JobApprovalStoreApi;
   readonly workerToolsHandler: WorkerToolsHandler;
 }
@@ -57,7 +57,7 @@ export async function resolveMcpToolCallRequest(
     grantAutoApprovalForTask: (task) => grantMcpAutoApprovalForTask(ctx.jobApprovalStore, task, request.serverId),
     grantApprovalForJob: (task) => grantMcpToolApprovalForJob(ctx.jobApprovalStore, task, request.serverId, request.toolName),
     grantAccess: (task) => grantTaskToolAccess(task, request.serverId, request.toolName),
-    persist: () => ctx.persistentApprovalStore.allowTool(request.serverId, request.toolName),
+    persist: () => ctx.globalApprovalStore.allowTool(request.serverId, request.toolName),
     reason,
   });
 }
@@ -79,7 +79,7 @@ export async function resolveMcpResourceReadRequest(
     grantAutoApprovalForTask: (task) => grantMcpAutoApprovalForTask(ctx.jobApprovalStore, task, request.serverId),
     grantApprovalForJob: (task) => grantMcpResourceReadApprovalForJob(ctx.jobApprovalStore, task, request.serverId, request.uri),
     grantAccess: (task) => grantTaskResourceReadAccess(task, request.serverId, request.uri),
-    persist: () => ctx.persistentApprovalStore.allowResourceRead(request.serverId, request.uri),
+    persist: () => ctx.globalApprovalStore.allowResourceRead(request.serverId, request.uri),
     reason,
   });
 }
@@ -100,7 +100,7 @@ export async function resolveHttpTokenRequest(
     grantAutoApprovalForTask: (task) => grantHttpTokenAutoApprovalForTask(ctx.jobApprovalStore, task, request.tokenId),
     grantOnce: (task) => grantHttpTokenOnce(task, request.tokenId, request.host),
     grantAccess: (task) => grantHttpTokenSessionAccess(task, request.tokenId, request.host),
-    persist: () => ctx.persistentApprovalStore.allowHttpToken(request.tokenId, request.host),
+    persist: () => ctx.globalApprovalStore.allowHttpToken(request.tokenId, request.host),
     reason,
   });
 }
@@ -204,7 +204,7 @@ export async function resolveHostDirectoryRequest(
         reason,
       );
     case "approve_always":
-      await ctx.persistentApprovalStore.allowHostDirectory(request.path, request.level);
+      await ctx.globalApprovalStore.allowHostDirectory(request.path, request.level);
       grantTaskHostDirectoryAccess(activeTask.activeTask, request.path, request.level);
       return grantHostDirectoryWithMessage(
         ctx,

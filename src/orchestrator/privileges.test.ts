@@ -16,7 +16,7 @@ import {
   StubMainAgent,
 } from "./test-helpers.js";
 import { hostGrantsPrefix } from "../paths.js";
-import type { PersistentApprovalStore } from "../privilege/persistent-approval-store.js";
+import type { GlobalApprovalStore } from "../privilege/global-approval-store.js";
 import { sharedWorkspaceMountPath } from "../shared-workspace.js";
 import type { JobDefinition } from "../jobs/job-validation.js";
 import { ActiveTaskState } from "../types.js";
@@ -238,7 +238,7 @@ test("request_interaction tool promotes a silent job task to interactive mode", 
 });
 
 test("silent job privilege requests are preceded by task context when they make the task visible", async () => {
-  const persistentApprovalStore: PersistentApprovalStore = {
+  const globalApprovalStore: GlobalApprovalStore = {
     isAlwaysAllowed: (serverId, toolName) => serverId === "todoist" && toolName === "find-projects",
     allowTool: async () => {},
     isResourceReadAlwaysAllowed: () => false,
@@ -249,7 +249,7 @@ test("silent job privilege requests are preceded by task context when they make 
     allowHostDirectory: async () => {},
   };
   const { orchestrator, taskLifecycle, channel } = createTestOrchestrator({
-    persistentApprovalStore,
+    globalApprovalStore,
     mainAgent: new StubMainAgent({ action: "reply", replyText: "ok" }),
   });
 
@@ -605,7 +605,7 @@ test("orchestrator fails the active task if channel file delivery fails", async 
 });
 
 test("orchestrator authorizes mcp resource reads from persistent config", async () => {
-  const persistentApprovalStore: PersistentApprovalStore = {
+  const globalApprovalStore: GlobalApprovalStore = {
     isAlwaysAllowed: () => false,
     allowTool: async () => {},
     isResourceReadAlwaysAllowed: (_serverId, uri) => uri === "test://resource",
@@ -616,15 +616,15 @@ test("orchestrator authorizes mcp resource reads from persistent config", async 
     allowHostDirectory: async () => {},
   };
   const { orchestrator, runner } = createTestOrchestrator({
-    persistentApprovalStore,
+    globalApprovalStore,
     mainAgent: new StubMainAgent({
       action: "launch_task",
       taskBrief: "Read a resource.",
       taskName: "resource-read",
       taskLanguage: "English",
-      taskPolicy: {
-        autoApproveMcpServers: ["todoist"],
-        autoApproveHttpTokens: [],
+      autoApprovalEligibility: {
+        eligibleMcpServers: ["todoist"],
+        eligibleHttpTokens: [],
       },
     }),
   });
@@ -653,7 +653,7 @@ test("orchestrator authorizes mcp resource reads from persistent config", async 
 });
 
 test("orchestrator does not apply persistent mcp approvals when task policy omits the server", async () => {
-  const persistentApprovalStore: PersistentApprovalStore = {
+  const globalApprovalStore: GlobalApprovalStore = {
     isAlwaysAllowed: () => false,
     allowTool: async () => {},
     isResourceReadAlwaysAllowed: (_serverId, uri) => uri === "test://resource",
@@ -664,15 +664,15 @@ test("orchestrator does not apply persistent mcp approvals when task policy omit
     allowHostDirectory: async () => {},
   };
   const { orchestrator, runner, channel } = createTestOrchestrator({
-    persistentApprovalStore,
+    globalApprovalStore,
     mainAgent: new StubMainAgent({
       action: "launch_task",
       taskBrief: "Read a resource.",
       taskName: "resource-read",
       taskLanguage: "English",
-      taskPolicy: {
-        autoApproveMcpServers: [],
-        autoApproveHttpTokens: [],
+      autoApprovalEligibility: {
+        eligibleMcpServers: [],
+        eligibleHttpTokens: [],
       },
     }),
   });
@@ -715,7 +715,7 @@ test("orchestrator does not apply persistent mcp approvals when task policy omit
 });
 
 test("orchestrator confirms persisted mcp tool approval suitability and reuses it for the task", async () => {
-  const persistentApprovalStore: PersistentApprovalStore = {
+  const globalApprovalStore: GlobalApprovalStore = {
     isAlwaysAllowed: (serverId, toolName) => serverId === "todoist" && toolName === "addTask",
     allowTool: async () => {},
     isResourceReadAlwaysAllowed: () => false,
@@ -726,15 +726,15 @@ test("orchestrator confirms persisted mcp tool approval suitability and reuses i
     allowHostDirectory: async () => {},
   };
   const { orchestrator, runner, channel, store } = createTestOrchestrator({
-    persistentApprovalStore,
+    globalApprovalStore,
     mainAgent: new StubMainAgent({
       action: "launch_task",
       taskBrief: "Add a task.",
       taskName: "todoist-add",
       taskLanguage: "English",
-      taskPolicy: {
-        autoApproveMcpServers: [],
-        autoApproveHttpTokens: [],
+      autoApprovalEligibility: {
+        eligibleMcpServers: [],
+        eligibleHttpTokens: [],
       },
     }),
   });
@@ -780,7 +780,7 @@ test("orchestrator confirms persisted mcp tool approval suitability and reuses i
   assert.equal(result.scope, "always");
 
   const session = store.getOrCreate("chat-mcp-confirm");
-  assert.deepEqual(session.visibleTask?.taskPolicy.autoApproveMcpServers, ["todoist"]);
+  assert.deepEqual(session.visibleTask?.autoApprovalEligibility.eligibleMcpServers, ["todoist"]);
 
   const second = await orchestrator.authorizeMcpToolCall({
     taskId,
@@ -795,7 +795,7 @@ test("orchestrator confirms persisted mcp tool approval suitability and reuses i
 });
 
 test("orchestrator confirms persisted http token suitability and enables later proxy auto-approval", async () => {
-  const persistentApprovalStore: PersistentApprovalStore = {
+  const globalApprovalStore: GlobalApprovalStore = {
     isAlwaysAllowed: () => false,
     allowTool: async () => {},
     isResourceReadAlwaysAllowed: () => false,
@@ -806,15 +806,15 @@ test("orchestrator confirms persisted http token suitability and enables later p
     allowHostDirectory: async () => {},
   };
   const { orchestrator, runner, channel, store } = createTestOrchestrator({
-    persistentApprovalStore,
+    globalApprovalStore,
     mainAgent: new StubMainAgent({
       action: "launch_task",
       taskBrief: "Transcribe a video.",
       taskName: "video-transcribe",
       taskLanguage: "English",
-      taskPolicy: {
-        autoApproveMcpServers: [],
-        autoApproveHttpTokens: [],
+      autoApprovalEligibility: {
+        eligibleMcpServers: [],
+        eligibleHttpTokens: [],
       },
     }),
   });
@@ -864,9 +864,9 @@ test("orchestrator confirms persisted http token suitability and enables later p
   });
 
   const session = store.getOrCreate("chat-http-confirm");
-  assert.deepEqual(session.visibleTask?.taskPolicy.autoApproveHttpTokens, ["vid2text"]);
+  assert.deepEqual(session.visibleTask?.autoApprovalEligibility.eligibleHttpTokens, ["vid2text"]);
 
-  const authorizer = new HttpTokenAuthorizer(store, persistentApprovalStore);
+  const authorizer = new HttpTokenAuthorizer(store, globalApprovalStore);
   const proxyResult = authorizer.authorizeHttpTokenUse({
     taskId,
     tokenId: "vid2text",
@@ -1012,7 +1012,7 @@ test("orchestrator sends mcp resource read privilege request to user when not pr
 
 test("allow for job persists an approval only for later executions of the same job", async () => {
   const allowedServers = new Map<string, Set<string>>();
-  const persistentApprovalStore: PersistentApprovalStore = {
+  const globalApprovalStore: GlobalApprovalStore = {
     isAlwaysAllowed: (serverId, toolName) => allowedServers.get(serverId)?.has(toolName) ?? false,
     allowTool: async (serverId, toolName) => {
       const tools = allowedServers.get(serverId) ?? new Set<string>();
@@ -1027,7 +1027,7 @@ test("allow for job persists an approval only for later executions of the same j
     allowHostDirectory: async () => {},
   };
   const { orchestrator, channel, taskLifecycle, runner } = createTestOrchestrator({
-    persistentApprovalStore,
+    globalApprovalStore,
     jobApprovalStore: new InMemoryJobApprovalStore(),
     mainAgent: new StubMainAgent({
       action: "reply",
@@ -1418,7 +1418,7 @@ test("moveToState rejects invalid task state transitions", () => {
     taskId: "task-1",
     taskName: "test",
     startedAt: new Date(0).toISOString(),
-    taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
+    autoApprovalEligibility: { eligibleMcpServers: [], eligibleHttpTokens: [] },
     origin: { kind: "launchedByUser" },
     interactionState: "interacting",
   });
@@ -1435,7 +1435,7 @@ test("task status field is not directly assignable", () => {
     taskId: "task-1",
     taskName: "test",
     startedAt: new Date(0).toISOString(),
-    taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
+    autoApprovalEligibility: { eligibleMcpServers: [], eligibleHttpTokens: [] },
     origin: { kind: "launchedByUser" },
     interactionState: "interacting",
   });

@@ -9,18 +9,18 @@ test("JobApprovalStore persists task policy per job only", async () => {
   const configDirectory = mkdtempSync(join(tmpdir(), "sandy-job-approval-store-"));
   const store = new JobApprovalStore(configDirectory);
 
-  await store.saveTaskPolicy("job-a", {
-    autoApproveMcpServers: ["todoist", "todoist"],
-    autoApproveHttpTokens: ["news-api"],
+  await store.saveAutoApprovalEligibility("job-a", {
+    eligibleMcpServers: ["todoist", "todoist"],
+    eligibleHttpTokens: ["news-api"],
   });
 
-  assert.deepEqual(await store.getTaskPolicy("job-a"), {
-    autoApproveMcpServers: ["todoist"],
-    autoApproveHttpTokens: ["news-api"],
+  assert.deepEqual(await store.getAutoApprovalEligibility("job-a"), {
+    eligibleMcpServers: ["todoist"],
+    eligibleHttpTokens: ["news-api"],
   });
-  assert.deepEqual(await store.getTaskPolicy("job-b"), {
-    autoApproveMcpServers: [],
-    autoApproveHttpTokens: [],
+  assert.deepEqual(await store.getAutoApprovalEligibility("job-b"), {
+    eligibleMcpServers: [],
+    eligibleHttpTokens: [],
   });
 });
 

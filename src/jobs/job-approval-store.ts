@@ -2,11 +2,11 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
 import { jobApprovalsFile } from "../state-paths.js";
-import type { MainAgentTaskPolicy } from "../types/main-agent.js";
+import type { TaskAutoApprovalEligibility } from "../types/main-agent.js";
 
-const taskPolicySchema = z.object({
-  autoApproveMcpServers: z.array(z.string().min(1)),
-  autoApproveHttpTokens: z.array(z.string().min(1)),
+const autoApprovalEligibilitySchema = z.object({
+  eligibleMcpServers: z.array(z.string().min(1)),
+  eligibleHttpTokens: z.array(z.string().min(1)),
 }).strict();
 
 const mcpToolApprovalSchema = z.object({ serverId: z.string().min(1), toolName: z.string().min(1) }).strict();
@@ -14,7 +14,7 @@ const mcpResourceReadApprovalSchema = z.object({ serverId: z.string().min(1), ur
 
 const jobApprovalStateSchema = z.object({
   jobId: z.string().min(1),
-  taskPolicy: taskPolicySchema,
+  autoApprovalEligibility: autoApprovalEligibilitySchema,
   approvedMcpTools: z.array(mcpToolApprovalSchema).default([]),
   approvedMcpResourceReads: z.array(mcpResourceReadApprovalSchema).default([]),
 }).strict();
@@ -28,8 +28,8 @@ type JobApprovalsFile = z.infer<typeof jobApprovalsFileSchema>;
 export type JobMcpApprovals = Pick<JobApprovalState, "approvedMcpTools" | "approvedMcpResourceReads">;
 
 export interface JobApprovalStoreApi {
-  getTaskPolicy(jobId: string): Promise<MainAgentTaskPolicy>;
-  saveTaskPolicy(jobId: string, taskPolicy: MainAgentTaskPolicy): Promise<void>;
+  getAutoApprovalEligibility(jobId: string): Promise<TaskAutoApprovalEligibility>;
+  saveAutoApprovalEligibility(jobId: string, autoApprovalEligibility: TaskAutoApprovalEligibility): Promise<void>;
   getMcpApprovals(jobId: string): Promise<JobMcpApprovals>;
   allowMcpTool(jobId: string, serverId: string, toolName: string): Promise<void>;
   allowMcpResourceRead(jobId: string, serverId: string, uri: string): Promise<void>;
@@ -42,15 +42,15 @@ export class JobApprovalStore implements JobApprovalStoreApi {
     this.filePath = jobApprovalsFile(configDirectory);
   }
 
-  async getTaskPolicy(jobId: string): Promise<MainAgentTaskPolicy> {
+  async getAutoApprovalEligibility(jobId: string): Promise<TaskAutoApprovalEligibility> {
     const state = await this.getJobState(jobId);
-    return cloneTaskPolicy(state.taskPolicy);
+    return cloneAutoApprovalEligibility(state.autoApprovalEligibility);
   }
 
-  async saveTaskPolicy(jobId: string, taskPolicy: MainAgentTaskPolicy): Promise<void> {
-    const normalizedTaskPolicy = normalizeTaskPolicy(taskPolicy);
+  async saveAutoApprovalEligibility(jobId: string, autoApprovalEligibility: TaskAutoApprovalEligibility): Promise<void> {
+    const normalizedTaskPolicy = normalizeAutoApprovalEligibility(autoApprovalEligibility);
     await this.updateJobState(jobId, (state) => {
-      state.taskPolicy = normalizedTaskPolicy;
+      state.autoApprovalEligibility = normalizedTaskPolicy;
     });
   }
 
@@ -91,7 +91,7 @@ export class JobApprovalStore implements JobApprovalStoreApi {
       data.approvals.push(state);
     }
     update(state);
-    state.taskPolicy = normalizeTaskPolicy(state.taskPolicy);
+    state.autoApprovalEligibility = normalizeAutoApprovalEligibility(state.autoApprovalEligibility);
     await this.save(data);
   }
 
@@ -117,30 +117,30 @@ export class JobApprovalStore implements JobApprovalStoreApi {
 function emptyJobApprovalState(jobId: string): JobApprovalState {
   return {
     jobId,
-    taskPolicy: emptyTaskPolicy(),
+    autoApprovalEligibility: emptyAutoApprovalEligibility(),
     approvedMcpTools: [],
     approvedMcpResourceReads: [],
   };
 }
 
-function normalizeTaskPolicy(taskPolicy: MainAgentTaskPolicy): MainAgentTaskPolicy {
+function normalizeAutoApprovalEligibility(autoApprovalEligibility: TaskAutoApprovalEligibility): TaskAutoApprovalEligibility {
   return {
-    autoApproveMcpServers: uniqueSortedStrings(taskPolicy.autoApproveMcpServers),
-    autoApproveHttpTokens: uniqueSortedStrings(taskPolicy.autoApproveHttpTokens),
+    eligibleMcpServers: uniqueSortedStrings(autoApprovalEligibility.eligibleMcpServers),
+    eligibleHttpTokens: uniqueSortedStrings(autoApprovalEligibility.eligibleHttpTokens),
   };
 }
 
-function cloneTaskPolicy(taskPolicy: MainAgentTaskPolicy): MainAgentTaskPolicy {
+function cloneAutoApprovalEligibility(autoApprovalEligibility: TaskAutoApprovalEligibility): TaskAutoApprovalEligibility {
   return {
-    autoApproveMcpServers: [...taskPolicy.autoApproveMcpServers],
-    autoApproveHttpTokens: [...taskPolicy.autoApproveHttpTokens],
+    eligibleMcpServers: [...autoApprovalEligibility.eligibleMcpServers],
+    eligibleHttpTokens: [...autoApprovalEligibility.eligibleHttpTokens],
   };
 }
 
-function emptyTaskPolicy(): MainAgentTaskPolicy {
+function emptyAutoApprovalEligibility(): TaskAutoApprovalEligibility {
   return {
-    autoApproveMcpServers: [],
-    autoApproveHttpTokens: [],
+    eligibleMcpServers: [],
+    eligibleHttpTokens: [],
   };
 }
 

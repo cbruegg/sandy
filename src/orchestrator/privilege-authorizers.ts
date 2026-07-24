@@ -60,7 +60,7 @@ export function tryAuthorizeNativeHttpTokenUse(
 
   if (
     isHttpTokenAutoApprovalAllowed(activeTask, request.tokenId)
-    && ctx.persistentApprovalStore.isHttpTokenAlwaysAllowed(request.tokenId, request.host)
+    && ctx.globalApprovalStore.isHttpTokenAlwaysAllowed(request.tokenId, request.host)
   ) {
     return approvedPrivilegeResult(
       request.requestId,
@@ -99,7 +99,7 @@ export async function tryAuthorizeHostDirectoryAccess(
     );
   }
 
-  if (ctx.persistentApprovalStore.isHostDirectoryAlwaysAllowed(request.path, request.level)) {
+  if (ctx.globalApprovalStore.isHostDirectoryAlwaysAllowed(request.path, request.level)) {
     return await grantHostDirectoryWithMessage(
       ctx,
       activeTask,

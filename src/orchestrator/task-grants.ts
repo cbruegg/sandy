@@ -86,11 +86,11 @@ export function grantHttpTokenSessionAccess(
 }
 
 export function isMcpAutoApprovalAllowed(task: ActiveTaskState, serverId: string): boolean {
-  return task.taskPolicy.autoApproveMcpServers.includes(serverId);
+  return task.autoApprovalEligibility.eligibleMcpServers.includes(serverId);
 }
 
 export function isHttpTokenAutoApprovalAllowed(task: ActiveTaskState, tokenId: string): boolean {
-  return task.taskPolicy.autoApproveHttpTokens.includes(tokenId);
+  return task.autoApprovalEligibility.eligibleHttpTokens.includes(tokenId);
 }
 
 export async function grantMcpAutoApprovalForTask(
@@ -102,7 +102,7 @@ export async function grantMcpAutoApprovalForTask(
     if (isMcpAutoApprovalAllowed(task, serverId)) {
       return false;
     }
-    task.taskPolicy.autoApproveMcpServers.push(serverId);
+    task.autoApprovalEligibility.eligibleMcpServers.push(serverId);
     return true;
   });
 }
@@ -140,7 +140,7 @@ export async function grantHttpTokenAutoApprovalForTask(
     if (isHttpTokenAutoApprovalAllowed(task, tokenId)) {
       return false;
     }
-    task.taskPolicy.autoApproveHttpTokens.push(tokenId);
+    task.autoApprovalEligibility.eligibleHttpTokens.push(tokenId);
     return true;
   });
 }
@@ -154,5 +154,5 @@ async function updateTaskPolicy(
   if (!changed || task.origin.kind !== "launchedByJob") {
     return;
   }
-  await jobApprovalStore.saveTaskPolicy(task.origin.jobId, task.taskPolicy);
+  await jobApprovalStore.saveAutoApprovalEligibility(task.origin.jobId, task.autoApprovalEligibility);
 }

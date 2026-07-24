@@ -21,7 +21,7 @@ import type { HttpTokenAuthorizer } from "../http/token-authorizer.js";
 import type { McpWorkerLaunchConfigBuilder } from "../mcp/worker-launch-config-builder.js";
 import type { HostMcpServerRegistry } from "../mcp/host-server-registry.js";
 import type { InMemorySessionStore } from "../session/in-memory-session-store.js";
-import type { TomlPersistentApprovalStore } from "../privilege/persistent-approval-store.js";
+import type { TomlGlobalApprovalStore } from "../privilege/global-approval-store.js";
 import type { JobApprovalStore } from "../jobs/job-approval-store.js";
 import type { JobStore } from "../jobs/job-store.js";
 import type { SkillService } from "../skills.js";
@@ -94,7 +94,7 @@ export type CoreStoresInput = {
 export type CoreStoresResult = {
   readonly name: "core-stores";
   readonly sessionStore: InMemorySessionStore;
-  readonly persistentApprovalStore: TomlPersistentApprovalStore;
+  readonly globalApprovalStore: TomlGlobalApprovalStore;
   readonly jobApprovalStore: JobApprovalStore;
   readonly skillService: SkillService;
   readonly jobStore: JobStore;
@@ -108,7 +108,7 @@ export type CoreStoresResult = {
 export type HttpProxyLayerInput = {
   readonly config: SandyConfig;
   readonly sessionStore: InMemorySessionStore;
-  readonly persistentApprovalStore: TomlPersistentApprovalStore;
+  readonly globalApprovalStore: TomlGlobalApprovalStore;
 };
 
 export type HttpProxyLayerResult = {
@@ -207,7 +207,7 @@ export type OrchestratorLayerInput = {
   readonly destinationStore: ChannelDestinationStore;
   readonly channelFormatting: NonNullable<ReturnType<ChannelAdapter["getFormatting"]>>;
   readonly sessionStore: InMemorySessionStore;
-  readonly persistentApprovalStore: TomlPersistentApprovalStore;
+  readonly globalApprovalStore: TomlGlobalApprovalStore;
   readonly jobApprovalStore: JobApprovalStore;
   readonly skillService: SkillService;
   readonly jobStore: JobStore;

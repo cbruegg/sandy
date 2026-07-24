@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import * as toml from "@iarna/toml";
 import { normalizeParsedToml } from "../config.js";
 
-export interface PersistentApprovalStore {
+export interface GlobalApprovalStore {
   isAlwaysAllowed(serverId: string, toolName: string): boolean;
   allowTool(serverId: string, toolName: string): Promise<void>;
   isResourceReadAlwaysAllowed(serverId: string, uri: string): boolean;
@@ -14,7 +14,7 @@ export interface PersistentApprovalStore {
   allowHostDirectory(path: string, level: "read_only" | "read_write"): Promise<void>;
 }
 
-export function createNoopPersistentApprovalStore(): PersistentApprovalStore {
+export function createNoopGlobalApprovalStore(): GlobalApprovalStore {
   return {
     isAlwaysAllowed: () => false,
     allowTool: async () => {},
@@ -44,7 +44,7 @@ type RawApprovalsConfig = {
   };
 };
 
-export class TomlPersistentApprovalStore implements PersistentApprovalStore {
+export class TomlGlobalApprovalStore implements GlobalApprovalStore {
   private readonly approvals = new Map<string, Set<string>>();
   private readonly resourceApprovals = new Map<string, Set<string>>();
   private readonly httpApprovals = new Map<string, Set<string>>();
