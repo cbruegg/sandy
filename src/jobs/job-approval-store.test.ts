@@ -23,3 +23,20 @@ test("JobApprovalStore persists task policy per job only", async () => {
     autoApproveHttpTokens: [],
   });
 });
+
+test("JobApprovalStore persists MCP tool and resource approvals per operation", async () => {
+  const configDirectory = mkdtempSync(join(tmpdir(), "sandy-job-approval-store-"));
+  const store = new JobApprovalStore(configDirectory);
+
+  await store.allowMcpTool("job-a", "todoist", "list_projects");
+  await store.allowMcpResourceRead("job-a", "todoist", "todoist://projects");
+
+  assert.deepEqual(await store.getMcpApprovals("job-a"), {
+    approvedMcpTools: [{ serverId: "todoist", toolName: "list_projects" }],
+    approvedMcpResourceReads: [{ serverId: "todoist", uri: "todoist://projects" }],
+  });
+  assert.deepEqual(await store.getMcpApprovals("job-b"), {
+    approvedMcpTools: [],
+    approvedMcpResourceReads: [],
+  });
+});

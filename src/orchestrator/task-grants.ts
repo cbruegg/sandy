@@ -107,6 +107,30 @@ export async function grantMcpAutoApprovalForTask(
   });
 }
 
+export async function grantMcpToolApprovalForJob(
+  jobApprovalStore: JobApprovalStoreApi,
+  task: ActiveTaskState,
+  serverId: string,
+  toolName: string,
+): Promise<void> {
+  grantTaskToolAccess(task, serverId, toolName);
+  if (task.origin.kind === "launchedByJob") {
+    await jobApprovalStore.allowMcpTool(task.origin.jobId, serverId, toolName);
+  }
+}
+
+export async function grantMcpResourceReadApprovalForJob(
+  jobApprovalStore: JobApprovalStoreApi,
+  task: ActiveTaskState,
+  serverId: string,
+  uri: string,
+): Promise<void> {
+  grantTaskResourceReadAccess(task, serverId, uri);
+  if (task.origin.kind === "launchedByJob") {
+    await jobApprovalStore.allowMcpResourceRead(task.origin.jobId, serverId, uri);
+  }
+}
+
 export async function grantHttpTokenAutoApprovalForTask(
   jobApprovalStore: JobApprovalStoreApi,
   task: ActiveTaskState,

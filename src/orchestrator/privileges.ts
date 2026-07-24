@@ -198,7 +198,6 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       isTaskGrantAllowed: (task) => isTaskToolGrantAllowed(task, input.serverId, input.toolName),
       isPersistentAllowed: () => Promise.resolve(this.deps.persistentApprovalStore.isAlwaysAllowed(input.serverId, input.toolName)),
       sessionMessage: messages.mcpToolAllowedForWorkerSession(input.serverId, input.toolName),
-      jobMessage: messages.mcpToolAllowedForJob(input.serverId, input.toolName),
       persistentMessage: messages.mcpToolAllowedFromPersistentConfig(input.serverId, input.toolName),
       buildRequest: (requestId) => ({
         kind: "mcp_tool_call" as const,
@@ -220,7 +219,6 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       isTaskGrantAllowed: (task) => isTaskResourceReadGrantAllowed(task, input.serverId, input.uri),
       isPersistentAllowed: () => Promise.resolve(this.deps.persistentApprovalStore.isResourceReadAlwaysAllowed(input.serverId, input.uri)),
       sessionMessage: messages.mcpResourceReadAllowedForWorkerSession(input.serverId, input.uri),
-      jobMessage: messages.mcpResourceReadAllowedForJob(input.serverId, input.uri),
       persistentMessage: messages.mcpResourceReadAllowedFromPersistentConfig(input.serverId, input.uri),
       buildRequest: (requestId) => ({
         kind: "mcp_resource_read" as const,
@@ -338,7 +336,6 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       isTaskGrantAllowed: (task: ActiveTaskState) => boolean;
       isPersistentAllowed: () => Promise<boolean>;
       sessionMessage: string;
-      jobMessage: string;
       persistentMessage: string;
       buildRequest: (requestId: string) => Extract<PrivilegeRequest, { kind: "mcp_tool_call" | "mcp_resource_read" }>;
     },
@@ -355,7 +352,6 @@ export class OrchestratorPrivilegesImpl implements OrchestratorPrivileges {
       isTaskGrantAllowed: options.isTaskGrantAllowed,
       isPersistentAllowed: options.isPersistentAllowed,
       sessionMessage: options.sessionMessage,
-      jobMessage: options.jobMessage,
       persistentMessage: options.persistentMessage,
     });
     if (authorization.kind === "resolved") {

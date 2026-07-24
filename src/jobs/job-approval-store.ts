@@ -9,9 +9,14 @@ const taskPolicySchema = z.object({
   autoApproveHttpTokens: z.array(z.string().min(1)),
 }).strict();
 
+const mcpToolApprovalSchema = z.object({ serverId: z.string().min(1), toolName: z.string().min(1) }).strict();
+const mcpResourceReadApprovalSchema = z.object({ serverId: z.string().min(1), uri: z.string().min(1) }).strict();
+
 const jobApprovalStateSchema = z.object({
   jobId: z.string().min(1),
   taskPolicy: taskPolicySchema,
+  approvedMcpTools: z.array(mcpToolApprovalSchema).default([]),
+  approvedMcpResourceReads: z.array(mcpResourceReadApprovalSchema).default([]),
 }).strict();
 
 const jobApprovalsFileSchema = z.object({
@@ -20,10 +25,14 @@ const jobApprovalsFileSchema = z.object({
 
 type JobApprovalState = z.infer<typeof jobApprovalStateSchema>;
 type JobApprovalsFile = z.infer<typeof jobApprovalsFileSchema>;
+export type JobMcpApprovals = Pick<JobApprovalState, "approvedMcpTools" | "approvedMcpResourceReads">;
 
 export interface JobApprovalStoreApi {
   getTaskPolicy(jobId: string): Promise<MainAgentTaskPolicy>;
   saveTaskPolicy(jobId: string, taskPolicy: MainAgentTaskPolicy): Promise<void>;
+  getMcpApprovals(jobId: string): Promise<JobMcpApprovals>;
+  allowMcpTool(jobId: string, serverId: string, toolName: string): Promise<void>;
+  allowMcpResourceRead(jobId: string, serverId: string, uri: string): Promise<void>;
 }
 
 export class JobApprovalStore implements JobApprovalStoreApi {
@@ -42,6 +51,30 @@ export class JobApprovalStore implements JobApprovalStoreApi {
     const normalizedTaskPolicy = normalizeTaskPolicy(taskPolicy);
     await this.updateJobState(jobId, (state) => {
       state.taskPolicy = normalizedTaskPolicy;
+    });
+  }
+
+  async getMcpApprovals(jobId: string): Promise<JobMcpApprovals> {
+    const state = await this.getJobState(jobId);
+    return {
+      approvedMcpTools: state.approvedMcpTools.map((entry) => ({ ...entry })),
+      approvedMcpResourceReads: state.approvedMcpResourceReads.map((entry) => ({ ...entry })),
+    };
+  }
+
+  async allowMcpTool(jobId: string, serverId: string, toolName: string): Promise<void> {
+    await this.updateJobState(jobId, (state) => {
+      if (!state.approvedMcpTools.some((entry) => entry.serverId === serverId && entry.toolName === toolName)) {
+        state.approvedMcpTools.push({ serverId, toolName });
+      }
+    });
+  }
+
+  async allowMcpResourceRead(jobId: string, serverId: string, uri: string): Promise<void> {
+    await this.updateJobState(jobId, (state) => {
+      if (!state.approvedMcpResourceReads.some((entry) => entry.serverId === serverId && entry.uri === uri)) {
+        state.approvedMcpResourceReads.push({ serverId, uri });
+      }
     });
   }
 
@@ -85,6 +118,8 @@ function emptyJobApprovalState(jobId: string): JobApprovalState {
   return {
     jobId,
     taskPolicy: emptyTaskPolicy(),
+    approvedMcpTools: [],
+    approvedMcpResourceReads: [],
   };
 }
 

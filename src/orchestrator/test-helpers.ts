@@ -310,6 +310,7 @@ class FakeSandboxRunner implements SandboxRunner {
 /** In-memory JobApprovalStore for tests that need predictable job-scoped persistence without file I/O. */
 export class InMemoryJobApprovalStore implements JobApprovalStoreApi {
   private readonly taskPolicies = new Map<string, { autoApproveMcpServers: string[]; autoApproveHttpTokens: string[] }>();
+  private readonly mcpApprovals = new Map<string, { approvedMcpTools: Array<{ serverId: string; toolName: string }>; approvedMcpResourceReads: Array<{ serverId: string; uri: string }> }>();
 
   getTaskPolicy(jobId: string): Promise<{ autoApproveMcpServers: string[]; autoApproveHttpTokens: string[] }> {
     const taskPolicy = this.taskPolicies.get(jobId);
@@ -324,6 +325,25 @@ export class InMemoryJobApprovalStore implements JobApprovalStoreApi {
       autoApproveMcpServers: Array.from(new Set(taskPolicy.autoApproveMcpServers)).sort(),
       autoApproveHttpTokens: Array.from(new Set(taskPolicy.autoApproveHttpTokens)).sort(),
     });
+    return Promise.resolve();
+  }
+
+  getMcpApprovals(jobId: string): Promise<{ approvedMcpTools: Array<{ serverId: string; toolName: string }>; approvedMcpResourceReads: Array<{ serverId: string; uri: string }> }> {
+    const approvals = this.mcpApprovals.get(jobId);
+    return Promise.resolve({ approvedMcpTools: [...(approvals?.approvedMcpTools ?? [])], approvedMcpResourceReads: [...(approvals?.approvedMcpResourceReads ?? [])] });
+  }
+
+  allowMcpTool(jobId: string, serverId: string, toolName: string): Promise<void> {
+    const approvals = this.mcpApprovals.get(jobId) ?? { approvedMcpTools: [], approvedMcpResourceReads: [] };
+    if (!approvals.approvedMcpTools.some((entry) => entry.serverId === serverId && entry.toolName === toolName)) approvals.approvedMcpTools.push({ serverId, toolName });
+    this.mcpApprovals.set(jobId, approvals);
+    return Promise.resolve();
+  }
+
+  allowMcpResourceRead(jobId: string, serverId: string, uri: string): Promise<void> {
+    const approvals = this.mcpApprovals.get(jobId) ?? { approvedMcpTools: [], approvedMcpResourceReads: [] };
+    if (!approvals.approvedMcpResourceReads.some((entry) => entry.serverId === serverId && entry.uri === uri)) approvals.approvedMcpResourceReads.push({ serverId, uri });
+    this.mcpApprovals.set(jobId, approvals);
     return Promise.resolve();
   }
 }

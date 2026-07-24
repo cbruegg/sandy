@@ -26,16 +26,11 @@ export async function authorizeMcpImmediately(
     isTaskGrantAllowed: (task: ActiveTaskState) => boolean;
     isPersistentAllowed: () => Promise<boolean>;
     sessionMessage: string;
-    jobMessage: string;
     persistentMessage: string;
   },
 ): Promise<McpAuthorizationDecision> {
   if (options.isTaskGrantAllowed(activeTask)) {
     return { kind: "resolved", result: approvedPrivilegeResult(randomUUID(), options.sessionMessage, "worker_session") };
-  }
-
-  if (activeTask.origin.kind === "launchedByJob" && isMcpAutoApprovalAllowed(activeTask, options.serverId)) {
-    return { kind: "resolved", result: approvedPrivilegeResult(randomUUID(), options.jobMessage, "job") };
   }
 
   const hasConfiguredAutoApproval = await options.isPersistentAllowed();

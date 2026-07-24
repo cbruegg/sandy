@@ -1080,7 +1080,7 @@ test("allow for job persists an approval only for later executions of the same j
     toolName: "list_projects",
     arguments: {},
   });
-  assert.equal((await secondApproval).scope, "job");
+  assert.equal((await secondApproval).scope, "worker_session");
   assert.equal(channel.privilegeRequests.length, 1);
 
   await runner.emit({ type: "task_done" }, secondTaskId);

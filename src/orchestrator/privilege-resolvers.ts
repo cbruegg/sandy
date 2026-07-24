@@ -21,6 +21,8 @@ import {
   grantHttpTokenSessionAccess,
   grantHttpTokenAutoApprovalForTask,
   grantMcpAutoApprovalForTask,
+  grantMcpResourceReadApprovalForJob,
+  grantMcpToolApprovalForJob,
   grantTaskHostDirectoryAccess,
   grantTaskResourceReadAccess,
   grantTaskToolAccess,
@@ -50,10 +52,10 @@ export async function resolveMcpToolCallRequest(
     onceMessage: messages.mcpToolAllowedOnce(request.serverId, request.toolName),
     sessionMessage: messages.mcpToolAllowedForWorkerSession(request.serverId, request.toolName),
     jobMessage: messages.mcpToolAllowedForJob(request.serverId, request.toolName),
-    canApproveForJob: true,
     alwaysMessage: messages.mcpToolAllowedAndPersisted(request.serverId, request.toolName),
     persistentMessage: messages.mcpToolAllowedFromPersistentConfig(request.serverId, request.toolName),
     grantAutoApprovalForTask: (task) => grantMcpAutoApprovalForTask(ctx.jobApprovalStore, task, request.serverId),
+    grantApprovalForJob: (task) => grantMcpToolApprovalForJob(ctx.jobApprovalStore, task, request.serverId, request.toolName),
     grantAccess: (task) => grantTaskToolAccess(task, request.serverId, request.toolName),
     persist: () => ctx.persistentApprovalStore.allowTool(request.serverId, request.toolName),
     reason,
@@ -72,10 +74,10 @@ export async function resolveMcpResourceReadRequest(
     onceMessage: messages.mcpResourceReadAllowedOnce(request.serverId, request.uri),
     sessionMessage: messages.mcpResourceReadAllowedForWorkerSession(request.serverId, request.uri),
     jobMessage: messages.mcpResourceReadAllowedForJob(request.serverId, request.uri),
-    canApproveForJob: true,
     alwaysMessage: messages.mcpResourceReadAllowedAndPersisted(request.serverId, request.uri),
     persistentMessage: messages.mcpResourceReadAllowedFromPersistentConfig(request.serverId, request.uri),
     grantAutoApprovalForTask: (task) => grantMcpAutoApprovalForTask(ctx.jobApprovalStore, task, request.serverId),
+    grantApprovalForJob: (task) => grantMcpResourceReadApprovalForJob(ctx.jobApprovalStore, task, request.serverId, request.uri),
     grantAccess: (task) => grantTaskResourceReadAccess(task, request.serverId, request.uri),
     persist: () => ctx.persistentApprovalStore.allowResourceRead(request.serverId, request.uri),
     reason,
@@ -117,10 +119,10 @@ async function resolveScopedApprovalRequest(
     onceMessage: string;
     sessionMessage: string;
     jobMessage?: string;
-    canApproveForJob?: boolean;
     alwaysMessage: string;
     persistentMessage: string;
     grantAutoApprovalForTask: (task: ActiveTaskState) => Promise<void>;
+    grantApprovalForJob?: (task: ActiveTaskState) => Promise<void>;
     grantAccess: (task: ActiveTaskState) => void;
     grantOnce?: (task: ActiveTaskState) => void;
     persist: () => Promise<void>;
@@ -151,10 +153,10 @@ async function resolveScopedApprovalRequest(
       options.grantAccess(activeTask.activeTask);
       return approvedPrivilegeResult(request.requestId, options.sessionMessage, "worker_session");
     case "approve_for_job":
-      if (!options.canApproveForJob || !options.jobMessage || activeTask.activeTask.origin.kind !== "launchedByJob") {
+      if (!options.jobMessage || !options.grantApprovalForJob) {
         return deniedPrivilegeResult(request.requestId, options.deniedMessage, options.reason);
       }
-      await options.grantAutoApprovalForTask(activeTask.activeTask);
+      await options.grantApprovalForJob(activeTask.activeTask);
       return approvedPrivilegeResult(request.requestId, options.jobMessage, "job");
     case "approve_always":
       await options.persist();

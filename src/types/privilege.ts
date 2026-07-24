@@ -44,7 +44,6 @@ type HttpTokenUsePrivilegeRequest = {
   host: string;
   reason: string;
   confirmsAutoApprovalForTask?: boolean;
-  canApproveForJob?: boolean;
 };
 
 type SkillMutationPrivilegeRequest = {

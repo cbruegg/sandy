@@ -261,6 +261,7 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
     const now = new Date().toISOString();
     const taskName = `Scheduled job: ${job.name}`;
     const taskPolicy = await this.deps.jobApprovalStore.getTaskPolicy(job.id);
+    const mcpApprovals = await this.deps.jobApprovalStore.getMcpApprovals(job.id);
     const taskState = new ActiveTaskState({
       taskId,
       taskName,
@@ -268,6 +269,8 @@ export class OrchestratorTaskLifecycleImpl implements TaskFailureHandler, Orches
       taskPolicy,
       origin: { kind: "launchedByJob", jobId: job.id, jobName: job.name },
       interactionState: "silent",
+      approvedMcpTools: mcpApprovals.approvedMcpTools,
+      approvedMcpResourceReads: mcpApprovals.approvedMcpResourceReads,
       approvedHostDirectories: workspacePath ? [{ path: workspacePath, level: "read_write" }] : [],
     });
     this.deps.taskCoordinator.addBackgroundJobTask(session, taskState);
