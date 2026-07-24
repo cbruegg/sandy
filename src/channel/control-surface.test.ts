@@ -113,7 +113,7 @@ test("buildPrivilegeControls for mcp_tool_call without auto-confirmation returns
   assert.equal(controls.rows[2]?.[1]?.actionId, "cancel");
 });
 
-test("buildPrivilegeControls offers allow for job only to job tasks", () => {
+test("buildPrivilegeControls offers allow for job to job tasks", () => {
   const controls = buildPrivilegeControls({
     kind: "mcp_tool_call",
     requestId: "req-1",
