@@ -3,7 +3,7 @@ import type {HostDirectoryAccessLevel} from "../hostfs/path-policy.ts";
 import type { JobMutationRequest } from "../jobs/job-types.js";
 import type { FileCopyWorkerToolPayload } from "../subagent/worker-tools.js";
 
-const privilegeApprovalScopeSchema = z.enum(["once", "worker_session", "always"]);
+const privilegeApprovalScopeSchema = z.enum(["once", "worker_session", "job", "always"]);
 
 type FileCopyPrivilegeRequest = {
   kind: "file_copy";
@@ -25,6 +25,7 @@ type McpToolCallPrivilegeRequest = {
   toolName: string;
   arguments: unknown;
   confirmsAutoApprovalForTask?: boolean;
+  canApproveForJob?: boolean;
 };
 
 type McpResourceReadPrivilegeRequest = {
@@ -33,6 +34,7 @@ type McpResourceReadPrivilegeRequest = {
   serverId: string;
   uri: string;
   confirmsAutoApprovalForTask?: boolean;
+  canApproveForJob?: boolean;
 };
 
 type HttpTokenUsePrivilegeRequest = {

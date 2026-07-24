@@ -86,11 +86,11 @@ export function grantHttpTokenSessionAccess(
 }
 
 export function isMcpAutoApprovalAllowed(task: ActiveTaskState, serverId: string): boolean {
-  return task.taskPolicy.autoApproveMcpServers.includes(serverId);
+  return task.autoApprovalEligibility.eligibleMcpServers.includes(serverId);
 }
 
 export function isHttpTokenAutoApprovalAllowed(task: ActiveTaskState, tokenId: string): boolean {
-  return task.taskPolicy.autoApproveHttpTokens.includes(tokenId);
+  return task.autoApprovalEligibility.eligibleHttpTokens.includes(tokenId);
 }
 
 export async function grantMcpAutoApprovalForTask(
@@ -102,9 +102,33 @@ export async function grantMcpAutoApprovalForTask(
     if (isMcpAutoApprovalAllowed(task, serverId)) {
       return false;
     }
-    task.taskPolicy.autoApproveMcpServers.push(serverId);
+    task.autoApprovalEligibility.eligibleMcpServers.push(serverId);
     return true;
   });
+}
+
+export async function grantMcpToolApprovalForJob(
+  jobApprovalStore: JobApprovalStoreApi,
+  task: ActiveTaskState,
+  serverId: string,
+  toolName: string,
+): Promise<void> {
+  grantTaskToolAccess(task, serverId, toolName);
+  if (task.origin.kind === "launchedByJob") {
+    await jobApprovalStore.allowMcpTool(task.origin.jobId, serverId, toolName);
+  }
+}
+
+export async function grantMcpResourceReadApprovalForJob(
+  jobApprovalStore: JobApprovalStoreApi,
+  task: ActiveTaskState,
+  serverId: string,
+  uri: string,
+): Promise<void> {
+  grantTaskResourceReadAccess(task, serverId, uri);
+  if (task.origin.kind === "launchedByJob") {
+    await jobApprovalStore.allowMcpResourceRead(task.origin.jobId, serverId, uri);
+  }
 }
 
 export async function grantHttpTokenAutoApprovalForTask(
@@ -116,7 +140,7 @@ export async function grantHttpTokenAutoApprovalForTask(
     if (isHttpTokenAutoApprovalAllowed(task, tokenId)) {
       return false;
     }
-    task.taskPolicy.autoApproveHttpTokens.push(tokenId);
+    task.autoApprovalEligibility.eligibleHttpTokens.push(tokenId);
     return true;
   });
 }
@@ -130,5 +154,5 @@ async function updateTaskPolicy(
   if (!changed || task.origin.kind !== "launchedByJob") {
     return;
   }
-  await jobApprovalStore.saveTaskPolicy(task.origin.jobId, task.taskPolicy);
+  await jobApprovalStore.saveAutoApprovalEligibility(task.origin.jobId, task.autoApprovalEligibility);
 }

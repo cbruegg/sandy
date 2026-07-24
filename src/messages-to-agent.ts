@@ -18,6 +18,8 @@ export const messages = {
     `Allowed ${serverId}.${toolName} once.`,
   mcpToolAllowedForWorkerSession: (serverId: string, toolName: string): string =>
     `Allowed ${serverId}.${toolName} for this worker session.`,
+  mcpToolAllowedForJob: (serverId: string, toolName: string): string =>
+    `Allowed ${serverId}.${toolName} for future runs of this scheduled job.`,
   mcpToolAllowedFromPersistentConfig: (serverId: string, toolName: string): string =>
     `Allowed ${serverId}.${toolName} from persistent config for this task.`,
   mcpToolAllowedAndPersisted: (serverId: string, toolName: string): string =>
@@ -31,6 +33,8 @@ export const messages = {
     `Allowed ${serverId} ${uri} once.`,
   mcpResourceReadAllowedForWorkerSession: (serverId: string, uri: string): string =>
     `Allowed ${serverId} ${uri} for this worker session.`,
+  mcpResourceReadAllowedForJob: (serverId: string, uri: string): string =>
+    `Allowed ${serverId} ${uri} for future runs of this scheduled job.`,
   mcpResourceReadAllowedFromPersistentConfig: (serverId: string, uri: string): string =>
     `Allowed ${serverId} ${uri} from persistent config for this task.`,
   mcpResourceReadAllowedAndPersisted: (serverId: string, uri: string): string =>

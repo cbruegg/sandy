@@ -44,7 +44,7 @@ function createTask(taskId: string, taskName: string, origin: TaskOrigin) {
     taskId,
     taskName,
     startedAt: new Date(0).toISOString(),
-    taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
+    autoApprovalEligibility: { eligibleMcpServers: [], eligibleHttpTokens: [] },
     origin,
     interactionState: origin.kind === "launchedByJob" ? "silent" : "interacting",
     workerConnected: true,

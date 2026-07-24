@@ -1,6 +1,6 @@
 import type { CoreStoresInput, CoreStoresResult } from "./types.js";
 import { InMemorySessionStore } from "../session/in-memory-session-store.js";
-import { TomlPersistentApprovalStore } from "../privilege/persistent-approval-store.js";
+import { TomlGlobalApprovalStore } from "../privilege/global-approval-store.js";
 import { JobApprovalStore } from "../jobs/job-approval-store.js";
 import { JobStore } from "../jobs/job-store.js";
 import { SkillService } from "../skills.js";
@@ -9,7 +9,7 @@ export function createCoreStoresLayer(input: CoreStoresInput): CoreStoresResult 
   const { config } = input;
 
   const sessionStore = new InMemorySessionStore();
-  const persistentApprovalStore = new TomlPersistentApprovalStore(
+  const globalApprovalStore = new TomlGlobalApprovalStore(
     config.configFilePath,
     config.persistentMcpApprovals,
     config.persistentHttpApprovals,
@@ -27,7 +27,7 @@ export function createCoreStoresLayer(input: CoreStoresInput): CoreStoresResult 
   return {
     name: "core-stores",
     sessionStore,
-    persistentApprovalStore,
+    globalApprovalStore,
     jobApprovalStore,
     skillService,
     jobStore,

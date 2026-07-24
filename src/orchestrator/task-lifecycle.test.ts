@@ -1366,7 +1366,7 @@ test("privilege prompt flushes commentary buffer before showing the request", as
       taskBrief: "Do the thing.",
       taskName: "privilege-task",
       taskLanguage: "English",
-      taskPolicy: { autoApproveMcpServers: [], autoApproveHttpTokens: [] },
+      autoApprovalEligibility: { eligibleMcpServers: [], eligibleHttpTokens: [] },
     }),
   });
 

@@ -86,11 +86,16 @@ export function buildPrivilegeControls(request: PrivilegeRequest): ControlSurfac
   }
 
   if (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read" || request.kind === "http_token_use") {
+    const canApproveForJob = (request.kind === "mcp_tool_call" || request.kind === "mcp_resource_read")
+      && request.canApproveForJob;
     rows.push([
       { actionId: "approve_once", label: buttonLabels.approve, event: { kind: "approval_response", target: "privilege_request", decision: "approve_once", requestId: request.requestId } },
       { actionId: "approve_worker_session", label: buttonLabels.approveWorkerSession, event: { kind: "approval_response", target: "privilege_request", decision: "approve_worker_session", requestId: request.requestId } },
     ]);
     rows.push([
+      ...(canApproveForJob
+        ? [{ actionId: "approve_for_job", label: buttonLabels.approveForJob, event: { kind: "approval_response" as const, target: "privilege_request" as const, decision: "approve_for_job" as const, requestId: request.requestId } }]
+        : []),
       { actionId: "approve_always", label: buttonLabels.approveAlways, event: { kind: "approval_response", target: "privilege_request", decision: "approve_always", requestId: request.requestId } },
       { actionId: "deny", label: buttonLabels.deny, event: { kind: "approval_response", target: "privilege_request", decision: "deny", requestId: request.requestId } },
     ]);

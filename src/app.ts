@@ -65,7 +65,7 @@ export async function startApp(): Promise<void> {
   const httpProxy = await createHttpProxyLayer({
     config,
     sessionStore: coreStores.sessionStore,
-    persistentApprovalStore: coreStores.persistentApprovalStore,
+    globalApprovalStore: coreStores.globalApprovalStore,
   });
 
   // ── 6. Hostfs ─────────────────────────────────────────────────────────
@@ -100,7 +100,7 @@ export async function startApp(): Promise<void> {
     destinationStore: channelLayer.destinationStore,
     channelFormatting: channelLayer.channelFormatting,
     sessionStore: coreStores.sessionStore,
-    persistentApprovalStore: coreStores.persistentApprovalStore,
+    globalApprovalStore: coreStores.globalApprovalStore,
     jobApprovalStore: coreStores.jobApprovalStore,
     skillService: coreStores.skillService,
     jobStore: coreStores.jobStore,

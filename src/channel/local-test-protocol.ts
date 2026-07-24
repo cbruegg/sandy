@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { MessageAttachment, NormalizedChatEvent, PrivilegeRequest } from "../types.js";
 import type { ChatId } from "../types.js";
 
-const approvalDecisionSchema = z.enum(["approve", "approve_once", "approve_worker_session", "approve_always", "deny"]);
+const approvalDecisionSchema = z.enum(["approve", "approve_once", "approve_worker_session", "approve_for_job", "approve_always", "deny"]);
 const approvalTargetSchema = z.enum(["privilege_request", "share_deletion", "task_summary_confirmation"]);
 
 const localTestAttachmentSchema = z.object({
