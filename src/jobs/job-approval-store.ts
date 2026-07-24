@@ -9,6 +9,11 @@ const autoApprovalEligibilitySchema = z.object({
   eligibleHttpTokens: z.array(z.string().min(1)),
 }).strict();
 
+const legacyTaskPolicySchema = z.object({
+  autoApproveMcpServers: z.array(z.string().min(1)),
+  autoApproveHttpTokens: z.array(z.string().min(1)),
+}).strict();
+
 const mcpToolApprovalSchema = z.object({ serverId: z.string().min(1), toolName: z.string().min(1) }).strict();
 const mcpResourceReadApprovalSchema = z.object({ serverId: z.string().min(1), uri: z.string().min(1) }).strict();
 
@@ -21,6 +26,17 @@ const jobApprovalStateSchema = z.object({
 
 const jobApprovalsFileSchema = z.object({
   approvals: z.array(jobApprovalStateSchema),
+}).strict();
+
+const legacyJobApprovalStateSchema = z.object({
+  jobId: z.string().min(1),
+  taskPolicy: legacyTaskPolicySchema,
+  approvedMcpTools: z.array(mcpToolApprovalSchema).default([]),
+  approvedMcpResourceReads: z.array(mcpResourceReadApprovalSchema).default([]),
+}).strict();
+
+const jobApprovalsFileInputSchema = z.object({
+  approvals: z.array(z.union([jobApprovalStateSchema, legacyJobApprovalStateSchema])),
 }).strict();
 
 type JobApprovalState = z.infer<typeof jobApprovalStateSchema>;
@@ -99,7 +115,12 @@ export class JobApprovalStore implements JobApprovalStoreApi {
     try {
       const raw = await readFile(this.filePath, "utf8");
       const parsed: unknown = JSON.parse(raw);
-      return jobApprovalsFileSchema.parse(parsed);
+      const input = jobApprovalsFileInputSchema.parse(parsed);
+      const data = migrateLegacyJobApprovals(input);
+      if (data.migrated) {
+        await this.save(data.file);
+      }
+      return data.file;
     } catch (error) {
       if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
         return { approvals: [] };
@@ -112,6 +133,28 @@ export class JobApprovalStore implements JobApprovalStoreApi {
     await mkdir(dirname(this.filePath), { recursive: true });
     await writeFile(this.filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
   }
+}
+
+function migrateLegacyJobApprovals(
+  input: z.infer<typeof jobApprovalsFileInputSchema>,
+): { file: JobApprovalsFile; migrated: boolean } {
+  let migrated = false;
+  const approvals = input.approvals.map((entry) => {
+    if ("autoApprovalEligibility" in entry) {
+      return entry;
+    }
+    migrated = true;
+    return {
+      jobId: entry.jobId,
+      autoApprovalEligibility: {
+        eligibleMcpServers: entry.taskPolicy.autoApproveMcpServers,
+        eligibleHttpTokens: entry.taskPolicy.autoApproveHttpTokens,
+      },
+      approvedMcpTools: entry.approvedMcpTools,
+      approvedMcpResourceReads: entry.approvedMcpResourceReads,
+    };
+  });
+  return { file: jobApprovalsFileSchema.parse({ approvals }), migrated };
 }
 
 function emptyJobApprovalState(jobId: string): JobApprovalState {
