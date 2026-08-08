@@ -1,6 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { ProxyAccess } from "../proxy-access.js";
+import jwt from "jsonwebtoken";
 
 function createAccess() {
   return new ProxyAccess();
@@ -14,6 +15,19 @@ test("ProxyAccess issues grants that validate for the matching task and server",
     taskId: "task-1",
     bearerToken: grant.bearerToken,
   }), { ok: true });
+});
+
+test("ProxyAccess issues grants that expire after three months", () => {
+  const access = createAccess();
+  const grant = access.issueWorkerGrant("task-1");
+  const payload = jwt.decode(grant.bearerToken);
+
+  assert.notEqual(payload, null);
+  assert.equal(typeof payload, "object");
+  if (payload === null || typeof payload !== "object") {
+    return;
+  }
+  assert.equal(payload.exp! - payload.iat!, 90 * 24 * 60 * 60);
 });
 
 test("ProxyAccess rejects grants for the wrong task", () => {

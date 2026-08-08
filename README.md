@@ -503,7 +503,7 @@ For MCP, Sandy exposes configured upstream servers to workers through an app-wid
 network. `streamable_http` servers stay proxied through the sidecar, while `stdio` servers are started eagerly on the
 host and reached through the sidecar control channel. Upstream OAuth credentials stay in the host's Sandy config
 directory and are mounted into the sidecar. The worker receives Codex MCP configuration for the configured servers,
-plus a Sandy-issued JWT bearer token valid for one day.
+plus a Sandy-issued JWT bearer token valid for three months.
 
 MCP `callTool` and `readResource` operations are privilege-managed independently. The user can approve one operation
 once, for the current worker session, or as `auto-allow for suitable tasks`; persisted approvals are written back to

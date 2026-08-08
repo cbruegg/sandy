@@ -37,7 +37,7 @@ export class ProxyAccess {
       bearerToken: jwt.sign({
         taskId,
       } satisfies ProxyTokenPayload, this.secret, {
-        expiresIn: "1d",
+        expiresIn: "90d",
       }),
     };
   }
