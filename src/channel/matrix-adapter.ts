@@ -183,7 +183,7 @@ const matrixFormatting: ChannelFormatting = {
   channelId: "matrix",
   markup: "markdown",
   allowedTags: matrixHtmlAllowedTags,
-  instructions: "Format user-visible output as Markdown. Use backticks for inline code and fenced code blocks for multiline command output. Do not emit raw HTML; Matrix delivery will convert Markdown to safe HTML.",
+  instructions: "Format user-visible output as Markdown. Use backticks for inline code and fenced code blocks for multiline command output. Emit URLs as URLs, never as codeblocks or surrounded by backticks. Do not emit raw HTML; Matrix delivery will convert Markdown to safe HTML.",
 };
 
 const MATRIX_POLL_START_EVENT_TYPE = "org.matrix.msc3381.poll.start";
