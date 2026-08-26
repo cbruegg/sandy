@@ -26,7 +26,7 @@ class RecordingAgentClient implements AgentClient {
     this.inputs.push(input);
     yield {
       method: "item/completed",
-      params: { item: { type: "agentMessage", text: "none", id: "item-1", phase: null, memoryCitation: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 },
+      params: { item: { type: "agentMessage", text: "none", id: "item-1", phase: null, memoryCitation: null, delivery: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 },
     };
     yield {
       method: "turn/completed",
