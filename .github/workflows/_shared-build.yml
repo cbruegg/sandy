@@ -33,6 +33,10 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Test Matrix crypto preparation
+        if: matrix.target == 'bun-linux-x64'
+        run: bun test src/channel/matrix-crypto-targets.test.ts
+
       - name: Prepare Matrix crypto binary for compile target
         run: bun ./scripts/prepare-matrix-crypto-binary.mjs --target "${{ matrix.target }}"
 

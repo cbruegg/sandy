@@ -139,11 +139,14 @@ async function collectMatrixCryptoPackageRoots(directoryPath, packageRoots) {
     }
 
     const entryPath = join(directoryPath, entry.name);
-    if (entry.name === "@matrix-org") {
-      const packageRoot = join(entryPath, "matrix-sdk-crypto-nodejs");
-      if (existsSync(join(packageRoot, "package.json"))) {
-        packageRoots.push(packageRoot);
+    if (entry.name.startsWith("@")) {
+      if (entry.name === "@matrix-org") {
+        const packageRoot = join(entryPath, "matrix-sdk-crypto-nodejs");
+        if (existsSync(join(packageRoot, "package.json"))) {
+          packageRoots.push(packageRoot);
+        }
       }
+      // Other scopes can contain their own nested crypto dependency (for example @vector-im).
       await collectScopedNodeModules(entryPath, packageRoots);
       continue;
     }
