@@ -865,7 +865,7 @@ test("DockerSandboxRunner does not mount skills when no skills directories are c
   assert.ok(!dockerRunInvocation.args.includes(`${workerBuiltInSkillsPath}:ro`));
 });
 
-test("DockerSandboxRunner mounts the host-managed worker Codex binary read-only", async () => {
+test("DockerSandboxRunner mounts the host-managed worker Codex binaries read-only", async () => {
   const taskChild = new FakeChildProcess();
   const workerCodexBinaryPath = defaultWorkerCodexBinaryPath;
 
@@ -877,6 +877,7 @@ test("DockerSandboxRunner mounts the host-managed worker Codex binary read-only"
   assert.ok(dockerRunInvocation);
   assert.ok(dockerRunInvocation.args.includes("SANDY_CODEX_PATH=/usr/local/bin/codex"));
   assert.ok(dockerRunInvocation.args.includes(`${workerCodexBinaryPath}:/usr/local/bin/codex:ro`));
+  assert.ok(dockerRunInvocation.args.includes("/tmp/sandy-codex/linux/codex-code-mode-host:/usr/local/bin/codex-code-mode-host:ro"));
 });
 
 test("DockerSandboxRunner joins the configured worker network when provided", async () => {

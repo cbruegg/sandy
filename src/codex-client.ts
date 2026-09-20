@@ -141,6 +141,34 @@ function resolveCodexBinaryName(platform: NodeJS.Platform): string {
   return platform === "win32" ? "codex.exe" : "codex";
 }
 
+function resolveCodexCodeModeHostBinaryName(platform: NodeJS.Platform): string {
+  return platform === "win32" ? "codex-code-mode-host.exe" : "codex-code-mode-host";
+}
+
+function resolveManagedCodexCodeModeHostAsset(
+  platform: NodeJS.Platform,
+  arch: string,
+): ManagedCodexAsset | null {
+  const targetTriple = resolveCodexTargetTriple(platform, arch);
+  if (!targetTriple) {
+    return null;
+  }
+
+  if (platform === "win32") {
+    return {
+      assetName: `codex-code-mode-host-${targetTriple}.exe`,
+      archive: "raw",
+      extractedBinaryName: `codex-code-mode-host-${targetTriple}.exe`,
+    };
+  }
+
+  return {
+    assetName: `codex-code-mode-host-${targetTriple}.tar.gz`,
+    archive: "tar.gz",
+    extractedBinaryName: `codex-code-mode-host-${targetTriple}`,
+  };
+}
+
 function buildReleaseApiUrl(repository: string, releaseTag: string): string {
   return `https://api.github.com/repos/${repository}/releases/tags/${releaseTag}`;
 }
@@ -226,9 +254,9 @@ async function extractCodexAsset(
   assetPath: string,
   asset: ManagedCodexAsset,
   versionDirectory: string,
-  platform: NodeJS.Platform,
+  binaryName: string,
 ): Promise<string> {
-  const finalBinaryPath = join(versionDirectory, resolveCodexBinaryName(platform));
+  const finalBinaryPath = join(versionDirectory, binaryName);
   if (asset.archive === "raw") {
     await rename(assetPath, finalBinaryPath);
   } else {
@@ -274,11 +302,11 @@ async function pruneCodexCache(cacheRoot: string, keepVersion: string): Promise<
   }
 }
 
-async function fetchCodexReleaseAsset(
+async function fetchCodexReleaseAssets(
   version: string,
-  assetName: string,
+  assetNames: string[],
   fetchFn: typeof fetch,
-): Promise<GitHubReleaseAsset> {
+): Promise<GitHubReleaseAsset[]> {
   const response = await fetchFn(buildReleaseApiUrl(CODEX_RELEASE_REPOSITORY, `${CODEX_RELEASE_TAG_PREFIX}${version}`), {
     headers: buildGitHubHeaders({
       accept: "application/vnd.github+json",
@@ -289,11 +317,13 @@ async function fetchCodexReleaseAsset(
   }
 
   const assets = parseGitHubReleaseAsset(await response.json());
-  const asset = assets.find((entry) => entry.name === assetName);
-  if (!asset) {
-    throw new Error(`Codex release ${version} is missing asset ${assetName}.`);
-  }
-  return asset;
+  return assetNames.map((assetName) => {
+    const asset = assets.find((entry) => entry.name === assetName);
+    if (!asset) {
+      throw new Error(`Codex release ${version} is missing asset ${assetName}.`);
+    }
+    return asset;
+  });
 }
 
 export async function ensureManagedCodexPath(options: EnsureManagedCodexOptions = {}): Promise<string> {
@@ -311,14 +341,16 @@ export async function ensureManagedCodexPath(options: EnsureManagedCodexOptions 
   const arch = options.arch ?? process.arch;
   const version = resolveCodexVersion();
   const asset = resolveManagedCodexAsset(platform, arch);
+  const codeModeHostAsset = resolveManagedCodexCodeModeHostAsset(platform, arch);
   const targetTriple = resolveCodexTargetTriple(platform, arch);
-  if (!asset || !targetTriple) {
+  if (!asset || !codeModeHostAsset || !targetTriple) {
     throw new Error(`Unsupported Codex platform: ${platform} (${arch})`);
   }
 
   const cacheRoot = options.cacheRoot ?? resolveManagedCodexCacheRoot(env, platform, arch);
   const versionDirectory = join(cacheRoot, version);
   const binaryPath = join(versionDirectory, resolveCodexBinaryName(platform));
+  const codeModeHostPath = join(versionDirectory, resolveCodexCodeModeHostBinaryName(platform));
   const resolutionKey = buildManagedCodexResolutionKey(cacheRoot, version, platform, arch);
   const inFlightResolution = managedCodexPathResolutions.get(resolutionKey);
   if (inFlightResolution) {
@@ -340,7 +372,7 @@ export async function ensureManagedCodexPath(options: EnsureManagedCodexOptions 
       platform,
       arch,
     });
-    if (isExecutableFile(binaryPath)) {
+    if (isExecutableFile(binaryPath) && isExecutableFile(codeModeHostPath)) {
       logger.info("codex.cache_hit", {
         version,
         binaryPath,
@@ -364,22 +396,36 @@ export async function ensureManagedCodexPath(options: EnsureManagedCodexOptions 
         version,
         releaseTag: `${CODEX_RELEASE_TAG_PREFIX}${version}`,
       });
-      const releaseAsset = await fetchCodexReleaseAsset(version, asset.assetName, fetchFn);
-      const downloadedAssetPath = join(stagingDirectory, asset.assetName);
-      logger.info("codex.asset_downloading", {
+      const releaseAssets = await fetchCodexReleaseAssets(
         version,
-        assetName: releaseAsset.name,
-        size: releaseAsset.size,
-        url: releaseAsset.browserDownloadUrl,
-      });
-      await downloadVerifiedAsset(fetchFn, releaseAsset, downloadedAssetPath);
+        [asset.assetName, codeModeHostAsset.assetName],
+        fetchFn,
+      );
+      const releaseAsset = releaseAssets[0];
+      const releaseCodeModeHostAsset = releaseAssets[1];
+      if (!releaseAsset || !releaseCodeModeHostAsset) {
+        throw new Error(`Codex release ${version} is missing required binaries.`);
+      }
       await mkdir(versionDirectory, { recursive: true });
-      logger.info("codex.asset_extracting", {
-        version,
-        assetName: releaseAsset.name,
-        versionDirectory,
-      });
-      await extractCodexAsset(downloadedAssetPath, asset, versionDirectory, platform);
+      for (const [downloadAsset, managedAsset, binaryName] of [
+        [releaseAsset, asset, resolveCodexBinaryName(platform)],
+        [releaseCodeModeHostAsset, codeModeHostAsset, resolveCodexCodeModeHostBinaryName(platform)],
+      ] as const) {
+        const downloadedAssetPath = join(stagingDirectory, managedAsset.assetName);
+        logger.info("codex.asset_downloading", {
+          version,
+          assetName: downloadAsset.name,
+          size: downloadAsset.size,
+          url: downloadAsset.browserDownloadUrl,
+        });
+        await downloadVerifiedAsset(fetchFn, downloadAsset, downloadedAssetPath);
+        logger.info("codex.asset_extracting", {
+          version,
+          assetName: downloadAsset.name,
+          versionDirectory,
+        });
+        await extractCodexAsset(downloadedAssetPath, managedAsset, versionDirectory, binaryName);
+      }
       await pruneCodexCache(cacheRoot, version);
       logger.info("codex.download_ready", {
         version,
