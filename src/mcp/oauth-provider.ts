@@ -93,6 +93,17 @@ export class SandyOAuthClientProvider implements OAuthClientProvider {
     const state = await this.loadState();
     const clientId = this.options.clientId;
     if (!clientId) {
+      if (this.hasStaleLoopbackClientId(state.clientInformation?.client_id)) {
+        // Home Assistant uses IndieAuth-style public client IDs: a loopback
+        // client ID and redirect URI must share the same host and port. The
+        // callback server deliberately selects a fresh port for every login,
+        // so an old fallback client ID cannot be reused for a new attempt.
+        // Drop it and let the SDK retry dynamic registration/fallback with the
+        // current callback origin instead.
+        delete state.clientInformation;
+        await this.saveState(state);
+        return undefined;
+      }
       return state.clientInformation;
     }
 
@@ -264,6 +275,17 @@ export class SandyOAuthClientProvider implements OAuthClientProvider {
 
   private usesNonInteractiveRuntimeRefresh(): boolean {
     return !this.options.interactive && this.options.redirectUrl === undefined;
+  }
+
+  private hasStaleLoopbackClientId(clientId: string | undefined): boolean {
+    if (!this.options.interactive || !this.options.redirectUrl || !clientId || !URL.canParse(clientId)) {
+      return false;
+    }
+
+    const clientUrl = new URL(clientId);
+    const redirectUrl = new URL(String(this.options.redirectUrl));
+    const loopbackHosts = new Set(["127.0.0.1", "::1", "localhost"]);
+    return loopbackHosts.has(clientUrl.hostname) && clientUrl.origin !== redirectUrl.origin;
   }
 
   private async saveState(state: SandyOAuthState): Promise<void> {

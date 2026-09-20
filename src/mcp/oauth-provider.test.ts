@@ -94,6 +94,29 @@ test("SandyOAuthClientProvider does not override interactive authorization-code 
   assert.equal(await provider.prepareTokenRequest("data:read_write"), undefined);
 });
 
+test("SandyOAuthClientProvider drops a stale loopback client ID before a new interactive login", async () => {
+  const stateFilePath = join(await mkdtemp(join(tmpdir(), "sandy-oauth-provider-")), "homeassistant.json");
+  await writeFile(stateFilePath, JSON.stringify({
+    configuredServerUrl: "http://raspinas:8123/api/mcp",
+    clientInformation: {
+      client_id: "http://127.0.0.1:46269",
+    },
+  }), "utf8");
+
+  const provider = new SandyOAuthClientProvider({
+    stateFilePath,
+    interactive: true,
+    redirectUrl: "http://127.0.0.1:34759/callback",
+    configuredServerUrl: "http://raspinas:8123/api/mcp",
+  });
+
+  assert.equal(await provider.clientInformation(), undefined);
+  const persistedState = JSON.parse(await readFile(stateFilePath, "utf8")) as {
+    clientInformation?: unknown;
+  };
+  assert.equal(persistedState.clientInformation, undefined);
+});
+
 test("SandyOAuthClientProvider invalidates saved state when the configured server URL changes", async () => {
   const stateFilePath = join(await mkdtemp(join(tmpdir(), "sandy-oauth-provider-")), "homeassistant.json");
   await writeFile(stateFilePath, JSON.stringify({
