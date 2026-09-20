@@ -1,6 +1,7 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { type Input } from "@openai/codex-sdk";
+import type { AppServerEvent } from "../codex-app-server-client/app-server-client.js";
 import { messages } from "../messages-to-user.js";
 import { AppServerWorkerSession, type StreamTurnResult } from "./worker-app-server.js";
 import {
@@ -787,6 +788,10 @@ test("AppServerWorkerSession reports a clear auth message after refresh failure 
         // The app-server converts the failed auth refresh into a later stream error.
       }
 
+      // This test exercises Sandy's auth-refresh behavior, rather than the
+      // complete upstream app-server error schema. Keep the fixture focused on
+      // the fields consumed by the worker so new generated fields do not make
+      // this unrelated behavioral test brittle.
       yield {
         method: "error" as const,
         params: {
@@ -803,7 +808,7 @@ test("AppServerWorkerSession reports a clear auth message after refresh failure 
           threadId: "thread-1",
           turnId: "turn-1",
         },
-      };
+      } as AppServerEvent;
     },
   };
 

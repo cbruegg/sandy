@@ -39,10 +39,12 @@ const testHttpTokens: Record<string, HttpTokenConfig> = {
 // ---- helpers for building AppServerEvent sequences ----
 
 function buildTurnEvents(finalResponse: string): AppServerEvent[] {
+  // These fixtures deliberately model only the event fields this suite reads.
+  // The generated app-server schema regularly gains unrelated required fields.
   return [
     { method: "item/completed", params: { item: { type: "agentMessage", text: finalResponse, id: "item-1", phase: null, memoryCitation: null, delivery: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 } },
     { method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "full", status: "completed", error: null, startedAt: null, completedAt: null, durationMs: null } } },
-  ];
+  ] as unknown as AppServerEvent[];
 }
 
 function buildTurnEventsWithCompaction(finalResponse: string): AppServerEvent[] {
@@ -50,7 +52,7 @@ function buildTurnEventsWithCompaction(finalResponse: string): AppServerEvent[] 
     { method: "item/started", params: { item: { type: "contextCompaction", id: "compaction-1" }, threadId: "thread-1", turnId: "turn-1", startedAtMs: 0 } },
     { method: "item/completed", params: { item: { type: "agentMessage", text: finalResponse, id: "item-1", phase: null, memoryCitation: null, delivery: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 } },
     { method: "turn/completed", params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "full", status: "completed", error: null, startedAt: null, completedAt: null, durationMs: null } } },
-  ];
+  ] as unknown as AppServerEvent[];
 }
 
 // ---- test double ----

@@ -24,10 +24,12 @@ class RecordingAgentClient implements AgentClient {
     _onServerRequest?: ServerRequestHandler,
   ): AsyncGenerator<AppServerEvent> {
     this.inputs.push(input);
+    // The collector only uses the message text; upstream-only fields belong to
+    // the protocol schema tests, not this behavioral fixture.
     yield {
       method: "item/completed",
       params: { item: { type: "agentMessage", text: "none", id: "item-1", phase: null, memoryCitation: null, delivery: null }, threadId: "thread-1", turnId: "turn-1", completedAtMs: 0 },
-    };
+    } as unknown as AppServerEvent;
     yield {
       method: "turn/completed",
       params: { threadId: "thread-1", turn: { id: "turn-1", items: [], itemsView: "full", status: "completed", error: null, startedAt: null, completedAt: null, durationMs: null } },
