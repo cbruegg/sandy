@@ -1,5 +1,6 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { chmod, mkdtemp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -109,12 +110,15 @@ test("ensureManagedCodexPath reuses the cached matching version and prunes older
   const currentVersion = resolveCodexVersion();
   const currentVersionDir = join(cacheRoot, currentVersion);
   const currentBinaryPath = join(currentVersionDir, process.platform === "win32" ? "codex.exe" : "codex");
+  const currentCodeModeHostPath = join(currentVersionDir, process.platform === "win32" ? "codex-code-mode-host.exe" : "codex-code-mode-host");
   const oldVersionDir = join(cacheRoot, "0.0.1");
 
   try {
     await mkdir(currentVersionDir, { recursive: true });
     await writeFile(currentBinaryPath, "#!/bin/sh\nexit 0\n");
     await chmod(currentBinaryPath, 0o755);
+    await writeFile(currentCodeModeHostPath, "#!/bin/sh\nexit 0\n");
+    await chmod(currentCodeModeHostPath, 0o755);
     await mkdir(oldVersionDir, { recursive: true });
     const failingFetch = (async () => {
       throw new Error("fetch should not be called when the cache already matches");
@@ -141,11 +145,14 @@ test("ensureManagedCodexPath isolates cross-platform worker caches by target tri
 
   const workerVersionDir = join(cacheRoot, linuxTriple, currentVersion);
   const workerBinaryPath = join(workerVersionDir, "codex");
+  const workerCodeModeHostPath = join(workerVersionDir, "codex-code-mode-host");
 
   try {
     await mkdir(workerVersionDir, { recursive: true });
     await writeFile(workerBinaryPath, "#!/bin/sh\nexit 0\n");
     await chmod(workerBinaryPath, 0o755);
+    await writeFile(workerCodeModeHostPath, "#!/bin/sh\nexit 0\n");
+    await chmod(workerCodeModeHostPath, 0o755);
 
     const resolved = await ensureManagedCodexPath({
       cacheRoot: join(cacheRoot, linuxTriple),
@@ -154,6 +161,56 @@ test("ensureManagedCodexPath isolates cross-platform worker caches by target tri
     });
 
     assert.equal(resolved, workerBinaryPath);
+  } finally {
+    await rm(cacheRoot, { recursive: true, force: true });
+  }
+});
+
+test("ensureManagedCodexPath downloads the Code Mode host alongside Codex", async () => {
+  const cacheRoot = await mkdtemp(join(tmpdir(), "sandy-codex-cache-"));
+  const version = resolveCodexVersion();
+  const codexAssetName = "codex-x86_64-pc-windows-msvc.exe";
+  const codeModeHostAssetName = "codex-code-mode-host-x86_64-pc-windows-msvc.exe";
+  const codexContents = "codex executable";
+  const codeModeHostContents = "code mode host executable";
+  const assetResponse = (name: string, contents: string) => ({
+    name,
+    browser_download_url: `https://example.test/${name}`,
+    digest: `sha256:${createHash("sha256").update(contents).digest("hex")}`,
+    size: Buffer.byteLength(contents),
+  });
+  const assets = [
+    assetResponse(codexAssetName, codexContents),
+    assetResponse(codeModeHostAssetName, codeModeHostContents),
+  ];
+  const fetchCalls: string[] = [];
+  const fetchFn = (async (input: string | URL) => {
+    const url = String(input);
+    fetchCalls.push(url);
+    if (url.startsWith("https://api.github.com/")) {
+      return new Response(JSON.stringify({ assets }), { status: 200 });
+    }
+    if (url.endsWith(codexAssetName)) {
+      return new Response(codexContents, { status: 200 });
+    }
+    if (url.endsWith(codeModeHostAssetName)) {
+      return new Response(codeModeHostContents, { status: 200 });
+    }
+    throw new Error(`Unexpected fetch URL: ${url}`);
+  }) as unknown as typeof fetch;
+
+  try {
+    const codexPath = await ensureManagedCodexPath({
+      cacheRoot,
+      fetchFn,
+      platform: "win32",
+      arch: "x64",
+    });
+
+    assert.equal(codexPath, join(cacheRoot, version, "codex.exe"));
+    assert.equal(await Bun.file(codexPath).text(), codexContents);
+    assert.equal(await Bun.file(join(cacheRoot, version, "codex-code-mode-host.exe")).text(), codeModeHostContents);
+    assert.equal(fetchCalls.length, 3);
   } finally {
     await rm(cacheRoot, { recursive: true, force: true });
   }

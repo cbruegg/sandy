@@ -1,7 +1,7 @@
 import {copyFile, mkdir, mkdtemp, rm} from "node:fs/promises";
 import {type ChildProcessWithoutNullStreams, spawn} from "node:child_process";
 import {tmpdir} from "node:os";
-import {join} from "node:path";
+import {dirname, join} from "node:path";
 import {createInterface} from "node:readline";
 import type {WorkerNetworkConfig} from "../config.js";
 import {logger, type LogLevel} from "../logger.js";
@@ -28,6 +28,7 @@ import {
 
 const workerCodexSeedMountPath = "/run/sandy-codex-seed";
 const workerCodexContainerPath = "/usr/local/bin/codex";
+const workerCodexCodeModeHostContainerPath = "/usr/local/bin/codex-code-mode-host";
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 300_000;
 const workerCapabilityArgs = [
   // Keep the worker rootful enough for package managers, sudo, and Homebrew,
@@ -238,7 +239,12 @@ export class TaskBundleLauncherImpl implements TaskBundleLauncher {
       dockerArgs.push("-v", `${workerCodexHomeTempDir}:${workerCodexSeedMountPath}:ro`);
     }
 
-    dockerArgs.push("-v", `${this.options.workerCodexBinaryPath}:${workerCodexContainerPath}:ro`);
+    dockerArgs.push(
+      "-v",
+      `${this.options.workerCodexBinaryPath}:${workerCodexContainerPath}:ro`,
+      "-v",
+      `${join(dirname(this.options.workerCodexBinaryPath), "codex-code-mode-host")}:${workerCodexCodeModeHostContainerPath}:ro`,
+    );
 
     const userSkillsDirectory = this.options.getUserSkillsDirectory();
     if (userSkillsDirectory) {
